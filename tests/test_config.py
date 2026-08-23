@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Config resolution: precedence, legacy aliases, profile loading.
+
+Runs with no device attached and no third-party packages. Plain asserts --
+the point is that a `python3 tests/test_config.py` in CI or in a shell tells
+you in one line whether the compatibility contract still holds.
+
+The legacy-alias tests are the load-bearing ones. Every command line in the
+taimen docs sets PHONE= or TK_HOST= directly; if those stop overriding, a
+year of documented invocations silently start talking to the wrong device.
+"""
+import os
+import sys
+import tempfile
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
+import porthole  # noqa: E402
+
+
+def sandbox(profile_env="", user_env=None, root_env=None, device="testdev"):
+    """Build a throwaway PORTHOLE_ROOT + XDG_CONFIG_HOME and return both paths."""
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="porthole-test-"))
+    prof = tmp / "profiles" / device
+    prof.mkdir(parents=True)
+    (prof / "device.env").write_text(profile_env)
+    if root_env is not None:
+        (tmp / ".env").write_text(root_env)
+    xdg = tmp / "xdg"
+    if user_env is not None:
+        (xdg / "porthole").mkdir(parents=True)
+        (xdg / "porthole" / "config.env").write_text(user_env)
+    return tmp, xdg
+
+
+def load(tmp, xdg, **env):
+    base = {"PORTHOLE_ROOT": str(tmp), "XDG_CONFIG_HOME": str(xdg)}
+    base.update(env)
+    return porthole.load_config(env=base)
+
+
+# ------------------------------------------------------------------ parsing --
+
+def test_parses_key_value_with_comments_and_quotes():
+    tmp, xdg = sandbox(profile_env=(
+        "# a comment\n"
+        "\n"
+        "PORTHOLE_SOC=msm8998\n"
+        'PORTHOLE_DEVICE_NAME="Google Pixel 2 XL"\n'
+        "PORTHOLE_ARCH = aarch64 \n"          # tolerate spaces around =
+        "export PORTHOLE_DTB=qcom/x.dtb\n"    # tolerate a leading `export`
+        "PORTHOLE_TRAILING=1 # inline comment\n"
+    ))
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert cfg["PORTHOLE_SOC"] == "msm8998", cfg["PORTHOLE_SOC"]
+    assert cfg["PORTHOLE_DEVICE_NAME"] == "Google Pixel 2 XL"
+    assert cfg["PORTHOLE_ARCH"] == "aarch64"
+    assert cfg["PORTHOLE_DTB"] == "qcom/x.dtb"
+    assert cfg["PORTHOLE_TRAILING"] == "1"
+
+
+def test_a_quoted_value_with_a_trailing_comment_loses_its_quotes():
+    """profiles/ documents almost every key, so `KEY="a"  # why` is the common
+    shape. Keeping the quotes makes every comparison against the value fail
+    silently -- it is what let a forbidden-slot guard pass `"a" != a`."""
+    tmp, xdg = sandbox(profile_env='PORTHOLE_SLOT_FORBIDDEN="a"   # no image\n')
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert cfg["PORTHOLE_SLOT_FORBIDDEN"] == "a", repr(cfg["PORTHOLE_SLOT_FORBIDDEN"])
+
+
+def test_profile_beats_the_built_in_defaults():
+    """Defaults are the LOWEST layer. A profile saying the device has A/B slots
+    must win over the conservative default of 0."""
+    tmp, xdg = sandbox(profile_env="PORTHOLE_HAS_AB_SLOTS=1\nPORTHOLE_SSH_PORT=2222\n")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert cfg["PORTHOLE_HAS_AB_SLOTS"] == "1"
+    assert cfg["PORTHOLE_SSH_PORT"] == "2222"
+
+
+def test_a_value_containing_a_hash_survives_when_quoted():
+    # A password or a cmdline fragment can legitimately contain '#'.
+    tmp, xdg = sandbox(profile_env='PORTHOLE_CMDLINE="loglevel=5 x#y"\n')
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert cfg["PORTHOLE_CMDLINE"] == "loglevel=5 x#y", cfg["PORTHOLE_CMDLINE"]
+
+
+# --------------------------------------------------------------- precedence --
+
+def test_five_layer_precedence():
+    """defaults < profile < user config.env < root .env < process env."""
+    tmp, xdg = sandbox(
+        profile_env="LAYER=profile\nONLY_PROFILE=p\n",
+        user_env="LAYER=user\nONLY_USER=u\n",
+        root_env="LAYER=root\nONLY_ROOT=r\n",
+    )
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert cfg["LAYER"] == "root", cfg["LAYER"]
+    assert cfg["ONLY_PROFILE"] == "p"
+    assert cfg["ONLY_USER"] == "u"
+    assert cfg["ONLY_ROOT"] == "r"
+
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev", LAYER="env")
+    assert cfg["LAYER"] == "env", "process env must beat every file"
+
+
+def test_source_reports_which_layer_won():
+    tmp, xdg = sandbox(profile_env="LAYER=profile\n", user_env="LAYER=user\n")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert cfg.source("LAYER") == "user-config", cfg.source("LAYER")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev", LAYER="env")
+    assert cfg.source("LAYER") == "environment", cfg.source("LAYER")
+    assert cfg.source("PORTHOLE_SSH_PORT") == "default"
+
+
+def test_defaults_are_present_without_any_file():
+    tmp, xdg = sandbox()
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert cfg["PORTHOLE_SSH_PORT"] == "22"
+    assert cfg["PORTHOLE_POLL"] == "0.5"
+    assert cfg["FASTBOOT"] == "fastboot"
+
+
+# ------------------------------------------------------------------ profile --
+
+def test_missing_profile_is_an_error_not_a_silent_empty():
+    """A typo'd device name must not resolve to a config with no device facts:
+    that is how you flash the wrong DTB."""
+    tmp, xdg = sandbox()
+    try:
+        load(tmp, xdg, PORTHOLE_DEVICE="nosuchdevice")
+    except porthole.ProfileNotFound as exc:
+        assert "nosuchdevice" in str(exc)
+    else:
+        assert False, "a missing profile must raise, not resolve empty"
+
+
+def test_no_device_selected_is_tolerated():
+    """`porthole devices` and `doctor` must work before a device is chosen."""
+    tmp, xdg = sandbox()
+    cfg = load(tmp, xdg)
+    assert cfg["PORTHOLE_DEVICE"] == ""
+    assert cfg["PORTHOLE_SSH_PORT"] == "22"
+
+
+def test_profiles_dir_lists_devices():
+    tmp, xdg = sandbox(device="google-taimen")
+    (tmp / "profiles" / "_template").mkdir(parents=True, exist_ok=True)
+    (tmp / "profiles" / "_template" / "device.env").write_text("")
+    names = porthole.list_profiles(tmp)
+    assert names == ["google-taimen"], names   # _template is not a device
+
+
+# ------------------------------------------------------- legacy alias table --
+# One test per row of spec section 4.3. These are the never-break-taimen tests.
+
+def test_PHONE_is_used_verbatim_when_set():
+    tmp, xdg = sandbox(profile_env="")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_USER="alice", PORTHOLE_HOST="10.0.0.5",
+               PHONE="user@172.16.42.1")
+    assert porthole.resolve_phone(cfg) == "user@172.16.42.1"
+
+
+def test_PHONE_is_composed_when_unset():
+    tmp, xdg = sandbox()
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_USER="alice", PORTHOLE_HOST="10.0.0.5")
+    assert porthole.resolve_phone(cfg) == "alice@10.0.0.5"
+
+
+def test_HOST_and_TK_HOST_override_PORTHOLE_HOST():
+    tmp, xdg = sandbox()
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_HOST="10.0.0.5", HOST="172.16.42.1")
+    assert porthole.resolve_host(cfg) == "172.16.42.1"
+
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_HOST="10.0.0.5", TK_HOST="172.16.42.9")
+    assert porthole.resolve_host(cfg) == "172.16.42.9"
+
+
+def test_HOST_beats_TK_HOST_when_both_set():
+    tmp, xdg = sandbox()
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               HOST="1.1.1.1", TK_HOST="2.2.2.2")
+    assert porthole.resolve_host(cfg) == "1.1.1.1"
+
+
+def test_host_falls_back_to_the_host_part_of_PHONE():
+    """tk-stream.sh does `HOST=${PHONE#*@}`. Someone who sets only PHONE must
+    still get a usable HOST for the ping probes."""
+    tmp, xdg = sandbox()
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev", PHONE="bob@192.168.7.7")
+    assert porthole.resolve_host(cfg) == "192.168.7.7"
+
+
+def test_legacy_scalars_pass_through_untouched():
+    tmp, xdg = sandbox(profile_env="PORTHOLE_POLL=9\n")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               FASTBOOT="/opt/fastboot", TK_POLL="0.1", TK_FORCE="1",
+               TK_AGENT="claude", TK_DEVICE_LOCK="/tmp/x.lock",
+               TK_DEVICE_TIMEOUT="30", TK_DEVICE_MAX="60",
+               TK_DEVICE_STATE="BOOTED")
+    assert cfg["FASTBOOT"] == "/opt/fastboot"
+    assert porthole.legacy(cfg, "TK_POLL", "PORTHOLE_POLL") == "0.1"
+    for k, v in [("TK_FORCE", "1"), ("TK_AGENT", "claude"),
+                 ("TK_DEVICE_LOCK", "/tmp/x.lock"), ("TK_DEVICE_TIMEOUT", "30"),
+                 ("TK_DEVICE_MAX", "60"), ("TK_DEVICE_STATE", "BOOTED")]:
+        assert cfg[k] == v, f"{k} was mangled: {cfg[k]!r}"
+
+
+def test_TK_AGENT_falls_back_to_PORTHOLE_AGENT():
+    tmp, xdg = sandbox(user_env="PORTHOLE_AGENT=user\n")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    assert porthole.legacy(cfg, "TK_AGENT", "PORTHOLE_AGENT") == "user"
+
+
+def test_ssh_opts_include_the_boot_survivable_flags():
+    """Host keys change on essentially every boot, so these are mandatory,
+    not laziness. Losing them makes every tool prompt and hang."""
+    tmp, xdg = sandbox()
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
+    opts = " ".join(porthole.ssh_opts(cfg))
+    for flag in ("StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null",
+                 "BatchMode=yes", "ConnectTimeout="):
+        assert flag in opts, f"{flag} missing from {opts}"
+
+
+# ------------------------------------------------------------------- runner --
+
+def main():
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    failed = 0
+    for name, fn in tests:
+        try:
+            fn()
+        except AssertionError as exc:
+            failed += 1
+            print(f"FAIL {name}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            print(f"ERROR {name}: {type(exc).__name__}: {exc}")
+    print(f"{len(tests) - failed}/{len(tests)} passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
