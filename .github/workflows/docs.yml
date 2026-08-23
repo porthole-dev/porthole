@@ -16,6 +16,15 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # `pages: write` here is only so configure-pages can turn Pages on by
+    # itself. Without it the first push fails at deploy time with "Get Pages
+    # site failed", and you have to go and flip a setting in the web UI --
+    # which is a poor first experience for a repo that is otherwise
+    # self-configuring.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,6 +46,18 @@ jobs:
           test -f site-src/cli.md
           test -f site-src/tools.md
           grep -q "porthole" site-src/index.md
+
+      - name: enable GitHub Pages if it is not already
+        # enablement: true flips Settings -> Pages -> Source to "GitHub
+        # Actions" over the API, so pushing is genuinely all that is needed.
+        # continue-on-error because this fails on a private repo without a
+        # plan that includes Pages, and that should not fail the docs build --
+        # `mkdocs build --strict` is still a useful check on a PR.
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: install mkdocs
         run: pip install mkdocs-material
