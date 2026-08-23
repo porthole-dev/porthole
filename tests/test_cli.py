@@ -46,6 +46,17 @@ def test_no_args_prints_an_orientation_not_a_usage_dump():
     assert "porthole" in out.lower()
 
 
+def test_global_flags_work_before_and_after_the_verb():
+    """`porthole doctor --no-color` is what people type. Requiring a global flag
+    before the verb is a papercut, and argparse's default handling silently
+    undoes the global one when the subparser flag is absent."""
+    for argv in (["--no-color", "devices"], ["devices", "--no-color"],
+                 ["--no-colour", "devices"], ["devices", "--no-colour"]):
+        rc, out, err = run(*argv)
+        assert rc == 0, f"{argv} -> rc={rc} {err}"
+        assert "\033[" not in out, f"{argv} still emitted colour"
+
+
 def test_unknown_verb_suggests_a_near_match():
     rc, out, err = run("doctro")
     assert rc == 64, f"rc={rc}"

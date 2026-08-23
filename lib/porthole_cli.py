@@ -216,15 +216,21 @@ class Parser(argparse.ArgumentParser):
 
 
 def with_device(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """Accept --device after the verb as well as before it.
+    """Accept the global flags after the verb as well as before it.
 
-    `porthole init --device taimen` is what everyone types; requiring it before
-    the verb is a papercut. SUPPRESS is load-bearing: without it argparse
-    overwrites a global --device with None whenever the subparser's flag is
-    absent.
+    `porthole doctor --no-color` and `porthole init --device taimen` are what
+    people actually type; requiring a global flag before the verb is a papercut
+    that makes a tool feel hostile.
+
+    SUPPRESS is load-bearing: without it argparse overwrites the global value
+    with the subparser's default whenever the flag is absent after the verb, so
+    `porthole --no-color doctor` would silently regain colour.
     """
     parser.add_argument("--device", default=argparse.SUPPRESS, metavar="CODENAME",
                         help="act on this device profile")
+    parser.add_argument("--no-color", "--no-colour", dest="no_color",
+                        default=argparse.SUPPRESS, action="store_true",
+                        help="plain output (also honours NO_COLOR)")
     return parser
 
 
@@ -251,7 +257,8 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-d", "--device", metavar="CODENAME",
                         help="act on this device profile")
-    parser.add_argument("--no-color", action="store_true",
+    parser.add_argument("--no-color", "--no-colour", action="store_true",
+                        dest="no_color", default=False,
                         help="plain output (also honours NO_COLOR)")
     parser.add_argument("-V", "--version", action="store_true",
                         help="print the version and exit")
@@ -348,7 +355,7 @@ def main(argv: list[str], root: pathlib.Path) -> int:
         return EX_USAGE
 
     args = parser.parse_args(argv)
-    out = Out(force_colour=False if args.no_color else None)
+    out = Out(force_colour=False if getattr(args, "no_color", False) else None)
 
     if getattr(args, "version", False):
         print(f"porthole {version(root)}")
