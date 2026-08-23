@@ -18,7 +18,7 @@ help:            ## show this help
 test:            ## run every test (no device needed)
 	@fail=0; \
 	for t in tests/test_config.py tests/test_cli.py tests/test_tools.py \
-	         tests/test_sandbox.py; do \
+	         tests/test_sandbox.py tests/test_pmaports.py; do \
 	  printf '%-28s ' "$$(basename $$t)"; \
 	  $(PY) $$t || fail=1; \
 	done; \
