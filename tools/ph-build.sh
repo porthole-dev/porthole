@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# shellcheck shell=bash
 # ph-build.sh -- envkernel build/flash loop for the active device. SOURCE this.
 #
 # scope:  generic
@@ -86,7 +87,7 @@ _ph_depth() { awk -v p="$_ph_mnt" '$2==p' /proc/mounts | wc -l; }
 # `pmbootstrap shutdown` cannot recover on its own.
 tkclean() {
 	local mk="$_ph_mnt/.output/Makefile"
-	local d prev i
+	local d prev
 	d=$(_ph_depth)
 	if [ "$d" -eq 0 ]; then
 		echo ">> /mnt/linux not mounted -- nothing to unstack"
@@ -95,7 +96,7 @@ tkclean() {
 	echo ">> /mnt/linux is stacked ${d} deep; peeling"
 	sudo -v || { echo ">> need sudo to unmount"; return 1; }
 
-	for i in $(seq 1 80); do
+	for _ in $(seq 1 80); do   # bounded: never spin forever on a stuck mount
 		prev=$(_ph_depth)
 		[ "$prev" -eq 0 ] && break
 		# Try the shadowed Makefile every round; it only succeeds once we reach
@@ -153,7 +154,7 @@ _ph_make() {
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
 	set --   # `source` would pass our args to envkernel, which rejects them
-	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null; return 1; }
+	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null || return 1; return 1; }
 
 	# envkernel provides `make` as an ALIAS carrying ARCH=arm64 and the chroot
 	# invocation. Bash expands aliases at PARSE time, and this function was parsed
@@ -162,11 +163,14 @@ _ph_make() {
 	# `Can't find default configuration "arch/x86/configs/$PORTHOLE_DEFCONFIG"`.
 	# eval re-parses at runtime, once the alias exists.
 	shopt -s expand_aliases
-	eval make "$PORTHOLE_DEFCONFIG" || { popd >/dev/null; echo ">> defconfig FAILED"; return 1; }
+	eval make "$PORTHOLE_DEFCONFIG" || { popd >/dev/null || return 1
+		echo ">> defconfig FAILED"; return 1; }
 	# make's exit code can lie once the tree is already built (BTF prep re-runs and
 	# returns non-zero with nothing wrong), so verify artifacts instead of trusting it.
 	eval make -j"$(nproc)"
-	popd >/dev/null
+	# This file is SOURCED, so a failed popd would strand the user's own
+	# interactive shell in the kernel tree.
+	popd >/dev/null || return 1
 
 	if [ ! -s "$img" ]; then
 		echo ">> no Image.gz at $img -- real build failure"; return 1
@@ -269,6 +273,7 @@ _ph_assert_no_devpkgs() {
 # envkernel _p outranks every release, so the upgrade silently does nothing.
 _ph_install_kernel_release() {
 	local ver
+	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
 	ver=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
 	      echo "$pkgver-r$pkgrel")
 	[ -n "$ver" ] && [ "$ver" != "-r" ] || { echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
@@ -556,10 +561,10 @@ tkmod() {
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
 	set --
-	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null; return 1; }
+	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null || return 1; return 1; }
 	shopt -s expand_aliases
-	eval make -j"$(nproc)" modules || { popd >/dev/null; echo ">> build failed"; return 1; }
-	popd >/dev/null
+	eval make -j"$(nproc)" modules || { popd >/dev/null || return 1; echo ">> build failed"; return 1; }
+	popd >/dev/null || return 1
 
 	local ko="$_PH_OUT/$rel"
 	[ -f "$ko" ] || { echo ">> no module at $ko"; return 1; }
@@ -640,14 +645,14 @@ tkboot() {
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
 	set --
-	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null; return 1; }
+	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null || return 1; return 1; }
 	shopt -s expand_aliases
 	if [ -n "$with_kernel" ]; then
-		eval make -j"$(nproc)" Image.gz dtbs || { popd >/dev/null; return 1; }
+		eval make -j"$(nproc)" Image.gz dtbs || { popd >/dev/null || return 1; return 1; }
 	else
-		eval make -j"$(nproc)" dtbs || { popd >/dev/null; return 1; }
+		eval make -j"$(nproc)" dtbs || { popd >/dev/null || return 1; return 1; }
 	fi
-	popd >/dev/null
+	popd >/dev/null || return 1
 
 	local out=/tmp/tk-fast-boot.img
 	if [ -n "$with_kernel" ]; then

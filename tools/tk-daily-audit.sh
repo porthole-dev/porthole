@@ -63,7 +63,7 @@ echo
 echo "=== input ==="
 say "touchscreen"       "$(grep -c ftm4 /proc/interrupts) irq line(s)"
 say "volume keys"       "$(grep -cE 'Volume Up|pm8998_resin|resin' /proc/interrupts) irq line(s)"
-say "power key"         "$(ls /sys/class/input/ | head -0; grep -rl 'pwrkey' /sys/class/input/*/device/name 2>/dev/null | head -1 || echo 'check evtest')"
+say "power key"         "$(grep -rl 'pwrkey' /sys/class/input/*/device/name 2>/dev/null | head -1 || echo 'check evtest')"
 say "fingerprint"       "$(ls /dev/fprint* 2>/dev/null; pkg fprintd) / $(unit fprintd.service)"
 
 echo
@@ -71,7 +71,7 @@ echo "=== media ==="
 say "camera (v4l2)"     "$(ls /dev/video* 2>/dev/null | tr '\n' ' ' || echo 'no /dev/video*')"
 say "camss driver"      "$(grep -c camss /proc/modules 2>/dev/null; dmesg 2>/dev/null | grep -ci camss) module/dmesg hits"
 say "libcamera"         "$(pkg libcamera)"
-say "camera app"        "$(pkg megapixels || true) $(ls /usr/share/applications/ | grep -i camera | tr '\n' ' ')"
+say "camera app"        "$(pkg megapixels || true) $(find /usr/share/applications/ -maxdepth 1 -iname '*camera*' -printf '%f ' 2>/dev/null)"
 say "audio card"        "$(cat /proc/asound/cards 2>/dev/null | head -2 | tr '\n' ' ')"
 say "UCM profile"       "$(ls /usr/share/alsa/ucm2/conf.d/msm8998/ 2>/dev/null | tr '\n' ' ' || echo MISSING)"
 say "pipewire"          "$(unit pipewire.service 2>/dev/null; systemctl --user is-active pipewire 2>/dev/null || echo '(user bus)')"
@@ -120,7 +120,7 @@ lux=$(cat /sys/bus/iio/devices/*/in_illuminance_raw 2>/dev/null | head -1)
 say "iio light raw"      "${lux:-no illuminance channel}"
 # The script runs under sudo -n, so a bare `systemctl --user` here would query
 # root's user manager, not the login user's -- always a bus error, verifying nothing.
-say "ambient nudge"      "$(sudo -n -u "$PORTHOLE_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$PORTHOLE_USER") systemctl --user is-enabled ${PORTHOLE_CODENAME}-ambient-nudge.service 2>&1 | head -1)"
+say "ambient nudge"      "$(sudo -n -u "$PORTHOLE_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$PORTHOLE_USER")" systemctl --user is-enabled ${PORTHOLE_CODENAME}-ambient-nudge.service 2>&1 | head -1)"
 # Phase B's before/after number. of_devfreq_cooling_register() does NOT check
 # #cooling-cells (only cpufreq_cooling.c:636 does), so the Adreno driver
 # (msm_gpu_devfreq.c:257) has been registering a thermal-devfreq-0 cooling

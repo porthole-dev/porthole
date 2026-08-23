@@ -20,7 +20,7 @@
 set -e
 
 # shellcheck source=../../../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../tools/tk-lib.sh"
+. "$(dirname "$0")/../../../tools/tk-lib.sh"
 DUR=${1:-8}
 REGDIR=/sys/kernel/debug/regmap/217:250:1:0
 
@@ -40,6 +40,7 @@ run() {
 	arecord -D hw:0,1 -f S16_LE -r 48000 -c 1 -d "$DUR" "/tmp/split-$tag.wav" >/dev/null 2>&1 &
 	p=$!
 	sleep 4
+	# shellcheck disable=SC2024  # sudo is for the READ; the redirect target is /tmp and needs none
 	sudo cat $REGDIR/registers > "/tmp/split-$tag.regs"
 	wait $p
 	echo "$tag done"

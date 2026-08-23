@@ -18,7 +18,7 @@
 set -e
 
 # shellcheck source=../../../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../tools/tk-lib.sh"
+. "$(dirname "$0")/../../../tools/tk-lib.sh"
 DUR=${1:-12}
 
 sudo rc-service greetd stop >/dev/null 2>&1 || true

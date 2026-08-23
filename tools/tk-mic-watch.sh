@@ -16,7 +16,7 @@
 set -e
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "$0")/tk-lib.sh"
 DUR=${1:-20}
 REG=/sys/kernel/debug/regmap/217:250:1:0/registers
 

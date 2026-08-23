@@ -102,8 +102,16 @@ if [ -n "${PORTHOLE_DEVICE:-}" ]; then
     if [ ! -r "$_ph_profile" ]; then
         echo "porthole: no profile for device '$PORTHOLE_DEVICE'" >&2
         echo "porthole: expected $_ph_profile" >&2
-        echo "porthole: known devices:" \
-             "$(ls "$PORTHOLE_ROOT/profiles" 2>/dev/null | grep -v '^_' | tr '\n' ' ')" >&2
+        # A glob rather than `ls | grep`: a filename with a newline or a space
+        # in it would split wrongly, and shellcheck is right to object.
+        _ph_known=
+        for _ph_d in "$PORTHOLE_ROOT"/profiles/*/; do
+            _ph_d=${_ph_d%/}; _ph_d=${_ph_d##*/}
+            case $_ph_d in _*|'*') continue ;; esac
+            _ph_known="$_ph_known $_ph_d"
+        done
+        echo "porthole: known devices:$_ph_known" >&2
+        unset _ph_known _ph_d
         return 1 2>/dev/null || exit 1
     fi
 fi

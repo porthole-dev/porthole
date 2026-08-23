@@ -34,7 +34,7 @@
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "$0")/tk-lib.sh"
 
 SECS=${SECS:-90}
 BL=$(ls -d /sys/class/backlight/* 2>/dev/null | head -1)
@@ -51,6 +51,8 @@ echo
 
 # A claim needs an ACTIVE seat session; over ssh polkit refuses one, so this
 # runs under sudo. It is also what makes the proxy poll at all.
+# shellcheck disable=SC2024  # sudo is for monitor-sensor itself;
+# the redirect target is /tmp and needs no privilege.
 sudo -n monitor-sensor --proximity --light >/tmp/tk-sensor-chain.mon 2>&1 &
 MON=$!
 trap 'kill $MON 2>/dev/null' EXIT INT TERM

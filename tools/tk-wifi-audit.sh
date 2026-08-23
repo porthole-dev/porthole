@@ -208,16 +208,16 @@ while read -r ch freq flags; do
 	SCANNED=$((SCANNED + 1))
 	note=""; out=""
 	# up to 3 attempts; -EBUSY is transient
-	for try in 1 2 3; do
+	for _try in 1 2 3; do
 		out=$($SUDO iw dev "$IFACE" scan freq "$freq" 2>&1)
 		case "$out" in
-			*"resource busy"*|*"Device or resource busy"*|*"Operation not permitted"*)
+			*"resource busy"*|*"Operation not permitted"*)
 				note="busy, retrying"; sleep 3; continue ;;
 		esac
 		note=""; break
 	done
 	case "$out" in
-		*"resource busy"*|*"Device or resource busy"*)
+		*"resource busy"*)
 			n=0; note="SCAN BUSY -- result not trustworthy"; BUSY=$((BUSY + 1)) ;;
 		*)
 			# `iw scan freq X` scans X but then dumps the WHOLE cached BSS

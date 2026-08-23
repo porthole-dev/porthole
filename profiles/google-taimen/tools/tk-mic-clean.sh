@@ -22,7 +22,7 @@
 set -e
 
 # shellcheck source=../../../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../tools/tk-lib.sh"
+. "$(dirname "$0")/../../../tools/tk-lib.sh"
 MIC=${1:-mic1}
 DUR=${2:-25}
 STRAY=$3

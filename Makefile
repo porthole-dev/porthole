@@ -27,11 +27,26 @@ test:            ## run every test (no device needed)
 	  && echo "ok" || { echo FAIL; fail=1; }; \
 	exit $$fail
 
-lint:            ## shellcheck + python syntax (skips what is not installed)
+SHELLCHECK_ARGS := -S warning -e SC1091,SC2086,SC2181
+SHELLCHECK_IMAGE := docker.io/koalaman/shellcheck-alpine:stable
+
+lint:            ## shellcheck + python syntax (falls back to a container)
+	@# Never silently skip: a linter that prints "skipping" and exits 0 reads
+	@# exactly like a clean run, which is how 28 findings once reached CI.
 	@if command -v shellcheck >/dev/null; then \
-	  shellcheck -S warning -e SC1091,SC2086,SC2181 $(filter %.sh,$(TOOLS)) \
-	    lib/porthole.sh || true; \
-	else echo "shellcheck not installed -- skipping (see porthole doctor)"; fi
+	  shellcheck $(SHELLCHECK_ARGS) lib/porthole.sh $(filter %.sh,$(TOOLS)) \
+	    && echo "shellcheck: ok"; \
+	elif command -v podman >/dev/null; then \
+	  echo "shellcheck not installed -- running it in a container"; \
+	  podman run --rm --userns=keep-id:uid=0,gid=0 --security-opt label=disable \
+	    -v "$(CURDIR):/src:ro" -w /src $(SHELLCHECK_IMAGE) \
+	    shellcheck $(SHELLCHECK_ARGS) lib/porthole.sh $(filter %.sh,$(TOOLS)) \
+	    && echo "shellcheck: ok"; \
+	else \
+	  echo "ERROR: neither shellcheck nor podman is available."; \
+	  echo "       Install one, or run: make lint SHELLCHECK_SKIP=1 (and know CI will not)"; \
+	  [ -n "$(SHELLCHECK_SKIP)" ]; \
+	fi
 	@$(PY) -m compileall -q lib bin tools tests >/dev/null && echo "python: ok"
 	@bash -n lib/porthole.sh && echo "shell lib: ok"
 

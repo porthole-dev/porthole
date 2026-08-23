@@ -184,7 +184,7 @@ trap 'echo; verdict; cleanup; exit 0' INT TERM
 verdict() {
 	echo
 	echo "=============== tk-capture verdict: $OUT"
-	local nowboot delta
+	local nowboot
 	nowboot=$(tk_boot_id 2>/dev/null)
 	if [ -z "$nowboot" ]; then
 		echo "  DEVICE IS NOT ANSWERING -- it is hung or still rebooting."

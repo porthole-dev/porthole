@@ -17,7 +17,7 @@
 set -e
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "$0")/tk-lib.sh"
 DMIC=${1:-DMIC0}
 DUR=${2:-25}
 # Rate must match snd_soc_msm8998's be_rate, or the DSP resamples on top of
@@ -41,12 +41,14 @@ set_ctl 'CDC_IF TX7 MUX' DEC7
 set_ctl 'ADC MUX7' DMIC
 set_ctl "DMIC MUX7" "$DMIC"
 
+# shellcheck disable=SC2024  # sudo is for the READ; the redirect target is /tmp and needs none
 sudo cat $REG > /tmp/reg-idle.txt
 
 echo "MIXER SET ($DMIC); starting ${DUR}s capture at ${RATE} Hz"
 arecord -D hw:0,1 -f S16_LE -r "$RATE" -c 1 -d "$DUR" "$OUT" >/dev/null 2>&1 &
 APID=$!
 sleep 6
+# shellcheck disable=SC2024  # sudo is for the READ; the redirect target is /tmp and needs none
 sudo cat $REG > /tmp/reg-run.txt
 echo "REGS CAPTURED at t+6s"
 wait $APID

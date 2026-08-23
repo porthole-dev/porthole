@@ -183,6 +183,41 @@ def test_tools_that_need_a_device_mention_the_mutex_or_use_the_lib():
                      + "\n  ".join(bad))
 
 
+BASHISMS = (
+    ("BASH_SOURCE", "BASH_SOURCE is undefined in POSIX sh -- ash reports "
+                    "'bad substitution' and the path resolves empty"),
+    ("[[", "[[ ]] is a bash keyword"),
+    ("declare ", "declare is a bash builtin"),
+    ("local -n", "namerefs are bash-only"),
+)
+
+
+def test_no_bashisms_in_posix_sh_scripts():
+    """pmOS ships busybox ash as /bin/sh. A bashism in a `#!/bin/sh` script does
+    not degrade -- it is a syntax error at the point of use.
+
+    This exists because a bulk edit added `${BASH_SOURCE[0]:-$0}` to eight
+    `#!/bin/sh` tools. Every one of them silently failed to find tk-lib.sh, and
+    only shellcheck in CI noticed."""
+    bad = []
+    for path in tools():
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        if not text.startswith("#!") or "bash" in text.splitlines()[0]:
+            continue
+        if "sh" not in text.splitlines()[0]:
+            continue
+        for token, why in BASHISMS:
+            for i, line in enumerate(text.splitlines(), 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if token in line:
+                    bad.append(f"{path.name}:{i}: {token} -- {why}")
+    assert not bad, ("bashisms in POSIX sh scripts:\n  " + "\n  ".join(bad))
+
+
 def _is_shell(path):
     return path.read_bytes()[:2] == b"#!" and b"sh" in path.read_bytes()[:40]
 
