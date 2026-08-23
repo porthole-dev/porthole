@@ -266,14 +266,24 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
     sub = parser.add_subparsers(dest="verb", metavar="<verb>")
     table = {}
     for spec in specs:
-        child = with_device(sub.add_parser(
-            spec["verb"], help=spec["help"], description=spec.get("description",
-                                                                  spec["help"]),
-            epilog=("examples:\n  " + "\n  ".join(spec["examples"])
-                    if spec["examples"] else None),
-            formatter_class=argparse.RawDescriptionHelpFormatter))
-        for flags, kwargs in spec["args"]:
-            child.add_argument(*flags, **kwargs)
+        # A malformed SPEC must cost you that one verb, not the whole CLI.
+        # discover() already guards a bad import; this guards a bad argument
+        # (a flag colliding with a global one, say), which otherwise raised
+        # out of build() and made `porthole doctor` unrunnable -- precisely
+        # the failure the registry exists to survive.
+        try:
+            child = with_device(sub.add_parser(
+                spec["verb"], help=spec["help"],
+                description=spec.get("description", spec["help"]),
+                epilog=("examples:\n  " + "\n  ".join(spec["examples"])
+                        if spec["examples"] else None),
+                formatter_class=argparse.RawDescriptionHelpFormatter))
+            for flags, kwargs in spec["args"]:
+                child.add_argument(*flags, **kwargs)
+        except (argparse.ArgumentError, TypeError, ValueError) as exc:
+            print(f"porthole: skipping verb {spec['verb']!r}: {exc}",
+                  file=sys.stderr)
+            continue
         child.set_defaults(_spec=spec)
         table[spec["verb"]] = spec
     return parser, table

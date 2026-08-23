@@ -166,6 +166,89 @@ def test_find_pmaports_returns_none_when_absent():
         pathlib.Path("/nonexistent-xyz")
 
 
+# --------------------------------------------------------------------- dts --
+
+def test_dts_include_following_finds_nodes_in_a_family_dtsi():
+    """Taimen configures &ufshc and eleven others in the board-family dtsi it
+    shares with walleye. Reading only the .dts reports all of them as
+    unconfigured and sends someone to redo work done years ago."""
+    from porthole_cmd_dts import nodes_including
+
+    d = TMP / "dts"
+    d.mkdir(exist_ok=True)
+    (d / "soc.dtsi").write_text("&ufshc { status = \"okay\"; };\n"
+                                "&usb3 { status = \"okay\"; };\n")
+    (d / "family.dtsi").write_text('#include "soc.dtsi"\n'
+                                   "&blsp1_uart3 { status = \"okay\"; };\n")
+    (d / "device.dts").write_text('#include "family.dtsi"\n'
+                                  "&tlmm { foo; };\n")
+
+    shallow = set(__import__("re").findall(r"^\s*&([a-zA-Z_]\w*)\s*\{",
+                                           (d / "device.dts").read_text(),
+                                           __import__("re").M))
+    assert shallow == {"tlmm"}, "sanity: the .dts alone names one node"
+
+    nodes, files = nodes_including(d / "device.dts")
+    assert nodes == {"tlmm", "blsp1_uart3", "ufshc", "usb3"}, nodes
+    assert len(files) == 3, [f.name for f in files]
+
+
+def test_dts_include_following_survives_a_cycle():
+    """A dtsi that includes something which includes it back must not hang."""
+    from porthole_cmd_dts import nodes_including
+    d = TMP / "dts-cycle"
+    d.mkdir(exist_ok=True)
+    (d / "a.dtsi").write_text('#include "b.dtsi"\n&nodea { };\n')
+    (d / "b.dtsi").write_text('#include "a.dtsi"\n&nodeb { };\n')
+    nodes, _ = nodes_including(d / "a.dtsi")
+    assert nodes == {"nodea", "nodeb"}, nodes
+
+
+def test_dts_include_following_ignores_missing_headers():
+    """`#include <dt-bindings/...>` and absent files must not raise."""
+    from porthole_cmd_dts import nodes_including
+    d = TMP / "dts-missing"
+    d.mkdir(exist_ok=True)
+    (d / "x.dts").write_text('#include <dt-bindings/gpio/gpio.h>\n'
+                             '#include "nonexistent.dtsi"\n&only { };\n')
+    nodes, files = nodes_including(d / "x.dts")
+    assert nodes == {"only"}, nodes
+    assert len(files) == 1
+
+
+# ------------------------------------------------------------------ serial --
+
+def test_serial_ignores_phantom_8250_ports():
+    """Linux registers a fixed set of ttyS nodes whether the hardware exists or
+    not, so a plain glob reports 32 serial ports on a laptop with none. `type`
+    is the discriminator: 0 is PORT_UNKNOWN."""
+    import porthole_cmd_serial as ser
+    sysfs = TMP / "sys-tty"
+    (sysfs / "ttyS0" / "device").mkdir(parents=True, exist_ok=True)
+    (sysfs / "ttyS0" / "type").write_text("0\n")           # placeholder
+    (sysfs / "ttyS1" / "device").mkdir(parents=True, exist_ok=True)
+    (sysfs / "ttyS1" / "type").write_text("4\n")           # a real 16550A
+
+    real = pathlib.Path
+    try:
+        # Point the checker at the fixture without touching the real /sys.
+        orig = ser.pathlib.Path
+        class FakePath(type(real("/"))):
+            pass
+        ser.pathlib = __import__("types").SimpleNamespace(
+            Path=lambda p="": orig(str(p).replace("/sys/class/tty", str(sysfs))))
+        assert not ser._is_real_uart("ttyS0"), "PORT_UNKNOWN must be filtered"
+        assert ser._is_real_uart("ttyS1"), "a real UART must be kept"
+    finally:
+        ser.pathlib = __import__("pathlib")
+
+
+def test_serial_baud_table_covers_the_usual_rates():
+    import porthole_cmd_serial as ser
+    for rate in (9600, 115200, 921600):
+        assert ser.BAUDS.get(rate), f"{rate} missing from the baud table"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
