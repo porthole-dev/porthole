@@ -21,7 +21,23 @@ Before porthole, the toolbox opened a fresh ssh connection for every probe —
 there was no `ControlMaster` anywhere in it. Each `boot_id` read, each `uptime`,
 each one-shot remote command paid a full handshake.
 
-Multiplexing lives in the shared `TK_SSH_OPTS`, so all ~95 tools inherit it from
+**Measured on the reference device** (Pixel 2 XL, USB gadget, five consecutive
+round trips after warming):
+
+| | per ssh round trip |
+|---|---|
+| `PORTHOLE_NO_MUX=1` (how the toolbox worked before) | **302 ms** |
+| multiplexed | **14 ms** |
+
+Reproduce it yourself:
+
+```sh
+PORTHOLE_NO_MUX=1 bash -c '. tools/tk-lib.sh; ssh "${TK_SSH_OPTS[@]}" "$PHONE" true
+  s=$(date +%s%3N); for i in 1 2 3 4 5; do ssh "${TK_SSH_OPTS[@]}" "$PHONE" true; done
+  e=$(date +%s%3N); echo "$(( (e-s)/5 ))ms each"'
+```
+
+Multiplexing lives in the shared `TK_SSH_OPTS`, so all ~114 tools inherit it from
 one edit:
 
 ```
@@ -54,6 +70,9 @@ first thing to try when diagnosing a strange hang.
 | ssh round trip, cold | < 350 ms |
 | `tk_device_state`, healthy booted device, warm | < 100 ms |
 | `tk_in_fastboot` | < 250 ms (bounded by `fastboot devices`) |
+
+Last measured on the reference device: warm round trip 18 ms, `fastboot devices`
+2 ms, `tk_device_state` 18 ms — all inside budget.
 
 Measure rather than claim:
 

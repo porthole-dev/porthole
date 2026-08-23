@@ -32,6 +32,38 @@ Single entrypoint, discoverable — and it breaks direct invocation, which is wh
 every document and every agent already does. Kept as an optional convenience
 verb instead.
 
+## The command registry
+
+`bin/porthole` is a thin launcher. Every verb is one `lib/porthole_cmd_<name>.py`
+exporting a `SPEC` dict, discovered by glob at startup:
+
+```python
+SPEC = {
+    "verb":  "doctor",
+    "help":  "one line, shown in `porthole --help`",
+    "order": 20,                      # sort key in help output
+    "args":  [(["--json"], {"action": "store_true", "help": "..."})],
+    "run":   cmd_doctor,              # (args, ctx) -> int
+    "examples": ["porthole doctor"],
+}
+```
+
+Adding a verb needs no edit anywhere else — no central list, no import. That is
+deliberate: a registry you must remember to update is a registry that goes
+stale, and this project expects contributors who have never opened
+`bin/porthole`.
+
+`run` receives a `Ctx` carrying the checkout root, a lazily-loaded config and an
+`Out` helper, so a command never rediscovers the checkout or reimplements colour
+handling. Config is lazy because `version` and `completion` must work in a
+checkout with no device selected.
+
+A command module that fails to import is reported and skipped rather than taking
+the CLI down: one broken third-party verb must not stop you running
+`porthole doctor` to find out why.
+
+Shell completions are generated from this same registry, so they cannot drift.
+
 ## Naming
 
 `tk_*` shell function names are **frozen** as the compatibility surface. Every
@@ -58,16 +90,32 @@ negative answer.
 Every tool opens with a block an agent can read with `head -20`:
 
 ```
-# tk-suspend-cycle.sh — N suspend/resume cycles with per-cycle evidence
-#
-# scope:    generic          | soc:<soc> | device:<codename>
-# needs:    BOOTED
-# env:      TK_CYCLES (default 20), PHONE, TK_AGENT
-# exits:    0 all clean · 1 a cycle failed · 75 lock · 76 wrong state
+#!/bin/bash
+# scope: generic          | soc:<soc> | device:<codename>
+# needs: BOOTED           | FASTBOOT | FROZEN | on-device | any | -
+# env:   TK_CYCLES (default 20), PHONE, TK_AGENT
+# exits: 0 all clean · 1 a cycle failed · 75 lock · 76 wrong state
+# N suspend/resume cycles with per-cycle evidence.
 ```
 
-`porthole doctor --tools` enforces the `scope:` line, so the convention is
-checked rather than aspirational.
+All four fields are required and `tests/test_tools.py` enforces them, along with
+valid scope and needs values. `porthole tools --lint` lists any gaps.
+
+`needs` values:
+
+| value | meaning |
+|---|---|
+| `-` | host only; never touches the device |
+| `BOOTED` | needs a booted device answering ssh |
+| `FASTBOOT` | needs the bootloader |
+| `FROZEN` | a recovery tool for the kernel-alive/userspace-gone state |
+| `any` | probes state and handles more than one |
+| `on-device` | runs *on* the device, pushed or installed there |
+
+A tool touching the device must use the shared lib or the mutex. The rare
+exception declares `# lib-exempt: <why>` in its own header — `stallwatch.sh`
+does, because detecting the PAM stall requires a raw ssh with a fixed timeout,
+which is exactly what `tk_boot_id`'s retry would mask.
 
 ## Device-scoped tools
 
