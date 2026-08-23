@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Swap the appended DTB inside an Android boot image, fixing up the header.
 
 taimen's boot.img carries the DTB appended to the kernel (kernel_size =

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: HOST, PORTHOLE_HOST
+# exits: 0 ok · non-zero on failure
 """Run a command on the pmOS initramfs debug shell (busybox telnetd, $HOST:23).
 
 The debug shell is a raw /bin/sh behind busybox telnetd, so it opens with a short IAC

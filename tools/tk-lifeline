@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: soc:qcom
+# needs: on-device (installed as a systemd timer; see tk-lifeline.{service,timer})
+# env: -
+# exits: 0 ok
 # tk-lifeline: if this boot cannot reach the USB host, return to the bootloader.
 # Armed only while /var/lib/tk-lifeline/armed exists -- disarm before handing
 # the phone back to normal use, or an unplugged phone would bootloader-loop.

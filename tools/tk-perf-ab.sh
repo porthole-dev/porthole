@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 # tk-perf-ab.sh -- interleaved A/B of a tuning knob against real frame timings.
 # Run ON THE DEVICE as root.
 #

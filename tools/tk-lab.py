@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: BOOTED
+# env: FASTBOOT, PHONE, TK_LAB_ALLOW_VOL
+# exits: 0 ok
 """tk-lab -- unattended audio experiment harness for taimen.
 
 Every audio hypothesis on this device used to cost a kernel build.  This runs

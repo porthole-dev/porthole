@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 """Print the CURRENT multitouch slot state of an evdev node, without waiting.
 
 Run ON THE DEVICE, as root. Stdlib only.

@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: on-device (pipe with `ssh ... sudo -n sh -s`)
+# env: PHONE, TK_AGENT
+# exits: 0 ok · 1 failed
 # tk-applaunch-bench.sh -- cold/warm application launch latency under phosh.
 # Run ON THE DEVICE as root:
 #

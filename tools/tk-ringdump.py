@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: HOST
+# exits: 0 ok · non-zero on failure
 """Decode the ringbuffer out of an adreno devcoredump into CP packets.
 
 Run on the HOST against a dump pulled from /sys/class/devcoredump/devcdN/data.

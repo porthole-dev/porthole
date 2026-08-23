@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Follow /dev/kmsg into a file, fsync'd per record, so the kernel log tail
 survives a watchdog reset.
 

@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed · 2 usage
 # tk-wifi-audit.sh -- end-to-end WiFi stack audit for taimen (ath10k/WCN3990).
 #
 # Runs ON THE DEVICE. Answers, with evidence rather than impressions:

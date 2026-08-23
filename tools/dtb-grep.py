@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:qcom
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Print nodes matching a name pattern out of a flattened device tree.
 
 There is no dtc on this host and the factory DTBs are the only authority on how

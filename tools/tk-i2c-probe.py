@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Scan the taimen touch i2c bus (QUP5) for the STM FTM4 at 0x49.
 
 Run ON THE DEVICE, as root. Stdlib only -- there is no i2c-tools and no

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:qcom
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Enable an IIO event and print events as they arrive. Runs ON the device.
 
 The event-only SMGR sensors -- step detector, activity, inactivity and the

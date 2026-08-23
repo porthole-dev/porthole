@@ -1,5 +1,9 @@
 #!/bin/bash
 # scope: soc:msm8998
+# needs: FASTBOOT
+# env: HOST, PORTHOLE_WORKDIR
+# exits: 0 ok · 1 failed
+# lib-exempt: watches raw USB/fastboot transitions around `fastboot boot`, including the confirmed-disconnect gate; the lib's helpers assume a settled device
 # Boot an image and time the USB transitions, distinguishing a real reboot from noise.
 #
 # The trap this exists to avoid: right after `fastboot boot` returns, the host has NOT yet

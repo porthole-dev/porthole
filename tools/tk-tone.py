@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: HOST
+# exits: 0 ok · non-zero on failure
 """Generate an acoustic probe signal, to be played on the HOST while the phone
 captures. Runs on the host; needs no numpy.
 

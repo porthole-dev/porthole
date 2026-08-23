@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_USER, TK_PUSH
+# exits: 0 ok · 1 failed
 # Stream a command's output from the phone to a host file, across reboots.
 #
 # Run this BEFORE the phone boots. Plain `ssh phone 'dmesg -w'` dies the moment
@@ -25,6 +28,9 @@
 #        TK_PUSH=tools/tk-display-watch.py \
 #          tk-stream.sh /tmp/display.log sudo python3 -u /tmp/tk-display-watch.py
 set -u
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 HOST=${PHONE#*@}

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · non-zero on failure
 """Measure the capture gating (HANDOFF-audio.md 2.5) as a number, per config.
 
 The section-4 acceptance rule cannot see a 2:1, and neither can a spectrum on

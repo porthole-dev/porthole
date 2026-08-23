@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_USER
+# exits: 0 ok
 # tk-mic-check.sh -- is the microphone producing AUDIO, or just a noise floor?
 #
 # WHY A TOOL AND NOT ONE arecord
@@ -40,6 +43,9 @@
 #
 # ponytail: fixed at DMIC1/DEC7, the UCM-declared path. --sweep tries them all.
 set -u
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 SECS=${SECS:-3}
 

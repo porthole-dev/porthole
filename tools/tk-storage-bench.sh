@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: soc:qcom
+# needs: on-device (pipe with `tk-device.sh ssh "$PHONE" 'sudo -n bash -s'`)
+# env: PHONE, TK_AGENT
+# exits: 0 ok · 1 failed
 # UFS / block / swap measurement for taimen. Run ON THE DEVICE as root:
 #
 #   TK_AGENT=<you> tools/tk-device.sh ssh "$PHONE" 'sudo -n bash -s' \

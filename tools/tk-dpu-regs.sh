@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_USER
+# exits: 0 ok · 1 failed
 # Dump and decode the DPU registers that matter for a stuck display.
 #
 # Why this exists: /sys/kernel/debug/dri/0/kms dumps every DPU block (top, lm_*,
@@ -26,12 +29,15 @@
 #        tk-dpu-regs.sh raw              (the whole kms dump)
 set -eu
 
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 
 ping -c1 -W2 $HOST >/dev/null 2>&1 || {
     echo "phone is not on the USB network"; exit 1; }
 
-dump=$(ssh -o StrictHostKeyChecking=no "$PHONE" \
+dump=$(ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
     'sudo cat /sys/kernel/debug/dri/0/kms' 2>/dev/null)
 
 [ -n "$dump" ] || { echo "empty dump -- is msm loaded?"; exit 1; }

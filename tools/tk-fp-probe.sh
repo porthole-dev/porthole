@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 # tk-fp-probe.sh -- is the fingerprint sensor physically alive?
 # Run ON THE DEVICE as root. Reads and toggles two GPIOs. Touches no bus.
 #

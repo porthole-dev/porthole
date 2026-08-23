@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 32 see source
 """Verify a boot.img actually carries the kernel/DTB you just built.
 
 This exists because the failure it catches is invisible: `pmbootstrap build

@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: device:google-taimen
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · non-zero on failure
 # tk-mic-ab.sh [seconds] -- runs ON THE PHONE.
 #
 # Records the SAME mic twice, in the two setups that behave differently, and
@@ -13,6 +16,9 @@
 # the shortest route to what the plain path is missing. Registers are read with
 # the regmap cache bypassed, i.e. actual silicon.
 set -e
+
+# shellcheck source=../../../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../tools/tk-lib.sh"
 DUR=${1:-25}
 REG=/sys/kernel/debug/regmap/217:250:1:0
 

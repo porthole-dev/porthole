@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 2 usage
 """Inject a key press through /dev/uinput. Run ON THE DEVICE as root.
 
 Same idiom as tools/tk-touch.py -- plain ioctl + struct, no ctypes, no deps.

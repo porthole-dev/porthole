@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · 1 failed
 """Measure the accelerometer mount matrix from four guided poses.
 
 Why this exists: the tool this replaces (tk-orient-check.py, deleted) only scored two candidate matrices, it

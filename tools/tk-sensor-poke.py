@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 """Live 16-bit-register I2C access to the IMX179, for use WHILE camss holds the
 pipeline open.
 

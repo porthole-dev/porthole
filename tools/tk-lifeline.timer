@@ -1,4 +1,7 @@
 # scope: generic
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 [Unit]
 Description=tk-lifeline: start the USB-host reachability check 90s after boot
 

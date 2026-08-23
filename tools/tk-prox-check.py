@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · non-zero on failure
 """Check that qcom_smgr suppresses the proximity IR crosstalk in the ALS.
 
 Settled, do not re-litigate:

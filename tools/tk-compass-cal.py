@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:qcom
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · 1 failed
 """Calibrate the magnetometer's hard-iron offset, and persist it.
 
 Uncalibrated, taimen's magnetometer reads a field magnitude of about 1.58

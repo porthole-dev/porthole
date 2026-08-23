@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:qcom
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Minimal qrtr-lookup: list QMI services on the QRTR bus. No deps."""
 import socket, struct
 CTRL_PORT, NEW_SERVER, NEW_LOOKUP = 0xfffffffe, 4, 10

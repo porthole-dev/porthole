@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Drive Easel's TX video pattern generator -- sensor and bypass mux out of the
 picture entirely.
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Dump multitouch events from an evdev node. Run ON THE DEVICE, as root.
 
 There is no evtest in the rootfs and no python-evdev, so this decodes

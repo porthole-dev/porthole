@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: HOST, TK_DTC_OUT
+# exits: 0 ok · 1 failed
 # tk-dtc.sh [board.dts] -- compile a board DTS on the HOST, before asking for a
 # kernel build.
 #

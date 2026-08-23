@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: on-device (scp it over, or pipe with `ssh ... sh -s`)
+# env: PHONE, TK_AGENT
+# exits: 0 ok · 1 failed
 # tk-session-cpu.sh -- rank a graphical session's user units by cumulative CPU.
 # Run ON THE DEVICE as root:
 #

@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: any (probes state; handles BOOTED and FASTBOOT)
+# env: FASTBOOT, HOST, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_IMG
+# exits: 0 ok · 1 failed · 2 usage · 3 see source · 4 see source · 5 see source · 6 see source · 7 see source
 # tk-recover.sh -- one command to get taimen back after the 2026-08-01 incident,
 # and after any hang that leaves it off the bus.
 #

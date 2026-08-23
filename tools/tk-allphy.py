@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Hand-configure ALL THREE msm8998 CSIPHYs and watch every status register.
 
 The pipeline must already be streaming on one PHY so CAMSS_TOP and the AHB

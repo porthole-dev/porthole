@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: soc:msm8998
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST
+# exits: 0 ok · 1 failed
 # tk-hang-matrix.sh -- the 2x2 attribution matrix for defect #3.
 # Run on the HOST. Drives the phone, watches it from outside, records verdicts.
 #
@@ -36,6 +39,9 @@
 #   event to tell a reset from a survival.
 set -u
 
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 MINUTES=${MINUTES:-15}
@@ -44,8 +50,8 @@ CELLS=${CELLS:-"wifi lte gpu both"}
 LOG=${LOG:-./hang-matrix-$(date +%Y%m%d-%H%M).log}
 
 say() { echo "$(date +%H:%M:%S) $*" | tee -a "$LOG"; }
-sshq() { timeout 25 ssh -o ConnectTimeout=8 "$PHONE" "$@" 2>/dev/null; }
-alive() { timeout 10 ssh -o ConnectTimeout=6 -o BatchMode=yes "$PHONE" true 2>/dev/null; }
+sshq() { timeout 25 ssh "${TK_SSH_OPTS[@]}" "$PHONE" "$@" 2>/dev/null; }
+alive() { timeout 10 ssh "${TK_SSH_OPTS[@]}" "$PHONE" true 2>/dev/null; }
 pingable() { timeout 4 ping -c1 -W2 "$HOST" >/dev/null 2>&1; }
 uptime_s() { sshq "cut -d' ' -f1 /proc/uptime" | cut -d. -f1; }
 

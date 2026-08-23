@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Poll Easel RX PHY_STOPSTATE / PHY_RX fast, to catch HS data bursts.
 
 A data lane sits in LP-11 (stop state) between packets, so a single read

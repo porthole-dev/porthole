@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Dump an MMIO range via /dev/mem, one mmap'd process.
 
 peek.py is fine for a handful of registers but costs a process start each; this

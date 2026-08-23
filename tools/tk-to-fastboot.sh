@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: soc:qcom
+# needs: any (probes state; handles BOOTED and FASTBOOT)
+# env: FASTBOOT, TK_ATTEMPT, TK_NO_SYSCALL, TK_POLL, TK_SWALLOWED_MAX, TK_TIMEOUT, TK_TRIES
+# exits: 0 ok · 1 failed · 3 see source
 # Get the phone INTO the bootloader, and return the instant it lands (~9s).
 #
 # THE IMPORTANT FACT: `sudo -n reboot bootloader` does NOT reach the bootloader

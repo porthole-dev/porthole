@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · non-zero on failure
 # tk-mic-test.sh [DMIC0..DMIC5] [seconds] [rate] -- runs ON THE PHONE.
 #
 # Records one clean capture on the requested DMIC following the vendor's
@@ -11,6 +14,9 @@
 #   - the first seconds are discarded by the analyser, not by this script
 #   - "DECn Volume" is never written (kcontrol max clamps it to a huge gain cut)
 set -e
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 DMIC=${1:-DMIC0}
 DUR=${2:-25}
 # Rate must match snd_soc_msm8998's be_rate, or the DSP resamples on top of

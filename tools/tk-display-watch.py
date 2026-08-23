@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Log the display pipeline so a frozen screen can be read off afterwards.
 
 Run ON THE DEVICE, as root. Stdlib only. One line per state change; redirect it

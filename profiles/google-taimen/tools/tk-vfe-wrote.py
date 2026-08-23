@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok
 """Does the VFE write ANY byte to the capture buffer?
 
 Nothing measured so far separates "the write master never issues an AXI

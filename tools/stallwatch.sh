@@ -1,5 +1,9 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_RESCUE_PORT
+# exits: 0 ok · non-zero on failure
+# lib-exempt: detecting the PAM stall REQUIRES a raw ssh with a fixed timeout; tk_boot_id retries, which is exactly what would mask the signature
 # stallwatch.sh -- detect the taimen PID-1 freeze from the HOST.
 #
 # THE SIGNATURE THIS EXISTS FOR

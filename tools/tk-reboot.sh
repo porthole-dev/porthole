@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: any (probes state; handles BOOTED and FASTBOOT)
+# env: FASTBOOT, TK_FORCE, TK_TIMEOUT
+# exits: 0 ok · 1 failed
 # Reboot the phone and return the INSTANT ssh answers again.
 #
 # This used to sleep a flat 30s after asking for the reboot and then poll every

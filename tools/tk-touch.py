@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 """Inject touch gestures through /dev/uinput. Run ON THE DEVICE as root.
 
 An untouched screen is indistinguishable from a broken one, and a human finger

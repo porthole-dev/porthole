@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Poll Easel TX PHY_STATUS to see whether the bypass forwards data bursts."""
 import mmap, os, struct, sys
 DEV="/sys/bus/pci/devices/0000:01:00.0/resource2"; PERIPH=0x04000000

@@ -35,10 +35,20 @@ TMPXDG = tempfile.mkdtemp(prefix="porthole-cli-test-")
 
 # -------------------------------------------------------------------- usage --
 
-def test_no_args_prints_usage_and_exits_64():
+def test_no_args_prints_an_orientation_not_a_usage_dump():
+    """A bare `porthole` is someone who just cloned this asking "now what".
+    A usage dump is the least useful possible answer: tell them where they
+    are and what to do next, and exit 0 because nothing went wrong."""
     rc, out, err = run()
+    assert rc == 0, f"rc={rc}"
+    assert "device" in out.lower() and "profiles" in out.lower()
+    assert "porthole" in out.lower()
+
+
+def test_unknown_verb_suggests_a_near_match():
+    rc, out, err = run("doctro")
     assert rc == 64, f"rc={rc}"
-    assert "usage" in (out + err).lower()
+    assert "doctor" in err, "should suggest the nearest verb"
 
 
 def test_unknown_verb_exits_64():

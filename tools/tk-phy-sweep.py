@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Sweep CSIPHY CMN_CTRL5 (the lane-enable mask) against a LIVE transmitting
 sensor and watch the eleven status registers.
 

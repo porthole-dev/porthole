@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok
 """Compare a live WCD934X register dump against downstream's init tables.
 
 The vendor kernel applies three {reg, mask, val} tables at codec init

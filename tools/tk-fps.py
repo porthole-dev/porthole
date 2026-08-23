@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Sample the display/GPU pipeline once a second. Run ON THE DEVICE.
 
 Stdlib only. Everything here is a passive read -- in particular it never opens

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Passively log the whole touch chain so a failure can be read off afterwards.
 
 Run ON THE DEVICE, as root. Stdlib only. Writes one line per state change to

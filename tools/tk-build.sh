@@ -1,5 +1,7 @@
 #!/bin/bash
 # scope: generic
+# needs: - (host only, no device)
+# exits: 0 ok · 64 usage · 75 lock unavailable
 # Serialise KERNEL BUILDS across parallel agents.
 #
 # Why this exists: `source envkernel.sh` bind-mounts the kernel tree onto

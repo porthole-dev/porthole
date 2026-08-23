@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Read/patch the kernel cmdline of an Android boot image, in place or to a copy.
 
 Why this exists: the boot header's id[] SHA1 covers only (kernel, ramdisk, second) --

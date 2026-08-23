@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Sample TLMM GPIO input levels on the phone -- runs ON THE DEVICE.
 
 Is the MI2S bit clock actually coming out of the pad?  q6afe reporting ret=0

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 """Play a rumble effect through the force-feedback API. Run ON THE DEVICE.
 
 This is the path userspace haptics actually use -- feedbackd uploads an

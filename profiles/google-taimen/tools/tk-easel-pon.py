@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok
 """Power on Easel's BCM15602 PMIC by hand and see if it answers on i2c.
 
 HANDOFF §41: Easel is an in-line MIPI bridge and both cameras terminate on it.

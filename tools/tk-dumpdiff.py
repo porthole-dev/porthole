@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Diff a stock-Android TKDUMP capture against our camss port's register state.
 
 Consumes:

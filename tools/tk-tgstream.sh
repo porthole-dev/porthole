@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 # tk-tgstream.sh -- capture from the CSID's own test generator.
 #
 # The point is that NOTHING upstream of the CSID is involved: the CSIPHY link is

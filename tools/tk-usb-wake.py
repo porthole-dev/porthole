@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:qcom
+# needs: any (probes state; handles BOOTED and FASTBOOT)
+# env: HOST
+# exits: 0 ok · non-zero on failure
 """Wake a taimen that is wedged in suspend, from the host, without hands.
 
 A resume-side hang between suspend_late and resume_early leaves the phone with
@@ -26,6 +29,16 @@ import fcntl
 import re
 import subprocess
 import sys
+
+# Resolve config through the shared lib: this is what supplies $PHONE, the
+# mandatory ssh flags (host keys change every boot) and connection
+# multiplexing. A tool that builds its own ssh command line gets none of them.
+import pathlib as _pl, sys as _sys
+for _p in _pl.Path(__file__).resolve().parents:
+    if (_p / "lib" / "porthole.py").is_file():
+        _sys.path.insert(0, str(_p / "lib"))
+        break
+import porthole
 
 USBDEVFS_RESET = 0x5514
 GADGET = "18d1:d001"   # pmOS gadget on taimen; also what fastboot shows

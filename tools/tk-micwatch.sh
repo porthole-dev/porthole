@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_UID
+# exits: 0 ok · non-zero on failure
 # tk-micwatch.sh -- sample whether anything is holding the microphone open.
 #
 # WHAT THIS SETTLES
@@ -24,6 +27,9 @@
 # Usage: tk-micwatch.sh [seconds]      (default: sample for 10 min, then report)
 #        tk-micwatch.sh daemon         (run on the device until stopped)
 set -u
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}

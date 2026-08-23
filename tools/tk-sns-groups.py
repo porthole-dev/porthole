@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:qcom
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Extract the SSC sensor-registry group table from Android's sensors.qcom.
 
 The SNS_REG QMI service hands SSC raw byte-slices of /persist/sensors/sns.reg,

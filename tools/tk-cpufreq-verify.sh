@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 # tk-cpufreq-verify.sh -- does a requested CPU frequency actually get delivered?
 # Run ON THE DEVICE, as root.
 #

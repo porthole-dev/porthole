@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok
 """Read Easel's MIPI RX/TOP state through BAR2 -- a third, independent
 receiver's opinion on whether the sensor is transmitting (HANDOFF §41g).
 

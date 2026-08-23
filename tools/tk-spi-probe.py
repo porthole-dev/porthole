@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Poke the taimen touch controller (LG SW49408) over spidev.
 
 Run ON THE DEVICE, as root. Drives the reset line, then does full-duplex

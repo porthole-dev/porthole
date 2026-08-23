@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: on-device (run it on the device, e.g. piped over ssh)
+# env: -
+# exits: 0 ok · 1 failed
 """Drive and inspect the phosh session deterministically. Run ON THE DEVICE.
 
 Every measurement in this tree that turned out to be wrong was wrong the same

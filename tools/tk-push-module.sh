@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PHONE
+# exits: 0 ok · 1 failed
 # Install a freshly built kernel module onto the running phone, no reflash.
 #
 # Why this exists: msm.ko and the panel driver are modules, so a driver change

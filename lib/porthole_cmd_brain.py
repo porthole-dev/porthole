@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """`porthole brain` -- search the second brain, and regenerate its index.
 
 The brain is plain markdown on purpose: any agent, any harness, `grep`, and a
@@ -99,8 +100,8 @@ def scope_matches(note_scope: str, want: str) -> bool:
     return note_scope == want or note_scope.startswith(want + ":")
 
 
-def cmd_brain(args, root: pathlib.Path) -> int:
-    root = pathlib.Path(root)
+def cmd_brain(args, ctx) -> int:
+    root = pathlib.Path(ctx.root)
     notes = load_notes(root)
 
     if args.reindex:
@@ -195,3 +196,30 @@ def write_index(root: pathlib.Path, notes: list[Note]) -> int:
         for note in unparsed:
             print(f"  {note.path.relative_to(root)}", file=sys.stderr)
     return 0
+
+
+SPEC = {
+    "verb": "brain",
+    "order": 50,
+    "help": "search the second brain",
+    "description": (
+        "47 scoped notes: laws, traps, playbooks, workflow. --scope filters to\n"
+        "what applies to your device and always includes the generic notes,\n"
+        "because hiding the laws from someone who filtered would be backwards."),
+    "args": [
+        (["query"], {"nargs": "*", "help": "words to match, or a note id"}),
+        (["--scope"], {"metavar": "SCOPE",
+                       "help": "generic | soc:<soc> | device:<codename>"}),
+        (["--subsystem"], {"metavar": "NAME", "help": "boot, power, build, ..."}),
+        (["--severity"], {"metavar": "LEVEL", "help": "law | trap | technique | fact"}),
+        (["--json"], {"action": "store_true", "help": "machine-readable"}),
+        (["--reindex"], {"action": "store_true", "help": "regenerate brain/INDEX.md"}),
+    ],
+    "run": cmd_brain,
+    "examples": [
+        "porthole brain --severity law",
+        "porthole brain watchdog",
+        "porthole brain --scope soc:sdm845",
+        "porthole brain --reindex",
+    ],
+}

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: BOOTED
+# env: -
+# exits: 0 ok · 1 failed
 """Walk the ALSA PCM lifecycle one call at a time, marking /dev/kmsg before each.
 
 Why this exists: opening the capture PCM hard-hangs the SoC with zero console
@@ -32,6 +35,16 @@ import os
 import sys
 import threading
 import time
+
+# Resolve config through the shared lib: this is what supplies $PHONE, the
+# mandatory ssh flags (host keys change every boot) and connection
+# multiplexing. A tool that builds its own ssh command line gets none of them.
+import pathlib as _pl, sys as _sys
+for _p in _pl.Path(__file__).resolve().parents:
+    if (_p / "lib" / "porthole.py").is_file():
+        _sys.path.insert(0, str(_p / "lib"))
+        break
+import porthole
 
 SND_PCM_STREAM_PLAYBACK = 0
 SND_PCM_STREAM_CAPTURE = 1

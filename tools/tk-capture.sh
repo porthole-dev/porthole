@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PHONE, TK_CAP_PORT, TK_CAP_WLAN
+# exits: 0 ok · 1 failed
 # tk-capture.sh -- arm every log channel this device has, from the HOST, and
 # say at the end whether anything died.
 #

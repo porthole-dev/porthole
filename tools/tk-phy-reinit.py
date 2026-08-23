@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Re-run the CSIPHY v5.0.1 init sequence by hand, WHILE the sensor is already
 transmitting, and report whether the PHY then sees anything.
 

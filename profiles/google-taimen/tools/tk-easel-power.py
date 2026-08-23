@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok
 """Bring Easel (Pixel Visual Core) all the way up from userspace, then retrain
 the PCIe link so it enumerates.
 

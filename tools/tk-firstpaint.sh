@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 # tk-firstpaint.sh -- what the user actually waits for: launch -> first frame.
 #
 # WHY THIS EXISTS ALONGSIDE tk-applaunch-bench.sh

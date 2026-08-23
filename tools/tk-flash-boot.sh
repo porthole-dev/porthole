@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: FASTBOOT
+# env: FASTBOOT, TK_SLOT, TK_TIMEOUT
+# exits: 0 ok · 1 failed · 2 usage
 # Flash a boot image to slot b and come back up in pmOS, end to end, unattended.
 #
 #   validate image -> bootloader -> flash boot_b -> set_active b -> reboot -> ssh

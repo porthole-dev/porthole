@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: any (probes state; handles BOOTED and FASTBOOT)
+# env: FASTBOOT, HOST, PORTHOLE_DEVICE, TK_AGENT, TK_DEVICE_LOCK, TK_DEVICE_MAX, TK_DEVICE_TIMEOUT
+# exits: 0 ok · 64 usage · 75 lock unavailable · 76 wrong device state · 124 timed out at the hold ceiling
 # Serialise access to the ONE physical phone across parallel agents.
 #
 # Usage:  tools/tk-device.sh [--need-booted|--need-fastboot] <command> [args...]

@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 # tk-camstream.sh -- one capture attempt on the IMX179 front camera, with the
 # only two instruments that survive it: the camss IRQ counters and dmesg.
 #

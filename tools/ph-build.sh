@@ -1,8 +1,8 @@
 # ph-build.sh -- envkernel build/flash loop for the active device. SOURCE this.
 #
 # scope:  generic
-# needs:  a host with pmbootstrap; the device only for tkflash
-# env:    PORTHOLE_WORKDIR (required), PORTHOLE_KERNEL_PKG, PORTHOLE_DEVICE_PKG,
+# needs: - (host; the device only for tkflash, which takes the mutex itself)
+# env:    PORTHOLE_WORKDIR (required), PORTHOLE_KERNEL_PKG, PORTHOLE_DEVICE_PKG
 #         PORTHOLE_FW_PKG, PORTHOLE_DTB, PORTHOLE_DEFCONFIG, TK_KPKG
 # gives:  tkbuild tkflash tkclean tkpurge-devpkgs
 # exits:  0 built and verified - 1 anything else

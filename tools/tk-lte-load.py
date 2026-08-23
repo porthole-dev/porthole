@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Generate sustained traffic that REALLY goes out over LTE. Run ON THE DEVICE.
 
 Exists because of one trap: binding a socket to the modem's source ADDRESS is

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Minimal flattened-devicetree dumper (no dtc on this host).
 
 Usage: fdtdump.py FILE.dtb [substring ...]

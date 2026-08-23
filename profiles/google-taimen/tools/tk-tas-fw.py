@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Parse a TAS2557 uCDSP firmware image and report what is inside it.
 
 The amp driver cannot make sound without this blob: tas2557_enable() refuses

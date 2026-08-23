@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: soc:msm8998
+# needs: BOOTED
+# env: FASTBOOT, HOST, PHONE, PORTHOLE_USER
+# exits: 0 ok · 1 failed
 # tk-audio-cycle.sh [--dtb] [--kernel] -- one command from "make finished" to
 # "here is what the device says".
 #
@@ -21,6 +24,9 @@
 # So every module is checked for a string that only the NEW source contains,
 # and the script refuses to push if it is missing.
 set -euo pipefail
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${KBUILD_OUTPUT:-$ROOT/linux/.output}
@@ -104,7 +110,7 @@ fi
 
 echo "== waiting for ssh"
 for _ in $(seq 120); do
-	ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no \
+	ssh "${TK_SSH_OPTS[@]}" \
 	    -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes \
 	    "$PHONE" true 2>/dev/null && break
 	sleep 1
@@ -112,7 +118,7 @@ done
 
 echo
 echo "== is the new code actually running?"
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+ssh "${TK_SSH_OPTS[@]}" \
     "$PHONE" '
 	echo "-- new module params (absent => old module still loaded):"
 	for p in /sys/module/snd_soc_wcd934x/parameters/slim_irq_mask_on_err \
@@ -137,5 +143,5 @@ python3 "$ROOT/tools/tk-lab.py" cap postfix -d 20 \
 
 echo
 echo "== what the new error paths say"
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+ssh "${TK_SSH_OPTS[@]}" \
     "$PHONE" 'sudo dmesg | grep -E "TKSLIMERR|TKREAD|TKBUF|Failed to connect port|No segment distribution|Cannot get presence rate|overflow|underflow|TX timed out|invalid dai id" || echo "   (nothing -- which for TKSLIMERR is the good answer)"'

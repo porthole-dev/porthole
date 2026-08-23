@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Invert the SoftwareIsp pipeline over a crop to recover raw (black-subtracted,
 normalised) channel ratios, and report the AWB gains that WOULD neutralise it.
 

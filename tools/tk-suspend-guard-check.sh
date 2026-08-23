@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST
+# exits: 0 ok · 1 failed
 # tk-suspend-guard-check.sh -- prove the suspend guard actually blocks, WITHOUT
 # ever suspending the phone.
 #
@@ -28,13 +31,16 @@
 #   pmaports/device/testing/device-google-taimen/taimen-suspend-guard.conf.
 set -u
 
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 UNIT=${1:-systemd-suspend.service}
 ARM=/run/taimen-suspend-is-safe
 OVERRIDE="/etc/systemd/system/${UNIT}.d/99-tk-guard-check.conf"
 
-sshq() { timeout 30 ssh -o ConnectTimeout=8 "$PHONE" "$@" 2>&1; }
+sshq() { timeout 30 ssh "${TK_SSH_OPTS[@]}" "$PHONE" "$@" 2>&1; }
 
 cleanup() {
 	sshq "sudo -n rm -f '$OVERRIDE' '$ARM'; sudo -n systemctl daemon-reload" >/dev/null

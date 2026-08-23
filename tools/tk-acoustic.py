@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: BOOTED
+# env: PHONE, TK_AMP
+# exits: 0 ok · non-zero on failure
 """tk-acoustic -- decide "does audio actually come out / go in" with no human.
 
 The laptop has a speaker and a microphone and the phone sits next to it, so
@@ -27,6 +30,16 @@ import subprocess
 import sys
 import time
 import wave
+
+# Resolve config through the shared lib: this is what supplies $PHONE, the
+# mandatory ssh flags (host keys change every boot) and connection
+# multiplexing. A tool that builds its own ssh command line gets none of them.
+import pathlib as _pl, sys as _sys
+for _p in _pl.Path(__file__).resolve().parents:
+    if (_p / "lib" / "porthole.py").is_file():
+        _sys.path.insert(0, str(_p / "lib"))
+        break
+import porthole
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

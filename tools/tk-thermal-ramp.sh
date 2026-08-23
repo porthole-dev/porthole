@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed · 130 see source
 # tk-thermal-ramp.sh -- the six-phase thermal ramp, with an abort that works.
 # Run ON THE DEVICE as root, WITH A HUMAN PRESENT.
 #

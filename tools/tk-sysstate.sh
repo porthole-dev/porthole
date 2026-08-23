@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: on-device (run it on the device, e.g. piped over ssh)
+# env: TK_PUSH
+# exits: 0 ok · non-zero on failure
 # Print one compact line of system state per second, forever.
 #
 # Run ON THE DEVICE, streamed to the host with tk-stream.sh. This exists for

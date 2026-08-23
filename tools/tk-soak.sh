@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: on-device (run it on the device, e.g. piped over ssh)
+# env: TK_SOAK_LOG
+# exits: 0 ok · non-zero on failure
 # tk-soak.sh -- the on-device half of the D2 / 72 h stability soak.
 # Run ON THE DEVICE as root, under systemd-run so it survives the ssh session.
 #

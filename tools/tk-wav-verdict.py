@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 """Decide whether a capture contains real microphone audio.
 
 Implements the acceptance rule from docs/HANDOFF-audio.md section 4, which

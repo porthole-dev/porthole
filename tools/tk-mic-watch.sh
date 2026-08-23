@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · non-zero on failure
 # tk-mic-watch.sh [seconds] -- runs ON THE PHONE.
 #
 # Samples the handful of registers that matter once a second DURING a capture,
@@ -10,6 +13,9 @@
 # ("%04x: %02x\n"), so a register is one dd at offset reg*10 -- reading all
 # 64K lines once a second would itself perturb the timing.
 set -e
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 DUR=${1:-20}
 REG=/sys/kernel/debug/regmap/217:250:1:0/registers
 

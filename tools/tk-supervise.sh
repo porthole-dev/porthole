@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: any (probes state; handles BOOTED and FASTBOOT)
+# env: FASTBOOT, HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_RESCUE_PORT
+# exits: 0 ok · 1 failed
 # tk-supervise.sh -- keep the phone alive during unattended work.
 #
 # Runs on the HOST, in the background, for the whole session. It watches for the
@@ -21,6 +24,9 @@
 # ponytail: no state machine, no config file. A loop and four cases.
 set -u
 
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 PORT=${TK_RESCUE_PORT:-2323}
@@ -32,7 +38,7 @@ say() { echo "$(date +%H:%M:%S) $*" | tee -a "$LOG"; }
 
 # See tk-recover.sh: a changed host key must not read as "ssh is dead", or
 # this supervisor reboots a healthy phone on the FROZEN branch.
-ssh_ok()  { timeout 8 ssh -o ConnectTimeout=5 -o BatchMode=yes \
+ssh_ok()  { timeout 8 ssh "${TK_SSH_OPTS[@]}" \
 	-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	-o LogLevel=ERROR "$PHONE" true 2>/dev/null; }
 ping_ok() { timeout 4 ping -c1 -W2 "$HOST" >/dev/null 2>&1; }

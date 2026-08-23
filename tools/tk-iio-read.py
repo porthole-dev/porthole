@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:qcom
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Read samples from a buffer-only IIO device (no in_*_raw), e.g. qcom-smgr-*.
 
 The SMGR driver only pushes into a kfifo buffer, so `cat in_accel_x_raw` does

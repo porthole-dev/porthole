@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: BOOTED
+# env: -
+# exits: 0 ok · non-zero on failure
 """Compare the __versions (modversions) sections of two .ko files.
 
 Run this BEFORE tk-push-module.sh. Exit 0 only when every symbol the new
@@ -19,6 +22,16 @@ symlink apk does not resolve; use /usr/lib/modules/...
     tools/tk-modcrc.py /tmp/ref.ko linux/.output/.../foo.ko
 """
 import struct, subprocess, sys, tempfile, os
+
+# Resolve config through the shared lib: this is what supplies $PHONE, the
+# mandatory ssh flags (host keys change every boot) and connection
+# multiplexing. A tool that builds its own ssh command line gets none of them.
+import pathlib as _pl, sys as _sys
+for _p in _pl.Path(__file__).resolve().parents:
+    if (_p / "lib" / "porthole.py").is_file():
+        _sys.path.insert(0, str(_p / "lib"))
+        break
+import porthole
 
 def versions(ko):
     with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as t:

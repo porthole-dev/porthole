@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """`porthole new-device` -- scaffold a profile for a device nobody has ported.
 
 Scaffolds and seeds. It deliberately does NOT try to generate a working
@@ -18,6 +19,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 
 
 CHECKLIST = """# {codename} — bring-up checklist
@@ -194,19 +197,18 @@ def retitle(content: str, codename: str, seeds: dict) -> str:
 # `profiles/{codename}/checklist.md` is the order to learn them in.""", 1)
 
 
-def cmd_new_device(args, root: pathlib.Path) -> int:
-    root = pathlib.Path(root)
+def cmd_new_device(args, ctx) -> int:
+    root = pathlib.Path(ctx.root)
     codename = args.codename
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", codename):
-        print(f"porthole: codename must be lowercase alphanumeric with dashes: "
-              f"{codename!r}", file=sys.stderr)
-        return 64
+        raise Bail(f"codename must be lowercase alphanumeric with dashes: "
+                   f"{codename!r}", EX_USAGE,
+                   "pmOS convention is <vendor>-<codename>, e.g. google-taimen")
 
     dest = root / "profiles" / codename
     if dest.exists() and not args.force:
-        print(f"porthole: {dest} already exists. Use --force to overwrite it.",
-              file=sys.stderr)
-        return 1
+        raise Bail(f"profiles/{codename} already exists", EX_FAIL,
+                   "re-run with --force to overwrite it")
 
     template = (root / "profiles" / "_template" / "device.env").read_text()
 
@@ -259,4 +261,29 @@ def cmd_new_device(args, root: pathlib.Path) -> int:
           f"question you now know to ask)")
     print(f"  3. run    porthole init --device {codename}")
     print(f"  4. read   porthole brain --severity law")
-    return 0
+    return EX_OK
+
+
+SPEC = {
+    "verb": "new-device",
+    "order": 70,
+    "help": "scaffold a profile for a device nobody has ported yet",
+    "description": (
+        "Copies the documented template, seeds what can honestly be known from\n"
+        "`fastboot getvar all` and any existing pmaports deviceinfo, and writes\n"
+        "a checklist wired to the playbooks.\n\n"
+        "It does NOT invent a deviceinfo, defconfig or DTS. A confidently wrong\n"
+        "one costs more than a blank: you end up debugging the device instead\n"
+        "of the file."),
+    "args": [
+        (["codename"], {"help": "lowercase, dashes; e.g. oneplus-enchilada"}),
+        (["--from-fastboot"], {"action": "store_true",
+                               "help": "seed from a device in the bootloader"}),
+        (["--force"], {"action": "store_true", "help": "overwrite an existing profile"}),
+    ],
+    "run": cmd_new_device,
+    "examples": [
+        "porthole new-device oneplus-enchilada",
+        "porthole new-device fairphone-fp4 --from-fastboot",
+    ],
+}

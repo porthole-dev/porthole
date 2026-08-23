@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 # tk-sensorstream.sh -- stream the REAL sensor path, imx179 -> CSIPHY -> CSID ->
 # ISPIF -> VFE, as opposed to tk-tgstream.sh which cuts the CSIPHY out and feeds
 # the CSID's own test generator.

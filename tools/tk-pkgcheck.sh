@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: soc:msm8998
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_USER
+# exits: 0 ok · non-zero on failure
 # tk-pkgcheck.sh -- is the thing that SHIPS the thing you EDITED?
 #
 # Run before every flash, and after every aport edit.
@@ -35,6 +38,9 @@
 # ponytail: a flat file of hashes, no database. Add per-file granularity when
 # "which file changed" is a question someone actually asks.
 set -u
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APORTS="$REPO/pmaports/device/testing"
 STATE="$REPO/.pkg-content-hashes"
@@ -68,7 +74,7 @@ done
 
 # --- B. aport vs installed --------------------------------------------------
 inst_chroot=$(pmbootstrap -y chroot -r -- apk info -v 2>/dev/null)
-inst_dev=$(timeout 15 ssh -o ConnectTimeout=5 -o BatchMode=yes "$PHONE" \
+inst_dev=$(timeout 15 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
 	'apk info -v' 2>/dev/null)
 
 for p in "${OWNED[@]}"; do
@@ -94,7 +100,7 @@ done
 
 # The kernel's own claim, which lies after a boot-only flash (modules and the
 # apk DB are not replaced), so /proc/version is the only truth.
-kver=$(timeout 15 ssh -o ConnectTimeout=5 -o BatchMode=yes "$PHONE" \
+kver=$(timeout 15 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
 	'grep -o "#[0-9]*" /proc/version' 2>/dev/null)
 krel=$(sed -n 's/^pkgrel=//p' "$APORTS/linux-postmarketos-qcom-msm8998-6.18/APKBUILD" | head -1)
 if [ -n "$kver" ]; then

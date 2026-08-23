@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: soc:msm8998
+# needs: BOOTED
+# env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST
+# exits: 0 ok · 2 usage
 # tk-deadman.sh -- arm/disarm a self-reboot on the PHONE before a risky test.
 #
 # THE PROBLEM THIS SOLVES
@@ -41,12 +44,15 @@
 #   tk-deadman.sh status
 set -u
 
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 UNIT=tk-deadman
 ACTION=${1:-status}
 SECS=${2:-300}
 
-ssh_d() { timeout 20 ssh -o BatchMode=yes -o ConnectTimeout=6 "$PORTHOLE_USER@$HOST" "$@"; }
+ssh_d() { timeout 20 ssh "${TK_SSH_OPTS[@]}" "$PORTHOLE_USER@$HOST" "$@"; }
 
 case "$ACTION" in
 arm)

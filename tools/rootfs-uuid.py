@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 """Read the filesystem UUIDs out of a pmOS rootfs image, without mounting it.
 
 Why: boot.img hard-codes pmos_boot_uuid= / pmos_root_uuid= in its cmdline. If

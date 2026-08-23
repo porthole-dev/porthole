@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · 2 usage
 """Interrogate the FTM4 touch controller behind the back of a bound ftm4 driver.
 
 Run ON THE DEVICE, as root. Stdlib only.

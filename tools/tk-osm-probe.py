@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Read what the msm8998 OSM actually delivered.
 
 Register map from the vendor driver ref/downstream-wahoo/drivers/clk/msm/

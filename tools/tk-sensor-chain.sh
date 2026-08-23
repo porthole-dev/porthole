@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: soc:qcom
+# needs: BOOTED
+# env: -
+# exits: 0 ok · 1 failed
 # tk-sensor-chain.sh -- watch the WHOLE ambient-light / proximity chain at once:
 # the kernel's raw IIO values, what iio-sensor-proxy publishes on D-Bus, and
 # what the backlight actually does about it.
@@ -28,6 +31,9 @@
 # ponytail: a log, not a verdict. The transitions are obvious in the numbers and
 # a threshold here would only be one more thing to be wrong about.
 set -u
+
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 
 SECS=${SECS:-90}
 BL=$(ls -d /sys/class/backlight/* 2>/dev/null | head -1)

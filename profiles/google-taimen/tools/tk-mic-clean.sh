@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: device:google-taimen
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · 1 failed
 # tk-mic-clean.sh [mic] [seconds] [stray] -- runs ON THE PHONE.
 #
 # mic:    mic1 (DMIC0->DEC7->TX7) | mic2 (DMIC2->DEC5->TX5) | mic3 (DMIC4->DEC6->TX6)
@@ -16,6 +19,9 @@
 # Mixer is set once, then left alone; the analyser discards the head. See
 # docs/HANDOFF-audio.md section 4 for why anything less is not evidence.
 set -e
+
+# shellcheck source=../../../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../tools/tk-lib.sh"
 MIC=${1:-mic1}
 DUR=${2:-25}
 STRAY=$3

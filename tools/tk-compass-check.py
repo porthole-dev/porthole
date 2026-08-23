@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Check the compass maths in qcom_smgr.c against floating point.
 
 The driver has to compute the heading in Q16 integer arithmetic -- there is no

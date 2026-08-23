@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Extract the AWB colour-temperature locus from a vendor chromatix 3a blob.
 
 The chromatix 3a library is a stub ELF whose entire payload is one .data blob

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Read (and optionally poke) the SoC CSIPHY common block live.
 
   tk-phystat.py [phybase] [ctrl6val]

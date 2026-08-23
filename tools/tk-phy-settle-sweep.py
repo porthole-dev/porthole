@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok
 """Sweep the CSIPHY settle count over its whole 0..255 range against a LIVE
 transmitting sensor.
 

@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: device:google-taimen
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · non-zero on failure
 # tk-dmic-sweep.sh [seconds] -- runs ON THE PHONE.
 #
 # Records every DMIC0..DMIC5 in turn through DEC7/TX7, each as its own stream
@@ -12,6 +15,9 @@
 # opposite clock edges, so a mono mic wired to the "odd" slot returns nothing
 # when the "even" one is selected -- worth sweeping rather than assuming.
 set -e
+
+# shellcheck source=../../../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../tools/tk-lib.sh"
 DUR=${1:-12}
 
 sudo rc-service greetd stop >/dev/null 2>&1 || true

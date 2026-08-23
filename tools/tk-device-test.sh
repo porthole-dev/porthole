@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: BOOTED
+# env: FASTBOOT, TK_AGENT, TK_DEVICE_LOCK, TK_DEVICE_STATE
+# exits: 0 ok · 1 failed · 76 wrong device state · 255 see source
 # One check: two concurrent tk-device.sh callers must not interleave.
 # If the lock is broken, the two "start" lines land next to each other.
 set -euo pipefail

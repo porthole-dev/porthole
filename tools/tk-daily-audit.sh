@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: soc:msm8998
+# needs: on-device (run it on the device; prints evidence, not verdicts)
+# env: PORTHOLE_CODENAME, PORTHOLE_USER
+# exits: 0 ok · non-zero on failure
 # Daily-driver readiness audit. Run ON THE DEVICE.
 #
 # The checklist is postmarketOS's own launch requirements for a phone people

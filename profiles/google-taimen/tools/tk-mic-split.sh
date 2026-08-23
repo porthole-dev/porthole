@@ -1,5 +1,8 @@
 #!/bin/sh
 # scope: device:google-taimen
+# needs: BOOTED
+# env: PHONE
+# exits: 0 ok · non-zero on failure
 # tk-mic-split.sh -- runs ON THE PHONE. Three captures, one question each.
 #
 #  1+2. DMIC0 twice, mixer untouched between them. If the constant DIFFERS
@@ -14,6 +17,9 @@
 # Register dumps are taken with the regmap CACHE BYPASSED, so they are the
 # silicon and not what the driver believes it wrote.
 set -e
+
+# shellcheck source=../../../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../../tools/tk-lib.sh"
 DUR=${1:-8}
 REGDIR=/sys/kernel/debug/regmap/217:250:1:0
 

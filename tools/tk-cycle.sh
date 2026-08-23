@@ -1,5 +1,8 @@
 #!/bin/bash
 # scope: generic
+# needs: any (probes state; handles BOOTED and FASTBOOT)
+# env: HOST, PHONE, PORTHOLE_USER, PORTHOLE_WORKDIR, TK_IMG
+# exits: 0 ok · 1 failed
 # One display bring-up experiment: bootloader -> RAM boot -> modprobe -> capture.
 #
 # Why this exists: bringing the display up means running the same loop dozens of
@@ -27,6 +30,9 @@
 #        tk-cycle.sh base.log
 set -u
 
+# shellcheck source=../lib/porthole.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+
 REPO=$PORTHOLE_WORKDIR
 IMG=${TK_IMG:-$REPO/boot-headless.img}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
@@ -39,7 +45,7 @@ ARGS="$*"
 # bootloader rather than power cycling by hand.
 if ping -c1 -W2 $HOST >/dev/null 2>&1; then
     echo "### phone is up, rebooting to bootloader"
-    timeout 20 ssh -o StrictHostKeyChecking=no "$PHONE" 'sudo reboot bootloader' \
+    timeout 20 ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo reboot bootloader' \
         >/dev/null 2>&1
 fi
 
@@ -58,19 +64,19 @@ timeout 60 fastboot boot "$IMG" >/dev/null 2>&1 || {
 
 for i in $(seq 1 15); do
     sleep 6
-    timeout 5 ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=4 \
+    timeout 5 ssh "${TK_SSH_OPTS[@]}" \
         "$PHONE" true 2>/dev/null && { echo "### booted (~$((i * 6))s)"; break; }
 done
 
 # Stream first, trigger second -- a wedge takes the whole SoC down and anything
 # still sitting in the ring buffer is lost.
 rm -f "$LOG"
-ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=3 -o ServerAliveCountMax=2 \
+ssh "${TK_SSH_OPTS[@]}" \
     "$PHONE" 'sudo dmesg -w' > "$LOG" 2>&1 &
 sleep 4
 
 echo "### modprobe msm $ARGS"
-timeout 90 ssh -o StrictHostKeyChecking=no "$PHONE" \
+timeout 90 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
     "sudo modprobe msm $ARGS; echo rc=\$?" 2>&1 | tail -1
 
 sleep 8

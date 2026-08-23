@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: soc:msm8998
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
 """Reassemble a split Qualcomm PIL image (foo.mdt + foo.b00..bNN) into one foo.mbn.
 
 Android ships these firmwares split: the .mdt holds the ELF header plus program

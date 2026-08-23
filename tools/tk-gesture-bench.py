@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: generic
+# needs: - (host only, no device)
+# env: -
+# exits: 0 ok · 1 failed
 """Measure how smooth the phosh session actually is. Run ON THE DEVICE as root.
 
 Average FPS is the wrong number. A session that renders 58 frames in a second

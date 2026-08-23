@@ -1,10 +1,13 @@
 #!/bin/bash
 # scope: soc:qcom
+# needs: BOOTED
+# env: PHONE, TK_ALARM, TK_HOST, TK_SUSPEND_CMD
+# exits: 0 ok · non-zero on failure
 # One real s2idle cycle, driven from the host, with evidence that survives the
 # reset that a failed one ends in.
 #
 #   tk-suspend-cycle.sh [alarm_sec] [prep_file] [post_file]
-#   TK_HOST="$PHONE" tk-suspend-cycle.sh 20
+#   PHONE=user@host tk-suspend-cycle.sh 20
 #
 # Three things this encodes, each of which cost real time on 2026-08-02:
 #

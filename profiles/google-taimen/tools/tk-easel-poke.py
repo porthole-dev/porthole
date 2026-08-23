@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # scope: device:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok
 """Poke Easel registers live through BAR2 (HANDOFF §42b).
 
   tk-easel-poke.py 0x040110e8 1      write
