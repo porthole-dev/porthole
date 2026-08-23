@@ -73,17 +73,37 @@ jobs:
           export XDG_CONFIG_HOME="$PWD/.xdg"
           ./bin/porthole init --device google-taimen --user ci --host 172.16.42.1
           ./bin/porthole config PHONE | grep -q '^ci@172.16.42.1$'
-      - name: doctor reports honestly with no device attached
+      - name: doctor reports honestly on a host with nothing installed
         run: |
           export XDG_CONFIG_HOME="$PWD/.xdg"
-          ./bin/porthole doctor --no-device --all --json > doctor.json
-          python3 -c "
-          import json; d = json.load(open('doctor.json'))
-          assert d['checks'], 'no checks ran'
-          for c in d['checks']:
-              assert c['status'] != 'fail' or c['fix'], f\"no fix for {c['name']}\"
-          print(f\"{len(d['checks'])} checks, verdict {d['verdict']}\")
-          "
+          # This runner has no fastboot, so doctor SHOULD exit non-zero. That
+          # is the behaviour under test, not a failure -- `|| true` keeps the
+          # step alive so the assertions below can check the shape of the
+          # report rather than merely its exit code.
+          ./bin/porthole doctor --no-device --all --json > doctor.json || true
+          python3 - <<'PY'
+          import json
+          d = json.load(open("doctor.json"))
+          assert d["checks"], "no checks ran"
+
+          # The contract: a failure must always name a fix. A check that says
+          # something is wrong without saying what to do is the thing doctor
+          # exists to replace.
+          for c in d["checks"]:
+              assert c["status"] != "fail" or c["fix"], f"no fix offered for {c['name']}"
+
+          # And it must actually notice a missing prerequisite rather than
+          # reporting a clean bill of health on a bare runner.
+          fastboot = next(c for c in d["checks"] if c["name"] == "host: fastboot")
+          assert fastboot["status"] == "fail", (
+              "doctor did not notice fastboot is missing on a bare runner")
+          assert "install" in fastboot["fix"], (
+              f"the fix should be an install command, got {fastboot['fix']!r}")
+
+          print(f"{len(d['checks'])} checks, verdict {d['verdict']}, "
+                f"{sum(1 for c in d['checks'] if c['status'] == 'fail')} fail "
+                f"(expected: fastboot is absent here)")
+          PY
       - name: agent surfaces are valid JSON
         run: |
           export XDG_CONFIG_HOME="$PWD/.xdg"
