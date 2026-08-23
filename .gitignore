@@ -1,0 +1,10 @@
+# Host-local identity and overrides — never committed.
+.env
+config.env
+
+# Python scratch
+__pycache__/
+*.pyc
+
+# Runtime state: ssh control sockets, device locks.
+.run/
