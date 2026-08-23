@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: on-device (installed as a systemd timer; see tk-lifeline.{service,timer})
 # env: -

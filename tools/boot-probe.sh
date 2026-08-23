@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: FASTBOOT
 # env: HOST, PORTHOLE_WORKDIR

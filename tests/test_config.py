@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Config resolution: precedence, legacy aliases, profile loading.
 
 Runs with no device attached and no third-party packages. Plain asserts --

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """bin/porthole: verbs, JSON output, exit codes.
 
 Everything here runs with no device attached. The device-touching parts of

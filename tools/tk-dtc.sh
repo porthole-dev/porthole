@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: - (host only, no device)
 # env: HOST, TK_DTC_OUT

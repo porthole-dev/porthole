@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: BOOTED
 # env: FASTBOOT, HOST, PHONE, PORTHOLE_USER

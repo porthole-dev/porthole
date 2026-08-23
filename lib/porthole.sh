@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # porthole config resolution and device helpers for the shell tools.
 # SOURCE this, don't run it.
 #

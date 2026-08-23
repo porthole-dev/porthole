@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # ph-build.sh -- envkernel build/flash loop for the active device. SOURCE this.
 #
 # scope:  generic

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: any (probes state; handles BOOTED and FASTBOOT)
 # env: HOST

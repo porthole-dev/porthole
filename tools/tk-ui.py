@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (run it on the device, e.g. piped over ssh)
 # env: -

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: - (host only, no device)
 # exits: 0 ok · 64 usage · 75 lock unavailable

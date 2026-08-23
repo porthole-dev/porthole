@@ -18,7 +18,8 @@ import re
 
 from porthole_cli import Bail, EX_FAIL, EX_OK
 
-FIELD_RE = re.compile(r"^#\s*(scope|needs|env|exits|gives|device):\s*(.*)$", re.M)
+FIELD_RE = re.compile(
+    r"^#\s*(scope|needs|env|exits|gives|device|lib-exempt):\s*(.*)$", re.M)
 # The first comment line after the shebang that is not a field: the summary.
 SUMMARY_RE = re.compile(r"^#\s*(\S.*?)\s*$", re.M)
 
@@ -42,17 +43,45 @@ class Tool:
         self.head = "".join(lines[:30])
         for key, value in FIELD_RE.findall(self.head):
             self.fields[key] = value.strip()
-        # Summary: the first comment line that is not the shebang, not a field,
-        # not a divider. Tools already open with one by house style.
-        for line in lines[:12]:
+        self.summary = self._summary(lines)
+
+    def _summary(self, lines) -> str:
+        """First line of the docstring for python, first real comment for shell.
+
+        Python tools carry their description in a module docstring, not a
+        comment block, so a comment-only scan returns nothing for half the
+        toolbox -- which is how the generated catalogue ended up with empty
+        cells.
+        """
+        text = "".join(lines)
+        if self.path.suffix == ".py":
+            m = re.search(r'^\s*(?:[ru]?["\']{3})(.+?)$', text, re.M)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+        # Shell: the first comment line that is not the shebang, not a field,
+        # not a field's wrapped continuation, and not a divider.
+        skipping_field = False
+        for line in lines[:20]:
             stripped = line.strip()
-            if not stripped.startswith("#") or stripped.startswith("#!"):
+            if stripped.startswith("#!"):
+                continue
+            if not stripped.startswith("#"):
+                if stripped:
+                    break
+                continue
+            if FIELD_RE.match(stripped):
+                skipping_field = True
                 continue
             body = stripped.lstrip("#").strip()
-            if not body or set(body) <= set("-=# ") or FIELD_RE.match(stripped):
+            if not body or set(body) <= set("-=# "):
+                skipping_field = False
                 continue
-            self.summary = body
-            break
+            if skipping_field and line.lstrip("#").startswith("   "):
+                # An indented wrap of the field above, not the summary.
+                continue
+            skipping_field = False
+            return body
+        return ""
 
     @property
     def name(self) -> str:
@@ -88,14 +117,23 @@ class Tool:
                 "missing_fields": self.gaps}
 
 
+# Files that live in tools/ but are not tools: systemd units are installed on
+# the device, and listing them in the catalogue invites someone to run them.
+NOT_TOOLS = (".service", ".timer", ".rules", ".conf", ".md", ".txt")
+
+
 def collect(root: pathlib.Path, device: str = "") -> list[Tool]:
-    paths = [p for p in sorted((root / "tools").iterdir())
-             if p.is_file() and not p.is_symlink() and p.name != "__pycache__"]
+    def usable(p):
+        return (p.is_file() and not p.is_symlink()
+                and not p.name.startswith(".")
+                and p.suffix not in NOT_TOOLS
+                and p.name != "__pycache__")
+
+    paths = [p for p in sorted((root / "tools").iterdir()) if usable(p)]
     if device:
         pdir = root / "profiles" / device / "tools"
         if pdir.is_dir():
-            paths += [p for p in sorted(pdir.iterdir())
-                      if p.is_file() and not p.name.startswith(".")]
+            paths += [p for p in sorted(pdir.iterdir()) if usable(p)]
     return [Tool(p, root) for p in paths]
 
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
 # env: PHONE, TK_AMP

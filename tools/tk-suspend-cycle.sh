@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: BOOTED
 # env: PHONE, TK_ALARM, TK_HOST, TK_SUSPEND_CMD

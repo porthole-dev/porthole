@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: on-device (run it on the device; prints evidence, not verdicts)
 # env: PORTHOLE_CODENAME, PORTHOLE_USER

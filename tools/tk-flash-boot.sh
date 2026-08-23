@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: FASTBOOT
 # env: FASTBOOT, TK_SLOT, TK_TIMEOUT

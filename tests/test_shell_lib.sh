@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # lib/porthole.sh: resolution, the legacy-alias contract, and agreement with
 # lib/porthole.py.
 #

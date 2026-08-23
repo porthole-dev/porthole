@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: - (host only, no device)
 # env: -

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (pipe with `ssh ... sudo -n sh -s`)
 # env: PHONE, TK_AGENT

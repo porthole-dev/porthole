@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: any (probes state; handles BOOTED and FASTBOOT)
 # env: HOST, PHONE, PORTHOLE_USER, PORTHOLE_WORKDIR, TK_IMG

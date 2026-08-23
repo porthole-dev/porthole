@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: any (probes state; handles BOOTED and FASTBOOT)
 # env: FASTBOOT, HOST, PORTHOLE_DEVICE, TK_AGENT, TK_DEVICE_LOCK, TK_DEVICE_MAX, TK_DEVICE_TIMEOUT

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
 # env: HOST, PHONE, TK_CAP_PORT, TK_CAP_WLAN

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # scope: device:google-taimen
 # needs: -  (host only, no device)
 # env: -

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: BOOTED
 # env: FASTBOOT, PHONE, TK_LAB_ALLOW_VOL

@@ -1,0 +1,51 @@
+# Changelog
+
+Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
+
+## [Unreleased]
+
+### Added
+- `porthole brief` — the agent entry point: device, state, this device's encoded
+  traps as prose, the rules that cost sessions, and next steps, in one call.
+- `porthole tools` — search 115 tools by scope, required device state, or name;
+  read a tool's contract without opening it. `--json` is the agent catalogue.
+- `porthole completion` for bash, zsh and fish, generated from the live command
+  registry so it cannot drift out of sync.
+- `porthole version` — environment summary for bug reports.
+- Extensible command registry: a verb is one `lib/porthole_cmd_<name>.py` file.
+- `tests/test_tools.py` — enforces the tool contract: self-describing headers,
+  valid scopes, no personal paths, device-scoped tools living in a profile.
+- CI across python 3.8/3.11/3.13, plus a fresh-clone smoke test.
+- `Makefile` with `test`, `lint`, `check`, `install-completion`.
+
+### Changed
+- 22 tools that opened their own ssh with hand-rolled flags now use the shared
+  lib, so they inherit the mandatory host-key options and connection
+  multiplexing. Measured: 302 ms → 14 ms per round trip.
+- A bare `porthole` orients you rather than dumping usage.
+- `porthole doctor` names a distribution-specific install command for anything
+  missing, and refuses (in code) to report a failure without a fix.
+
+### Fixed
+- An error's remedy went to stdout while the error went to stderr, so
+  `2>log` captured the problem and lost the fix.
+- Built-in defaults beat the device profile — exactly backwards.
+- Both config parsers kept the quotes on `KEY="a"  # comment`, which silently
+  defeated the forbidden-slot guard.
+
+## [0.1.0] — 2026-08-23
+
+Initial extraction from the taimen (Pixel 2 XL, MSM8998) port.
+
+### Added
+- Layered `KEY=value` config: defaults → device profile → user config → checkout
+  `.env` → process environment.
+- `lib/porthole.sh` and `lib/porthole.py`, held together by a test that diffs
+  their resolution on every key.
+- 115 tools, de-hardcoded and scoped.
+- `brain/` — 47 scoped knowledge notes from two ports.
+- SSH connection multiplexing in the shared options, with every reboot path
+  tearing the control master down first.
+- Full backward compatibility with the taimen invocations: `PHONE`, `HOST`,
+  `TK_HOST`, `FASTBOOT`, `TK_POLL`, `TK_AGENT`, `TK_DEVICE_*`, and a sourceable
+  `tools/tk-lib.sh`.

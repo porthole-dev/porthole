@@ -33,16 +33,14 @@ GADGET_IP = "172.16.42.1"
 
 
 def tools():
-    paths = [p for p in sorted((ROOT / "tools").iterdir())
-             if p.is_file() and not p.is_symlink()
-             and p.name not in ("__pycache__",)]
-    pdir = ROOT / "profiles"
-    for profile in sorted(pdir.iterdir()) if pdir.is_dir() else []:
-        tdir = profile / "tools"
-        if tdir.is_dir():
-            paths += [p for p in sorted(tdir.iterdir())
-                      if p.is_file() and not p.name.startswith(".")]
-    return paths
+    """One definition of "a tool", shared with the CLI so the contract tests and
+    `porthole tools` can never disagree about what they are checking."""
+    from porthole_cmd_tools import collect
+    return [t.path for t in collect(ROOT)] + [
+        t.path for profile in sorted((ROOT / "profiles").iterdir())
+        if profile.is_dir() and not profile.name.startswith("_")
+        for t in collect(ROOT, profile.name)
+        if "profiles" in t.path.parts]
 
 
 def head_of(path, lines=30):

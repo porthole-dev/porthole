@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: BOOTED
 # env: -

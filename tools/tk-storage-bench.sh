@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: on-device (pipe with `tk-device.sh ssh "$PHONE" 'sudo -n bash -s'`)
 # env: PHONE, TK_AGENT

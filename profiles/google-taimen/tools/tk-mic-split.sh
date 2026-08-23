@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # scope: device:google-taimen
 # needs: BOOTED
 # env: PHONE

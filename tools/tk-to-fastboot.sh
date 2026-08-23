@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: any (probes state; handles BOOTED and FASTBOOT)
 # env: FASTBOOT, TK_ATTEMPT, TK_NO_SYSCALL, TK_POLL, TK_SWALLOWED_MAX, TK_TIMEOUT, TK_TRIES

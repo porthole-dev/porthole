@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.8 is the floor bin/porthole enforces. Testing it is what stops a
+        # walrus operator or a 3.10 match statement quietly raising the bar for
+        # someone on an older distro.
+        python: ["3.8", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: config resolution
+        run: python3 tests/test_config.py
+      - name: cli
+        run: python3 tests/test_cli.py
+      - name: tool contracts
+        run: python3 tests/test_tools.py
+      - name: shell lib (and shell/python agreement)
+        run: bash tests/test_shell_lib.sh
+      - name: device mutex
+        run: bash tools/tk-device-test.sh
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: shellcheck
+        # SC1091: sourcing tk-lib.sh is resolved at runtime, not statically.
+        run: |
+          shellcheck -S warning -e SC1091,SC2086,SC2181 \
+            lib/porthole.sh $(find tools profiles/*/tools -name '*.sh' -not -type l)
+      - name: python syntax
+        run: python3 -m compileall -q lib bin tools tests
+
+  smoke:
+    name: fresh-clone smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: the CLI works with nothing configured
+        run: |
+          ./bin/porthole
+          ./bin/porthole --help
+          ./bin/porthole version
+          ./bin/porthole devices
+      - name: bootstrap headlessly, as an agent would
+        run: |
+          export XDG_CONFIG_HOME="$PWD/.xdg"
+          ./bin/porthole init --device google-taimen --user ci --host 172.16.42.1
+          ./bin/porthole config PHONE | grep -q '^ci@172.16.42.1$'
+      - name: doctor reports honestly with no device attached
+        run: |
+          export XDG_CONFIG_HOME="$PWD/.xdg"
+          ./bin/porthole doctor --no-device --all --json > doctor.json
+          python3 -c "
+          import json; d = json.load(open('doctor.json'))
+          assert d['checks'], 'no checks ran'
+          for c in d['checks']:
+              assert c['status'] != 'fail' or c['fix'], f\"no fix for {c['name']}\"
+          print(f\"{len(d['checks'])} checks, verdict {d['verdict']}\")
+          "
+      - name: agent surfaces are valid JSON
+        run: |
+          export XDG_CONFIG_HOME="$PWD/.xdg"
+          ./bin/porthole brief --no-device --json | python3 -m json.tool > /dev/null
+          ./bin/porthole tools --json            | python3 -m json.tool > /dev/null
+          ./bin/porthole brain --json            | python3 -m json.tool > /dev/null
+      - name: completions generate for every shell
+        run: |
+          for s in bash zsh fish; do ./bin/porthole completion $s > /dev/null; done
+      - name: scaffolding a new device works
+        run: |
+          ./bin/porthole new-device test-device
+          test -f profiles/test-device/device.env
+          test -f profiles/test-device/checklist.md

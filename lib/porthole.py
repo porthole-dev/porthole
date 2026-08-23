@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """porthole config resolution and device transport, for the python tools.
 
 Import this instead of reading os.environ["PHONE"] directly. Every tool that

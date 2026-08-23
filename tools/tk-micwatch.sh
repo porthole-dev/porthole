@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
 # env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_UID
