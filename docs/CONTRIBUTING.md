@@ -56,6 +56,34 @@ A note earns its place if it would have saved someone a session.
 - Link with `[[note-id]]`.
 - `porthole brain --reindex` afterwards.
 
+## Documentation
+
+The site is generated, never hand-edited:
+
+```sh
+make docs          # regenerate site-src/ and mkdocs.yml
+make docs-serve    # preview at http://127.0.0.1:8000 (needs mkdocs-material)
+```
+
+Its CLI reference comes from the command registry, its tool catalogue from the
+tool headers, its profile keys from `profiles/_template/device.env`, and its
+knowledge base from `brain/`. Edit those, not the site.
+
+`site-src/`, `site/` and `mkdocs.yml` are gitignored. A committed copy would
+silently shadow the generated one and let the published docs drift from the
+code.
+
+**Publishing is opt-in.** CI builds the docs with `--strict` on every push and
+pull request, so a broken link fails there rather than shipping — but it only
+deploys to GitHub Pages when a repository variable says to:
+
+> Settings → Secrets and variables → Actions → Variables → `PUBLISH_DOCS` = `true`
+
+That default exists because GitHub Pages on a private repository needs a plan
+that includes it. Attempting to deploy without one puts a permanent red cross
+on a workflow that is otherwise doing its job, which trains people to ignore
+CI.
+
 ## Tests
 
 All of these run with no device attached:

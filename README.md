@@ -14,7 +14,8 @@ day one.
 114 tools · 50 knowledge notes · 18 commands · zero third-party dependencies
 ```
 
-**[Documentation →](https://Pixel-pmOS.github.io/porthole/)**
+Docs: `make docs-serve`, or set the `PUBLISH_DOCS` repository
+variable to publish them to GitHub Pages.
 
 ---
 
