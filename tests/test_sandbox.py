@@ -167,9 +167,29 @@ def test_refuses_dangerous_mount_options():
            because="not permitted")
 
 
-def test_refuses_a_bind_mount_of_a_host_path():
-    denied("mount", "--bind", "/etc", f"{CH}/etc", because="escapes")
-    denied("mount", "--bind", "/", f"{CH}/host", because="escapes")
+def test_allows_binding_kernel_api_filesystems_into_a_chroot():
+    """A chroot cannot work without /proc, /sys and /dev bound in, and
+    pmbootstrap does it on every chroot init. Found by running the broker
+    against a real uninitialised chroot -- the first capture missed it."""
+    for api in ("/proc", "/sys", "/dev"):
+        allowed("mount", "--bind", api, f"{CH}{api}")
+
+
+def test_refuses_a_bind_mount_of_host_data():
+    """/proc is a kernel interface; /etc is host data. Binding host data into a
+    chroot hands it to whatever runs in there."""
+    denied("mount", "--bind", "/etc", f"{CH}/etc", because="bind source")
+    denied("mount", "--bind", "/", f"{CH}/host", because="bind source")
+    denied("mount", "--bind", "/home", f"{CH}/home", because="bind source")
+    denied("mount", "--bind", "/root", f"{CH}/root", because="bind source")
+
+
+def test_refuses_binding_anything_OUT_of_the_roots():
+    """The destination is what matters: binding a confined dir onto /etc would
+    replace host config."""
+    denied("mount", "--bind", f"{CH}/etc", "/etc", because="bind destination")
+    denied("mount", "--bind", "/proc", "/mnt/elsewhere",
+           because="bind destination")
 
 
 def test_refuses_an_executable_from_a_writable_directory():

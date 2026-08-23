@@ -49,9 +49,33 @@ Measured, not guessed. A logging shim was put in `PMB_SUDO` and a real
   1  touch         1  env           1  losetup
 ```
 
-Eleven verbs. **Every path argument was inside the pmbootstrap work directory.**
+Eleven verbs. **Every path argument was inside the pmbootstrap work directory**
+— with one exception found later, below.
+
 That is what makes a validating broker viable: the legitimate surface is small,
 regular, and confined.
+
+### One trace is not enough
+
+That capture ran against a chroot that was *already initialised*. Running the
+finished broker against a fresh one immediately hit a denial:
+
+```
+mount --bind /proc <workdir>/chroot_native/proc   ->  DENIED
+```
+
+A chroot cannot function without `/proc`, `/sys` and `/dev` bound into it, and
+pmbootstrap does that on every chroot init. The first trace never showed it.
+
+The fix was principled rather than a widening: for a **bind** mount the
+*destination* must always be confined, and the *source* may additionally be one
+of a short, exact list of kernel API filesystems. Host data — `/etc`, `/home`,
+`/root`, `/` — stays refused, because binding host data into a chroot hands it
+to whatever runs in there.
+
+**The lesson worth taking: derive the policy from a trace, then test it end to
+end against the real thing.** A denial is information; investigate it rather
+than relaxing the rule that produced it.
 
 Reproduce it on your own setup before trusting this list:
 
@@ -170,9 +194,21 @@ Verify:
 
 ```sh
 porthole sandbox status
-PMB_SUDO=/usr/local/libexec/porthole/ph-sudo pmbootstrap chroot -- true
+PMB_SUDO=/usr/local/libexec/porthole/ph-sudo pmbootstrap chroot -- uname -a
 porthole sandbox audit --denied
 ```
+
+Measured on the reference setup: a full `pmbootstrap chroot -- uname -a` against
+an uninitialised chroot brokered **31 root operations, all allowed**, and the
+chroot ran. The same broker refused, with exit 77 and an audit entry each:
+
+| attempt | refused because |
+|---|---|
+| `rm -rf /etc` | path escapes the declared roots |
+| `touch /etc/cron.d/backdoor` | path escapes the declared roots |
+| `sh -c 'cat /etc/shadow > /tmp/stolen'` | `sh -c` is only for a literal append |
+| `mount --bind /home <chroot>/home` | bind source is host data, not an API filesystem |
+| `bash -c id` | verb not in the allowlist |
 
 ## Reading the audit log
 

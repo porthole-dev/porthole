@@ -228,6 +228,19 @@ SH_APPEND = re.compile(r"^echo\s+(?P<text>[^|;&<>`$()]*?)\s*>>\s*(?P<path>\S+)$"
 # Mount options that turn a confined mount into an unconfined one.
 FORBIDDEN_MOUNT_OPTS = ("remount", "rbind", "move")
 
+# Kernel API filesystems a chroot legitimately needs bound INTO it. These are
+# not host data: they are kernel interfaces that any chroot has to have to
+# function, and pmbootstrap binds them on every chroot init.
+#
+# The list is deliberately exact -- no /etc, no /home, no /usr, no /. Binding
+# host data into a chroot would hand it to whatever runs in there, which is the
+# thing this broker exists to prevent. What matters for safety is that the
+# DESTINATION is confined; a permitted source is only ever mounted inward.
+BIND_SOURCE_ALLOWLIST = frozenset({
+    "/proc", "/sys", "/dev", "/dev/pts", "/dev/shm", "/run",
+    "/sys/fs/cgroup", "/sys/kernel/debug", "/dev/null", "/dev/zero",
+})
+
 
 def check_paths(argv: list[str], policy: Policy, skip: int = 1) -> None:
     """Every path-looking argument must resolve inside a declared root."""
@@ -257,6 +270,14 @@ def handle_ln(argv, policy):
 
 
 def handle_mount(argv, policy):
+    """The destination must always be confined; the source may also be a kernel
+    API filesystem, which a chroot cannot work without.
+
+    Found by running the broker against a real `pmbootstrap chroot` on a chroot
+    that had not been initialised yet: it binds /proc, /sys and /dev inward. The
+    earlier capture missed it because the chroot was already set up -- a good
+    argument for testing a policy end to end rather than trusting one trace.
+    """
     for i, arg in enumerate(argv):
         if arg in ("-o", "--options") and i + 1 < len(argv):
             opts = argv[i + 1].split(",")
@@ -264,7 +285,33 @@ def handle_mount(argv, policy):
                 if bad in opts:
                     deny(f"mount option {bad!r} is not permitted: it can move "
                          f"or re-flag a mount outside the declared roots", argv)
-    check_paths(argv, policy)
+
+    operands = [a for a in argv[1:] if not a.startswith("-")]
+    # Skip an option's value (`-t tmpfs`, `-o size=1M`) when collecting them.
+    skip = set()
+    for i, arg in enumerate(argv):
+        if arg in ("-t", "--types", "-o", "--options"):
+            skip.add(i + 1)
+    operands = [a for i, a in enumerate(argv)
+                if i > 0 and i not in skip and not a.startswith("-")]
+
+    is_bind = "--bind" in argv or "-B" in argv
+    if is_bind and len(operands) == 2:
+        source, dest = operands
+        if not policy.contains(dest):
+            deny(f"bind destination escapes the declared roots: {dest}", argv)
+        if source not in BIND_SOURCE_ALLOWLIST and not policy.contains(source):
+            deny(f"bind source is neither inside the declared roots nor a "
+                 f"kernel API filesystem: {source}\n"
+                 f"           permitted API sources: "
+                 f"{', '.join(sorted(BIND_SOURCE_ALLOWLIST))}", argv)
+        return
+
+    # Non-bind mount: the target is the last operand, and a pseudo-filesystem
+    # source like `tmpfs` is a type name rather than a path.
+    for operand in operands:
+        if looks_like_path(operand) and not policy.contains(operand):
+            deny(f"mount target escapes the declared roots: {operand}", argv)
 
 
 def handle_sh(argv, policy):
