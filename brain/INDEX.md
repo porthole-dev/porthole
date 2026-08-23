@@ -40,6 +40,7 @@ generic notes as well.
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
+| [running-a-device-script-on-the-host](traps/running-a-device-script-on-the-host.md) | `generic` | A device-side script run on the host produces plausible, entirely wrong output |
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
 | [stale-dev-package-outranks-your-build](traps/stale-dev-package-outranks-your-build.md) | `generic` | A _p<timestamp> dev snapshot outranks a release, so apk installs a kernel from days ago |
@@ -80,5 +81,5 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 45
+- `generic` — 46
 - `soc:msm8998` — 1

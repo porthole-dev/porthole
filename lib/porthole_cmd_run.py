@@ -9,6 +9,7 @@ directory it landed in, and holding the device mutex without spelling it out.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 
 from porthole_cli import Bail, EX_FAIL
@@ -33,6 +34,13 @@ def cmd_run(args, ctx) -> int:
     env.update({k: str(v) for k, v in cfg.items()})
     env["PORTHOLE_ROOT"] = str(ctx.root)
 
+    # An `on-device` tool executes ON the phone. Running it locally produces
+    # plausible, entirely wrong output -- host load averages and host process
+    # names, with nothing to signal the mistake. Pipe it over instead, which is
+    # what each of those tools documents in its own header.
+    if tool.needs.lower().startswith("on-device"):
+        return _run_on_device(tool, args, ctx, cfg)
+
     argv = [str(tool.path), *args.args]
     if args.lock:
         # Declaring the state is the whole point of the mutex: exit 76 in a
@@ -46,6 +54,38 @@ def cmd_run(args, ctx) -> int:
         argv = wrapper + argv
 
     return subprocess.run(argv, env=env).returncode
+
+
+def _run_on_device(tool, args, ctx, cfg) -> int:
+    """Pipe a device-side script to the device and run it there.
+
+    `sh -s` rather than scp: no file is left behind, and it works on a rootfs
+    with nowhere writable. sudo -n because that is what these scripts assume --
+    if it fails, `porthole doctor` explains why.
+    """
+    import porthole
+
+    dev = ctx.device()
+    state = dev.state()
+    if state != "BOOTED":
+        raise Bail(f"the device is {state}, and {tool.name} runs on the device",
+                   76, "something has to move the device first; "
+                       "`porthole brief` says what state it is in")
+
+    interpreter = "sh" if tool.path.suffix != ".py" else "python3"
+    remote = f"sudo -n {interpreter} -s" if interpreter == "sh" else "sudo -n python3 -"
+    quoted = " ".join(shlex.quote(a) for a in args.args)
+    if quoted and interpreter == "sh":
+        remote = f"sudo -n {interpreter} -s -- {quoted}"
+
+    argv = ["ssh", *porthole.ssh_opts(cfg), porthole.resolve_phone(cfg), remote]
+    if args.lock:
+        wrapper = [str(ctx.root / "tools" / "tk-device.sh"), "--need-booted"]
+        argv = wrapper + argv
+
+    ctx.out(ctx.out.paint(f"  running {tool.name} on the device", "grey"))
+    with open(tool.path, "rb") as script:
+        return subprocess.run(argv, stdin=script).returncode
 
 
 SPEC = {
@@ -66,5 +106,6 @@ SPEC = {
     "examples": [
         "porthole run tk-fps.py",
         "porthole run --lock tk-suspend-cycle.sh 20",
+        "porthole run tk-sysstate.sh    # an on-device tool: piped over, not run here",
     ],
 }

@@ -228,6 +228,32 @@ def test_init_does_not_clobber_an_existing_config_without_force():
     assert "alice" in text
 
 
+# ---------------------------------------------------------------------- run --
+
+def test_run_refuses_to_execute_an_on_device_tool_locally():
+    """An `on-device` tool executes ON the phone. Running it on the host
+    produces plausible, entirely wrong output -- host load averages and host
+    process names -- with nothing to signal the mistake. It must be piped to
+    the device, or refused when the device is not there.
+
+    Caught in practice: `porthole run tk-sysstate.sh` printed the workstation's
+    22GB of RAM and firefox, which reads exactly like a working measurement."""
+    rc, out, err = run("run", "tk-sysstate.sh",
+                       env={"PORTHOLE_DEVICE": "google-taimen",
+                            "PORTHOLE_DEVICE_STATE": "ABSENT"})
+    assert rc == 76, f"expected 76 (wrong device state), got {rc}"
+    assert "device" in (out + err).lower()
+    # The giveaway that it ran locally would be host-shaped output.
+    assert "firefox" not in out
+
+
+def test_run_reports_an_unknown_tool_with_suggestions():
+    rc, _, err = run("run", "tk-suspend",
+                     env={"PORTHOLE_DEVICE": "google-taimen"})
+    assert rc != 0
+    assert "tk-suspend" in err
+
+
 # -------------------------------------------------------------------- runner --
 
 def main():
