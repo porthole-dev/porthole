@@ -179,10 +179,14 @@ def cmd_diff(args, ctx) -> int:
                     o(f"  {o.paint('LOST', 'red')}  {d['symbol']}  "
                       f"asked {d['asked']}, got {d['got'] or '(absent)'}")
             if watch_missing:
+                # Build the painted text first. A multi-line expression inside
+                # an f-string is PEP 701, which is Python 3.12+; this project
+                # declares a 3.8 floor, so it is a syntax error on every
+                # interpreter CI runs.
+                note = o.paint("watched, but the defconfig never asks for it",
+                               "grey")
                 for symbol in watch_missing:
-                    o(f"  {o.paint('UNSET', 'yellow')} {symbol}  "
-                      f"{o.paint('watched, but the defconfig never asks for it',
-                                 'grey')}")
+                    o(f"  {o.paint('UNSET', 'yellow')} {symbol}  {note}")
             if not watch_lost and not watch_missing:
                 o(o.paint("  all present", "green"))
             o.blank()

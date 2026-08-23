@@ -218,6 +218,30 @@ def test_no_bashisms_in_posix_sh_scripts():
     assert not bad, ("bashisms in POSIX sh scripts:\n  " + "\n  ".join(bad))
 
 
+def test_the_python_floor_is_declared_consistently():
+    """bin/porthole, the Makefile and the CI matrix must agree on the oldest
+    interpreter supported. When they drift, local checks pass against a newer
+    python and CI rejects syntax the developer cannot see -- which is exactly
+    how a PEP 701 f-string reached main."""
+    launcher = (ROOT / "bin" / "porthole").read_text()
+    m = re.search(r"sys\.version_info\s*<\s*\((\d+),\s*(\d+)\)", launcher)
+    assert m, "bin/porthole must declare a version floor"
+    floor = f"{m.group(1)}.{m.group(2)}"
+
+    makefile = (ROOT / "Makefile").read_text()
+    m = re.search(r"^PY_FLOOR\s*:?=\s*(\S+)", makefile, re.M)
+    assert m, "the Makefile must declare PY_FLOOR"
+    assert m.group(1) == floor, (
+        f"Makefile PY_FLOOR={m.group(1)} but bin/porthole requires {floor}")
+
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    m = re.search(r'python:\s*\[([^\]]+)\]', ci)
+    assert m, "the CI matrix must list python versions"
+    versions = [v.strip().strip('"\'') for v in m.group(1).split(",")]
+    assert floor in versions, (
+        f"CI matrix {versions} does not test the declared floor {floor}")
+
+
 def _is_shell(path):
     return path.read_bytes()[:2] == b"#!" and b"sh" in path.read_bytes()[:40]
 

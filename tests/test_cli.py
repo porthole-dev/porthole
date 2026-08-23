@@ -182,6 +182,25 @@ def test_doctor_names_a_fix_for_every_failure():
             assert check.get("fix"), f"no fix offered for {check['name']}"
 
 
+def test_doctor_survives_a_host_with_no_ping_or_fastboot():
+    """A minimal host may have neither. An unguarded FileNotFoundError from
+    `ping` took `porthole doctor` down entirely on python:3.8-slim -- and
+    doctor is the one command someone on a bare host runs first, so it has to
+    be the most robust thing here, not the least.
+
+    Only python3.8 CI caught it, because a slim container is the only
+    environment tested that genuinely lacks ping."""
+    empty = tempfile.mkdtemp(prefix="porthole-nobin-")
+    rc, out, err = run("doctor", "--tools", "--json",
+                       env={"PORTHOLE_DEVICE": "google-taimen",
+                            "PATH": empty})
+    assert "Traceback" not in err, f"doctor crashed:\n{err}"
+    data = json.loads(out)
+    assert data["checks"], "doctor must still report with no binaries at all"
+    state = next(c for c in data["checks"] if c["name"] == "device: state")
+    assert state["status"] in ("warn", "skip"), state
+
+
 def test_doctor_tools_checks_headers():
     rc, out, _ = run("doctor", "--tools", "--json",
                      env={"PORTHOLE_DEVICE": "google-taimen"})

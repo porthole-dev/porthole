@@ -6,10 +6,13 @@
 
 SHELL := /bin/bash
 PY    := python3
+# The oldest interpreter bin/porthole accepts, and what CI's
+# matrix floor is. Keep the three in step.
+PY_FLOOR := 3.8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
-.PHONY: help test lint check fmt tools-doc brain-index clean install-completion docs docs-serve
+.PHONY: help test lint check ci fmt tools-doc brain-index clean install-completion docs docs-serve
 
 help:            ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -48,10 +51,34 @@ lint:            ## shellcheck + python syntax (falls back to a container)
 	  echo "       Install one, or run: make lint SHELLCHECK_SKIP=1 (and know CI will not)"; \
 	  [ -n "$(SHELLCHECK_SKIP)" ]; \
 	fi
-	@$(PY) -m compileall -q lib bin tools tests >/dev/null && echo "python: ok"
+	@$(PY) -m compileall -q lib bin tools tests >/dev/null && echo "python: ok ($(shell $(PY) -c 'import sys;print(".".join(map(str,sys.version_info[:2])))'))"
+	@# Compiling with the DEVELOPER's interpreter is not enough, and this is not
+	@# hypothetical: a multi-line expression inside an f-string is PEP 701, legal
+	@# on 3.12+ and a syntax error below it. It compiled locally on 3.14 and
+	@# broke every CI job. The floor is what bin/porthole declares, so the floor
+	@# is what must be checked.
+	@if command -v podman >/dev/null; then \
+	  podman run --rm --userns=keep-id:uid=0,gid=0 --security-opt label=disable \
+	    -v "$(CURDIR):/src:ro" -w /tmp docker.io/library/python:$(PY_FLOOR)-slim \
+	    sh -c 'cp -r /src /w && cd /w && python -m compileall -q lib bin tools tests' \
+	    && echo "python $(PY_FLOOR) (the declared floor): ok"; \
+	else \
+	  echo "WARNING: no podman -- cannot check the python $(PY_FLOOR) floor."; \
+	  echo "         Your interpreter is newer and accepts syntax CI will reject."; \
+	fi
 	@bash -n lib/porthole.sh && echo "shell lib: ok"
 
 check: lint test ## lint then test
+
+ci:              ## run what CI runs, including the python floor
+	@echo "== tests on the declared floor (python $(PY_FLOOR)) =="
+	@command -v podman >/dev/null || { echo "needs podman"; exit 1; }
+	@podman run --rm --userns=keep-id:uid=0,gid=0 --security-opt label=disable \
+	  -v "$(CURDIR):/src:ro" -w /tmp docker.io/library/python:$(PY_FLOOR)-slim \
+	  sh -c 'cp -r /src /w && cd /w && for t in tests/test_*.py; do \
+	    printf "%-26s " "$$(basename $$t)"; python "$$t" | tail -1; done'
+	@echo
+	@$(MAKE) --no-print-directory check
 
 brain-index:     ## regenerate brain/INDEX.md
 	@./bin/porthole brain --reindex

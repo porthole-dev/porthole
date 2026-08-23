@@ -89,6 +89,20 @@ CI.
 All of these run with no device attached:
 
 ```sh
+make ci                             # what CI runs, INCLUDING the python floor
+make check                          # lint + tests on your interpreter
+```
+
+**Run `make ci` before you claim something passes.** `make check` compiles with
+*your* interpreter, and if yours is newer than the declared floor it will accept
+syntax CI rejects — a multi-line expression inside an f-string is PEP 701, legal
+on 3.12+ and a syntax error below it. That exact thing compiled clean locally on
+3.14 and broke every CI job.
+
+The floor is declared in three places and a test asserts they agree:
+`bin/porthole`, `PY_FLOOR` in the Makefile, and the CI matrix.
+
+```sh
 python3 tests/test_config.py        # config resolution, legacy aliases
 bash    tests/test_shell_lib.sh     # the same, plus shell/python agreement
 python3 tests/test_cli.py           # CLI verbs, JSON, exit codes

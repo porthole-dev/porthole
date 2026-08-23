@@ -378,8 +378,12 @@ class Device:
         """
         if self.cfg.get("PORTHOLE_NO_MUX", "0") == "1":
             return
-        subprocess.run(["ssh", *ssh_opts(self.cfg), "-O", "exit", self.phone],
-                       capture_output=True, stdin=subprocess.DEVNULL)
+        try:
+            subprocess.run(["ssh", *ssh_opts(self.cfg), "-O", "exit",
+                            self.phone], capture_output=True,
+                           stdin=subprocess.DEVNULL, timeout=15)
+        except (OSError, subprocess.TimeoutExpired):
+            pass      # no ssh, or no master to tear down; neither is fatal
 
     # -- probes --
 
@@ -439,9 +443,27 @@ class Device:
             return "FASTBOOT"
         if self.boot_id():
             return "BOOTED"
-        rc = subprocess.run(["ping", "-c1", "-W2", self.host],
-                            capture_output=True).returncode
-        return "FROZEN" if rc == 0 else "ABSENT"
+        return "FROZEN" if self._pings() else "ABSENT"
+
+    def _pings(self) -> bool:
+        """Does the device answer ICMP?
+
+        Guarded because a minimal host may not have `ping` at all -- a slim
+        container image does not -- and an unguarded FileNotFoundError here
+        took down `porthole doctor` entirely, which is the one command someone
+        on a bare host runs first.
+
+        Without ping we cannot separate FROZEN from ABSENT, so we return the
+        more conservative answer: ABSENT means "needs a human", and claiming a
+        device is merely FROZEN when we do not know invites an automated
+        recovery that cannot work.
+        """
+        try:
+            return subprocess.run(["ping", "-c1", "-W2", self.host],
+                                  capture_output=True,
+                                  timeout=10).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
 
     # -- actions --
 
@@ -509,17 +531,21 @@ class Device:
         slot = self.cfg.get("PORTHOLE_ACTIVE_SLOT", "")
         forbidden = self.cfg.get("PORTHOLE_SLOT_FORBIDDEN", "")
         if not slot:
-            return subprocess.run([self.fastboot, "reboot"],
-                                  capture_output=True).returncode == 0
+            return self._fastboot("reboot")
         if slot == forbidden:
             raise RuntimeError(
                 f"refusing to set_active {slot}: the profile marks it "
                 f"PORTHOLE_SLOT_FORBIDDEN (no known-good image)")
-        for argv in ([self.fastboot, "set_active", slot],
-                     [self.fastboot, "reboot"]):
-            if subprocess.run(argv, capture_output=True).returncode != 0:
-                return False
-        return True
+        return self._fastboot("set_active", slot) and self._fastboot("reboot")
+
+    def _fastboot(self, *args) -> bool:
+        """Run fastboot, surviving its absence. A host with no android-tools
+        should get a clean False rather than a traceback."""
+        try:
+            return subprocess.run([self.fastboot, *args], capture_output=True,
+                                  timeout=60).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
 
     # -- waiting --
 
