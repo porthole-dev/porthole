@@ -100,9 +100,9 @@ def test_config_single_key_prints_bare_value():
 def test_config_exposes_the_resolved_phone_and_host():
     rc, out, _ = run("config", "--json",
                      env={"PORTHOLE_DEVICE": "google-taimen",
-                          "PHONE": "user@172.16.42.1"})
+                          "PHONE": "olduser@172.16.42.1"})
     data = json.loads(out)
-    assert data["PHONE"]["value"] == "user@172.16.42.1"
+    assert data["PHONE"]["value"] == "olduser@172.16.42.1"
     assert data["HOST"]["value"] == "172.16.42.1"
 
 

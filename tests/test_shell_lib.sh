@@ -71,8 +71,8 @@ has "a missing profile is fatal, not silent" "$out" "no profile for device"
 # tests: every one of them corresponds to command lines printed in taimen docs.
 
 is "PHONE verbatim beats a composed one" \
-   "$(phsh 'PHONE=user@172.16.42.1 PORTHOLE_USER=alice PORTHOLE_HOST=10.0.0.5' \
-           'echo $PHONE')" "user@172.16.42.1"
+   "$(phsh 'PHONE=olduser@172.16.42.1 PORTHOLE_USER=alice PORTHOLE_HOST=10.0.0.5' \
+           'echo $PHONE')" "olduser@172.16.42.1"
 is "HOST overrides PORTHOLE_HOST" \
    "$(phsh 'HOST=172.16.42.1 PORTHOLE_HOST=10.0.0.5' 'echo $HOST')" "172.16.42.1"
 is "TK_HOST overrides PORTHOLE_HOST" \
@@ -84,9 +84,9 @@ is "HOST is mined from PHONE when only PHONE is set" \
 is "TK_POLL beats PORTHOLE_POLL" \
    "$(phsh 'TK_POLL=0.1 PORTHOLE_POLL=9' 'echo $TK_POLL')" "0.1"
 is "TK_AGENT beats PORTHOLE_AGENT" \
-   "$(phsh 'TK_AGENT=claude PORTHOLE_AGENT=user' 'echo $TK_AGENT')" "claude"
+   "$(phsh 'TK_AGENT=claude PORTHOLE_AGENT=agentname' 'echo $TK_AGENT')" "claude"
 is "TK_AGENT falls back to PORTHOLE_AGENT" \
-   "$(phsh 'PORTHOLE_AGENT=user' 'echo $TK_AGENT')" "user"
+   "$(phsh 'PORTHOLE_AGENT=agentname' 'echo $TK_AGENT')" "agentname"
 is "FASTBOOT passes through" \
    "$(phsh 'FASTBOOT=/opt/fb' 'echo $FASTBOOT')" "/opt/fb"
 is "the frozen tk_* surface is defined" \
@@ -157,7 +157,7 @@ else:               print(cfg.get(key, ''))
 
 agree '' PHONE
 agree '' HOST
-agree 'PHONE=user@172.16.42.1' PHONE
+agree 'PHONE=olduser@172.16.42.1' PHONE
 agree 'PHONE=bob@192.168.7.7' HOST
 agree 'HOST=1.1.1.1 TK_HOST=2.2.2.2' HOST
 agree 'TK_HOST=172.16.42.9' HOST

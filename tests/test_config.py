@@ -158,8 +158,8 @@ def test_PHONE_is_used_verbatim_when_set():
     tmp, xdg = sandbox(profile_env="")
     cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
                PORTHOLE_USER="alice", PORTHOLE_HOST="10.0.0.5",
-               PHONE="user@172.16.42.1")
-    assert porthole.resolve_phone(cfg) == "user@172.16.42.1"
+               PHONE="olduser@172.16.42.1")
+    assert porthole.resolve_phone(cfg) == "olduser@172.16.42.1"
 
 
 def test_PHONE_is_composed_when_unset():
@@ -211,9 +211,9 @@ def test_legacy_scalars_pass_through_untouched():
 
 
 def test_TK_AGENT_falls_back_to_PORTHOLE_AGENT():
-    tmp, xdg = sandbox(user_env="PORTHOLE_AGENT=user\n")
+    tmp, xdg = sandbox(user_env="PORTHOLE_AGENT=agentname\n")
     cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev")
-    assert porthole.legacy(cfg, "TK_AGENT", "PORTHOLE_AGENT") == "user"
+    assert porthole.legacy(cfg, "TK_AGENT", "PORTHOLE_AGENT") == "agentname"
 
 
 def test_ssh_opts_include_the_boot_survivable_flags():
