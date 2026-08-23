@@ -130,6 +130,18 @@ unset _ph_profile
 : "${PORTHOLE_REBOOT_BUDGET_S:=120}"
 : "${PORTHOLE_FASTBOOT_BUDGET_S:=60}"
 
+# The kernel source directory for an arch is not the arch name: a package says
+# aarch64, the tree says arch/arm64. Deriving it here keeps every build script
+# from hardcoding one device's answer.
+case ${PORTHOLE_ARCH:-aarch64} in
+    aarch64) PORTHOLE_ARCH_DIR=arm64 ;;
+    armv7|armhf|armv7l) PORTHOLE_ARCH_DIR=arm ;;
+    x86_64|x86) PORTHOLE_ARCH_DIR=x86 ;;
+    riscv64) PORTHOLE_ARCH_DIR=riscv ;;
+    *) PORTHOLE_ARCH_DIR=$PORTHOLE_ARCH ;;
+esac
+export PORTHOLE_ARCH_DIR
+
 # ------------------------------------------------- the compatibility surface --
 
 # HOST: the legacy names win, then the host part of PHONE (tk-stream.sh does

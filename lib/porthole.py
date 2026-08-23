@@ -62,6 +62,10 @@ DEFAULTS = {
     "PORTHOLE_WATCHDOG_MAX_S": "",
 }
 
+ARCH_DIRS = {"aarch64": "arm64", "armv7": "arm", "armhf": "arm",
+             "armv7l": "arm", "x86_64": "x86", "x86": "x86",
+             "riscv64": "riscv"}
+
 LAYER_DEFAULT = "default"
 LAYER_PROFILE = "profile"
 LAYER_USER = "user-config"
@@ -227,6 +231,10 @@ def load_config(root: str | os.PathLike | None = None,
             cfg.source("PORTHOLE_DEVICE") if device else LAYER_DEFAULT)
     cfg.set("PORTHOLE_ROOT", str(root), cfg.source("PORTHOLE_ROOT"))
     cfg.setdefault("PORTHOLE_RUNDIR", str(root / ".run"))
+    # The kernel source directory for an arch is not the arch name: a package
+    # says aarch64, the tree says arch/arm64.
+    cfg.setdefault("PORTHOLE_ARCH_DIR", ARCH_DIRS.get(
+        cfg.get("PORTHOLE_ARCH", "aarch64"), cfg.get("PORTHOLE_ARCH", "")))
     return cfg
 
 
