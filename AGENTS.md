@@ -9,13 +9,26 @@ an SDK agent, an IDE assistant, or a human reading over someone's shoulder.
 
 ---
 
-## 0. First, in this order
+## 0. Run this first
 
 ```sh
-porthole doctor                    # will the toolbox even work? names every fix
-porthole config                    # what device am I on, and where did each value come from
+porthole brief          # or `porthole brief --json` if you are parsing
+```
+
+One call gives you: which device and its live state, that device's encoded traps
+as prose, the rules below, the tool catalogue pointer, the laws, and suggested
+next steps. It is read-only and safe at the start of every session.
+
+Then, as needed:
+
+```sh
+porthole doctor --all              # will the toolbox work? names every fix
+porthole tools --json              # the full catalogue, with each tool's contract
+porthole config --json             # every resolved value and which layer set it
 porthole brain --severity law      # ten notes. Read them.
 ```
+
+Everything above takes `--json`. Exit codes are an API — see §7.
 
 Then, depending on what you are doing:
 
@@ -27,10 +40,17 @@ Then, depending on what you are doing:
 | working a subsystem | `brain/playbooks/`, then `porthole brain <keyword>` |
 | about to report a result | `brain/laws/every-test-needs-a-positive-control.md` |
 
-**`ls tools/ | wc -l` is over 90. List the whole directory before concluding a
-tool does not exist** — a truncated listing has caused exactly that mistake.
-Every tool's first 20 lines say what it does, what device state it needs, what
-environment it reads, and what its exit codes mean.
+**Do not guess whether a tool exists — ask.**
+
+```sh
+porthole tools --grep suspend       # search names and summaries
+porthole tools --needs BOOTED       # what can I run right now
+porthole tools tk-suspend-cycle.sh  # read its contract without opening it
+```
+
+There are 114. A truncated `ls` has caused exactly the mistake of concluding a
+tool does not exist. Every tool's first 20 lines declare `scope`, `needs`, `env`
+and `exits`, so `head -20 <tool>` also answers the question.
 
 ---
 
@@ -139,6 +159,21 @@ portability is worse than scoping narrowly.
 
 ---
 
+## 4b. Adding to porthole itself
+
+| you wrote | it goes in | then |
+|---|---|---|
+| a generic tool | `tools/` | give it the four header fields |
+| a device-specific probe | `profiles/<codename>/tools/` | scope it `device:<codename>` |
+| a CLI verb | `lib/porthole_cmd_<name>.py` with a `SPEC` dict | nothing — it is discovered |
+| a lesson that generalises | `brain/traps/<id>.md` with `scope:` and evidence | `porthole brain --reindex` |
+| a device fact | `profiles/<codename>/device.env` | — |
+
+`make check` before you claim it works. The tool contract is enforced by
+`tests/test_tools.py`, not by review diligence.
+
+---
+
 ## 5. Commits
 
 - Author and committer are the human. Never take credit for someone else's work;
@@ -155,7 +190,23 @@ have the full rules.
 
 ---
 
-## 6. Do not give worktree isolation to work touching nested repos
+## 6. Exit codes are an API
+
+| code | meaning | you should |
+|---|---|---|
+| 0 | success | continue |
+| 1 | the thing under test failed | report it — a result, not an error |
+| 64 | usage error | fix the invocation |
+| 75 | could not get the device lock | **retry** |
+| 76 | device in the wrong state | **do not retry** — something must move it |
+| 124 | killed at the hold ceiling | a wedge; investigate, do not just rerun |
+
+Do not conflate 1 with the others. An agent that cannot tell "the tool broke"
+from "the answer is no" reports broken tools as findings.
+
+---
+
+## 7. Do not give worktree isolation to work touching nested repos
 
 A worktree of the outer repo does not contain nested repos (a kernel tree, a
 pmaports checkout) at all, and every git operation against their real paths is

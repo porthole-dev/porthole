@@ -3,14 +3,33 @@
 ## Adding a tool
 
 1. Put it in `tools/` if it is generic, `profiles/<codename>/tools/` if it
-   encodes a vendor protocol or one silicon block. **Scope it honestly.**
-2. Give it the standard header (see `docs/ARCHITECTURE.md`). `porthole doctor
-   --tools` checks the `scope:` line.
+   encodes a vendor protocol or one silicon block. **Scope it honestly** —
+   over-claiming portability is worse than scoping narrowly.
+2. Give it the four-field header. All four are required and enforced:
+
+   ```
+   #!/bin/bash
+   # SPDX-License-Identifier: MIT
+   # scope: generic          | soc:<soc> | device:<codename>
+   # needs: BOOTED           | FASTBOOT | FROZEN | on-device | any | -
+   # env:   PHONE, TK_AGENT, ...          (or `-`)
+   # exits: 0 ok · 1 failed · 75 lock · 76 wrong state
+   # One line saying what it does.
+   ```
+
+   `porthole tools --lint` lists any gaps; `make test` fails on them.
 3. Never hardcode an IP, username, slot letter or package name. Shell:
    `. tools/tk-lib.sh`. Python: `import porthole`.
 4. If it deliberately induces a reset, put a timeout on every ssh — otherwise it
    wedges the device lock for everyone else.
 5. Non-trivial logic leaves one runnable check behind.
+
+## Adding a CLI verb
+
+One file. `lib/porthole_cmd_<name>.py` exporting a `SPEC` dict — see
+`docs/ARCHITECTURE.md` for the shape, and any existing `porthole_cmd_*.py` for a
+worked example. It is discovered at startup; there is no list to update, and
+shell completion is generated from it automatically.
 
 ## Adding a device
 
