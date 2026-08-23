@@ -5,6 +5,20 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- `porthole soc` — find devices sharing your SoC in pmaports (664 device
+  packages, indexed in 55ms) and inherit their known-good boot image offsets.
+  `new-device` now seeds from the closest sibling automatically.
+- `porthole dts` — device-tree workflow: where the values come from, what the
+  SoC dtsi already defines, scaffolding, and a `compare` that follows
+  `#include` chains so inherited nodes are not reported as gaps.
+- `porthole aports` — pmaports workflow: status, feature branches off the right
+  base, scoped diffs, and a patch series with a pre-submission lint.
+- `porthole channel` and `porthole ui` — switch release channel and compositor,
+  saying what the switch costs first.
+- `porthole serial` — UART console with the terminal built in (termios, stdlib),
+  plus hardware guidance for getting a UART onto a phone.
+- `porthole docs` — a generated MkDocs Material site published to GitHub Pages.
+- `brain/playbooks/25-device-tree.md`.
 - `porthole brief` — the agent entry point: device, state, this device's encoded
   traps as prose, the rules that cost sessions, and next steps, in one call.
 - `porthole tools` — search 115 tools by scope, required device state, or name;

@@ -227,14 +227,51 @@ def cmd_new_device(args, ctx) -> int:
             notes.append("no device in the bootloader — nothing seeded from "
                          "fastboot")
 
-    # An existing pmaports device package is the best source there is: those
-    # values are already trusted by something that boots.
-    for candidate in (pathlib.Path.home() / ".local/var/pmbootstrap/cache_git"
-                      / "pmaports").rglob(f"device-{codename}/deviceinfo"):
-        got = seed_from_deviceinfo(candidate)
-        seeds.update(got)
-        notes.append(f"seeded {len(got)} key(s) from {candidate}")
-        break
+    # 1. An existing pmaports package for THIS device is the best source there
+    #    is: those values are already trusted by something that boots.
+    import porthole_pmaports as pmap
+    pmaports = pmap.find_pmaports(getattr(ctx, "cfg", None) if ctx else None)
+    sibling = None
+    if pmaports:
+        own = list(pmaports.rglob(f"device-{codename}/deviceinfo"))
+        if own:
+            got = seed_from_deviceinfo(own[0])
+            seeds.update(got)
+            notes.append(f"seeded {len(got)} key(s) from its own pmaports "
+                         f"package")
+
+        # 2. Otherwise -- the common case for a device nobody has ported --
+        #    the closest sibling on the same SoC. Its boot image offsets are
+        #    known to boot, which is worth more than any amount of guessing.
+        if not own or args.soc:
+            devices = pmap.load_devices(pmaports)
+            soc = args.soc
+            if not soc:
+                # Infer from a same-vendor device, then give up rather than
+                # guess: seeding from the wrong silicon is worse than blanks.
+                vendor = codename.split("-")[0]
+                same_vendor = [d for d in devices
+                               if d.codename.startswith(vendor + "-") and d.soc]
+                soc = same_vendor[0].soc if len(
+                    {d.soc for d in same_vendor}) == 1 else ""
+            if soc:
+                sibs = [d for d in pmap.siblings(devices, soc)
+                        if d.codename != codename]
+                if sibs:
+                    sibling = sibs[0]
+                    got = seed_from_deviceinfo(sibling.path / "deviceinfo")
+                    # Never let a sibling's identity leak into your profile.
+                    for key in ("PORTHOLE_DEVICE_NAME", "PORTHOLE_VENDOR",
+                                "PORTHOLE_CODENAME", "PORTHOLE_YEAR",
+                                "PORTHOLE_SCREEN_WIDTH", "PORTHOLE_SCREEN_HEIGHT",
+                                "PORTHOLE_DTB"):
+                        got.pop(key, None)
+                    for key, value in got.items():
+                        seeds.setdefault(key, value)
+                    seeds.setdefault("PORTHOLE_SOC", soc.split("-", 1)[-1])
+                    notes.append(f"seeded {len(got)} key(s) from "
+                                 f"{sibling.codename} ({sibling.category}), the "
+                                 f"closest device on {soc}")
 
     content, filled = apply_seeds(template, seeds)
     content = retitle(content, codename, seeds)
@@ -252,6 +289,13 @@ def cmd_new_device(args, ctx) -> int:
     print(f"created profiles/{codename}/")
     for note in notes:
         print(f"  {note}")
+    if sibling:
+        print()
+        print(f"  Inherited values come from a device that BOOTS, which beats")
+        print(f"  guessing -- but same SoC does not guarantee same board.")
+        print(f"  Verify the boot image offsets against your own device's")
+        print(f"  downstream mkbootimg args or an unpacked stock boot.img.")
+        print(f"    porthole soc --inherit {sibling.codename}")
     blanks = len(re.findall(r'^[A-Z_]+=""\s*(?:#.*)?$', content, re.M))
     print(f"  {len(filled)} key(s) filled, {blanks} still blank")
     print()
@@ -279,6 +323,9 @@ SPEC = {
         (["codename"], {"help": "lowercase, dashes; e.g. oneplus-enchilada"}),
         (["--from-fastboot"], {"action": "store_true",
                                "help": "seed from a device in the bootloader"}),
+        (["--soc"], {"metavar": "SOC",
+                     "help": "seed from the closest sibling on this SoC, "
+                             "e.g. qcom-sdm845"}),
         (["--force"], {"action": "store_true", "help": "overwrite an existing profile"}),
     ],
     "run": cmd_new_device,
