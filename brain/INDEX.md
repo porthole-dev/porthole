@@ -56,6 +56,7 @@ generic notes as well.
 |---|---|---|
 | [00-device-protocol](playbooks/00-device-protocol.md) | `generic` | Moving a device between states without losing an hour |
 | [10-first-boot](playbooks/10-first-boot.md) | `generic` | Playbook: first boot |
+| [15-vendor-blobs](playbooks/15-vendor-blobs.md) | `generic` | Playbook: getting at vendor firmware |
 | [20-storage-usb-ssh](playbooks/20-storage-usb-ssh.md) | `generic` | Playbook: storage, USB and ssh |
 | [25-device-tree](playbooks/25-device-tree.md) | `generic` | Playbook: writing a device tree |
 | [30-display](playbooks/30-display.md) | `generic` | Playbook: display |
@@ -78,10 +79,10 @@ generic notes as well.
 
 | id | scope | title |
 |---|---|---|
-| [device-google-taimen](devices/google-taimen/README.md) | `device:google-taimen` | Google Pixel 2 XL (taimen, MSM8998) — the reference port |
+| [device-google-taimen](devices/google-taimen/device-google-taimen.md) | `device:google-taimen` | Google Pixel 2 XL (taimen, MSM8998) — the reference port |
 
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 48
+- `generic` — 49
 - `soc:msm8998` — 1

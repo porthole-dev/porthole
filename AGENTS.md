@@ -159,9 +159,30 @@ unchanged: `PHONE`, `HOST`, `TK_HOST`, `FASTBOOT`, `TK_POLL`, `TK_FORCE`,
 count, the forbidden slot, the watchdog ceiling. Each of those is a fact someone
 will otherwise re-derive at 3am.
 
-**A lesson that generalises** → a note in `brain/traps/` with a `scope:` line,
-citing the evidence that proved it. That is how the *next* device benefits from
-what this one cost you. Then `porthole brain --reindex`.
+**A lesson that generalises** → a note in `brain/`. **This is part of finishing
+the work, not an optional extra.** Knowledge sharing is a stated goal of this
+project: a session that established something real and wrote nothing down has
+left the next person to pay for it again.
+
+```sh
+porthole brain --new <kebab-id> --severity trap --subsystem boot
+$EDITOR brain/traps/<kebab-id>.md
+porthole brain --lint        # enforced in CI; a note with no evidence fails
+porthole brain --submit      # branch, signed commit, pull request
+```
+
+The bar, and the linter enforces most of it:
+
+- **Would it have saved someone a session?** If not it is a note to yourself.
+- **`evidence:` must be something a stranger can re-check.** A trap without a
+  source is folklore, and folklore is what this corpus exists to replace.
+- **One idea per note.** If the title needs an "and", it is two notes.
+- **Scope honestly.** Over-claiming portability is worse than scoping narrowly.
+- **Write the symptom first.** People search by what they are seeing, not by
+  the cause they do not know yet.
+
+Do not contribute a guess. `confidence: suspected` exists for a reason, but a
+note you have not actually verified is worse than silence — it will be trusted.
 
 **A tool you needed and had to write** → `tools/` if it is generic,
 `profiles/<codename>/tools/` if it encodes a vendor protocol or one silicon

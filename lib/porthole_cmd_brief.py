@@ -36,6 +36,11 @@ RULES = [
      "that never executed is not a refutation."),
     ("Confirm before anything irreversible",
      "flashing, thermal ramps, anything that can leave a slot unbootable."),
+    ("Contribute what you learn back to brain/",
+     "this project exists to share knowledge, not just to fix one phone. If "
+     "you established something 100% and it would have saved someone a "
+     "session: `porthole brain --new <id>`, then `--lint`, then `--submit`. "
+     "A session that learned something and wrote nothing down is unfinished."),
 ]
 
 
@@ -80,6 +85,16 @@ def cmd_brief(args, ctx) -> int:
             "laws": laws,
             "search": "porthole brain <query> [--scope <scope>]",
             "index": "brain/INDEX.md",
+            "contribute": {
+                "duty": "If you establish something validated that would have "
+                        "saved someone a session, it belongs in brain/. This "
+                        "is part of the work, not an optional extra.",
+                "new": "porthole brain --new <kebab-id> --severity trap",
+                "lint": "porthole brain --lint",
+                "submit": "porthole brain --submit",
+                "bar": "one idea per note; cite evidence a stranger can "
+                       "re-check; scope it honestly.",
+            },
         },
         "rules": [{"rule": r, "why": w} for r, w in RULES],
         "entrypoints": {

@@ -34,6 +34,14 @@ jobs:
         run: python3 tests/test_sandbox.py
       - name: pmaports index
         run: python3 tests/test_pmaports.py
+      - name: vendor blob tooling
+        run: python3 tests/test_blobs.py
+      - name: kernel config diff
+        run: python3 tests/test_kconfig.py
+      - name: knowledge base meets the bar
+        # A note with no evidence, a scaffold nobody filled in, or a scope that
+        # is not one of the three valid shapes fails here rather than landing.
+        run: ./bin/porthole brain --lint
       - name: shell lib (and shell/python agreement)
         run: bash tests/test_shell_lib.sh
       - name: device mutex

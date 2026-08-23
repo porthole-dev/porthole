@@ -17,6 +17,8 @@ import pathlib
 import re
 import sys
 
+from porthole_cli import Bail
+
 SECTIONS = ("laws", "traps", "playbooks", "workflow", "devices")
 
 # A deliberately small frontmatter reader. The alternative is a YAML dependency,
@@ -102,6 +104,14 @@ def scope_matches(note_scope: str, want: str) -> bool:
 
 def cmd_brain(args, ctx) -> int:
     root = pathlib.Path(ctx.root)
+
+    if args.new:
+        return cmd_new(args, ctx, root)
+    if args.lint:
+        return cmd_lint(args, ctx, root)
+    if args.submit:
+        return cmd_submit(args, ctx, root)
+
     notes = load_notes(root)
 
     if args.reindex:
@@ -198,6 +208,271 @@ def write_index(root: pathlib.Path, notes: list[Note]) -> int:
     return 0
 
 
+# ------------------------------------------------------- contribute --------
+
+REQUIRED_FIELDS = ("id", "title", "scope", "subsystem", "severity",
+                   "confidence", "evidence")
+VALID_SCOPE = re.compile(r"^(generic|soc:[a-z0-9_-]+|device:[a-z0-9-]+)$")
+VALID_SEVERITY = {"law", "trap", "technique", "fact"}
+VALID_CONFIDENCE = {"proven", "probable", "suspected"}
+
+TEMPLATE = """---
+id: {id}
+title: {title}
+scope: {scope}
+subsystem: {subsystem}
+severity: {severity}
+confidence: {confidence}
+evidence: {evidence}
+first-learned: {date}
+---
+
+**Symptom** — what it looks like when you hit it. Write this first and write it
+well: people search by what they are seeing, not by the cause they do not know
+yet.
+
+**Cause** —
+
+**What to do** —
+
+<!--
+Before you submit this, check it against the bar:
+
+  - Would this have saved someone a session? If not, it is a note to yourself,
+    not a note for the corpus.
+  - Is `evidence:` something a stranger can re-check? A trap without a source
+    is folklore, and folklore is what this corpus exists to replace.
+  - Is `scope:` honest? Over-claiming portability is worse than scoping
+    narrowly. If it only ever applied to one device, say so.
+  - One idea per note. If the title needs an "and", it is two notes.
+
+Link related notes with [[note-id]] -- liberally. A link to a note nobody has
+written yet is a marker, not an error.
+-->
+"""
+
+
+def _lint_note(note, index, root) -> list[str]:
+    """Everything wrong with one note. Empty list means it passes."""
+    problems = []
+    rel = note.path.relative_to(root)
+
+    for field in REQUIRED_FIELDS:
+        value = note.meta.get(field, "")
+        if not value:
+            problems.append(f"missing `{field}:`")
+        elif value.strip().upper().startswith("TODO"):
+            # The scaffold seeds placeholders on purpose. Letting one through
+            # would defeat the whole mechanism: a note whose evidence is the
+            # word TODO is exactly the folklore this corpus replaces.
+            problems.append(f"`{field}:` is still the scaffold placeholder")
+
+    if note.meta.get("id") and note.meta["id"] != note.path.stem:
+        problems.append(f"id {note.meta['id']!r} does not match the filename "
+                        f"{note.path.stem!r}")
+
+    scope = note.meta.get("scope", "")
+    if scope and not VALID_SCOPE.match(scope):
+        problems.append(f"scope {scope!r} is not generic | soc:<soc> | "
+                        f"device:<codename>")
+
+    sev = note.meta.get("severity", "")
+    if sev and sev not in VALID_SEVERITY:
+        problems.append(f"severity {sev!r} is not one of "
+                        f"{', '.join(sorted(VALID_SEVERITY))}")
+
+    conf = note.meta.get("confidence", "")
+    if conf and conf not in VALID_CONFIDENCE:
+        problems.append(f"confidence {conf!r} is not one of "
+                        f"{', '.join(sorted(VALID_CONFIDENCE))}")
+
+    # The bar the whole corpus rests on: a claim you cannot re-check is
+    # folklore. `proven` in particular has to point at something specific.
+    evidence = note.meta.get("evidence", "")
+    if conf == "proven" and evidence and len(evidence) < 12:
+        problems.append(f"confidence is `proven` but evidence is only "
+                        f"{evidence!r} -- cite something a stranger can check")
+
+    # An HTML comment is guidance to the author, not content. The scaffold
+    # explains [[wikilinks]] inside one, and scanning it reports the example as
+    # a dead link on every freshly created note.
+    body_no_comments = re.sub(r"<!--.*?-->", "", note.body, flags=re.S)
+    for link in re.findall(r"\[\[([a-z0-9/-]+)\]\]", body_no_comments):
+        target = link.split("/")[-1]
+        if target not in index:
+            problems.append(f"[[{target}]] does not exist "
+                            f"(fine as a marker; noted, not fatal)")
+
+    if len(body_no_comments.strip()) < 80:
+        problems.append("body is too short to be useful to anyone else")
+
+    # An unedited scaffold is not a contribution. Catch it by its own prompts
+    # rather than by length, because the prompts are long enough to pass a
+    # length check on their own.
+    for prompt in ("what it looks like when you hit it",
+                   "**Cause** —\n\n**What to do** —"):
+        if prompt in body_no_comments:
+            problems.append("the scaffold prompts are still unanswered")
+            break
+
+    return problems
+
+
+def cmd_lint(args, ctx, root) -> int:
+    notes = load_notes(root)
+    index = {n.id for n in notes} | {n.path.stem for n in notes}
+
+    rows, fatal = [], 0
+    for note in notes:
+        problems = _lint_note(note, index, root)
+        hard = [p for p in problems if "noted, not fatal" not in p]
+        if problems:
+            rows.append({"note": str(note.path.relative_to(root)),
+                         "problems": problems, "fatal": bool(hard)})
+        fatal += bool(hard)
+
+    def render():
+        o = ctx.out
+        if not rows:
+            o(o.paint(f"  all {len(notes)} notes pass", "green"))
+            return
+        for row in rows:
+            colour = "red" if row["fatal"] else "yellow"
+            o(f"  {o.paint(row['note'], colour)}")
+            for problem in row["problems"]:
+                o(f"      {problem}")
+        o.blank()
+        o(f"{fatal} note(s) with problems that must be fixed, "
+          f"{len(rows) - fatal} with warnings, out of {len(notes)}.")
+
+    ctx.emit({"notes": len(notes), "fatal": fatal, "rows": rows}, render)
+    return 1 if fatal else 0
+
+
+def cmd_new(args, ctx, root) -> int:
+    import datetime
+
+    note_id = args.query[0] if args.query else ""
+    if not note_id:
+        raise Bail("name the note", 64,
+                   "porthole brain new a-short-kebab-case-id --severity trap")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", note_id):
+        raise Bail(f"id must be lowercase kebab-case: {note_id!r}", 64,
+                   "it becomes the filename and the [[link]] target")
+
+    section = args.section or {"law": "laws", "trap": "traps",
+                               "technique": "playbooks",
+                               "fact": "traps"}.get(args.severity or "trap",
+                                                    "traps")
+    target = pathlib.Path(root) / "brain" / section / f"{note_id}.md"
+    if target.exists():
+        raise Bail(f"{target.relative_to(root)} already exists", 1,
+                   f"porthole brain {note_id}   to read it")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(TEMPLATE.format(
+        id=note_id,
+        title=args.title or note_id.replace("-", " ").capitalize(),
+        scope=args.scope or "generic",
+        subsystem=args.subsystem or "TODO",
+        severity=args.severity or "trap",
+        confidence=args.confidence or "proven",
+        evidence=args.evidence or "TODO: what proves this, that a stranger can re-check",
+        date=datetime.date.today().isoformat()))
+
+    ctx.out(f"{ctx.out.paint(ctx.out.sym('✓', 'ok'), 'green')} "
+            f"{target.relative_to(root)}")
+    ctx.out.blank()
+    ctx.out.hint(f"$EDITOR {target.relative_to(root)}")
+    ctx.out.hint("porthole brain lint            does it meet the bar")
+    ctx.out.hint("porthole brain submit          branch, commit, PR")
+    return 0
+
+
+def cmd_submit(args, ctx, root) -> int:
+    """Turn a finished note into a branch, a commit and a pull request."""
+    import subprocess
+
+    root = pathlib.Path(root)
+
+    def git(*a, check=False):
+        proc = subprocess.run(["git", "-C", str(root), *a],
+                              capture_output=True, text=True, timeout=60)
+        if check and proc.returncode != 0:
+            raise Bail(f"git {' '.join(a)}: {proc.stderr.strip()}", 1)
+        return proc.returncode, proc.stdout.strip()
+
+    _, porcelain = git("status", "--porcelain", "brain")
+    changed = [l[3:] for l in porcelain.splitlines() if l.strip()]
+    if not changed:
+        raise Bail("no changes under brain/", 1,
+                   "porthole brain new <id>   to start one")
+
+    # Lint before proposing: a note that fails the bar should not become a PR
+    # someone else has to reject.
+    if cmd_lint(_LintArgs(), ctx, root) != 0:
+        raise Bail("the linter found problems", 1,
+                   "fix them, then submit -- a note that fails the bar wastes "
+                   "a reviewer's time rather than saving it")
+
+    ids = [pathlib.Path(c).stem for c in changed if c.endswith(".md")]
+    topic = args.branch or f"brain/{ids[0] if ids else 'notes'}"
+    subject = args.message or (
+        f"brain: {ids[0].replace('-', ' ')}" if len(ids) == 1
+        else f"brain: {len(ids)} notes")
+
+    steps = [
+        ("git switch -c " + topic, f"a branch for the note"),
+        ("git add brain/", "stage it"),
+        (f'git commit -s -m "{subject}"', "sign off (DCO)"),
+        (f"git push -u origin {topic}", "publish the branch"),
+        ('gh pr create --fill', "open the pull request"),
+    ]
+
+    if not args.yes:
+        ctx.out.heading(f"submit {len(changed)} note change(s)")
+        for c in changed:
+            ctx.out(f"  {c}")
+        ctx.out.blank()
+        ctx.out.heading("this will run")
+        for cmd, why in steps:
+            ctx.out(ctx.out.paint(f"  {cmd}", "cyan") +
+                    ctx.out.paint(f"   # {why}", "grey"))
+        ctx.out.blank()
+        ctx.out.hint("porthole brain submit --yes")
+        return 0
+
+    _, current = git("rev-parse", "--abbrev-ref", "HEAD")
+    if current != topic:
+        git("switch", "-c", topic, check=True)
+    git("add", "brain", check=True)
+    git("commit", "-s", "-m", subject, check=True)
+    ctx.out(ctx.out.paint(f"  committed on {topic}", "green"))
+
+    if args.no_push:
+        ctx.out.hint(f"git push -u origin {topic}")
+        return 0
+
+    rc, _ = git("push", "-u", "origin", topic)
+    if rc != 0:
+        ctx.out.warn("push failed -- the commit is safe on the local branch")
+        return 1
+    ctx.out(ctx.out.paint(f"  pushed {topic}", "green"))
+
+    import shutil as _shutil
+    if _shutil.which("gh"):
+        subprocess.run(["gh", "pr", "create", "--fill"], cwd=root)
+    else:
+        ctx.out.hint("open a pull request for " + topic +
+                     "  (install `gh` to have this done for you)")
+    return 0
+
+
+class _LintArgs:
+    """cmd_lint reads only these."""
+    json = False
+
+
 SPEC = {
     "verb": "brain",
     "order": 50,
@@ -210,10 +485,27 @@ SPEC = {
         (["query"], {"nargs": "*", "help": "words to match, or a note id"}),
         (["--scope"], {"metavar": "SCOPE",
                        "help": "generic | soc:<soc> | device:<codename>"}),
-        (["--subsystem"], {"metavar": "NAME", "help": "boot, power, build, ..."}),
-        (["--severity"], {"metavar": "LEVEL", "help": "law | trap | technique | fact"}),
+        (["--subsystem"], {"metavar": "NAME",
+                           "help": "filter by, or set on a new note"}),
+        (["--severity"], {"metavar": "LEVEL",
+                          "help": "law | trap | technique | fact -- filter by, "
+                                  "or set on a new note"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
         (["--reindex"], {"action": "store_true", "help": "regenerate brain/INDEX.md"}),
+        (["--new"], {"action": "store_true",
+                     "help": "scaffold a note: `brain --new <id>`"}),
+        (["--lint"], {"action": "store_true",
+                      "help": "check every note meets the bar"}),
+        (["--submit"], {"action": "store_true",
+                        "help": "branch, commit and open a PR for your notes"}),
+        (["--title"], {"help": "new: the note's title"}),
+        (["--confidence"], {"help": "new: proven | probable | suspected"}),
+        (["--evidence"], {"help": "new: what proves it"}),
+        (["--section"], {"help": "new: laws | traps | playbooks | workflow"}),
+        (["--branch"], {"help": "submit: branch name"}),
+        (["--message"], {"help": "submit: commit subject"}),
+        (["--no-push"], {"action": "store_true", "help": "submit: commit only"}),
+        (["--yes"], {"action": "store_true", "help": "submit: actually do it"}),
     ],
     "run": cmd_brain,
     "examples": [
