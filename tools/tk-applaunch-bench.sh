@@ -10,7 +10,7 @@
 # WHICH SESSION -- RESOLVED AT RUN TIME, NOT HARDCODED
 #   Do not assume a uid. This device's seated session has been uid 113
 #   "greetd" (a `Class=greeter` compositor -- the phone sitting at the lock
-#   screen, nobody unlocked in) at some points and will be uid 10000 "user"
+#   screen, nobody unlocked in) at some points and will be uid 10000, the login user
 #   (a real `Class=user` session) once someone logs in. Those are different
 #   buses, different environments, different resident-process sets, and a
 #   number from one is not comparable to a number from the other. So: walk

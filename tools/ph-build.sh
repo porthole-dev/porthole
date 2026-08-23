@@ -480,7 +480,7 @@ tkbuild-kernel() {
 # PHONE is honoured so this works over WiFi too; the old hardcoded USB address
 # is only reachable when the gadget is up.
 tkpush-modules() {
-	local phone=${PHONE:-user@172.16.42.1}
+	local phone=${PHONE:-$PORTHOLE_USER@$HOST}
 	# The phone mints a new host key on essentially every boot, so bare ssh
 	# fails "Connection closed" or stops to ask about the key and this returns
 	# a stale-module success. tk-lib.sh already carries the options every other
@@ -548,7 +548,7 @@ tkpush-modules() {
 #
 #   tkmod drivers/media/i2c/imx179.ko imx179
 tkmod() {
-	local rel=$1 name=$2 phone=${PHONE:-user@172.16.42.1}
+	local rel=$1 name=$2 phone=${PHONE:-$PORTHOLE_USER@$HOST}
 	[ -n "$rel" ] && [ -n "$name" ] || { echo ">> usage: tkmod <path/to/mod.ko> <modname>"; return 1; }
 
 	tkclean || return 1

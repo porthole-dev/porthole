@@ -115,8 +115,8 @@ say "iio prox/light"     "${iio:-MISSING}"
 lux=$(cat /sys/bus/iio/devices/*/in_illuminance_raw 2>/dev/null | head -1)
 say "iio light raw"      "${lux:-no illuminance channel}"
 # The script runs under sudo -n, so a bare `systemctl --user` here would query
-# root's user manager, not user's -- always a bus error, verifying nothing.
-say "ambient nudge"      "$(sudo -n -u user XDG_RUNTIME_DIR=/run/user/$(id -u user) systemctl --user is-enabled taimen-ambient-nudge.service 2>&1 | head -1)"
+# root's user manager, not the login user's -- always a bus error, verifying nothing.
+say "ambient nudge"      "$(sudo -n -u "$PORTHOLE_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$PORTHOLE_USER") systemctl --user is-enabled ${PORTHOLE_CODENAME}-ambient-nudge.service 2>&1 | head -1)"
 # Phase B's before/after number. of_devfreq_cooling_register() does NOT check
 # #cooling-cells (only cpufreq_cooling.c:636 does), so the Adreno driver
 # (msm_gpu_devfreq.c:257) has been registering a thermal-devfreq-0 cooling
