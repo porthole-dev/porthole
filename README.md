@@ -11,8 +11,10 @@ Pixel 2 XL, made generic — so the next device starts from month three instead 
 day one.
 
 ```
-115 tools · 47 knowledge notes · zero third-party dependencies
+114 tools · 50 knowledge notes · 18 commands · zero third-party dependencies
 ```
+
+**[Documentation →](https://Pixel-pmOS.github.io/porthole/)**
 
 ---
 
@@ -290,6 +292,46 @@ fit, an assumption that does not hold — that is the most valuable bug report
 this project can receive.** It has only ever been proven against one device.
 
 ---
+
+## Device trees
+
+```sh
+porthole dts sources              where the real values come from
+porthole dts labels               what the SoC dtsi already defines for you
+porthole dts new                  scaffold, inheriting the board-family dtsi
+porthole dts compare <sibling>    what they configure that you have not
+porthole dts check                does it compile
+```
+
+A device tree is layered: the SoC dtsi is written, a board-family dtsi often
+covers most of the rest, and your `.dts` is a few hundred lines describing the
+board. `compare` follows `#include` chains, so it does not report inherited
+nodes as gaps.
+
+Background: `porthole brain 25-device-tree`.
+
+## Working on pmaports
+
+```sh
+porthole aports status            branch, what changed, which of it is yours
+porthole aports start <topic>     a feature branch off the right base
+porthole aports diff --mine       just your device's packages
+porthole aports patch             a series, with a pre-submission lint
+porthole channel                  see and switch release channel
+porthole ui                       see and switch compositor
+```
+
+## A serial console
+
+```sh
+porthole serial hardware   what to buy, how to wire it, how to enable earlycon
+porthole serial list       what is attached
+porthole serial console    attach (terminal built in — no picocom needed)
+```
+
+ssh needs userspace and the USB gadget needs driver probe. A UART needs
+neither: it is the only channel that talks during early boot, and the only one
+that says anything when a kernel dies before console handover.
 
 ## Configuration
 

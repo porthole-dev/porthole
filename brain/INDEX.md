@@ -57,6 +57,7 @@ generic notes as well.
 | [00-device-protocol](playbooks/00-device-protocol.md) | `generic` | Moving a device between states without losing an hour |
 | [10-first-boot](playbooks/10-first-boot.md) | `generic` | Playbook: first boot |
 | [20-storage-usb-ssh](playbooks/20-storage-usb-ssh.md) | `generic` | Playbook: storage, USB and ssh |
+| [25-device-tree](playbooks/25-device-tree.md) | `generic` | Playbook: writing a device tree |
 | [30-display](playbooks/30-display.md) | `generic` | Playbook: display |
 | [40-suspend](playbooks/40-suspend.md) | `generic` | Playbook: suspend and deep sleep |
 | [50-wifi-bt-modem](playbooks/50-wifi-bt-modem.md) | `generic` | Playbook: wifi, bluetooth and modem |
@@ -82,5 +83,5 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 47
+- `generic` — 48
 - `soc:msm8998` — 1

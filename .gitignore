@@ -8,3 +8,11 @@ __pycache__/
 
 # Runtime state: ssh control sockets, device locks.
 .run/
+
+# Documentation build output. `porthole docs build` regenerates site-src/ from
+# the command registry, the tool headers, the profile template and brain/;
+# mkdocs renders site/ from that. Committing either would let a stale copy
+# shadow the generated one.
+site-src/
+site/
+mkdocs.yml

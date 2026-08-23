@@ -1,0 +1,65 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: generate the site sources
+        # Generation needs no dependencies -- it reads the command registry,
+        # the tool headers, the profile template and brain/. Only rendering
+        # needs mkdocs, which is why this step comes first and separately.
+        run: ./bin/porthole docs build --org "${GITHUB_REPOSITORY%/*}" --repo "${GITHUB_REPOSITORY#*/}"
+
+      - name: assert the site is actually generated, not committed
+        # site-src/ is gitignored on purpose. If a stale copy ever gets
+        # committed it will silently shadow the generated one and the published
+        # docs will drift from the code.
+        run: |
+          git status --porcelain site-src mkdocs.yml
+          test -f site-src/cli.md
+          test -f site-src/tools.md
+          grep -q "porthole" site-src/index.md
+
+      - name: install mkdocs
+        run: pip install mkdocs-material
+
+      - name: build (strict -- a broken link fails the build)
+        run: mkdocs build --strict
+
+      - name: upload
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

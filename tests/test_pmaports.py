@@ -249,6 +249,60 @@ def test_serial_baud_table_covers_the_usual_rates():
         assert ser.BAUDS.get(rate), f"{rate} missing from the baud table"
 
 
+# -------------------------------------------------------------------- docs --
+
+def test_docs_nav_quotes_titles_containing_colons():
+    """Note titles routinely contain a colon -- "Playbook: first boot" -- and an
+    unquoted colon-space is a YAML mapping. The file then fails to parse with an
+    error pointing at a line that looks perfectly fine."""
+    from porthole_cmd_docs import _nav, _yaml_key
+    assert _yaml_key("Playbook: first boot") == '"Playbook: first boot"'
+    assert _yaml_key('a "quoted" title') == '"a \\"quoted\\" title"'
+    out = _nav([("Playbook: first boot", "a.md")])
+    assert out.strip() == '- "Playbook: first boot": a.md', out
+
+
+def test_docs_resolves_wikilinks_across_sections():
+    """A law is linked from a workflow note. Resolving relative to the LINKING
+    file points at a sibling that does not exist, and mkdocs --strict fails."""
+    from porthole_cmd_docs import _resolve_links
+    index = {
+        "the-lock-says-who-not-what": pathlib.PurePath("laws/the-lock-says-who-not-what.md"),
+        "frozen-is-not-hung": pathlib.PurePath("traps/frozen-is-not-hung.md"),
+    }
+    here = pathlib.PurePath("workflow/agent-protocol.md")
+    out = _resolve_links("see [[the-lock-says-who-not-what]] and "
+                         "[[frozen-is-not-hung]]", here, index)
+    assert "(../laws/the-lock-says-who-not-what.md)" in out, out
+    assert "(../traps/frozen-is-not-hung.md)" in out, out
+
+
+def test_docs_renders_an_unwritten_wikilink_as_plain_text():
+    """brain/README.md says to link liberally: a [[link]] to a note nobody has
+    written yet is a marker, not an error. It must not become a broken link
+    that fails a strict docs build."""
+    from porthole_cmd_docs import _resolve_links
+    out = _resolve_links("see [[not-written-yet]]",
+                         pathlib.PurePath("laws/x.md"), {})
+    assert out == "see `not-written-yet`", out
+
+
+def test_docs_rewrites_readme_repo_links_for_the_flat_site():
+    from porthole_cmd_docs import _readme_as_index
+    out = _readme_as_index("see [config](docs/CONFIG.md) and [agents](AGENTS.md)")
+    assert "(config.md)" in out and "(agents.md)" in out, out
+
+
+def test_docs_index_drops_the_readme_table_of_contents():
+    """The site has real navigation; an in-page TOC of anchors that no longer
+    all exist is worse than none."""
+    from porthole_cmd_docs import _readme_as_index
+    out = _readme_as_index("# t\n\n## Table of contents\n\n- [a](#a)\n- [b](#b)\n\n"
+                           "## Real section\n\nbody\n")
+    assert "Table of contents" not in out
+    assert "Real section" in out and "body" in out
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
