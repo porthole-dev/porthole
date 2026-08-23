@@ -80,6 +80,17 @@ See `brain/laws/the-lock-says-who-not-what.md`.
 Do not recover someone else's experiment out from under them. A device sitting
 in the bootloader is usually a measurement in progress, not a fault.
 
+### Never ask for host root outside the sandbox
+
+pmbootstrap needs root; you do not need it on the host. Use
+`porthole sandbox shell` (a rootless container where root maps to the user's own
+uid) or the brokered `PMB_SUDO`, which confines every request to declared paths
+and audits it.
+
+If a command is refused with exit 77, that is the broker. **Do not work around
+it** — report what you needed and why. Widening a security policy to make an
+error go away is how the policy stops meaning anything. `docs/SANDBOX.md`.
+
 ### Confirm before anything irreversible
 
 Flashing, thermal ramps, anything that can leave a slot unbootable. Approval for

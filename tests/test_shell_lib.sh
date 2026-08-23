@@ -25,13 +25,20 @@ hasnt() {
     case $2 in *"$3"*) bad "$1" "'$3' should be absent from: $2" ;; *) ok ;; esac
 }
 
-# Run a snippet in a clean bash with lib/porthole.sh sourced. `env -i` matters:
-# the developer running the tests has PHONE or TK_HOST exported often enough
-# that inheriting the environment makes these tests lie.
+# Run a snippet in a clean bash with lib/porthole.sh sourced.
+#
+# `env -i` matters: the developer running the tests has PHONE or TK_HOST
+# exported often enough that inheriting the environment makes these tests lie.
+#
+# `--norc --noprofile` matters too, and was added after a broken line in a
+# developer's ~/.bashrc.d printed to stderr and was captured as the value of
+# every resolved key. A test that reads the tester's shell config is a test
+# that fails on someone else's laptop for reasons that have nothing to do with
+# the code.
 phsh() { # phsh 'VAR=x VAR=y' 'echo $PHONE'
     env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
         XDG_CONFIG_HOME="$TMPXDG" $1 \
-        bash -c ". '$ROOT/lib/porthole.sh'; $2" 2>&1
+        bash --norc --noprofile -c ". '$ROOT/lib/porthole.sh'; $2" 2>&1
 }
 
 TMPXDG=$(mktemp -d)

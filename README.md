@@ -343,6 +343,28 @@ and `porthole brief` reads them back to you as sentences.
 
 ---
 
+## Running pmbootstrap safely
+
+pmbootstrap needs root. The usual workaround —
+`Defaults:you timestamp_timeout=9999` — is a **167-hour root credential cache**:
+for a week, every process running as you gets silent, unlimited root. That is
+not something to hand an agent.
+
+```sh
+porthole sandbox status     # what is configured, what the gaps are
+porthole sandbox install    # writes a script; read it, then run it
+porthole sandbox shell      # rootless container: root maps to YOUR uid
+porthole sandbox audit --denied
+```
+
+Two tiers: a **broker** that validates every root request pmbootstrap makes
+against an allowlist derived empirically (11 verbs, all paths confined to
+declared roots, every decision audited), and a **rootless container** where
+container-root maps to your own unprivileged uid.
+
+The threat model — including what each tier honestly does *not* stop — is in
+**[`docs/SANDBOX.md`](docs/SANDBOX.md)**. Read it before trusting either.
+
 ## For agents and LLMs
 
 **[`AGENTS.md`](AGENTS.md)** is the front door, written for any LLM rather than
