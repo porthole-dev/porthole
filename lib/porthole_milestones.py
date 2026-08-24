@@ -22,6 +22,7 @@ a device tree milestone works for any SoC without that SoC being named here.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import shutil
@@ -146,6 +147,75 @@ def _keys(ctx, *names):
     return done(", ".join(f"{n}={_cfg(ctx, n)}" for n in names))
 
 
+# Directories that are enormous and never hold a device tree we wrote. Pruning
+# them is the difference between reading a few thousand entries and reading two
+# million: a kernel tree plus its build output under one workdir is normal, and
+# a probe that walks all of it is a probe that hangs the caller.
+PRUNE = {".git", ".ccache", "out", "build", ".output", "node_modules",
+         "__pycache__", ".venv", "target", "objs", ".cache", "_build"}
+
+# Where a device tree actually lives, cheapest first. The kernel convention is
+# arch/<arch>/boot/dts; ours is dts/. Looking in the likely places first means
+# the walk below is a fallback rather than the normal path.
+DTS_HINTS = ("", "dts", "arch/arm64/boot/dts", "arch/arm/boot/dts",
+             "arch/riscv/boot/dts", "kernel", "linux/arch/arm64/boot/dts")
+
+MAX_DIRS = 4000
+
+
+def _find(work: pathlib.Path, name: str, hints=DTS_HINTS, walk=True):
+    """First file called `name` under `work`, or None -- WITHOUT walking
+    everything.
+
+    `work.rglob(name)` reads every directory beneath the workdir. A device repo
+    with a kernel tree in it has ~2 million files, so that took minutes and
+    froze the TUI on its very first frame. It also cost nothing to avoid: a
+    device tree is in one of a handful of places, and if it is not, a bounded
+    walk that gives up is a better answer than one that never returns.
+
+    Returns (path, exhausted). `exhausted=True` means the search hit its
+    ceiling, so "not found" means "not found cheaply" and the caller must say
+    so rather than reporting an absence it did not establish.
+    """
+    for hint in hints:
+        base = work / hint if hint else work
+        if not base.is_dir():
+            continue
+        direct = base / name
+        if direct.is_file():
+            return direct, False
+        try:
+            for found in base.glob(f"*/{name}"):
+                if found.is_file():
+                    return found, False
+        except OSError:
+            pass
+
+    if not walk:
+        # Absence is the NORMAL state for this caller (a build artefact that
+        # has not been built yet), and walking thousands of directories to
+        # confirm a routine "no" cost 367ms of a 400ms probe run. Looking where
+        # the thing would be is the whole search.
+        return None, False
+
+    seen = 0
+    stack = [work]
+    while stack and seen < MAX_DIRS:
+        current = stack.pop()
+        seen += 1
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in PRUNE and not entry.name.startswith("."):
+                            stack.append(pathlib.Path(entry.path))
+                    elif entry.name == name:
+                        return pathlib.Path(entry.path), False
+        except OSError:
+            continue
+    return None, bool(stack)
+
+
 def probe_soc(ctx):
     return _keys(ctx, "PORTHOLE_SOC")
 
@@ -199,10 +269,16 @@ def probe_dts_exists(ctx):
     stem = pathlib.Path(dtb).name if dtb else ""
     if not stem:
         return blocked("PORTHOLE_DTB is not set")
-    hits = [p for p in work.rglob(f"{stem}.dts") if p.is_file()]
-    if hits:
-        rel = hits[0].relative_to(work)
-        return done(f"{rel}")
+    hit, exhausted = _find(work, f"{stem}.dts")
+    if hit:
+        return done(str(hit.relative_to(work)))
+    if exhausted:
+        # Say what was actually established. "Not found in the first few
+        # thousand directories" is not "absent", and reporting the second when
+        # you only checked the first is the class of lie this module exists to
+        # stop.
+        return todo(f"no {stem}.dts in the usual places (search capped at "
+                    f"{MAX_DIRS} directories)")
     return todo(f"no {stem}.dts under {work}")
 
 
@@ -221,12 +297,17 @@ def probe_dts_compiles(ctx):
     stem = pathlib.Path(dtb).name if dtb else ""
     if not stem:
         return blocked("PORTHOLE_DTB is not set")
-    sources = [p for p in work.rglob(f"{stem}.dts") if p.is_file()]
-    newest_src = max((p.stat().st_mtime for p in sources), default=0)
+    source, _ = _find(work, f"{stem}.dts")
+    newest_src = source.stat().st_mtime if source else 0
+    # A compiled blob sits beside its source or in a build directory next to
+    # it -- never somewhere only an exhaustive walk would find.
+    hints = DTS_HINTS
+    if source:
+        rel = source.parent.relative_to(work)
+        hints = (str(rel), str(rel / ".."), *DTS_HINTS)
     for name in (f"{stem}.dtb", f"{stem}.dtbo"):
-        for hit in work.rglob(name):
-            if not hit.is_file():
-                continue
+        hit, _ = _find(work, name, hints=hints, walk=False)
+        if hit:
             st = hit.stat()
             # A file merely NAMED .dtb proves nothing. A real one has a
             # header and some content, and one older than its own source

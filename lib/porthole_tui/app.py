@@ -74,21 +74,34 @@ class App:
 
     def run(self, stdscr) -> int:
         curses.curs_set(0)
-        stdscr.nodelay(True)
+        # timeout(), not nodelay() + napms(): curses.napms holds the GIL for
+        # its whole sleep, which starved the refresh thread so completely that
+        # the model never finished loading and the console sat on its "reading
+        # the port" frame forever. getch() with a timeout blocks on a read, so
+        # the interpreter hands the GIL to the worker while it waits.
+        stdscr.timeout(60)
         stdscr.keypad(True)
         T.init()
-        self.model.refresh(block=True)
-        self.items = palette.collect(self.model.snapshot)
+        # Paint BEFORE loading anything. The first version blocked on a full
+        # model build before its first frame, so a slow probe showed the user
+        # an empty terminal with no way to tell "starting" from "hung" -- and
+        # one probe was walking a two-million-file kernel tree, so it hung.
+        # A frame first means the app is always visibly alive, and a probe that
+        # gets slow again degrades to a stale screen instead of a black one.
+        try:
+            self.draw(stdscr)
+        except curses.error:
+            pass
+        self.model.refresh()
 
         while self.running:
             try:
                 self.draw(stdscr)
             except curses.error:
                 pass                      # a resize mid-draw; next frame wins
-            ch = stdscr.getch()
+            ch = stdscr.getch()           # blocks up to 60ms, releasing the GIL
             if ch == -1:
-                curses.napms(40)          # ~25fps idle: responsive, not a spin
-                continue
+                continue                  # timed out: redraw and wait again
             self.key(stdscr, ch)
         return 0
 
@@ -100,8 +113,18 @@ class App:
         snap = self.model.snapshot
         self.header(stdscr, snap, w)
 
+        if not snap.stamp and not snap.error:
+            # First frame, model still loading. Say so rather than drawing an
+            # empty pane that reads as a broken tool.
+            stdscr.addstr(2, 2, "reading the port…", T.attr(T.DIM))
+            self.footer(stdscr, w, h)
+            stdscr.refresh()
+            return
+
         body = _Sub(stdscr, 1, h - 2)
         if self.in_palette:
+            if not self.items:
+                self.items = palette.collect(snap)
             n = palette.render(body, snap, h - 2, w, self.sel, self.query,
                                self.items)
         else:
@@ -169,6 +192,7 @@ class App:
             self.query = ""
         elif ch == ord("r"):
             self.model.refresh()
+            self.items = palette.collect(self.model.snapshot)
             self.note("refreshing", T.DIM)
         elif ch in (curses.KEY_DOWN, ord("j")):
             self.sel = min(self.sel + 1, max(0, self.count - 1))

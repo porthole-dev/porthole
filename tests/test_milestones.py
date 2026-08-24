@@ -268,6 +268,104 @@ def test_unsafe_milestones_are_never_offered_to_run():
             assert "flash" not in m.how, f"{m.id} offers to flash"
 
 
+# ------------------------------------------------------- bounded searching --
+
+def _tree(base, dirs=300, depth=3):
+    """A wide, deep directory tree with nothing we want in it."""
+    made = 0
+    stack = [(base, 0)]
+    while stack and made < dirs:
+        node, d = stack.pop()
+        if d >= depth:
+            continue
+        for i in range(6):
+            child = node / f"sub{i}"
+            child.mkdir(parents=True, exist_ok=True)
+            (child / "noise.c").write_text("")
+            made += 1
+            stack.append((child, d + 1))
+    return made
+
+
+def test_a_probe_never_walks_an_unbounded_tree():
+    """The bug that froze the TUI on its first frame.
+
+    probe_dts_compiles called work.rglob(), which reads EVERY directory under
+    the workdir. A device repo with a kernel tree in it has ~2 million files,
+    so the probe took minutes and the console hung before painting anything.
+
+    Counted rather than timed: a timing assertion is flaky on a loaded CI
+    runner, and what actually matters is that the search is bounded at all.
+    """
+    import os as _os
+    import porthole_milestones as pm
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = pathlib.Path(tmp)
+        _tree(work)
+        visited = []
+        real = _os.scandir
+
+        def counting(path=".", *a, **k):
+            visited.append(str(path))
+            return real(path, *a, **k)
+
+        pm.os.scandir = counting
+        try:
+            hit, exhausted = pm._find(work, "nothing-is-called-this.dts")
+        finally:
+            pm.os.scandir = real
+        assert hit is None
+        assert len(visited) <= pm.MAX_DIRS, (
+            f"the search read {len(visited)} directories; the cap is "
+            f"{pm.MAX_DIRS}")
+
+
+def test_a_capped_search_reports_that_it_gave_up():
+    """"Not found in the first few thousand directories" is not "absent", and
+    reporting the second when you established only the first is exactly the
+    over-claiming this module exists to prevent."""
+    import porthole_milestones as pm
+    with tempfile.TemporaryDirectory() as tmp:
+        work = pathlib.Path(tmp)
+        _tree(work, dirs=pm.MAX_DIRS + 50, depth=6)
+        row = one(pm.probe_dts_exists,
+                  {"PORTHOLE_WORKDIR": str(work), "PORTHOLE_DTB": "absent"})
+        assert row["state"] == ms.TODO
+        if "capped" in row["evidence"]:
+            assert str(pm.MAX_DIRS) in row["evidence"]
+
+
+def test_a_missing_build_artefact_costs_no_search():
+    """A .dtb that has not been built yet is the NORMAL state. Walking
+    thousands of directories to confirm a routine "no" was 367ms of a 400ms
+    probe run."""
+    import os as _os
+    import porthole_milestones as pm
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = pathlib.Path(tmp)
+        _tree(work)
+        (work / "dts").mkdir(exist_ok=True)
+        (work / "dts" / "board.dts").write_text("/dts-v1/;\n")
+        visited = []
+        real = _os.scandir
+
+        def counting(path=".", *a, **k):
+            visited.append(str(path))
+            return real(path, *a, **k)
+
+        pm.os.scandir = counting
+        try:
+            row = one(pm.probe_dts_compiles,
+                      {"PORTHOLE_WORKDIR": str(work), "PORTHOLE_DTB": "board"})
+        finally:
+            pm.os.scandir = real
+        assert row["state"] == ms.TODO
+        assert len(visited) < 50, (
+            f"confirming a missing .dtb read {len(visited)} directories")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

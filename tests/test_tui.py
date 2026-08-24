@@ -314,6 +314,104 @@ def test_a_broken_profile_degrades_instead_of_crashing():
     assert m.snapshot.error, "a bad device should surface as an error, not a crash"
 
 
+def test_the_first_frame_does_not_need_a_loaded_model():
+    """The console showed an empty terminal and then hung, because it built the
+    whole model before painting anything. A frame first means it is always
+    visibly alive, and a probe that gets slow again degrades to a stale screen
+    rather than a black one."""
+    from porthole_tui.model import Model
+    m = Model(ROOT, "google-taimen")
+    snap = m.snapshot                      # never refreshed
+    assert not snap.stamp, "an unloaded snapshot should have no timestamp"
+    from porthole_tui.panes import port
+    win = FakeWin()
+    port.render(win, snap, 24, 100)        # must not raise
+    assert win.calls, "nothing was drawn for an empty model"
+
+
+class Screen:
+    """A fake stdscr that behaves like curses at the edges, so a frame can be
+    driven end to end without a terminal."""
+
+    def __init__(self, h=24, w=100):
+        self.h, self.w = h, w
+        self.grid = [[" "] * w for _ in range(h)]
+
+    def getmaxyx(self):
+        return (self.h, self.w)
+
+    def erase(self):
+        self.grid = [[" "] * self.w for _ in range(self.h)]
+
+    def refresh(self):
+        pass
+
+    def addstr(self, y, x, text, attr=0):
+        import curses
+        if not 0 <= y < self.h:
+            raise curses.error("addstr out of bounds")
+        for i, ch in enumerate(text):
+            if 0 <= x + i < self.w:
+                self.grid[y][x + i] = ch
+
+    def __str__(self):
+        return "\n".join("".join(r).rstrip() for r in self.grid)
+
+
+def test_the_console_reaches_a_loaded_screen_while_refreshing_in_background():
+    """The bug that made the console useless: it drew "reading the port…" and
+    never advanced.
+
+    The model was fine and the panes were fine. The event loop used
+    `curses.napms()`, which holds the GIL for its entire sleep, so the refresh
+    thread was starved and the snapshot never arrived. Nothing raised and
+    nothing logged -- the app simply waited forever on a frame it had already
+    drawn.
+
+    Driving the real draw loop against a fake screen is what catches that: a
+    unit test of the model passes either way, because the model was never the
+    problem.
+    """
+    import time
+    from porthole_tui.app import App
+
+    app = App(ROOT, "google-taimen")
+    app.model.refresh()                    # background, exactly as run() does
+    screen = Screen()
+    for _ in range(200):                   # ~10s ceiling, far above the real ~0.1s
+        app.draw(screen)
+        if app.model.snapshot.stamp:
+            break
+        time.sleep(0.05)
+    assert app.model.snapshot.stamp, (
+        "the background refresh never completed while the draw loop ran — "
+        "something in the loop is holding the GIL")
+    app.draw(screen)
+    out = str(screen)
+    assert "reading the port" not in out, "still stuck on the loading frame"
+    assert "porthole" in out, out[:200]
+
+
+def test_the_event_loop_does_not_hold_the_gil_while_idling():
+    """A source check, because the failure it guards against is invisible:
+    napms() blocks with the GIL held and the symptom is a frozen screen with
+    no error anywhere."""
+    import ast
+    import inspect
+    from porthole_tui import app as appmod
+
+    # Look for a CALL, not the word: the fix's own comment explains why
+    # napms is wrong, and a substring check would trip on the explanation.
+    tree = ast.parse(inspect.getsource(appmod.App.run).strip())
+    called = {getattr(n.func, "attr", None)
+              for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    assert "napms" not in called, (
+        "curses.napms holds the GIL and starves the refresh thread; "
+        "use stdscr.timeout() so getch() waits on a read instead")
+    assert "timeout" in called, (
+        "the loop must wait on getch() with a timeout, not spin")
+
+
 def test_the_session_clock_is_monotonic():
     from porthole_tui.model import Model
     m = Model(ROOT)
