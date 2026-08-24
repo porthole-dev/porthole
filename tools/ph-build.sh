@@ -85,6 +85,33 @@ _ph_depth() { awk -v p="$_ph_mnt" '$2==p' /proc/mounts | wc -l; }
 # overmount is a child of the BOTTOM /mnt/linux layer, buried under 15 more. So it
 # only becomes reachable after everything above it is peeled -- which is also why
 # `pmbootstrap shutdown` cannot recover on its own.
+# Where pmbootstrap keeps envkernel.sh. It is not on PATH, its location depends
+# on how pmbootstrap was installed, and it was hardcoded to one developer's
+# checkout -- which made `scope: generic` in this file's header false for
+# everybody else.
+_ph_find_envkernel() {
+	local c pmb_root
+	for c in \
+		"${PORTHOLE_ENVKERNEL:-}" \
+		"${PORTHOLE_PMBOOTSTRAP_SRC:-}/helpers/envkernel.sh" \
+		"$HOME/.local/share/pmbootstrap/helpers/envkernel.sh" \
+		"/usr/share/pmbootstrap/helpers/envkernel.sh"
+	do
+		[ -n "$c" ] && [ -r "$c" ] && { printf '%s\n' "$c"; return 0; }
+	done
+	# pipx and pip installs put it beside the pmb package.
+	pmb_root=$(python3 -c 'import importlib.util as u,pathlib;s=u.find_spec("pmb");print(pathlib.Path(s.origin).parent.parent if s and s.origin else "")' 2>/dev/null)
+	if [ -n "$pmb_root" ]; then
+		for c in "$pmb_root/helpers/envkernel.sh" "$pmb_root/pmb/helpers/envkernel.sh"; do
+			[ -r "$c" ] && { printf '%s\n' "$c"; return 0; }
+		done
+	fi
+	echo ">> cannot find envkernel.sh." >&2
+	echo ">> set PORTHOLE_ENVKERNEL to its path, or PORTHOLE_PMBOOTSTRAP_SRC" >&2
+	echo ">> to a pmbootstrap checkout, and try again." >&2
+	return 1
+}
+
 tkclean() {
 	local mk="$_ph_mnt/.output/Makefile"
 	local d prev
@@ -154,7 +181,8 @@ _ph_make() {
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
 	set --   # `source` would pass our args to envkernel, which rejects them
-	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null || return 1; return 1; }
+	_ph_envkernel="$(_ph_find_envkernel)" || { popd >/dev/null || return 1; return 1; }
+	source "$_ph_envkernel" || { popd >/dev/null || return 1; return 1; }
 
 	# envkernel provides `make` as an ALIAS carrying ARCH=arm64 and the chroot
 	# invocation. Bash expands aliases at PARSE time, and this function was parsed
@@ -178,9 +206,17 @@ _ph_make() {
 	if [ "$out/.config" -nt "$img" ]; then
 		echo ">> Image.gz older than .config -- a config change did not compile"; return 1
 	fi
-	if [ "$dtsdir/pmi8998.dtsi" -nt "$dtb" ] || \
-	   [ "$dtsdir/msm8998-google-wahoo.dtsi" -nt "$dtb" ] || \
-	   [ "$dtsdir/${_PH_DTB%.dtb}.dts" -nt "$dtb" ]; then
+	# Which .dtsi files this board pulls in is a per-device fact, so it comes
+	# from the profile. Default: the board .dts itself. A device whose SoC dtsi
+	# is edited without this set gets a dtb that silently did not rebuild --
+	# which is what PORTHOLE_DTS_DEPS exists to prevent.
+	local _stale=""
+	for _dep in ${PORTHOLE_DTS_DEPS:-} "${_PH_DTB%.dtb}.dts"; do
+		[ -e "$dtsdir/$_dep" ] || continue
+		[ "$dtsdir/$_dep" -nt "$dtb" ] && _stale="$_dep"
+	done
+	if [ -n "$_stale" ]; then
+		echo ">> $_stale is newer than the dtb"
 		echo ">> dtb older than its DTS -- it did not rebuild (check dtc output)"; return 1
 	fi
 	echo ">> kernel + dtb current -- packaging"
@@ -222,11 +258,11 @@ _ph_make() {
 tkpurge-devpkgs() {
 	local repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
 	local stale
-	stale=$(ls "$repo"/linux-postmarketos-qcom-msm8998*_p*.apk 2>/dev/null | wc -l)
+	stale=$(ls "$repo"/${_PH_KPKG}*_p*.apk 2>/dev/null | wc -l)
 	[ "$stale" -eq 0 ] && return 0
 	echo ">> purging $stale envkernel (_p) kernel apks that would outrank the release build"
 	sudo mkdir -p "$repo/.stale-devpkgs" || return 1
-	sudo sh -c "mv '$repo'/linux-postmarketos-qcom-msm8998*_p*.apk '$repo/.stale-devpkgs'/" || return 1
+	sudo sh -c "mv '$repo'/${_PH_KPKG}*_p*.apk '$repo/.stale-devpkgs'/" || return 1
 	pmbootstrap index || return 1
 }
 
@@ -234,7 +270,7 @@ tkpurge-devpkgs() {
 _ph_assert_no_devpkgs() {
 	local repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
 	local stale
-	stale=$(ls "$repo"/linux-postmarketos-qcom-msm8998*_p*.apk 2>/dev/null | wc -l)
+	stale=$(ls "$repo"/${_PH_KPKG}*_p*.apk 2>/dev/null | wc -l)
 	if [ "$stale" -ne 0 ]; then
 		echo "REFUSING: $stale envkernel (_p) kernel apks are in the local repo." >&2
 		echo "apk sorts _p<timestamp> ABOVE -rNN, so one of those would be installed" >&2
@@ -419,12 +455,54 @@ tkflash-boot() {
 	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
 		echo ">> refusing to flash a stale image"; return 1; }
 
-	fastboot flash boot_a "$img" || return 1
-	fastboot flash boot_b "$img" || return 1
-	# mainline needs Caleb's stub on the active slot; TWRP needs the stock one.
-	fastboot flash dtbo_a "$_PH_REPO/dtbo/dtbo_idx12.img" || return 1
-	fastboot flash dtbo_b "$_PH_REPO/dtbo/dtbo_idx12.img" || return 1
-	fastboot set_active b    # also resets that slot's retry counter
+	# Which slots exist, which one may be armed, and which dtbo to write are
+	# all profile facts. They were taimen's values written into a file whose
+	# header claims `scope: generic`, and PORTHOLE_SLOT_FORBIDDEN /
+	# PORTHOLE_ACTIVE_SLOT / PORTHOLE_DTBO_IMG existed in the schema while
+	# nothing read them.
+	local slots="${PORTHOLE_SLOTS:-a b}" target="${PORTHOLE_ACTIVE_SLOT:-}"
+	local forbidden="${PORTHOLE_SLOT_FORBIDDEN:-}"
+
+	if [ "${PORTHOLE_HAS_AB_SLOTS:-0}" != "1" ]; then
+		fastboot flash boot "$img" || return 1
+	else
+		local s
+		for s in $slots; do
+			fastboot flash "boot_$s" "$img" || return 1
+		done
+	fi
+
+	if [ -n "${PORTHOLE_DTBO_IMG:-}" ]; then
+		local dtbo_img="$_PH_REPO/${PORTHOLE_DTBO_IMG}"
+		if [ ! -s "$dtbo_img" ]; then
+			echo ">> PORTHOLE_DTBO_IMG is set but $dtbo_img is missing" >&2
+			return 1
+		fi
+		# The bootloader reads dtbo from the ACTIVE slot, so both get it or the
+		# next slot flip silently reverts you. See brain/traps/dtbo-must-match.
+		if [ "${PORTHOLE_HAS_AB_SLOTS:-0}" != "1" ]; then
+			fastboot flash dtbo "$dtbo_img" || return 1
+		else
+			for s in $slots; do
+				fastboot flash "dtbo_$s" "$dtbo_img" || return 1
+			done
+		fi
+	fi
+
+	if [ "${PORTHOLE_HAS_AB_SLOTS:-0}" = "1" ] && [ -n "$target" ]; then
+		# REFUSE rather than arm a slot the profile says has no known-good
+		# image. Recovery from the bootloader cannot re-arm a slot, so this is
+		# the last point at which the mistake is cheap.
+		case " $forbidden " in
+			*" $target "*)
+				echo ">> REFUSING: PORTHOLE_ACTIVE_SLOT=$target is listed in" >&2
+				echo ">> PORTHOLE_SLOT_FORBIDDEN=$forbidden" >&2
+				return 1 ;;
+		esac
+		fastboot set_active "$target"   # also resets that slot's retry counter
+	elif [ "${PORTHOLE_HAS_AB_SLOTS:-0}" = "1" ]; then
+		echo ">> PORTHOLE_ACTIVE_SLOT is unset -- leaving the active slot alone"
+	fi
 	fastboot reboot
 }
 
@@ -561,7 +639,8 @@ tkmod() {
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
 	set --
-	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null || return 1; return 1; }
+	_ph_envkernel="$(_ph_find_envkernel)" || { popd >/dev/null || return 1; return 1; }
+	source "$_ph_envkernel" || { popd >/dev/null || return 1; return 1; }
 	shopt -s expand_aliases
 	eval make -j"$(nproc)" modules || { popd >/dev/null || return 1; echo ">> build failed"; return 1; }
 	popd >/dev/null || return 1
@@ -645,7 +724,8 @@ tkboot() {
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
 	set --
-	source "$HOME/src/pmbootstrap/helpers/envkernel.sh" || { popd >/dev/null || return 1; return 1; }
+	_ph_envkernel="$(_ph_find_envkernel)" || { popd >/dev/null || return 1; return 1; }
+	source "$_ph_envkernel" || { popd >/dev/null || return 1; return 1; }
 	shopt -s expand_aliases
 	if [ -n "$with_kernel" ]; then
 		eval make -j"$(nproc)" Image.gz dtbs || { popd >/dev/null || return 1; return 1; }

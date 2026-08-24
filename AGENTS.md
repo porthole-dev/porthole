@@ -271,6 +271,8 @@ nothing else — it will burn a long time and return BLOCKED.
 | `config` | print the resolved config and where each value came from | yes | no |
 | `serial` | UART console: the channel that works before anything else does | yes | no |
 | `kconfig` | catch the kernel symbols olddefconfig silently dropped | yes | no |
+| `build` | build the kernel and package it, through envkernel | yes | needs --yes |
+| `flash` | flash the built boot image, honouring the slot policy | yes | needs --yes |
 | `devices` | list device profiles | yes | no |
 | `aports` | work on pmaports: status, feature branches, diffs, patches | yes | needs --yes |
 | `channel` | see and switch the postmarketOS release channel | yes | no |
