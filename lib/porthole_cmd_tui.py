@@ -3,7 +3,7 @@
 """`porthole tui` -- launch the console.
 
 A launcher, so the TUI is discoverable from `porthole --help` rather than being
-a second binary nobody finds. The real program is bin/porthole-tui, which owns
+a second binary nobody finds. The CLI runs `python3 -m porthole_tui`, which owns
 the terminal; keeping that separate means no verb ever unexpectedly seizes the
 screen in a script.
 """
