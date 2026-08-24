@@ -574,6 +574,61 @@ def test_the_port_filter_keeps_stale_first():
     assert "stale" in labels[0], "stale must lead within the filtered set: {}".format(labels)
 
 
+# -- Ruling R24: on_catalogue_chosen discriminates explicitly, not by luck --
+#
+# The old handler told Tool/Note/device apart by hasattr() alone. Tool and
+# Note happen to have disjoint attribute names today, so it worked -- but
+# that is luck, not a discriminator, and an unrecognised payload fell through
+# to the device branch and got formatted into a `porthole use {...}` command,
+# which passes launch()'s prefix gate (it checks the PREFIX, not the sense).
+
+class _Chosen:
+    def __init__(self, payload):
+        self.payload = payload
+
+
+def test_choosing_a_milestone_opens_its_reader():
+    async def body(app, pilot):
+        row = {"id": "m1", "phase": "first-boot", "title": "usb gadget answers",
+               "state": "todo", "source": "probe", "evidence": "", "why": "because",
+               "how": "porthole doctor", "playbook": "", "safe": True}
+        app.screen.on_catalogue_chosen(_Chosen(row))
+        await pilot.pause()
+        assert isinstance(app.screen, Reader), type(app.screen).__name__
+        assert "usb gadget answers" in app.screen.doc.title
+    tui_harness.pilot(make, body)
+
+
+def test_choosing_a_note_opens_its_reader():
+    async def body(app, pilot):
+        import porthole_cmd_brain as bmod
+        note = bmod.load_notes(ROOT)[0]
+        app.screen.on_catalogue_chosen(_Chosen(note))
+        await pilot.pause()
+        assert isinstance(app.screen, Reader)
+    tui_harness.pilot(make, body)
+
+
+def test_choosing_a_device_switches_to_it():
+    async def body(app, pilot):
+        app.screen.on_catalogue_chosen(_Chosen("google-taimen"))
+        await pilot.pause()
+        # `use` is safe and harmless, so it spawns without a confirm
+        assert any("porthole use google-taimen" == j.command for j in app.jobs.jobs), \
+            [j.command for j in app.jobs.jobs]
+    tui_harness.pilot(make, body)
+
+
+def test_an_unrecognised_payload_is_refused_not_formatted_into_a_command():
+    # launch() checks the PREFIX, not the sense: a stringified dict would pass its gate.
+    async def body(app, pilot):
+        app.screen.on_catalogue_chosen(_Chosen({"id": "x", "title": "no phase key"}))
+        await pilot.pause()
+        assert app.jobs.jobs == [], [j.command for j in app.jobs.jobs]
+        assert not isinstance(app.screen, Reader)
+    tui_harness.pilot(make, body)
+
+
 def main():
     return tui_harness.run(globals())
 

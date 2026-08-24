@@ -176,14 +176,24 @@ class MainScreen(Screen):
         from ..content import for_milestone, for_note, for_tool
         from .reader import Reader
         payload = event.payload
+        # Explicit shapes, not duck-typing (ruling R24). Tool and Note
+        # currently have disjoint attributes so hasattr() on one happened to
+        # work, but that is luck: give Tool a .body and every tool would
+        # silently open as a note. A device must be an actual str, and
+        # anything unrecognised is refused rather than formatted into a
+        # command -- launch() checks the PREFIX, not the sense, so
+        # "porthole use {'id': ...}" would sail straight through its gate.
         if isinstance(payload, dict) and "phase" in payload:
             doc = for_milestone(payload)
-        elif hasattr(payload, "body"):
+        elif isinstance(payload, str):
+            self.launch("porthole use {}".format(payload), safe=True)
+            return
+        elif hasattr(payload, "body") and hasattr(payload, "meta"):
             doc = for_note(self.app.root, payload.id)
-        elif hasattr(payload, "summary"):
+        elif hasattr(payload, "summary") and hasattr(payload, "needs"):
             doc = for_tool(self.app.root, payload.name)
         else:
-            self.launch("porthole use {}".format(payload), safe=True)
+            self.notify("cannot open that selection", severity="warning")
             return
 
         def closed(command):
