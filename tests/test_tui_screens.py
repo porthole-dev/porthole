@@ -16,7 +16,7 @@ tui_harness.require()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-from textual.widgets import (Button, Input, ListView, RichLog,  # noqa: E402
+from textual.widgets import (Button, Checkbox, Input, ListView, RichLog,  # noqa: E402
                              Select, Static)
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
@@ -587,6 +587,42 @@ def test_lines_lost_to_the_ring_are_reported_not_silently_dropped():
     tui_harness.pilot(make, body)
 
 
+# -- Ruling R27: R25's fix was too narrow ----------------------------------
+#
+# _run()'s exec-failure branch appended to job.lines directly and never
+# touched job.produced, so _drain's `total > self._seen` guard (0 > 0) never
+# fired: the expanded drawer stayed empty while the collapsed label -- which
+# reads lines[-1] unconditionally, bypassing the guard -- showed the error
+# fine. That is the exact silent freeze R25 exists to prevent, reproduced
+# inside the fix for it. Job.emit() is now the only way a line enters
+# job.lines; both tests below would fail against the pre-R27 code.
+
+def test_a_command_that_cannot_exec_still_shows_its_error_in_the_drawer():
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        job = app.jobs.spawn("definitely-not-a-real-binary-xyz")
+        drawer.attach(job)
+        await job.wait()
+        drawer.expanded = True   # RichLog defers rendering while display: none
+        await pilot.pause(0.4)
+        assert job.produced == len(job.lines), \
+            "produced {} vs {} lines".format(job.produced, len(job.lines))
+        assert "could not run it" in _joined(drawer), \
+            "the error never reached the expanded log"
+    tui_harness.pilot(make, body)
+
+
+def test_every_append_goes_through_emit():
+    # Structural, not behavioural: a future call site that appends directly
+    # would reintroduce the divergence, and no behavioural test would notice
+    # until a user hit that particular path. Matches the bite test's grep --
+    # the one legitimate hit is Job.emit()'s own `self.lines.append(text)`.
+    src = (ROOT / "lib" / "porthole_tui" / "jobs.py").read_text()
+    hits = [line.strip() for line in src.splitlines() if "lines.append" in line]
+    assert hits == ["self.lines.append(text)"], \
+        "a bare lines.append survives outside Job.emit(): {}".format(hits)
+
+
 # -- Ruling R23: the port filter is a dead affordance that lies -----------
 
 def _snapshot_with(rows):
@@ -1044,6 +1080,24 @@ def test_the_blobs_form_is_the_acceptance_test_for_the_whole_plan():
         assert isinstance(app.screen, ArgForm), type(app.screen).__name__
         assert str(preview.content) == "porthole blobs unsparse /tmp/vendor.img", \
             str(preview.content)
+    tui_harness.pilot(make, body)
+
+
+def test_toggling_a_checkbox_reaches_the_command():
+    # _collect()'s Checkbox branch is the trickiest deviation in this screen:
+    # Textual 8.2.8's Checkbox.Changed carries no public accessor for the
+    # widget that changed, which is why every field is re-swept on any
+    # change instead of each event picking its own dest out. Nothing
+    # exercised that branch -- every other test either pokes form.values
+    # directly or never touches a check-kind field.
+    async def body(app, pilot):
+        form = ArgForm(spec_for("blobs"))
+        app.push_screen(form)
+        await pilot.pause()
+        box = form.query_one("#f-dry_run", Checkbox)
+        box.value = True
+        await pilot.pause()
+        assert "--dry-run" in form.command(), form.command()
     tui_harness.pilot(make, body)
 
 

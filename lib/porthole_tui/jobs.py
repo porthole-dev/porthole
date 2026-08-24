@@ -82,6 +82,19 @@ class Job:
         await self._done.wait()
         return self.rc
 
+    def emit(self, text):
+        """The ONLY way a line enters this job.
+
+        `lines` is a ring buffer, so `len()` cannot tell the drawer how much has
+        been produced -- it is pinned at maxlen once saturated. `produced` is the
+        real count and must move in lockstep with every append. Routing all
+        appends through here is what stops a future call site from adding one
+        and forgetting the other, which is exactly how the exec-failure path
+        silently swallowed its own error message (ruling R27).
+        """
+        self.lines.append(text)
+        self.produced += 1
+
 
 class JobManager:
     """Spawns jobs and keeps their history for the session."""
@@ -124,7 +137,7 @@ class JobManager:
                 *argv, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT, start_new_session=True)
         except (OSError, ValueError) as exc:
-            job.lines.append("could not run it: {}".format(exc))
+            job.emit("could not run it: {}".format(exc))
             self._finish(job, 127, "done", on_exit)
             return
 
@@ -169,8 +182,7 @@ class JobManager:
 
         def emit(raw):
             text = raw.decode("utf-8", "replace")
-            job.lines.append(text)
-            job.produced += 1
+            job.emit(text)
             if on_line:
                 on_line(text)
 
