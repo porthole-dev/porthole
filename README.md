@@ -11,7 +11,7 @@ Pixel 2 XL, made generic — so the next device starts from month three instead 
 day one.
 
 ```
-98 tools · 55 knowledge notes · 25 commands · zero third-party dependencies
+98 tools · 55 knowledge notes · 25 commands · the CLI has zero third-party dependencies
 ```
 
 Docs: `make docs-serve`, or set the `PUBLISH_DOCS` repository
@@ -38,8 +38,14 @@ variable to publish them to GitHub Pages.
 
 ## Requirements
 
-**porthole has no third-party dependencies.** No pip install, no npm, no
-virtualenv. If you have Python 3.8+ and OpenSSH you can already run most of it.
+**porthole's CLI has no third-party dependencies.** No pip install, no npm, no
+virtualenv. If you have Python 3.8+ and OpenSSH you can already run every verb
+and every tool.
+
+The **console** (`porthole tui`) is the one optional extra: it needs Python
+3.10+ and `textual`. Nothing else does, and nothing else ever will — a host
+that is already broken is exactly where `porthole next` has to keep working
+with nothing installed.
 
 | | needed for | if missing |
 |---|---|---|
@@ -47,6 +53,7 @@ virtualenv. If you have Python 3.8+ and OpenSSH you can already run most of it.
 | **openssh client** | every command that talks to a booted device | device tools fail; host-only tools still work |
 | **fastboot** | reaching and leaving the bootloader | flashing and recovery unavailable |
 | **flock** *(util-linux)* | serialising parallel workers on one device | the mutex cannot serialise; fine if you work alone |
+| **textual** *(optional)* | `porthole tui`, the full-screen console | the console says so and names the install command for your distro; every verb still works |
 | adb | talking to a stock or recovery system | optional, rarely needed |
 | pmbootstrap | building and flashing images | you can still probe and debug a running device |
 | shellcheck | `make lint` when contributing | optional |
@@ -487,6 +494,8 @@ lib/
   porthole.sh           the same semantics for shell tools
   porthole_cli.py       command registry and output helpers
   porthole_cmd_*.py     one module per verb — drop one in to add a verb
+  porthole_tui/         the console (`porthole tui`) — needs python 3.10+
+                        and textual; gate.py itself runs on 3.8 to say so
 tools/                  ~95 tk-* tools: boot, flash, probe, benchmark, soak
 profiles/
   _template/            every device key, documented
