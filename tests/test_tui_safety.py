@@ -14,6 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
 
 from porthole_tui import safety  # noqa: E402
+import porthole_milestones as ms  # noqa: E402
 
 
 def test_empty_command_is_never_safe():
@@ -121,6 +122,17 @@ def test_the_trailing_space_boundary_is_load_bearing():
     for real in ("porthole run tk-x.sh dd if=/dev/zero of=/dev/block/sda",
                  "porthole run tk-x.sh rm -rf /data"):
         assert safety.needs_confirmation(real, True), real
+
+
+def test_no_safe_milestone_command_is_irreversible():
+    """Cross-check the milestone table against the screen, so a table edit
+    cannot quietly make something destructive auto-runnable."""
+    for m in ms.MILESTONES:
+        if not m.safe or not m.how.startswith("porthole"):
+            continue
+        assert not safety.needs_confirmation(m.how, safe=True), (
+            f"milestone {m.id!r} is marked safe but its command {m.how!r} "
+            f"looks irreversible; one of the two is wrong")
 
 
 def main():
