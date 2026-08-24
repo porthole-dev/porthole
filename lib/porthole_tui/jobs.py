@@ -41,6 +41,12 @@ class Job:
         self.command = command
         self.argv = list(argv)
         self.lines = collections.deque(maxlen=max_lines)
+        # `len(self.lines)` measures the RING, not the stream: once the deque
+        # saturates, every append evicts the oldest line and len() is pinned
+        # at maxlen forever. `produced` only ever grows, so it survives
+        # eviction and a drainer can tell "nothing new" from "more than the
+        # ring can hold" (ruling R25).
+        self.produced = 0
         self.rc = None
         self.started = time.monotonic()
         self.finished = None
@@ -164,6 +170,7 @@ class JobManager:
         def emit(raw):
             text = raw.decode("utf-8", "replace")
             job.lines.append(text)
+            job.produced += 1
             if on_line:
                 on_line(text)
 

@@ -5,6 +5,7 @@
 Skips loudly on the 3.8/3.11/3.13 matrix where textual is absent; the `console`
 CI job installs it and fails if these skip there.
 """
+import collections
 import pathlib
 import sys
 
@@ -521,6 +522,64 @@ def test_ctrl_r_reruns_through_the_confirm_boundary():
         await pilot.press("ctrl+r")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmRun)
+    tui_harness.pilot(make, body)
+
+
+# -- Ruling R25: the drawer's stream dies silently at 20,000 lines --------
+#
+# `len(job.lines)` measures the RING (a deque(maxlen=20000)), not the
+# stream: once it saturates, every append evicts the oldest line and len()
+# is pinned at maxlen forever, so a `len(lines) > self._seen` guard never
+# fires again. The collapsed label keeps ticking regardless (it recomputes
+# from a fresh snapshot every tick), so the app looks alive while the
+# expanded log has been frozen since line 20000. A kernel build is exactly
+# the volume that exceeds it. Both tests shrink the ring to make the
+# saturation reachable in a test run instead of after 20,000 real lines.
+#
+# RichLog defers rendering until its size is known, and #job-log is
+# `display: none` while the drawer is collapsed (same quirk documented on
+# test_output_reaches_the_drawer_while_the_job_runs above) -- so both tests
+# expand the drawer and pause before reading its rendered lines.
+
+def _joined(drawer):
+    log = drawer.query_one("#job-log", RichLog)
+    return "\n".join(strip.text for strip in log.lines)
+
+
+def test_the_stream_keeps_flowing_past_the_ring_buffer_size():
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        # A `sleep 0.01` between lines (0.6s total) spreads the 60 lines
+        # across several of the drawer's 0.1s drain ticks, so the ring
+        # saturates and gets drained from PARTWAY through the run -- not
+        # caught in one final catch-up read once the job has already
+        # finished, which a `len(lines) > self._seen` guard can still pass
+        # by accident (all 10 survivors happen to include the last line).
+        job = app.jobs.spawn(
+            "sh -c 'i=0; while [ $i -lt 60 ]; do echo line $i; sleep 0.01; "
+            "i=$((i+1)); done'")
+        job.lines = collections.deque(job.lines, maxlen=10)   # shrink the ring
+        drawer.attach(job)
+        await pilot.pause(0.3)          # let it run partway, mid-stream drains happen
+        await job.wait()
+        drawer.expanded = True
+        await pilot.pause(0.4)
+        rendered = _joined(drawer)
+        assert "line 59" in rendered, "the stream stopped: {}".format(rendered[-200:])
+    tui_harness.pilot(make, body)
+
+
+def test_lines_lost_to_the_ring_are_reported_not_silently_dropped():
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        job = app.jobs.spawn("sh -c 'i=0; while [ $i -lt 60 ]; do echo line $i; "
+                             "i=$((i+1)); done'")
+        job.lines = collections.deque(job.lines, maxlen=10)
+        await job.wait()
+        drawer.attach(job)                    # attach AFTER, so eviction already happened
+        drawer.expanded = True
+        await pilot.pause(0.4)
+        assert "scrolled past" in _joined(drawer)
     tui_harness.pilot(make, body)
 
 

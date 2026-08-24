@@ -36,6 +36,14 @@ class JobDrawer(Vertical):
         yield Label("no job running", id="job-line")
         yield RichLog(id="job-log", highlight=False, markup=False)
 
+    def on_mount(self) -> None:
+        # Created paused, not merely never-started, because a widget-level
+        # timer ticking ten times a second for the life of the app -- copying
+        # up to 20,000 strings on every tick -- outlives every job it was
+        # created for (reviewer's Minor 1). attach()/_drain() resume and
+        # re-pause it around each job's actual lifetime.
+        self._timer = self.set_interval(0.1, self._drain, pause=True)
+
     def text(self):
         return "\n".join(self.job.lines) if self.job else ""
 
@@ -43,23 +51,49 @@ class JobDrawer(Vertical):
         self.job = job
         self._seen = 0
         self.query_one("#job-log", RichLog).clear()
-        if self._timer is None:
-            self._timer = self.set_interval(0.1, self._drain)
+        if self._timer is not None:
+            self._timer.resume()
         self._drain()
 
     def _drain(self) -> None:
         if self.job is None:
             return
-        lines = list(self.job.lines)
-        if len(lines) > self._seen:
+        # `len(job.lines)` measures the RING, not the STREAM. Job.lines is a
+        # deque(maxlen=20000): once it saturates, len() is pinned at maxlen
+        # forever and a `len(lines) > self._seen` guard never fires again --
+        # the log freezes at line 20000 while the collapsed label keeps
+        # ticking, so nothing LOOKS wrong. A kernel build is exactly the case
+        # that exceeds it (ruling R25). `produced` only ever grows, so it
+        # survives eviction and tells "nothing new" from "more than the ring
+        # can hold" apart.
+        total = self.job.produced
+        if total > self._seen:
             log = self.query_one("#job-log", RichLog)
-            for line in lines[self._seen:]:
+            survived = list(self.job.lines)
+            new = total - self._seen
+            if new > len(survived):
+                # More was produced than the ring can hold. Say so rather
+                # than quietly skipping: a log that drops lines without
+                # admitting it is worse than one that scrolls.
+                log.write("... {} lines scrolled past the {}-line buffer".format(
+                    new - len(survived), self.job.lines.maxlen))
+                new = len(survived)
+            for line in survived[len(survived) - new:]:
                 log.write(line)
-            self._seen = len(lines)
+            self._seen = total
+        lines = list(self.job.lines)
         tail = lines[-1][:44] if lines else ""
         self.query_one("#job-line", Label).update("{} {}  {:.0f}s  {}".format(
             self.MARK.get(self.job.state, "?"), self.job.command[:38],
             self.job.duration(), tail))
+        # NOT "!= running": attach() calls _drain() synchronously, before
+        # the job's own asyncio task has had a turn to flip state to
+        # "running", so a job is still "queued" on that first call. Pausing
+        # on that condition paused the timer one tick after resuming it --
+        # measured (a job would never drain past its first line). Pause only
+        # on the two states JobManager._finish actually sets.
+        if self.job.state in ("done", "cancelled") and self._timer is not None:
+            self._timer.pause()
 
     def watch_expanded(self, _old, new) -> None:
         self.set_class(new, "-expanded")
