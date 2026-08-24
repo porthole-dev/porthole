@@ -74,15 +74,15 @@ def cmd_soc(args, ctx) -> int:
     soc = args.name or _my_soc(ctx, devices)
     if not soc:
         raise Bail("could not determine a SoC", EX_FAIL,
-                   "name one (`porthole soc qcom-msm8998`), set PORTHOLE_SOC "
-                   "in the profile, or `porthole soc --list`")
+                   "name one (`porthole soc show qcom-msm8998`), set PORTHOLE_SOC "
+                   "in the profile, or `porthole soc list`")
 
     matches = [d for d in devices if d.soc == soc]
     if not matches:
         near = sorted({d.soc for d in devices if soc.split("-")[-1] in d.soc})
         raise Bail(f"no devices on SoC {soc!r}", EX_FAIL,
                    f"did you mean: {', '.join(near[:5])}?" if near
-                   else "`porthole soc --list` shows every family")
+                   else "`porthole soc list` shows every family")
 
     mine = ctx.cfg.get("PORTHOLE_CODENAME") or ctx.cfg.get("PORTHOLE_DEVICE", "")
     sibs = [d for d in matches if d.codename != mine]
@@ -116,9 +116,9 @@ def cmd_soc(args, ctx) -> int:
             o(f"  {best.codename} ({best.category}) — "
               f"{len(best.info)} deviceinfo keys already answered")
             o.blank()
-            o.hint(f"porthole soc --inherit {best.codename}   "
+            o.hint(f"porthole soc inherit {best.codename}   "
                    f"# the values worth copying")
-            o.hint(f"porthole soc --diff {best.codename}      "
+            o.hint(f"porthole soc diff {best.codename}      "
                    f"# how yours differs")
             o(f"  {o.paint(f'read: {best.path}', 'grey')}")
         else:

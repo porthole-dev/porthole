@@ -262,10 +262,11 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
     epilog += [
         "",
         "examples:",
+        "  porthole next                   where am I, and what is next?",
         "  porthole doctor                 is my host ready?",
-        "  porthole init --device NAME     set up your identity, once",
+        "  porthole init NAME              set up your identity, once",
         "  porthole tools --needs BOOTED   which tools need a booted device",
-        "  porthole brain --severity law   the ten notes worth reading",
+        "  porthole brain search --severity law   the ten notes worth reading",
         "",
         "every read verb takes --json. Docs: README.md, AGENTS.md for agents.",
     ]
@@ -354,13 +355,13 @@ def overview(root: pathlib.Path, out: Out) -> int:
     out.blank()
 
     if not device or not configured:
-        out.hint("porthole init --device <codename>   set up, once")
+        out.hint("porthole init <codename>   set up, once")
         if not profiles:
             out.hint("porthole new-device <codename>      port something new")
     else:
+        out.hint("porthole next                       where am I, what is next?")
         out.hint("porthole doctor                     check the host and device")
         out.hint("porthole tools                      what can I run?")
-        out.hint("porthole brain --severity law       what should I know?")
     out.blank()
     out("`porthole --help` for all verbs.")
     return EX_OK

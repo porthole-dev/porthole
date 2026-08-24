@@ -13,6 +13,10 @@ an SDK agent, an IDE assistant, or a human reading over someone's shoulder.
 
 ```sh
 porthole brief          # or `porthole brief --json` if you are parsing
+
+`brief` now carries the port's own state: how far along it is, the single
+next milestone, its command, and anything ticked that a probe says is not
+true. `porthole next --json` is the same block on its own.
 ```
 
 One call gives you: which device and its live state, that device's encoded traps
@@ -25,7 +29,7 @@ Then, as needed:
 porthole doctor --all              # will the toolbox work? names every fix
 porthole tools --json              # the full catalogue, with each tool's contract
 porthole config --json             # every resolved value and which layer set it
-porthole brain --severity law      # ten notes. Read them.
+porthole brain search --severity law      # ten notes. Read them.
 ```
 
 Everything above takes `--json`. Exit codes are an API — see §7.
@@ -165,10 +169,10 @@ project: a session that established something real and wrote nothing down has
 left the next person to pay for it again.
 
 ```sh
-porthole brain --new <kebab-id> --severity trap --subsystem boot
+porthole brain new <kebab-id> --severity trap --subsystem boot
 $EDITOR brain/traps/<kebab-id>.md
-porthole brain --lint        # enforced in CI; a note with no evidence fails
-porthole brain --submit      # branch, signed commit, pull request
+porthole brain lint        # enforced in CI; a note with no evidence fails
+porthole brain submit      # branch, signed commit, pull request
 ```
 
 The bar, and the linter enforces most of it:
@@ -198,7 +202,7 @@ portability is worse than scoping narrowly.
 | a generic tool | `tools/` | give it the four header fields |
 | a device-specific probe | `profiles/<codename>/tools/` | scope it `device:<codename>` |
 | a CLI verb | `lib/porthole_cmd_<name>.py` with a `SPEC` dict | nothing — it is discovered |
-| a lesson that generalises | `brain/traps/<id>.md` with `scope:` and evidence | `porthole brain --reindex` |
+| a lesson that generalises | `brain/traps/<id>.md` with `scope:` and evidence | `porthole brain reindex` |
 | a device fact | `profiles/<codename>/device.env` | — |
 
 `make check` before you claim it works. The tool contract is enforced by

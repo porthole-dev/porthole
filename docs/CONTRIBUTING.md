@@ -17,7 +17,7 @@
    # One line saying what it does.
    ```
 
-   `porthole tools --lint` lists any gaps; `make test` fails on them.
+   `porthole tools lint` lists any gaps; `make test` fails on them.
 3. Never hardcode an IP, username, slot letter or package name. Shell:
    `. tools/tk-lib.sh`. Python: `import porthole`.
 4. If it deliberately induces a reset, put a timeout on every ssh — otherwise it
@@ -54,7 +54,7 @@ A note earns its place if it would have saved someone a session.
 - Prefer `scope: generic`, honestly. If it only applied to one device, scope it
   there.
 - Link with `[[note-id]]`.
-- `porthole brain --reindex` afterwards.
+- `porthole brain reindex` afterwards.
 
 ## Documentation
 

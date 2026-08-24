@@ -164,7 +164,7 @@ def check_profile(ch: Checks, cfg, root: pathlib.Path) -> None:
     device = cfg.get("PORTHOLE_DEVICE", "")
     if not device:
         ch.add("profile", "fail", "no device selected",
-               "porthole init --device <codename>",
+               "porthole init <codename>",
                "`porthole devices` lists what exists")
         return
     ch.add("profile", "ok", device)
@@ -289,7 +289,7 @@ def check_tools(ch: Checks, root: pathlib.Path) -> None:
                f"{len(missing)} of {len(tools)} incomplete: {sample}"
                + (" ..." if len(missing) > 5 else ""),
                "add the standard header block; see docs/CONTRIBUTING.md",
-               "`porthole tools --lint` lists every gap")
+               "`porthole tools lint` lists every gap")
     else:
         ch.add("tools: headers", "ok", f"all {len(tools)} self-describing")
 

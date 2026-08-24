@@ -193,7 +193,7 @@ def cmd_new(args, ctx) -> int:
     target = _my_dts(ctx, tree)
     if target.exists() and not args.force:
         raise Bail(f"{target} already exists", EX_FAIL,
-                   "--force to overwrite, or `porthole dts todo` to see what "
+                   "--force to overwrite, or `porthole dts check` to see what "
                    "is left in it")
 
     cfg = ctx.cfg

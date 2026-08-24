@@ -5,7 +5,7 @@ scope: generic
 subsystem: bringup
 severity: trap
 confidence: proven
-evidence: `porthole new-device --device google-cheetah --soc cloudripper` scaffolded an unseeded profile with no complaint (2026-08-24). gs201-cheetah-common.dtsi includes eleven gs201-cloudripper-*.dtsi files: cloudripper is the reference board that cheetah and panther derive from, and gs201 is the silicon.
+evidence: <!-- porthole:historical --> `porthole new-device --device google-cheetah --soc cloudripper` scaffolded an unseeded profile with no complaint (2026-08-24). gs201-cheetah-common.dtsi includes eleven gs201-cloudripper-*.dtsi files: cloudripper is the reference board that cheetah and panther derive from, and gs201 is the silicon.
 first-learned: 2026-08-24
 ---
 

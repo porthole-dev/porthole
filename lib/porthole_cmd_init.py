@@ -74,6 +74,28 @@ def emit_sudo_snippet(ctx, user: str) -> None:
         "This must NOT go into a device package other people install.", "grey"))
 
 
+def _scaffold(ctx, args) -> str:
+    """Create a profile from inside init, so a first run can finish.
+
+    Delegates to new-device rather than reimplementing it: the seeding rules,
+    the SoC reporting and the checklist generation all live there, and a second
+    copy of them here would be a second copy to keep true.
+    """
+    codename = ask("codename (<vendor>-<device>, e.g. google-cheetah)", "")
+    if not codename:
+        raise Bail("a codename is needed to create a profile", EX_FAIL,
+                   "porthole new-device <codename>")
+    soc = ask("SoC, if you know it (vendor-prefixed, e.g. qcom-sdm845)", "")
+    argv = [sys.executable, str(pathlib.Path(ctx.root) / "bin" / "porthole"),
+            "new-device", codename] + (["--soc", soc] if soc else [])
+    import subprocess
+    ctx.out.blank()
+    if subprocess.run(argv).returncode != 0:
+        raise Bail(f"could not scaffold {codename}", EX_FAIL)
+    ctx.out.blank()
+    return codename
+
+
 def cmd_init(args, ctx) -> int:
     root = ctx.root
     devices = porthole.list_profiles(root)
@@ -85,8 +107,32 @@ def cmd_init(args, ctx) -> int:
         ctx.out.blank()
 
     device = args.codename
-    if not device:
+    if not device and interactive:
+        # A newcomer with no profiles must not be told to go and read about a
+        # different verb. Offering to create one here is the difference between
+        # a first run that finishes and a first run that becomes a documentation
+        # search.
+        if devices:
+            ctx.out("  which device?")
+            for i, name in enumerate(devices, 1):
+                ctx.out(f"    {i}. {name}")
+            ctx.out(f"    n. something not ported yet")
+            ctx.out.blank()
+            choice = ask("pick one", "1")
+            if choice.lower() in ("n", "new"):
+                device = _scaffold(ctx, args)
+            elif choice.isdigit() and 1 <= int(choice) <= len(devices):
+                device = devices[int(choice) - 1]
+            else:
+                device = choice
+        else:
+            ctx.out("  no device profiles yet — let us make one.")
+            ctx.out.blank()
+            device = _scaffold(ctx, args)
+        devices = porthole.list_profiles(root)
+    elif not device:
         device = ask("device codename", devices[0] if devices else "")
+
     if device and device not in devices:
         raise Bail(
             f"no profile for {device!r}. Known: {', '.join(devices) or '(none)'}",
@@ -133,11 +179,22 @@ def cmd_init(args, ctx) -> int:
             ctx.out(ctx.out.paint(f"    autodetected {line}", "grey"))
         emit_sudo_snippet(ctx, user)
         ctx.out.blank()
+        # End on a step, not a menu. A newcomer's next action should be one
+        # thing they can do, and `next` is the verb whose whole job is to know
+        # which thing that is.
         ctx.out.heading("Then")
-        ctx.out.hint("porthole doctor                       check host and device")
-        ctx.out.hint("porthole tools                        what can I run?")
-        ctx.out.hint("porthole brain search --severity law  what to know first")
-        ctx.out.hint("porthole use <codename>               switch device later")
+        try:
+            import porthole_cmd_next as nxt
+            _, summary, _ = nxt.collect(ctx)
+            step = summary.get("next")
+            if step:
+                ctx.out(f"  {ctx.out.paint(step['title'], 'cyan')}")
+                if step["command"]:
+                    ctx.out.hint(step["command"])
+        except Exception:  # noqa: BLE001 -- init must finish even if next cannot
+            pass
+        ctx.out.hint("porthole next     where am I, and what is next")
+        ctx.out.hint("porthole doctor   check host and device")
 
     return ctx.emit(payload, render)
 

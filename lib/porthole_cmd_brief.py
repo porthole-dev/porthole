@@ -39,7 +39,7 @@ RULES = [
     ("Contribute what you learn back to brain/",
      "this project exists to share knowledge, not just to fix one phone. If "
      "you established something 100% and it would have saved someone a "
-     "session: `porthole brain --new <id>`, then `--lint`, then `--submit`. "
+     "session: `porthole brain new <id>`, then `--lint`, then `--submit`. "
      "A session that learned something and wrote nothing down is unfinished."),
 ]
 
@@ -89,9 +89,9 @@ def cmd_brief(args, ctx) -> int:
                 "duty": "If you establish something validated that would have "
                         "saved someone a session, it belongs in brain/. This "
                         "is part of the work, not an optional extra.",
-                "new": "porthole brain --new <kebab-id> --severity trap",
-                "lint": "porthole brain --lint",
-                "submit": "porthole brain --submit",
+                "new": "porthole brain new <kebab-id> --severity trap",
+                "lint": "porthole brain lint",
+                "submit": "porthole brain submit",
                 "bar": "one idea per note; cite evidence a stranger can "
                        "re-check; scope it honestly.",
             },
@@ -104,6 +104,10 @@ def cmd_brief(args, ctx) -> int:
             "contributing": "docs/CONTRIBUTING.md",
         },
         "next": _next_steps(cfg, device, state, profile_gaps),
+        # The port's own state, folded in so the ONE call AGENTS.md tells an
+        # agent to make first also answers "where am I". A second call for the
+        # most important question would be a second call most sessions skip.
+        "port": _port_state(ctx, device),
     }
 
     def render():
@@ -133,6 +137,18 @@ def cmd_brief(args, ctx) -> int:
         for label, path in payload["entrypoints"].items():
             ctx.out.kv(label, path, w)
         ctx.out.blank()
+        port = payload["port"]
+        if port and port.get("next"):
+            ctx.out.heading("where this port is")
+            pr = port["progress"]
+            ctx.out.kv("progress", f"{pr['done']}/{pr['total']} · {pr['phase']}", w)
+            ctx.out.kv("next", port["next"]["title"], w)
+            if port["next"]["command"]:
+                ctx.out.kv("", ctx.out.paint(port["next"]["command"], "cyan"), w)
+            for item in port.get("stale", [])[:3]:
+                ctx.out.warn(f"{item['title']}: {item['detail']}")
+            ctx.out.blank()
+
         ctx.out.heading("suggested next steps")
         for step in payload["next"]:
             ctx.out.hint(step)
@@ -181,9 +197,26 @@ def _device_traps(cfg) -> list[str]:
     return out
 
 
+def _port_state(ctx, device: str) -> dict:
+    """Milestone state, or {} when there is no device to have state about.
+
+    Never fatal: `brief` is the first thing an agent runs, and a brief that
+    dies because a checklist is missing is a brief that stops the session
+    before it starts.
+    """
+    if not device:
+        return {}
+    try:
+        import porthole_cmd_next as nxt
+        _, summary, has_markers = nxt.collect(ctx)
+        return {**summary, "checklist_has_markers": has_markers}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _next_steps(cfg, device: str, state: str, gaps: list[str]) -> list[str]:
     if not device:
-        return ["porthole devices", "porthole init --device <codename>",
+        return ["porthole devices", "porthole init <codename>",
                 "porthole new-device <codename>   # to port something new"]
     steps = []
     if cfg.source("PORTHOLE_USER") == "default":
@@ -198,7 +231,7 @@ def _next_steps(cfg, device: str, state: str, gaps: list[str]) -> list[str]:
         steps.append("porthole doctor   # confirm sudo -n works before anything else")
     if gaps:
         steps.append(f"fill profiles/{device}/device.env: {', '.join(gaps)}")
-    steps.append("porthole brain --severity law   # ten notes, read once")
+    steps.append("porthole brain search --severity law   # ten notes, read once")
     return steps
 
 

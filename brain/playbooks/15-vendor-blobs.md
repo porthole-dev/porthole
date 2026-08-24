@@ -28,7 +28,7 @@ them. That is this.
 ## Read without mounting, and without root
 
 ```sh
-porthole blobs unpack factory.zip --list    # a factory image NESTS
+porthole blobs unpack factory.zip --dry-run    # a factory image NESTS
 porthole blobs unsparse vendor.img          # Android sparse -> raw
 porthole blobs ls vendor.raw.img            # ext4, via debugfs, no mount
 porthole blobs inventory vendor.raw.img     # what consumes what

@@ -51,7 +51,8 @@ virtualenv. If you have Python 3.8+ and OpenSSH you can already run most of it.
 | pmbootstrap | building and flashing images | you can still probe and debug a running device |
 | shellcheck | `make lint` when contributing | optional |
 
-**You do not need all of it to start.** Run `porthole doctor` and it will tell
+**You do not need all of it to start.** Run `porthole next      # where am I, and what is next?
+porthole doctor` and it will tell
 you exactly what is missing, what each thing is for, and the install command
 **for your distribution** — it reads `/etc/os-release` and adjusts.
 
@@ -167,7 +168,7 @@ porthole 0.1.0
   · identity  not configured
     profiles  1 (google-taimen)
 
-  → porthole init --device <codename>   set up, once
+  → porthole init <codename>   set up, once
 
 `porthole --help` for all verbs.
 ```
@@ -283,8 +284,8 @@ instead of the file.
 Then:
 
 ```sh
-porthole init --device oneplus-enchilada
-porthole brain --severity law     # ten notes. Read them before you start.
+porthole init oneplus-enchilada
+porthole brain search --severity law     # ten notes. Read them before you start.
 cat profiles/oneplus-enchilada/checklist.md
 ```
 

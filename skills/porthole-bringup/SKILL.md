@@ -74,6 +74,6 @@ observations cannot be re-audited later.
 
 - A fact about this device → `profiles/<codename>/device.env`
 - A lesson that generalises → a note in `brain/traps/` with a `scope:` line and
-  its evidence, then `porthole brain --reindex`
+  its evidence, then `porthole brain reindex`
 - A tool you had to write → `tools/` (generic) or the profile's `tools/`
   (vendor-specific), with the standard header

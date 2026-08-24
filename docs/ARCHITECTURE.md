@@ -99,7 +99,7 @@ Every tool opens with a block an agent can read with `head -20`:
 ```
 
 All four fields are required and `tests/test_tools.py` enforces them, along with
-valid scope and needs values. `porthole tools --lint` lists any gaps.
+valid scope and needs values. `porthole tools lint` lists any gaps.
 
 `needs` values:
 
