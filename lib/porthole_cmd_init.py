@@ -208,6 +208,9 @@ SPEC = {
         "address, your tool paths. Never committed.\n\n"
         "Interactive at a terminal, flag-driven otherwise, so an agent can\n"
         "bootstrap headless."),
+    # It calls ask() in a loop and would otherwise appear to hang in a
+    # drawer with no visible prompt. The console hands the real tty over.
+    "interactive": True,
     # The positional IS the device. `device_pos` used to exist only because the
     # injected --device selector collided with it; both go away together.
     "device_flag": False,

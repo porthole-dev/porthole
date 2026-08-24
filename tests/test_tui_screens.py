@@ -629,6 +629,38 @@ def test_an_unrecognised_payload_is_refused_not_formatted_into_a_command():
     tui_harness.pilot(make, body)
 
 
+# -- Task 14: interactive verbs get the real terminal ---------------------
+#
+# A pilot cannot drive a real tty handover (App.suspend() hands the actual
+# terminal to a subprocess) -- these two prove ROUTING only: an interactive
+# command reaches _suspend_and_run instead of being streamed into the
+# drawer, and a streaming command never touches _suspend_and_run at all.
+# The tty handover itself is unverified by this suite; see the task report.
+
+def test_interactive_command_routes_through_suspend_not_the_drawer():
+    async def body(app, pilot):
+        calls = []
+        app.screen._suspend_and_run = lambda command: calls.append(command)
+        app.screen._spawn("porthole serial console")
+        await pilot.pause()
+        assert calls == ["porthole serial console"], calls
+        assert app.jobs.jobs == [], \
+            "an interactive command must not also be streamed into the drawer"
+    tui_harness.pilot(make, body)
+
+
+def test_a_streaming_command_never_touches_suspend():
+    async def body(app, pilot):
+        calls = []
+        app.screen._suspend_and_run = lambda command: calls.append(command)
+        app.screen._spawn("porthole brief")
+        await pilot.pause()
+        assert calls == []
+        assert len(app.jobs.jobs) == 1
+        app.jobs.cancel_all()
+    tui_harness.pilot(make, body)
+
+
 def main():
     return tui_harness.run(globals())
 

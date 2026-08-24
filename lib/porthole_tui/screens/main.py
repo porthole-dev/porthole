@@ -168,9 +168,37 @@ class MainScreen(Screen):
         self.app.push_screen(ConfirmRun(command, is_risky(command)), answered)
 
     def _spawn(self, command) -> None:
+        from ..jobs import is_interactive
+        if is_interactive(self.app.root, command):
+            self._suspend_and_run(command)
+            return
         job = self.app.jobs.spawn(command)
         self.query_one(JobDrawer).attach(job)
         self.notify("running: {}".format(command))
+
+    def _suspend_and_run(self, command) -> None:
+        """Hand the real terminal over.
+
+        `porthole serial console` drives termios directly and `porthole
+        init` prompts in a loop -- piping either into the drawer would
+        mangle the former and make the latter look hung with no visible
+        prompt. The output belongs to the command.
+        """
+        import shlex
+        import subprocess
+        import sys
+        argv = shlex.split(command)
+        with self.app.suspend():
+            print("\n$ {}\n".format(command))
+            try:
+                subprocess.run([sys.executable,
+                                str(self.app.root / "bin" / "porthole")]
+                               + argv[1:])
+            except OSError as exc:
+                print("could not run it: {}".format(exc))
+            input("\n[enter] back to porthole ")
+        # An interactive command may well have changed the device's state.
+        self.app.store.refresh()
 
     def on_catalogue_chosen(self, event) -> None:
         from ..content import for_milestone, for_note, for_tool

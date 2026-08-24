@@ -213,6 +213,27 @@ def test_shell_snippets_are_recognised_and_excluded():
     assert argspec.is_direct("porthole blobs extract v.img --match 'wlan|bdwlan'", "blobs")
 
 
+def test_interactive_is_a_bool_for_every_verb():
+    for spec in porthole_cli.discover(ROOT):
+        assert spec.get("interactive", False) in (True, False), spec["verb"]
+
+
+def test_serial_declares_itself_interactive():
+    # It drives termios directly. Streaming it into a drawer would mangle it,
+    # and a pty here would be a second terminal emulator in a project that
+    # already has one.
+    specs = {s["verb"]: s for s in porthole_cli.discover(ROOT)}
+    assert specs["serial"].get("interactive") is True
+
+
+def test_is_interactive_reads_the_registry():
+    from porthole_tui import jobs
+    assert jobs.is_interactive(ROOT, "porthole serial console")
+    assert not jobs.is_interactive(ROOT, "porthole brief")
+    assert not jobs.is_interactive(ROOT, "porthole")
+    assert not jobs.is_interactive(ROOT, "sh -c true")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
