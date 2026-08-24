@@ -9,6 +9,7 @@ per device makes that class of mistake visible instead of silent.
 from __future__ import annotations
 
 from .. import theme as T
+from . import _list
 
 
 def render(win, snap, height, width, sel=0):
@@ -17,12 +18,15 @@ def render(win, snap, height, width, sel=0):
     win.addstr(1, 2, "device", T.attr(T.DIM))
     win.addstr(1, 22, "working repo", T.attr(T.DIM))
     win.addstr(1, 58, "pmaports", T.attr(T.DIM))
-    for i, name in enumerate(devices):
+    rows = max(1, height - 6)
+    visible, offset, sel = _list.window(devices, sel, rows)
+    count = _list.scrollbar(offset, len(visible), len(devices))
+    if count:
+        win.addstr(1, max(0, width - len(count) - 2), count, T.attr(T.DIM))
+    for i, name in enumerate(visible):
         y = 3 + i
-        if y >= height - 3:
-            break
         live = name == snap.device
-        cur = i == sel
+        cur = offset + i == sel
         mark = T.g("tick") if live else " "
         win.addstr(y, 2, f"{mark} {T.fit(name, 17).ljust(17)}",
                    T.attr(T.ACTIVE if live else T.BASE,
@@ -33,9 +37,9 @@ def render(win, snap, height, width, sel=0):
                    T.attr(T.BASE if wd else T.WARN))
         win.addstr(y, 58, T.fit(_short(pm) or "shared", max(0, width - 60)),
                    T.attr(T.BASE if pm else T.DIM))
-    y = min(3 + len(devices), height - 3) + 1
-    win.addstr(y, 2, "A repo shown as 'not set' is not inherited from another "
-                     "device — that was the bug.", T.attr(T.DIM))
+    y = min(3 + len(visible), height - 3) + 1
+    win.addstr(y, 2, T.fit("A repo shown as 'not set' is not inherited from "
+                           "another device.", max(0, width - 4)), T.attr(T.DIM))
     return len(devices)
 
 

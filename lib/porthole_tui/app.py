@@ -23,10 +23,10 @@ import sys
 
 from . import theme as T
 from .model import Model
-from .panes import brain, console, devices, palette, port, tools
+from .panes import brain, detail, devices, palette, port, tools
 
 PANES = [("port", port), ("devices", devices), ("tools", tools),
-         ("brain", brain), ("console", console)]
+         ("brain", brain)]
 
 # Words that mean a command can change the device or the host irreversibly.
 # This is a SECOND opinion, not the first: `safe` is a human judgement recorded
@@ -67,10 +67,14 @@ class App:
         self.message = ""
         self.message_role = T.DIM
         self.items: list = []
-        self.console_lines: list = []
+        self.doc = None            # the detail/help overlay, when open
+        self.doc_sel = 0
         self.count = 0
         self.page = 10
         self.running = True
+
+    def scroll(self, delta: int) -> None:
+        self.doc_sel = max(0, min(self.doc_sel + delta, max(0, self.count - 1)))
 
     def move(self, delta: int) -> None:
         """Move the selection, clamped to what actually exists.
@@ -126,7 +130,16 @@ class App:
         snap = self.model.snapshot
         self.header(stdscr, snap, w)
 
-        if not snap.stamp and not snap.error:
+        if snap.error:
+            stdscr.addstr(2, 2, "could not read this port", T.attr(T.CRIT, bold=True))
+            for i, line in enumerate(str(snap.error).splitlines()[:6]):
+                stdscr.addstr(4 + i, 4, T.fit(line, w - 6), T.attr(T.BASE))
+            stdscr.addstr(11, 2, "r retry    2 pick another device    q quit",
+                          T.attr(T.DIM))
+            self.footer(stdscr, w, h)
+            stdscr.refresh()
+            return
+        if not snap.stamp:
             # First frame, model still loading. Say so rather than drawing an
             # empty pane that reads as a broken tool.
             stdscr.addstr(2, 2, "reading the port…", T.attr(T.DIM))
@@ -135,6 +148,15 @@ class App:
             return
 
         body = _Sub(stdscr, 1, h - 2)
+        if self.doc is not None:
+            n = detail.render(body, snap, h - 2, w, self.doc_sel, self.doc)
+            self.count = n
+            self.page = max(1, h - 7)
+            if self.doc_sel > max(0, n - 1):
+                self.doc_sel = max(0, n - 1)
+            self.footer(stdscr, w, h)
+            stdscr.refresh()
+            return
         if self.in_palette:
             if not self.items:
                 self.items = palette.collect(snap)
@@ -144,9 +166,6 @@ class App:
             name, mod = PANES[self.pane]
             if name in ("tools", "brain"):
                 n = mod.render(body, snap, h - 2, w, self.sel, self.query)
-            elif name == "console":
-                n = mod.render(body, snap, h - 2, w, self.sel,
-                               self.console_lines)
             else:
                 n = mod.render(body, snap, h - 2, w, self.sel)
         self.count = n
@@ -188,8 +207,11 @@ class App:
             stdscr.addstr(h - 1, 0, T.fit(" " + self.message, w - 1),
                           T.attr(self.message_role))
             return
-        tabs = "  ".join(f"{i + 1} {n}" for i, (n, _) in enumerate(PANES))
-        hint = f" {tabs}    / palette    r refresh    ? keys    q quit"
+        if self.doc is not None:
+            hint = " esc back    j k scroll    r run it    ? keys    q quit"
+        else:
+            tabs = "  ".join(f"{i + 1} {n}" for i, (n, _) in enumerate(PANES))
+            hint = (f" {tabs}    / filter    ^p palette    ? keys    q quit")
         if self.model.busy:
             hint += "   working…"
         stdscr.addstr(h - 1, 0, T.fit(hint, w - 1), T.attr(T.DIM))
@@ -201,32 +223,60 @@ class App:
         if self.in_palette or self.in_filter:
             return self.text_key(stdscr, ch)
 
+        # Esc closes what is open before it quits: quitting on Esc while a
+        # note is on screen loses the whole session to a reflex.
+        if ch == 27 and (self.doc is not None or self.in_palette):
+            self.doc, self.in_palette, self.query = None, False, ""
+            return
         if ch in (ord("q"), 27):
+            if self.doc is not None:
+                self.doc = None
+                return
             self.running = False
+        elif ch == ord("?"):
+            self.doc = detail.for_help(PANES)
+            self.doc_sel = 0
         elif ch == ord("/"):
-            self.in_palette = True
-            self.query = ""
-            self.sel = 0
-        elif ord("1") <= ch <= ord("5"):
+            # `/` filters the list you are looking at, which is what every
+            # editor does. It used to open the palette while the real filter
+            # was `f`, a key named in no footer and no help.
+            if PANES[self.pane][0] in ("tools", "brain") and self.doc is None:
+                self.in_filter, self.query, self.sel = True, "", 0
+            else:
+                self.in_palette, self.query, self.sel = True, "", 0
+        elif ch == 16:                            # ctrl-P
+            self.in_palette, self.query, self.sel = True, "", 0
+        elif ch == 9:                             # tab
+            self.pane = (self.pane + 1) % len(PANES)
+            self.sel, self.query, self.doc = 0, "", None
+        elif ord("1") <= ch < ord("1") + len(PANES):
             self.pane = ch - ord("1")
             self.sel = 0
             self.query = ""
+            self.doc = None
         elif ch == ord("r"):
             self.model.refresh()
             self.items = palette.collect(self.model.snapshot)
             self.note("refreshing", T.DIM)
         elif ch in (curses.KEY_DOWN, ord("j")):
-            self.move(1)
+            (self.scroll if self.doc is not None else self.move)(1)
         elif ch in (curses.KEY_UP, ord("k")):
-            self.move(-1)
+            (self.scroll if self.doc is not None else self.move)(-1)
         elif ch in (curses.KEY_NPAGE, 6):        # PgDn, ctrl-F
-            self.move(self.page)
+            (self.scroll if self.doc is not None else self.move)(self.page)
         elif ch in (curses.KEY_PPAGE, 2):        # PgUp, ctrl-B
-            self.move(-self.page)
+            (self.scroll if self.doc is not None else self.move)(-self.page)
         elif ch in (curses.KEY_HOME, ord("g")):
-            self.sel = 0
+            self.doc_sel = 0 if self.doc is not None else self.sel
+            self.sel = 0 if self.doc is None else self.sel
         elif ch in (curses.KEY_END, ord("G")):
-            self.sel = max(0, self.count - 1)
+            if self.doc is not None:
+                self.doc_sel = max(0, self.count - 1)
+            else:
+                self.sel = max(0, self.count - 1)
+        elif ch == ord("r") and self.doc is not None:
+            if self.doc.command:
+                self.launch(stdscr, self.doc.command, safe=self.doc.safe)
         elif ch == ord("f") and PANES[self.pane][0] in ("tools", "brain"):
             self.in_filter = True
             self.query = ""
@@ -264,10 +314,48 @@ class App:
             hits = palette.rank(self.items, self.query)
             if not hits or self.sel >= len(hits):
                 return
+            item = hits[self.sel]
             self.in_palette = False
-            return self.launch(stdscr, hits[self.sel]["run"])
+            if item["kind"] == "note":
+                self.doc = detail.for_note(self.root, item["id"])
+                self.doc_sel = 0
+                return
+            if item["kind"] == "tool":
+                self.doc = detail.for_tool(self.root, item["id"])
+                self.doc_sel = 0
+                return
+            if item["kind"] == "milestone":
+                for row in (snap.rows or []):
+                    if row["id"] == item["id"]:
+                        self.doc = detail.for_milestone(row)
+                        self.doc_sel = 0
+                        return
+            return self.launch(stdscr, item["run"])
 
+        root = self.root
         name = PANES[self.pane][0]
+        if name == "tools":
+            import porthole_cmd_tools as tmod
+            tools = tmod.collect(root, snap.device)
+            if self.query:
+                q = self.query.lower()
+                tools = [x for x in tools if q in x.name.lower()
+                         or q in (x.summary or "").lower()]
+            if self.sel < len(tools):
+                self.doc = detail.for_tool(root, tools[self.sel].name)
+                self.doc_sel = 0
+            return
+        if name == "brain":
+            import porthole_cmd_brain as bmod
+            notes = bmod.load_notes(root)
+            if self.query:
+                q = self.query.lower()
+                notes = [n for n in notes if q in n.title.lower()
+                         or q in n.id.lower() or q in n.body.lower()]
+            if self.sel < len(notes):
+                self.doc = detail.for_note(root, notes[self.sel].id)
+                self.doc_sel = 0
+            return
         if name == "devices":
             if self.sel < len(snap.devices):
                 target = snap.devices[self.sel]
@@ -309,7 +397,11 @@ class App:
         stdscr.refresh()
         stdscr.nodelay(False)
         ch = stdscr.getch()
-        stdscr.nodelay(True)
+        # Restore the LOOP's timeout, not nodelay(True): nodelay is timeout(0),
+        # so getch() would return -1 immediately forever and run() would spin a
+        # core after every confirmation, accepted or cancelled. Same class as
+        # the napms GIL bug this file warns about 200 lines up.
+        stdscr.timeout(60)
         return ch == ord("y")
 
     def shell(self, stdscr, command) -> None:

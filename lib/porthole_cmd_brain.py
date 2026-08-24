@@ -501,7 +501,7 @@ SPEC = {
     "order": 50,
     "help": "search the second brain",
     "description": (
-        "47 scoped notes: laws, traps, playbooks, workflow. --scope filters to\n"
+        "Scoped notes: laws, traps, playbooks, workflow. --scope filters to\n"
         "what applies to your device and always includes the generic notes,\n"
         "because hiding the laws from someone who filtered would be backwards."),
     "args": [

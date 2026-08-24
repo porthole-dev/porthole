@@ -11,7 +11,7 @@ Pixel 2 XL, made generic — so the next device starts from month three instead 
 day one.
 
 ```
-114 tools · 50 knowledge notes · 18 commands · zero third-party dependencies
+98 tools · 55 knowledge notes · 25 commands · zero third-party dependencies
 ```
 
 Docs: `make docs-serve`, or set the `PUBLISH_DOCS` repository
@@ -51,8 +51,7 @@ virtualenv. If you have Python 3.8+ and OpenSSH you can already run most of it.
 | pmbootstrap | building and flashing images | you can still probe and debug a running device |
 | shellcheck | `make lint` when contributing | optional |
 
-**You do not need all of it to start.** Run `porthole next      # where am I, and what is next?
-porthole doctor` and it will tell
+**You do not need all of it to start.** Run `porthole next` and it will tell
 you exactly what is missing, what each thing is for, and the install command
 **for your distribution** — it reads `/etc/os-release` and adjusts.
 
@@ -492,7 +491,7 @@ tools/                  ~95 tk-* tools: boot, flash, probe, benchmark, soak
 profiles/
   _template/            every device key, documented
   google-taimen/        the reference device: facts as data + its own tools
-brain/                  47 scoped knowledge notes
+brain/                  55 scoped knowledge notes
 docs/                   architecture, config, performance, contributing
 tests/                  everything runs with no device attached
 ```

@@ -485,6 +485,107 @@ def test_a_long_list_says_where_you_are():
     assert _list.scrollbar(0, 10, 10) == "", "no indicator when it all fits"
 
 
+def test_nothing_advertised_in_the_footer_or_a_pane_is_a_no_op():
+    """Six keys were documented and unhandled: `?` did nothing, `enter` did
+    nothing on two panes, `a` did nothing on a pane that could not work at all,
+    and every pane's keys() was dead code no help screen ever read.
+
+    A tool that advertises a key it ignores is worse than one that offers less.
+    """
+    import curses
+    from porthole_tui.app import App, PANES
+
+    app = App(ROOT, "google-taimen")
+    app.model.refresh(block=True)
+    screen = Screen()
+
+    # `?` must open something.
+    app.key(screen, ord("?"))
+    assert app.doc is not None, "? is still unhandled"
+    app.draw(screen)
+    assert "switch pane" in str(screen)
+    app.key(screen, 27)
+    assert app.doc is None, "esc did not close the overlay"
+
+    # `enter` must open a reader on every pane that lists things.
+    for index, name in ((2, "tools"), (3, "brain")):
+        app.pane, app.sel, app.doc = index, 0, None
+        app.draw(screen)
+        app.key(screen, 10)
+        assert app.doc is not None, f"enter is a no-op on the {name} pane"
+        app.key(screen, 27)
+
+
+def test_the_help_overlay_is_built_from_the_panes_themselves():
+    """keys() existed in all six panes and was never called. Reading it here is
+    what stops the footer, the panes and the help from disagreeing -- and they
+    did: two panes documented `/` as filter while `/` opened the palette."""
+    from porthole_tui.app import PANES
+    from porthole_tui.panes import detail
+    doc = detail.for_help(PANES)
+    body = "\n".join(doc.lines)
+    for name, _ in PANES:
+        assert name in body, f"{name}'s keys are missing from the help"
+    assert "?" in body and "esc" in body
+
+
+def test_every_pane_that_claims_a_key_has_it_handled():
+    """Cross-check each pane's advertised keys against the app's handler, so a
+    new pane cannot document a key nobody wired up."""
+    import inspect
+    from porthole_tui.app import App, PANES
+    handled = inspect.getsource(App.key) + inspect.getsource(App.activate)
+    for name, mod in PANES:
+        for key, _what in mod.keys():
+            if key in ("enter", "\u2191\u2193", "j k"):
+                continue
+            assert f'ord("{key}")' in handled or key in ("/",), (
+                f"the {name} pane documents {key!r} and nothing handles it")
+
+
+def test_a_confirmation_restores_the_loop_timeout():
+    """confirm() set nodelay(True) on the way out, which is timeout(0) -- so
+    after any confirmation getch() returned -1 immediately forever and the loop
+    span a core. Same class as the napms GIL bug, 200 lines later."""
+    import ast
+    import inspect
+    from porthole_tui.app import App
+
+    # Match the CALL, not the word: the fix's own comment explains why
+    # nodelay(True) is wrong, and a substring check trips on the explanation.
+    tree = ast.parse(inspect.getsource(App.confirm).strip())
+    calls = [(getattr(n.func, "attr", None),
+              [getattr(a, "value", None) for a in n.args])
+             for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    assert ("nodelay", [True]) not in calls, (
+        "confirm() clobbers the loop's timeout and leaves it busy-spinning")
+    assert any(name == "timeout" for name, _ in calls), (
+        "confirm() must restore the loop's getch timeout on the way out")
+
+
+def test_a_broken_profile_is_shown_not_swallowed():
+    """Snapshot.error was set on any failure and never rendered: a bad profile
+    produced a silently empty screen."""
+    from porthole_tui.app import App
+    app = App(ROOT, "definitely-not-a-device")
+    app.model.refresh(block=True)
+    screen = Screen()
+    app.draw(screen)
+    out = str(screen)
+    assert "could not read this port" in out, out[:200]
+    assert "ProfileNotFound" in out or "definitely-not-a-device" in out
+
+
+def test_no_pane_is_dead_code():
+    """Pane 5 rendered an empty state forever: console_lines was assigned [],
+    read once, and never appended to. It held a top-level key hostage."""
+    import inspect
+    from porthole_tui.app import App, PANES
+    src = inspect.getsource(App)
+    assert "console_lines" not in src, "the dead console pane is back"
+    assert len(PANES) == 4
+
+
 def test_the_session_clock_is_monotonic():
     from porthole_tui.model import Model
     m = Model(ROOT)
