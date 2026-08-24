@@ -45,3 +45,5 @@ Rail:focus-within, #content:focus-within, JobDrawer:focus-within {
 
 .empty { color: $text-muted; }
 .error { color: $error; text-style: bold; }
+
+.catalogue--count { height: 1; color: $text-muted; }

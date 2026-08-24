@@ -5,10 +5,10 @@ One screen with a swappable content region rather than six screens, because
 the rail must stay on screen across every section -- pushing a screen per
 section would take the spine away exactly when it is most useful.
 
-The catalogue widgets (PortView, DeviceList, ToolList, NoteList) are wired in
-by a later task. Until then every section -- including PORT -- shows the same
-labelled placeholder, which is honest: there is nothing to look at yet, and an
-empty pane reads as a broken tool where a sentence does not.
+Sections 1-4 (port, devices, tools, brain) have real catalogue widgets.
+Sections 5-6 (logs, jobs) still show the placeholder below -- their widgets
+land in a later task, and an empty pane reads as a broken tool where a
+sentence does not.
 """
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Footer, Label
 
+from ..widgets.brain import NoteList
+from ..widgets.devices import DeviceList
+from ..widgets.port import PortView
 from ..widgets.rail import Rail
+from ..widgets.tools import ToolList
 
 
 class MainScreen(Screen):
@@ -37,8 +41,9 @@ class MainScreen(Screen):
         super().__init__(**kw)
         self.sections = sections
         self.reader_open = False
-        # Populated by a later task once the catalogue widgets exist.
-        self.WIDGETS = {}
+        # Logs and jobs keep the placeholder below until a later task.
+        self.WIDGETS = {"port": PortView, "devices": DeviceList,
+                        "tools": ToolList, "brain": NoteList}
         for index, (key, _title) in enumerate(sections, start=1):
             self._bindings.bind(str(index), "section('{}')".format(key),
                                 show=False)

@@ -104,6 +104,26 @@ def test_a_raising_publish_step_does_not_wedge_the_store_forever():
     assert store.busy is False, "a raising publish step must not wedge the store"
 
 
+def test_a_refreshed_snapshot_reports_a_real_device_state():
+    """The model must actually ASK, not sit at a placeholder.
+
+    state.py exists in its current shape because the header once read UNPROBED
+    forever: the model refused to probe at all, while three milestones told
+    the user to leave the console and run doctor. The rule was never "no
+    device I/O", it was "not on the event loop". Nothing else in the suite
+    notices if that regresses.
+    """
+    store = state.Store(ROOT)
+    store.refresh(block=True)
+    snap = store.snapshot
+    assert snap.state, "state must never be empty after a refresh"
+    assert snap.state.lower() != "unprobed", \
+        "the model refused to probe: {!r}".format(snap.state)
+    assert snap.state.upper() in (
+        "BOOTED", "SSH", "FROZEN", "FASTBOOT", "RECOVERY", "ABSENT", "UNKNOWN"), \
+        "unrecognised device state {!r}".format(snap.state)
+
+
 def test_uptime_advances():
     store = state.Store(ROOT)
     first = store.uptime()
