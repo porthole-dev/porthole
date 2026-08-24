@@ -50,10 +50,21 @@ PLACEHOLDER = re.compile(r"<[^>]+>|\{[a-z_]+\}|\b(?:NAME|CODENAME|PKG|SOC|DIR|"
 
 DUMMY = "placeholder"
 
+# A few placeholders stand for a CONSTRAINED value, and a generic dummy fails
+# the parser for the wrong reason. Keeping the map tiny and explicit beats
+# teaching the extractor to read `choices=` out of the registry.
+PLACEHOLDER_VALUES = {"shell": "bash", "verb": "doctor", "action": "status",
+                      "codename": "google-taimen", "device": "google-taimen"}
+
 # Prose that happens to begin "porthole <verb>". No command contains these.
+# NB: no word that is also a real command token belongs here. "run" is a VERB
+# and "clean" an action word, and listing them hid every `porthole run ...`
+# invocation in the repository from this check. The prose lines they were added
+# for ("porthole doctor is clean", "porthole init has not been run") are still
+# caught by the function words they also contain.
 STOPWORDS = {"and", "the", "for", "is", "are", "has", "have", "not", "been",
              "to", "what", "how", "it", "this", "that", "a", "an", "of", "in",
-             "with", "resolution", "keeping", "rebuild", "clean", "run"}
+             "with", "resolution", "keeping", "rebuild"}
 
 # A note may legitimately cite a command that USED to work -- brain/ records
 # what went wrong, and the broken invocation is the evidence. A line carrying
@@ -144,11 +155,24 @@ def normalise(raw: str) -> list[str] | None:
     raw = raw[len("porthole "):] if raw.startswith("porthole ") else raw
     # A command is separated from its description by two or more spaces, or an
     # em/en dash. Both conventions are used throughout this codebase.
+    # One line can name two alternatives -- "porthole use X, or porthole
+    # new-device X". Judge the first; the second is reached on its own line
+    # elsewhere, and stitching them together produces a command nobody wrote.
+    raw = re.split(r",? \bor\b ", raw)[0]
     raw = re.split(r"\s{2,}|\s[—–]\s", raw)[0]
     raw = raw.split(" # ")[0].strip().rstrip(".,;:)`\"'")
+    # Optional-argument notation is documentation, not a token.
+    raw = re.sub(r"\[[^\]]*\]", "", raw).strip()
+    # Substitute placeholders BEFORE the shell test. The `<>` in <codename> is
+    # not a redirect, and testing first meant every placeholder command was
+    # discarded as "a shell example" -- including `porthole init --device
+    # <codename>`, the exact string this file exists to catch. 56 invocations
+    # were hidden, among them the whole newcomer family.
+    raw = PLACEHOLDER.sub(
+        lambda m: PLACEHOLDER_VALUES.get(m.group(0).strip("<>{}").lower(), DUMMY),
+        raw)
     if not raw or SHELL.search(raw):
         return None
-    raw = PLACEHOLDER.sub(DUMMY, raw)
     try:
         import shlex
         argv = shlex.split(raw)
@@ -238,6 +262,25 @@ def test_every_spec_example_parses():
             if not ok:
                 failures.append(f"{spec['verb']}: `{example}` -> {why}")
     assert not failures, "\n  ".join(failures)
+
+
+def test_specs_do_not_name_tests_that_do_not_exist():
+    """Spec/code drift is the same class as doc/CLI drift.
+
+    An acceptance table naming seven tests, six of them misspelled and all in
+    the wrong file, is not mechanically checkable -- and that is precisely what
+    the CLI spec shipped with.
+    """
+    have = set()
+    for path in (ROOT / "tests").glob("test_*.py"):
+        have |= set(re.findall(r"^def (test_\w+)", path.read_text(), re.M))
+    missing = {}
+    for spec in (ROOT / "docs" / "superpowers" / "specs").glob("*.md"):
+        named = set(re.findall(r"`(test_\w+)`", spec.read_text()))
+        gone = named - have
+        if gone:
+            missing[spec.name] = sorted(gone)
+    assert not missing, f"specs name tests that do not exist: {missing}"
 
 
 def main():

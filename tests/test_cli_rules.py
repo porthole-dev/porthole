@@ -121,15 +121,45 @@ def test_actions_are_positional_not_flags():
             f"{spec['verb']} encodes actions as flags: {sorted(offenders)}; "
             f"use a positional ACTION with choices")
 
+    # Positive control. No verb currently trips this rule, so without a
+    # synthetic offender the assertion above can never fire and the test is
+    # decoration. `brain/laws/every-test-needs-a-positive-control.md`.
+    fake = {"verb": "fake", "args": [(["--lint"], {"action": "store_true"})]}
+    offenders = {names[0] for names, kw in fake["args"]
+                 if names[0].lstrip("-").replace("-", "_") in ACTION_WORDS
+                 and kw.get("action") == "store_true"}
+    assert offenders == {"--lint"}, "the rule no longer detects a flag-action"
+
+
+# Verbs whose first positional is free text, so argparse `choices` cannot
+# constrain it. They dispatch on a leading action word themselves, and must
+# say something when that word is nearly-but-not an action -- otherwise a typo
+# silently becomes a search and an empty result reads as "no such note".
+FREE_TEXT_ACTION = {"brain", "tools"}
+
 
 def test_multi_action_verbs_declare_choices():
-    """An ACTION positional without `choices` gives no completion and no
-    error for a typo."""
+    """An ACTION positional without `choices` gives no completion and no error
+    for a typo. Checked by POSITION, not by the name `action`: hooking on the
+    name silently skipped `brain` and `tools`, the two verbs converted to
+    positional actions in the first place."""
     for spec in SPECS:
-        for names, kw in spec["args"]:
-            if names[0] == "action":
-                assert kw.get("choices"), (
-                    f"{spec['verb']}'s action positional has no choices")
+        if spec["verb"] in FREE_TEXT_ACTION:
+            continue
+        positional = [(names, kw) for names, kw in spec["args"]
+                      if not names[0].startswith("-")]
+        if not positional:
+            continue
+        names, kw = positional[0]
+        if names[0] in ("action", "ACTION"):
+            assert kw.get("choices"), (
+                f"{spec['verb']}'s action positional has no choices")
+
+
+def test_free_text_action_verbs_flag_a_near_miss():
+    """`porthole brain lnit` must not silently become a search for "lnit"."""
+    rc, out, err = run("brain", "lnit")
+    assert "lint" in (out + err), f"no suggestion offered: {out + err!r}"
 
 
 def test_soc_and_brain_take_positional_actions():

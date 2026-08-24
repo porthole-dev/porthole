@@ -28,6 +28,15 @@ import porthole_milestones as ms
 from porthole_cli import Bail, EX_FAIL, EX_OK
 
 MAX_LISTED = 6
+WIDTH = 44
+
+
+def _fit(text: str, width: int = WIDTH) -> str:
+    """Trim on a word boundary. Cutting mid-word looks like a rendering bug."""
+    if len(text) <= width:
+        return text.ljust(width)
+    cut = text[:width - 1].rsplit(" ", 1)[0]
+    return (cut + "…").ljust(width)
 
 
 def _checklist(ctx) -> pathlib.Path:
@@ -133,18 +142,18 @@ def cmd_next(args, ctx) -> int:
         shown = 0
         for row in rows:
             if row["source"] == "stale":
-                o(f"  {o.paint('! stale  ', 'red')} {row['title'][:44]:<44s} "
+                o(f"  {o.paint('! stale  ', 'red')} {_fit(row['title'])} "
                   f"{o.paint(row['evidence'] or 'ticked, but not true', 'grey')}")
                 shown += 1
         for row in rows:
             if row["state"] == ms.BLOCKED and shown < MAX_LISTED:
-                o(f"  {o.paint('· blocked', 'yellow')} {row['title'][:44]:<44s} "
+                o(f"  {o.paint('· blocked', 'yellow')} {_fit(row['title'])} "
                   f"{o.paint(row['evidence'], 'grey')}")
                 shown += 1
         recent = [r for r in rows if r["state"] == ms.DONE][-3:]
         for row in recent:
             tag = "derived" if row["source"] == "derived" else "manual "
-            o(f"  {o.paint('✓ ' + tag, 'green')} {row['title'][:44]:<44s} "
+            o(f"  {o.paint('✓ ' + tag, 'green')} {_fit(row['title'])} "
               f"{o.paint(row['evidence'] or 'ticked', 'grey')}")
         if shown or recent:
             o.blank()

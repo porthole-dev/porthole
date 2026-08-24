@@ -16,11 +16,18 @@ addresses changed. Applying `T` to downstream NEW, and independently computing
 `mainline OLD + D`, gives two derivations of the same file; where they disagree
 is a finding, never a value to average.
 
-**This is deliberately not a device tree parser.** It reads the two textual
-forms that carry the information -- `label: node@addr` declarations and `reg =
-<...>` properties -- because that is what the analysis actually needed, and a
-parser is a large dependency bought against a need that has not appeared. If a
-construct needs one, that is a finding for a human, not a feature.
+**This is deliberately not a device tree parser.** It reads exactly one textual
+form: the `label: node@addr {` declaration. That was enough to recover a real
+SoC generation delta, and a parser is a large dependency bought against a need
+that has not appeared.
+
+**Know what that does NOT cover.** A `reg = <...>` property is not read, so a
+node whose unit address is right and whose `reg` is wrong passes `verify`
+clean. `dtc` catches that mismatch (`simple_bus_reg`), which is why compiling
+is a separate, non-optional check rather than something this module claims to
+subsume. Likewise `verify` does not police nodes ADDED in the new generation:
+it proves nothing was dropped and no address was invented, not that nothing was
+added.
 
 Nothing here guesses. An address that cannot be justified is reported.
 """
@@ -172,13 +179,17 @@ def _mask(addr: str, shared: int) -> str:
 
 # ------------------------------------------------------------------- toml --
 
-def to_toml(delta: Delta, old_soc: str, new_soc: str) -> str:
+def to_toml(delta: Delta, old_soc: str, new_soc: str, origin: str = "") -> str:
     """The audit trail, as TOML.
 
     Checked in next to the device tree. Every address that differs from the
     mainline sibling cites the downstream file and line that justifies it, so
-    `verify` can prove no value was invented. That citation is the difference
-    between a port you can defend and a port you can only hope about.
+    `verify` can prove no value was invented.
+
+    `origin` is what makes those citations resolvable: "file:line" identifies
+    nothing unless the reader can obtain that exact file. Pass the repository
+    and commit the sources came from, or the audit trail is only an assertion
+    with line numbers on it.
     """
     d = delta.to_dict()
     lines = [
@@ -191,6 +202,10 @@ def to_toml(delta: Delta, old_soc: str, new_soc: str) -> str:
         f'new_soc = "{new_soc}"',
         f'old_source = "{pathlib.Path(d["old"]).name}"',
         f'new_source = "{pathlib.Path(d["new"]).name}"',
+        # Without this the citations below name a file and a line in a tree
+        # nobody can identify, which is an audit trail nobody can audit.
+        f'origin = "{origin}"' if origin else
+        '# origin = ""   # SET THIS: repo and commit the sources came from',
         "",
         "[counts]",
     ]

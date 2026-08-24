@@ -103,6 +103,11 @@ def cmd_brief(args, ctx) -> int:
             "device_protocol": "brain/playbooks/00-device-protocol.md",
             "contributing": "docs/CONTRIBUTING.md",
         },
+        # NOTE: this is a list of suggestion STRINGS. The port's next
+        # milestone is an object at payload["port"]["next"]. Same word, one
+        # level apart, different types -- kept because both names are correct
+        # in place and renaming either would break a consumer, but an agent
+        # reading this file should know before it indexes the wrong one.
         "next": _next_steps(cfg, device, state, profile_gaps),
         # The port's own state, folded in so the ONE call AGENTS.md tells an
         # agent to make first also answers "where am I". A second call for the

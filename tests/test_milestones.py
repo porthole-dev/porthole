@@ -181,12 +181,30 @@ def test_a_template_default_is_not_an_established_value():
     assert row["state"] == ms.DONE
 
 
-def test_slot_policy_does_not_nag_a_device_without_slots():
-    """Reporting todo forever for something physically absent is how a
-    checklist teaches people to skim it."""
+def test_slot_policy_is_not_completed_by_the_shipped_default():
+    """The regression this test previously ENSHRINED.
+
+    It used to assert that HAS_AB_SLOTS="0" meant done. But "0" is both the
+    template's shipped value and a real answer, so every freshly scaffolded
+    device auto-completed the A/B safety milestone -- the one whose own `why`
+    says "after the first bad flash is too late to decide this". A safety check
+    that completes itself is worse than none, because it also reports that the
+    matter is handled.
+    """
     row = one(ms.probe_slot_policy, {"PORTHOLE_HAS_AB_SLOTS": "0"})
+    assert row["state"] == ms.TODO, "an unprobed default must not read as done"
+    assert "never probed" in row["evidence"]
+
+
+def test_slot_policy_does_not_nag_a_device_with_no_slots():
+    """Once ASKED, absent hardware is done-by-not-applying: reporting todo
+    forever for something physically absent is how a checklist gets skimmed."""
+    row = one(ms.probe_slot_policy, {"PORTHOLE_SLOTS_PROBED": "fastboot-getvar",
+                                     "PORTHOLE_HAS_AB_SLOTS": "0"})
     assert row["state"] == ms.DONE
-    row = one(ms.probe_slot_policy, {"PORTHOLE_HAS_AB_SLOTS": "1"})
+    assert "probed" in row["evidence"]
+    row = one(ms.probe_slot_policy, {"PORTHOLE_SLOTS_PROBED": "fastboot-getvar",
+                                     "PORTHOLE_HAS_AB_SLOTS": "1"})
     assert row["state"] == ms.TODO
 
 
@@ -204,11 +222,27 @@ def test_no_probe_touches_the_device():
     """`brief` calls this, `brief --no-device` must work offline, and a probe
     that hangs on a dead phone would make the first command an agent runs the
     one that hangs."""
+    import ast
     import inspect
+    # Check for CALLS, not vocabulary. A probe may perfectly well say "run
+    # `fastboot getvar all`" in its advice string -- naming the fix is the
+    # whole point of the evidence field. What must not happen is executing it.
+    banned = {"run", "check_output", "call", "check_call", "Popen", "system",
+              "create_connection", "urlopen"}
     for m in ms.MILESTONES:
-        src = inspect.getsource(m.probe) if m.probe.__name__ != "<lambda>" else ""
-        for banned in ("subprocess.run", "socket", "ssh", "fastboot", "adb"):
-            assert banned not in src, f"{m.id}'s probe references {banned}"
+        if m.probe.__name__ == "<lambda>":
+            continue
+        try:
+            tree = ast.parse(inspect.getsource(m.probe).lstrip())
+        except (OSError, SyntaxError, IndentationError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                fn = node.func
+                name = getattr(fn, "attr", None) or getattr(fn, "id", None)
+                assert name not in banned, (
+                    f"{m.id}'s probe calls {name}() — probes must not execute "
+                    f"anything; `brief --no-device` has to work offline")
 
 
 def test_every_milestone_is_well_formed():

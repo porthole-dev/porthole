@@ -29,6 +29,7 @@ generic notes as well.
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
 | [a-module-parameter-that-does-not-exist-is-ignored](traps/a-module-parameter-that-does-not-exist-is-ignored.md) | `generic` | A module parameter that does not exist is silently ignored |
+| [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
@@ -87,6 +88,6 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 51
+- `generic` — 52
 - `soc:gs201` — 1
 - `soc:msm8998` — 1

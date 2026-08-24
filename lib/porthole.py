@@ -54,6 +54,7 @@ DEFAULTS = {
     # Device facts, defaulted to the conservative answer. A device with no
     # profile is assumed to have no A/B slots, because the failure mode of
     # wrongly assuming slots is flashing a partition that does not exist.
+    "PORTHOLE_SLOTS_PROBED": "",
     "PORTHOLE_HAS_AB_SLOTS": "0",
     "PORTHOLE_ACTIVE_SLOT": "",
     "PORTHOLE_SLOT_FORBIDDEN": "",

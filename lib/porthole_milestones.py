@@ -161,6 +161,12 @@ def probe_sibling(ctx):
         if not pmaports:
             return blocked("no pmaports checkout found")
         devices = pmap.load_devices(pmaports)
+        # Zero devices means the read failed, not that the silicon is new.
+        # "no sibling" drawn from an empty list is an artefact of a broken
+        # checkout wearing the evidence of a finding.
+        if not devices:
+            return blocked(f"{pmaports} lists no devices; "
+                           f"'no sibling' would be an artefact of that")
         codename = _cfg(ctx, "PORTHOLE_CODENAME") or _cfg(ctx, "PORTHOLE_DEVICE")
         matches = [d for d in devices
                    if d.soc and d.soc.endswith(soc) and d.codename != codename]
@@ -215,11 +221,23 @@ def probe_dts_compiles(ctx):
     stem = pathlib.Path(dtb).name if dtb else ""
     if not stem:
         return blocked("PORTHOLE_DTB is not set")
+    sources = [p for p in work.rglob(f"{stem}.dts") if p.is_file()]
+    newest_src = max((p.stat().st_mtime for p in sources), default=0)
     for name in (f"{stem}.dtb", f"{stem}.dtbo"):
-        hits = [p for p in work.rglob(name) if p.is_file()]
-        if hits:
-            size = hits[0].stat().st_size
-            return done(f"{hits[0].relative_to(work)} ({size // 1024} KiB)")
+        for hit in work.rglob(name):
+            if not hit.is_file():
+                continue
+            st = hit.stat()
+            # A file merely NAMED .dtb proves nothing. A real one has a
+            # header and some content, and one older than its own source
+            # describes a tree that no longer exists.
+            if st.st_size < 1024:
+                return todo(f"{hit.relative_to(work)} is {st.st_size} bytes — "
+                            f"not a device tree blob")
+            if newest_src and st.st_mtime < newest_src:
+                return todo(f"{hit.relative_to(work)} is older than its "
+                            f"source — recompile before trusting it")
+            return done(f"{hit.relative_to(work)} ({st.st_size // 1024} KiB)")
     return todo("no compiled dtb in the working repo")
 
 
@@ -236,8 +254,12 @@ def probe_verify_script(ctx):
     for name in ("verify.sh", "verify"):
         path = work / name
         if path.is_file():
-            ok = "executable" if path.stat().st_mode & 0o111 else "NOT executable"
-            return done(f"{name} ({ok})")
+            # A gate nobody can execute is not a gate. Reporting `done` with
+            # the evidence "NOT executable" was this module's own failure mode
+            # -- a confident claim contradicted by the fact printed beside it.
+            if not path.stat().st_mode & 0o111:
+                return todo(f"{name} exists but is not executable")
+            return done(f"{name} (executable)")
     return todo(f"no verify.sh in {work}")
 
 
@@ -273,12 +295,22 @@ def _pmaports_pkg(ctx, name):
 def probe_slot_policy(ctx):
     """A/B safety, and the reason it is not optional.
 
-    Only meaningful where the device HAS slots. Where it does not, the
-    milestone is done by not applying -- reporting "todo" forever for something
-    physically absent is how a checklist teaches people to ignore it.
+    Where the device genuinely has no slots this is done-by-not-applying:
+    reporting "todo" forever for absent hardware is how a checklist teaches
+    people to skim it.
+
+    But "no slots" must be ESTABLISHED, not assumed. The template ships
+    PORTHOLE_HAS_AB_SLOTS="0" and the config layer defaults it to "0", so
+    before this fix every freshly scaffolded device silently auto-completed the
+    one milestone whose own `why` says "after the first bad flash is too late
+    to decide this". A safety milestone that completes itself is worse than one
+    that does not exist, because it also tells you it is handled.
     """
+    if not _cfg(ctx, "PORTHOLE_SLOTS_PROBED"):
+        return todo("slots never probed — HAS_AB_SLOTS is still the shipped "
+                    "default; `fastboot getvar all` is what answers this")
     if _cfg(ctx, "PORTHOLE_HAS_AB_SLOTS") != "1":
-        return done("no A/B slots on this device")
+        return done("no A/B slots on this device (probed)")
     if _cfg(ctx, "PORTHOLE_SLOT_FORBIDDEN") or _cfg(ctx, "PORTHOLE_ACTIVE_SLOT"):
         return done(f"forbidden={_cfg(ctx, 'PORTHOLE_SLOT_FORBIDDEN') or '(none)'}, "
                     f"active={_cfg(ctx, 'PORTHOLE_ACTIVE_SLOT') or '(unset)'}")
@@ -299,13 +331,18 @@ def probe_identity(ctx):
 def probe_reachable(ctx):
     """Is the device answering? Never probed here -- see the note above.
 
-    State is read from what the config already resolved (TK_DEVICE_STATE or a
-    cached probe). If nothing knows, this is BLOCKED rather than todo: an
-    unreachable device is not a task you can pick up, it is a precondition.
+    State comes from TK_DEVICE_STATE / PORTHOLE_DEVICE_STATE, which a human or
+    a tool SETS to skip the real probe. So a positive reading is an assertion,
+    not a measurement, and the evidence string says so: this milestone is at
+    most as trustworthy as whoever exported that variable.
+
+    If nothing knows, BLOCKED rather than todo -- an unreachable device is not
+    a task you can pick up, it is a precondition.
     """
     state = (_cfg(ctx, "TK_DEVICE_STATE") or _cfg(ctx, "PORTHOLE_DEVICE_STATE"))
     if state.upper() in ("BOOTED", "SSH"):
-        return done(f"device state {state}")
+        return done(f"declared {state} (asserted, not probed — "
+                    f"`porthole doctor` measures it)")
     if state:
         return blocked(f"device state is {state}, not BOOTED")
     return blocked("device state not probed (run `porthole doctor`)")

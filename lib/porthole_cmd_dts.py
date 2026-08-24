@@ -462,7 +462,8 @@ def cmd_port(args, ctx) -> int:
         delta = dd.Delta(args.from_dts, args.to_dts)
         doc = delta.to_dict()
         if args.out:
-            body = dd.to_toml(delta, args.old_soc or "old", args.new_soc or "new")
+            body = dd.to_toml(delta, args.old_soc or "old",
+                              args.new_soc or "new", args.origin or "")
             pathlib.Path(args.out).write_text(body)
 
         def render():
@@ -622,6 +623,10 @@ SPEC = {
                       "help": "port delta: the OLD vendor tree"}),
         (["--to"], {"dest": "to_dts", "metavar": "DTS",
                     "help": "port delta: the NEW vendor tree"}),
+        (["--origin"], {"metavar": "REPO@SHA",
+                        "help": "port delta: where the vendor sources came "
+                                "from — without it the citations resolve to "
+                                "nothing"}),
         (["--old-soc"], {"metavar": "SOC", "help": "port delta: label for the old SoC"}),
         (["--new-soc"], {"metavar": "SOC", "help": "port delta: label for the new SoC"}),
         (["--template"], {"metavar": "DTS",

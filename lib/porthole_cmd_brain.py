@@ -116,6 +116,16 @@ def cmd_brain(args, ctx) -> int:
     query = list(args.query or [])
     if query and query[0] in ACTIONS:
         action, query = query[0], query[1:]
+    elif query:
+        # A free-text query cannot use argparse `choices`, so a mistyped action
+        # silently becomes a search for that typo. Searching is the right
+        # fallback -- but say so, or the user reads an empty result as "no such
+        # note" rather than "you typed the verb wrong".
+        import difflib
+        near = difflib.get_close_matches(query[0], ACTIONS, n=1, cutoff=0.75)
+        if near:
+            ctx.out.warn(f"searching for {query[0]!r}; did you mean "
+                         f"`porthole brain {near[0]}`?")
     args.query = query
 
     if action == "new":

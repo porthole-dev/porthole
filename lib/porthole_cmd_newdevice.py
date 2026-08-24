@@ -110,7 +110,10 @@ def getvar_all(fastboot: str) -> dict[str, str]:
 
 
 def seed_from_fastboot(vals: dict[str, str]) -> dict[str, str]:
-    seeded = {}
+    # A witness that the question was ASKED. "0" is both the shipped default
+    # and a real answer, so without this a device nobody probed is
+    # indistinguishable from a device with no slots.
+    seeded = {"PORTHOLE_SLOTS_PROBED": "fastboot-getvar"}
     slots = vals.get("slot-count") or vals.get("has-slot:boot")
     if slots and slots not in ("0", "no"):
         seeded["PORTHOLE_HAS_AB_SLOTS"] = "1"

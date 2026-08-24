@@ -557,8 +557,16 @@ def cmd_new(args, ctx) -> int:
     """Scaffold a device document in the right place, with the right header."""
     kind = args.name or "handoff"
     if kind not in KINDS:
-        raise Bail(f"unknown kind {kind!r}", EX_USAGE,
-                   f"kinds: {', '.join(KINDS)}")
+        # `log` is the DIRECTORY dated entries land in, and the linter names it.
+        # Someone reading that advice reasonably types it as a kind, so accept
+        # it rather than correcting them with a message that reads as a
+        # contradiction.
+        if kind == "log":
+            kind = "handoff"
+        else:
+            raise Bail(f"unknown kind {kind!r}", EX_USAGE,
+                       f"kinds: {', '.join(KINDS)} — `log` is the directory "
+                       f"dated entries land in, not a kind")
     docs = _docs_root(ctx)
     device = ctx.cfg.get("PORTHOLE_DEVICE", "device")
     date = _today(ctx)
