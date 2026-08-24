@@ -19,10 +19,10 @@ help:            ## show this help
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 test:            ## run every test (no device needed)
+	@# Globbed, not listed. CI globs; a hand-kept list here silently diverged
+	@# and eight suites ran in CI but never locally.
 	@fail=0; \
-	for t in tests/test_config.py tests/test_cli.py tests/test_tools.py \
-	         tests/test_sandbox.py tests/test_pmaports.py \
-	         tests/test_blobs.py tests/test_kconfig.py; do \
+	for t in tests/test_*.py; do \
 	  printf '%-28s ' "$$(basename $$t)"; \
 	  $(PY) $$t || fail=1; \
 	done; \
