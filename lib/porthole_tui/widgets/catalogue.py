@@ -73,8 +73,8 @@ class Catalogue(Vertical):
         yield Label("", id="count", classes="catalogue--count")
         yield ListView(id="rows")
 
-    def on_mount(self) -> None:
-        self._repopulate()
+    async def on_mount(self) -> None:
+        await self._repopulate()
         # `mount()` is asynchronous, so the caller's `widget.focus()` in
         # `_show()` (screens/main.py) races the compose of #rows and loses:
         # this container itself is not focusable, so that call is a silent
@@ -83,19 +83,31 @@ class Catalogue(Vertical):
         # immediately, without a tab first.
         self.query_one("#rows", ListView).focus()
 
-    def watch_snapshot(self, _old, _new) -> None:
-        self._repopulate()
+    async def watch_snapshot(self, _old, _new) -> None:
+        await self._repopulate()
 
-    def watch_query(self, _old, _new) -> None:
-        self._repopulate()
+    async def watch_query(self, _old, _new) -> None:
+        await self._repopulate()
 
-    def _repopulate(self) -> None:
+    async def _repopulate(self) -> None:
+        """Async because `ListView.clear()` is.
+
+        It returns an AwaitRemove and the removal has NOT happened when it
+        returns. _repopulate runs twice on entry -- once from on_mount, once
+        from watch_snapshot when MainScreen._show assigns the snapshot -- so
+        dropping that awaitable left the first population in the DOM while
+        the second appended beside it: 95 tools rendered as 190 rows, empty
+        states printed their message twice, the count label said 95 while
+        showing 190, and on_list_view_selected's `index < len(self._payloads)`
+        guard made Enter do nothing at all on every row past the first
+        population. Textual permits async on_mount and async watchers.
+        """
         try:
             listing = self.query_one("#rows", ListView)
             count = self.query_one("#count", Label)
         except Exception:  # noqa: BLE001
             return                      # not mounted yet
-        listing.clear()
+        await listing.clear()
         rows = self.visible_rows()
         self._payloads = [payload for _label, payload in rows]
         count.update(self.count_label())

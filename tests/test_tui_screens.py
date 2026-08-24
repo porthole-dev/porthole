@@ -1280,6 +1280,83 @@ def test_a_verb_without_arguments_runs_instead_of_opening_an_empty_form():
     tui_harness.pilot(make, body)
 
 
+# -- The list on screen, not the pure method behind it --------------------
+#
+# Every other catalogue test asserts against visible_rows()/count_label()/
+# _payloads, which are pure and were always right. The ListView's real
+# children were asserted nowhere, which is how an un-awaited
+# `ListView.clear()` rendered every list twice through seventeen reviews.
+
+def test_a_catalogue_renders_exactly_as_many_rows_as_it_has_payloads():
+    async def body(app, pilot):
+        # Warm BEFORE entering the section: the doubling only happens when
+        # _show() has a real snapshot to assign, so both _repopulate calls
+        # (on_mount, then watch_snapshot) have rows to append.
+        app.store.refresh(block=True)
+        await pilot.press("3")
+        await pilot.pause()
+        listing = app.screen.query_one(ToolList)
+        rows = listing.query_one("#rows", ListView)
+        assert len(listing._payloads) > 1, \
+            "this repo must have tools for the check to mean anything"
+        assert len(rows.children) == len(listing._payloads), \
+            "on entry: {} rows drawn for {} payloads".format(
+                len(rows.children), len(listing._payloads))
+        await pilot.press("r")
+        await pilot.pause(0.6)          # let the worker land and _poll tick
+        assert len(rows.children) == len(listing._payloads), \
+            "after r: {} rows drawn for {} payloads".format(
+                len(rows.children), len(listing._payloads))
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("3")
+        await pilot.pause()
+        listing = app.screen.query_one(ToolList)
+        rows = listing.query_one("#rows", ListView)
+        assert len(rows.children) == len(listing._payloads), \
+            "re-entering: {} rows drawn for {} payloads".format(
+                len(rows.children), len(listing._payloads))
+    tui_harness.pilot(make, body)
+
+
+def test_enter_opens_the_last_row_too_not_just_the_first_half():
+    # on_list_view_selected guards `index < len(self._payloads)`. With the
+    # list rendered twice, every row past the first population had no payload
+    # behind it and enter did nothing at all -- silently.
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        await pilot.press("3")
+        await pilot.pause()
+        listing = app.screen.query_one(ToolList)
+        rows = listing.query_one("#rows", ListView)
+        last = len(rows.children) - 1
+        assert last > 0, "needs more than one row"
+        rows.focus()
+        rows.index = last
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, Reader), \
+            "enter on row {} of {} opened nothing: {}".format(
+                last, len(rows.children), type(app.screen).__name__)
+    tui_harness.pilot(make, body)
+
+
+def test_the_palette_draws_one_row_per_hit():
+    async def body(app, pilot):
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        screen = app.screen
+        rows = screen.query_one("#palette-rows", ListView)
+        screen.query_one("#palette-query", Input).value = "br"
+        await pilot.pause()
+        assert screen.hits, "the filter must match something"
+        assert len(rows.children) == len(screen.hits[:200]), \
+            "{} rows drawn for {} hits".format(
+                len(rows.children), len(screen.hits))
+    tui_harness.pilot(make, body)
+
+
 def main():
     return tui_harness.run(globals())
 

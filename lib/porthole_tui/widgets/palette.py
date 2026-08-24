@@ -111,13 +111,19 @@ class Palette(ModalScreen):
                     id="palette-query")
         yield ListView(id="palette-rows")
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.query_one("#palette-query", Input).focus()
-        self._repopulate("")
+        await self._repopulate("")
 
-    def _repopulate(self, query) -> None:
+    async def _repopulate(self, query) -> None:
+        # Awaited for the same reason Catalogue._repopulate is: clear()
+        # returns an AwaitRemove and the rows are still there when it
+        # returns, so an un-awaited clear leaves the previous result set
+        # stacked under the new one -- and on_list_view_selected's
+        # `index < len(self.hits)` guard then makes Enter dead on the half
+        # that has no hit behind it.
         listing = self.query_one("#palette-rows", ListView)
-        listing.clear()
+        await listing.clear()
         self.hits = rank(self.items, query)
         if not self.hits:
             listing.append(ListItem(Label("nothing matches", classes="empty")))
@@ -127,8 +133,8 @@ class Palette(ModalScreen):
                 BADGE.get(item["kind"], "?"), item["label"][:28],
                 item["detail"][:50]))))
 
-    def on_input_changed(self, event) -> None:
-        self._repopulate(event.value)
+    async def on_input_changed(self, event) -> None:
+        await self._repopulate(event.value)
 
     def on_input_submitted(self, event) -> None:
         self.query_one("#palette-rows", ListView).focus()
