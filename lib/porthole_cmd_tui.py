@@ -20,15 +20,22 @@ def cmd_tui(args, ctx) -> int:
     if not sys.stdout.isatty():
         raise Bail("the console needs a terminal", EX_USAGE,
                    "for a pipe or an agent, use `porthole next --json`")
-    target = pathlib.Path(ctx.root) / "bin" / "porthole-tui"
-    if not target.exists():
-        raise Bail(f"{target} is missing", EX_FAIL)
-    argv = [sys.executable, str(target)]
+    # Run the gate HERE as well as in __main__, so a missing dependency is a
+    # Bail with a hint rather than a subprocess that prints and exits 1.
+    lib = pathlib.Path(ctx.root) / "lib"
+    sys.path.insert(0, str(lib))
+    from porthole_tui import gate
+    problem = gate.check()
+    if problem:
+        raise Bail(problem.rstrip(), EX_FAIL)
+    argv = [sys.executable, "-m", "porthole_tui"]
     device = getattr(args, "device", None) or ctx.cfg.get("PORTHOLE_DEVICE", "")
     if device:
         argv += ["-d", device]
-    os.execv(sys.executable, argv)   # replace: two processes for one screen
-    return EX_FAIL                   # unreachable
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(lib) + os.pathsep + env.get("PYTHONPATH", "")
+    os.execve(sys.executable, argv, env)   # replace: two processes for one screen
+    return EX_FAIL                         # unreachable
 
 
 SPEC = {
