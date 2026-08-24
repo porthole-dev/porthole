@@ -264,6 +264,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `brief` | everything an agent needs to start a session, in one call | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
 | `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |
+| `verify` | every check that runs with no device attached | yes | no |
 | `tools` | search the toolbox and read a tool's contract | yes | no |
 | `soc` | find devices sharing your SoC and inherit their working values | yes | no |
 | `dts` | write and check a device tree without starting from blank | yes | no |

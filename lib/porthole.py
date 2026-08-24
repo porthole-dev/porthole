@@ -58,6 +58,14 @@ DEFAULTS = {
     # profile is assumed to have no A/B slots, because the failure mode of
     # wrongly assuming slots is flashing a partition that does not exist.
     "PORTHOLE_SLOTS_PROBED": "",
+    # Build and verify inputs that cannot be guessed from the tree.
+    "PORTHOLE_DTS_INCLUDES": "",
+    "PORTHOLE_DTS_DEPS": "",
+    "PORTHOLE_DTC_BASELINE": "",
+    "PORTHOLE_DTC_IGNORE": "",
+    "PORTHOLE_KERNEL_TREE": "",
+    "PORTHOLE_ENVKERNEL": "",
+    "PORTHOLE_PMBOOTSTRAP_SRC": "",
     "PORTHOLE_HAS_AB_SLOTS": "0",
     "PORTHOLE_ACTIVE_SLOT": "",
     "PORTHOLE_SLOT_FORBIDDEN": "",
