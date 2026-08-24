@@ -74,14 +74,18 @@ def test_a_broken_build_degrades_into_the_snapshot_not_an_exception():
     assert store.busy is False, "a raising _build must still finish its refresh"
 
 
-def test_a_raising_lock_does_not_wedge_the_store_forever():
+def test_a_raising_publish_step_does_not_wedge_the_store_forever():
     """The real reason Store._load wraps its publish in a try/finally.
 
-    A raising _build was never the risk -- the except branch already fell through to
-    clear _busy. The risk is the publish step itself raising: without the finally,
-    _busy stays True for the life of the session and refresh()'s `if self._busy: return`
-    guard then rejects EVERY future refresh. The console stops updating and never
-    recovers, with nothing on screen to say why.
+    A raising _build was never the risk -- the except branch already fell through and
+    cleared _busy. The risk is the publish step itself raising while a refresh is in
+    flight: without the finally, _busy stays True for the life of the session and
+    refresh()'s `if self._busy: return` guard then rejects EVERY later refresh. The
+    console stops updating and never recovers, with nothing on screen to say why.
+
+    _load() is called directly with _busy already set, because that is what an in-flight
+    refresh looks like. Going through refresh(block=True) would NOT exercise this: the
+    blocking path never sets _busy, so the assertion would pass with the finally removed.
     """
     class Exploding:
         def __enter__(self):
@@ -92,10 +96,11 @@ def test_a_raising_lock_does_not_wedge_the_store_forever():
 
     store = state.Store(ROOT)
     store._lock = Exploding()
+    store._busy = True                 # what a refresh in flight looks like
     try:
-        store.refresh(block=True)
+        store._load()
     except RuntimeError:
-        pass                      # the raise propagates; that is fine
+        pass                           # the finally clears the flag, it does not swallow
     assert store.busy is False, "a raising publish step must not wedge the store"
 
 
