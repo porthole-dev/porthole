@@ -9,7 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
 
 import porthole_milestones as ms  # noqa: E402
-from porthole_tui import state  # noqa: E402
+from porthole_tui import state, content  # noqa: E402
 
 
 def test_phases_fold_rows_into_the_spine():
@@ -76,6 +76,43 @@ def test_uptime_advances():
     first = store.uptime()
     time.sleep(0.01)
     assert store.uptime() > first
+
+
+def test_a_stale_milestone_leads_with_the_contradiction():
+    # The evidence string IS the answer for a stale milestone. If it is not
+    # first, the port believes it is further along than it is -- and that is
+    # the direction that gets someone flashing.
+    doc = content.for_milestone({
+        "title": "usb gadget answers", "state": "done", "source": "stale",
+        "evidence": "no g_ether in /sys/class/net", "why": "", "how": "",
+        "playbook": "", "safe": False})
+    assert "TICKED, BUT THE TOOL DISAGREES" in doc.lines[0]
+    assert any("g_ether" in line for line in doc.lines[:5])
+
+
+def test_a_milestone_carries_its_command_and_its_safety():
+    doc = content.for_milestone({
+        "title": "probe the panel", "state": "todo", "source": "probe",
+        "evidence": "", "why": "nothing else can be tested first",
+        "how": "porthole run tk-display-watch", "playbook": "", "safe": True})
+    assert doc.command == "porthole run tk-display-watch"
+    assert doc.safe is True
+
+
+def test_an_unknown_tool_is_a_document_not_a_crash():
+    doc = content.for_tool(ROOT, "tk-does-not-exist")
+    assert doc.lines == ["no such tool"]
+    assert doc.command == "" and doc.safe is False
+
+
+def test_an_unknown_note_is_a_document_not_a_crash():
+    assert content.for_note(ROOT, "no-such-note").lines == ["no such note"]
+
+
+def test_wrap_preserves_blank_lines_and_indented_blocks():
+    out = content.wrap("one\n\n    indented stays\n", 40)
+    assert "" in out
+    assert "    indented stays" in out
 
 
 def main():
