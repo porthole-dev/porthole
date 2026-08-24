@@ -11,7 +11,7 @@ Pixel 2 XL, made generic — so the next device starts from month three instead 
 day one.
 
 ```
-98 tools · 55 knowledge notes · 25 commands · the CLI has zero third-party dependencies
+98 tools · 55 knowledge notes · 25 commands · zero third-party dependencies in the CLI
 ```
 
 Docs: `make docs-serve`, or set the `PUBLISH_DOCS` repository
@@ -39,8 +39,9 @@ variable to publish them to GitHub Pages.
 ## Requirements
 
 **porthole's CLI has no third-party dependencies.** No pip install, no npm, no
-virtualenv. If you have Python 3.8+ and OpenSSH you can already run every verb
-and every tool.
+virtualenv — every verb starts on a bare Python 3.8. What some of them then need to
+finish the job (fastboot to reach a bootloader, pmbootstrap to build) is in the table
+below, and `porthole doctor` names the install command for your distribution.
 
 The **console** (`porthole tui`) is the one optional extra: it needs Python
 3.10+ and `textual`. Nothing else does, and nothing else ever will — a host
