@@ -10,6 +10,8 @@ import os
 import pathlib
 import sys
 
+from porthole_cli import EX_FAIL, EX_USAGE
+
 from . import gate
 
 
@@ -18,11 +20,11 @@ def main(argv=None):
     if not sys.stdout.isatty():
         sys.stderr.write("porthole's console needs a terminal. "
                          "For a pipe or an agent, use `porthole next --json`.\n")
-        return 64
+        return EX_USAGE
     problem = gate.check()
     if problem:
         sys.stderr.write(problem)
-        return 1
+        return EX_FAIL
     device = None
     for flag in ("-d", "--device"):
         if flag in argv:
