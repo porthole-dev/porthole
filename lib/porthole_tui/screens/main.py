@@ -281,21 +281,39 @@ class MainScreen(Screen):
         init` prompts in a loop -- piping either into the drawer would
         mangle the former and make the latter look hung with no visible
         prompt. The output belongs to the command.
+
+        The body of this `with` must never raise (ruling R26). Textual
+        8.2.8's App.suspend() is a @contextmanager with no try/finally --
+        resume_application_mode() sits after a bare yield -- so an exception
+        escaping here skips terminal restoration entirely and leaves the user
+        in raw mode with no way back. Ctrl-D at the prompt is an ordinary
+        habit, not a contrived input.
         """
+        import os
         import shlex
         import subprocess
         import sys
         argv = shlex.split(command)
+        # exec has no shell, so a literal `~` would reach the tool
+        # unexpanded -- the same reason jobs.py's _run() does this.
+        argv = [os.path.expanduser(a) for a in argv]
         with self.app.suspend():
-            print("\n$ {}\n".format(command))
             try:
+                print("\n$ {}\n".format(command))
                 subprocess.run([sys.executable,
                                 str(self.app.root / "bin" / "porthole")]
                                + argv[1:])
             except OSError as exc:
                 print("could not run it: {}".format(exc))
-            input("\n[enter] back to porthole ")
+            except KeyboardInterrupt:
+                print("\ninterrupted")
+            try:
+                input("\n[enter] back to porthole ")
+            except (EOFError, KeyboardInterrupt):
+                pass                    # Ctrl-D / Ctrl-C here just means "go back"
         # An interactive command may well have changed the device's state.
+        # Outside the `with`, so it runs after restoration, not during
+        # suspension.
         self.app.store.refresh()
 
     def on_catalogue_chosen(self, event) -> None:

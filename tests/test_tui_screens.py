@@ -724,6 +724,75 @@ def test_a_streaming_command_never_touches_suspend():
     tui_harness.pilot(make, body)
 
 
+# -- Ruling R26: Ctrl-D at the suspend prompt wrecks the terminal ----------
+#
+# Textual 8.2.8's App.suspend() is a @contextmanager with no try/finally --
+# read directly from the installed package -- so an exception escaping the
+# `with` body skips terminal restoration entirely. _suspend_and_run's body
+# must therefore be incapable of raising.
+#
+# Textual's own headless test driver reports can_suspend = False, so
+# app.suspend() itself raises SuspendNotSupported the instant it is entered
+# under a pilot -- confirmed directly, and it means these tests cannot enter
+# the real contextmanager the way ruling R26's own suggested test assumed.
+# app.suspend is swapped for a real (working) contextmanager just for the
+# duration of each test so _suspend_and_run's own body -- the part this repo
+# controls -- actually runs and is what gets exercised.
+
+def test_the_suspend_prompt_survives_ctrl_d():
+    """Ctrl-D at the prompt is an ordinary habit, and it must not leave the
+    user in raw mode with no way back."""
+    import builtins
+    import contextlib
+    import subprocess as sp
+
+    @contextlib.contextmanager
+    def working_suspend():
+        yield
+
+    async def body(app, pilot):
+        real_input, real_run, real_suspend = builtins.input, sp.run, app.suspend
+        builtins.input = lambda *a: (_ for _ in ()).throw(EOFError())
+        sp.run = lambda *a, **k: None
+        app.suspend = working_suspend
+        try:
+            app.screen._suspend_and_run("porthole brief")   # must not raise
+        finally:
+            builtins.input, sp.run, app.suspend = real_input, real_run, real_suspend
+        assert app.is_running
+    tui_harness.pilot(make, body)
+
+
+def test_suspend_expands_the_tilde_argv_never_reaches_the_tool_unexpanded():
+    """jobs.py's own _run() expands `~` because exec has no shell -- "a
+    literal `~` would reach the tool unexpanded". This path builds argv the
+    same way and must not skip it (ruling R26, item 2)."""
+    import builtins
+    import contextlib
+    import os
+    import subprocess as sp
+
+    @contextlib.contextmanager
+    def working_suspend():
+        yield
+
+    async def body(app, pilot):
+        captured = []
+        real_input, real_run, real_suspend = builtins.input, sp.run, app.suspend
+        builtins.input = lambda *a: ""
+        sp.run = lambda argv, **k: captured.append(argv)
+        app.suspend = working_suspend
+        try:
+            app.screen._suspend_and_run(
+                "porthole serial console --log ~/x.log")
+        finally:
+            builtins.input, sp.run, app.suspend = real_input, real_run, real_suspend
+        assert captured, "subprocess.run was never called"
+        assert "~/x.log" not in captured[0], captured[0]
+        assert os.path.expanduser("~/x.log") in captured[0], captured[0]
+    tui_harness.pilot(make, body)
+
+
 # -- Task 15: the argument form and the file picker -----------------------
 #
 # The old palette built `porthole <verb>` for every verb and stopped there,
