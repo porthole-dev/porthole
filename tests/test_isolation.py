@@ -39,6 +39,22 @@ def run(*args, env=None, xdg=None):
     return p.returncode, p.stdout, p.stderr
 
 
+class Skip(Exception):
+    """This test could not run here.
+
+    Reported as `skip`, never as a pass. A CI runner has no pmaports checkout,
+    and a test that silently succeeds because its subject was absent is a test
+    that will keep succeeding after the subject breaks.
+    """
+
+
+def needs_pmaports():
+    import porthole
+    import porthole_pmaports as pmap
+    if not pmap.find_pmaports(porthole.load_config(root=ROOT)):
+        raise Skip("no pmaports checkout on this host")
+
+
 TMPXDG = tempfile.mkdtemp(prefix="porthole-iso-")
 
 
@@ -154,6 +170,7 @@ def test_worktree_previews_or_refuses_but_never_writes_without_yes():
     """Two correct outcomes and no third: it previews, or it refuses because
     one already exists. What it must never do is create one -- a preview that
     modifies the user's pmbootstrap clone is not a preview."""
+    needs_pmaports()
     saw_preview = saw_refusal = False
     for device in DEVICES:
         rc, out, err = run("aports", "worktree", "-d", device)
@@ -170,6 +187,7 @@ def test_worktree_previews_or_refuses_but_never_writes_without_yes():
 def test_worktree_refuses_to_clobber_an_existing_one():
     """Criterion 7. Recreating a worktree silently would throw away whatever
     was uncommitted in it."""
+    needs_pmaports()
     import porthole_cmd_use as use
     cfg_text = (ROOT / "profiles").parent  # noqa: F841 - readability only
     for device in DEVICES:
@@ -245,18 +263,22 @@ def test_milestone_probes_read_only_the_active_workdir():
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
-    failed = 0
+    failed = skipped = 0
     for name, fn in tests:
         try:
             fn()
             print(f"  ok   {name}")
+        except Skip as exc:
+            skipped += 1
+            print(f"  skip {name}: {exc}")
         except AssertionError as exc:
             failed += 1
             print(f"  FAIL {name}: {exc}")
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"  ERR  {name}: {type(exc).__name__}: {exc}")
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    tail = f", {skipped} skipped" if skipped else ""
+    print(f"\n{len(tests) - failed - skipped}/{len(tests)} passed{tail}")
     return 1 if failed else 0
 
 

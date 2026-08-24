@@ -326,7 +326,20 @@ def copy_brain(root: pathlib.Path, dest: pathlib.Path) -> dict[str, list]:
     return sections
 
 
+def _refresh_agents(ctx) -> bool:
+    path = pathlib.Path(ctx.root) / "AGENTS.md"
+    try:
+        fresh = render_agents(ctx.root)
+    except Exception:  # noqa: BLE001
+        return False
+    if fresh != path.read_text():
+        path.write_text(fresh)
+        return True
+    return False
+
+
 def cmd_build(args, ctx) -> int:
+    agents_changed = _refresh_agents(ctx)
     root = ctx.root
     src = root / SITE_SRC
     if src.exists():
@@ -666,6 +679,50 @@ def cmd_lint(args, ctx) -> int:
                            for k, p, d in findings],
               "clean": not findings}, render)
     return EX_OK if not findings else EX_FAIL
+
+
+# ------------------------------------------------- the agent surface, generated --
+
+MARKER = "GENERATED: verbs"
+
+
+def verb_table(root) -> str:
+    """The verb inventory, from the live registry.
+
+    AGENTS.md is the front door for an agent that has never seen this project.
+    A hand-maintained list of verbs there is wrong the first time one is
+    renamed -- which happened, and left twenty-four broken invocations across
+    the repo including the one on the newcomer's first screen. So the
+    inventory is generated and a test fails when the file disagrees with it.
+
+    Only the inventory. The prose stays hand-written, because the judgement and
+    the war stories are what make the file worth reading, and no generator
+    produces those.
+    """
+    import porthole_cli
+    specs = porthole_cli.discover(pathlib.Path(root))
+    lines = ["| verb | does | json | writes outside its profile |",
+             "|---|---|---|---|"]
+    for spec in specs:
+        flags = {n for names, _ in spec["args"] for n in names
+                 if n.startswith("-")}
+        lines.append(
+            f"| `{spec['verb']}` | {spec['help']} | "
+            f"{'yes' if '--json' in flags else 'no'} | "
+            f"{'needs --yes' if spec.get('escapes_scope') else 'no'} |")
+    return "\n".join(lines)
+
+
+def render_agents(root) -> str:
+    """AGENTS.md with its generated block refreshed."""
+    path = pathlib.Path(root) / "AGENTS.md"
+    text = path.read_text()
+    begin, end = f"<!-- BEGIN {MARKER} -->", f"<!-- END {MARKER} -->"
+    if begin not in text or end not in text:
+        return text
+    head, rest = text.split(begin, 1)
+    _, tail = rest.split(end, 1)
+    return f"{head}{begin}\n{verb_table(root)}\n{end}{tail}"
 
 
 ACTIONS = {"build": cmd_build, "serve": cmd_serve, "new": cmd_new,

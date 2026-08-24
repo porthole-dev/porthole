@@ -25,6 +25,22 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 import porthole_cli  # noqa: E402
 
+class Skip(Exception):
+    """This test could not run here.
+
+    Reported as `skip`, never as a pass. A CI runner has no pmaports checkout,
+    and a test that silently succeeds because its subject was absent is a test
+    that will keep succeeding after the subject breaks.
+    """
+
+
+def needs_pmaports():
+    import porthole
+    import porthole_pmaports as pmap
+    if not pmap.find_pmaports(porthole.load_config(root=ROOT)):
+        raise Skip("no pmaports checkout on this host")
+
+
 TMPXDG = tempfile.mkdtemp(prefix="porthole-rules-test-")
 SPECS = porthole_cli.discover(ROOT)
 
@@ -163,6 +179,7 @@ def test_free_text_action_verbs_flag_a_near_miss():
 
 
 def test_soc_and_brain_take_positional_actions():
+    needs_pmaports()
     for argv, needle in ((["soc", "list"], "device"),
                          (["brain", "lint"], "notes"),
                          (["brain", "search", "--severity", "law"], "laws")):
@@ -174,6 +191,7 @@ def test_soc_and_brain_take_positional_actions():
 def test_the_common_case_did_not_get_longer():
     """`porthole soc` and `porthole brain <query>` must still work: converting
     to positional actions is not a licence to make the frequent path verbose."""
+    needs_pmaports()
     rc, out, err = run("brain", "watchdog")
     assert rc == 0 and "watchdog" in out.lower(), f"rc={rc} {err}"
     # `soc` with no action resolves the SoC from the selected device, so the
@@ -196,6 +214,7 @@ def test_every_reporting_verb_takes_json():
 
 
 def test_json_output_actually_parses():
+    needs_pmaports()
     for argv in (["devices", "--json"], ["soc", "list", "--json"],
                  ["brain", "search", "--severity", "law", "--json"],
                  ["tools", "--json"]):
@@ -235,6 +254,7 @@ def test_force_means_overwrite_not_dirty_tree():
 def test_unknown_soc_warns_and_still_scaffolds(tmp=None):
     """New silicon has no pmaports sibling BY DEFINITION. A rule that rejected
     unknown SoCs would reject exactly the ports this tool exists for."""
+    needs_pmaports()
     import shutil
     dest = ROOT / "profiles" / "zzz-ruletest"
     shutil.rmtree(dest, ignore_errors=True)
@@ -260,6 +280,7 @@ def test_a_near_miss_soc_names_the_near_match_but_still_scaffolds():
     from the exact port this tool exists to start. What must be protected is
     seeding from the wrong silicon, and that is handled by not seeding at all
     (see the next test), not by refusing to run."""
+    needs_pmaports()
     import shutil
     dest = ROOT / "profiles" / "zzz-ruletest2"
     shutil.rmtree(dest, ignore_errors=True)
@@ -277,6 +298,7 @@ def test_a_near_miss_soc_names_the_near_match_but_still_scaffolds():
 def test_an_unknown_soc_never_falls_back_to_vendor_inference():
     """Naming a SoC that does not exist must not quietly seed from whatever
     else that vendor makes. That fallback is for when NO SoC was named."""
+    needs_pmaports()
     import shutil
     dest = ROOT / "profiles" / "zzz-ruletest3"
     shutil.rmtree(dest, ignore_errors=True)
@@ -312,18 +334,22 @@ def test_completion_covers_every_verb():
 def main():
     tests = [(name, fn) for name, fn in sorted(globals().items())
              if name.startswith("test_") and callable(fn)]
-    failed = 0
+    failed = skipped = 0
     for name, fn in tests:
         try:
             fn()
             print(f"  ok   {name}")
+        except Skip as exc:
+            skipped += 1
+            print(f"  skip {name}: {exc}")
         except AssertionError as exc:
             failed += 1
             print(f"  FAIL {name}: {exc}")
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"  ERR  {name}: {type(exc).__name__}: {exc}")
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    tail = f", {skipped} skipped" if skipped else ""
+    print(f"\n{len(tests) - failed - skipped}/{len(tests)} passed{tail}")
     return 1 if failed else 0
 
 

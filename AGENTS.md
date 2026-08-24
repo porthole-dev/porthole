@@ -13,11 +13,11 @@ an SDK agent, an IDE assistant, or a human reading over someone's shoulder.
 
 ```sh
 porthole brief          # or `porthole brief --json` if you are parsing
-
-`brief` now carries the port's own state: how far along it is, the single
-next milestone, its command, and anything ticked that a probe says is not
-true. `porthole next --json` is the same block on its own.
 ```
+
+`brief` carries the port's own state: how far along it is, the single next
+milestone with its command, and anything ticked that a probe says is not true.
+`porthole next --json` is that block on its own.
 
 One call gives you: which device and its live state, that device's encoded traps
 as prose, the rules below, the tool catalogue pointer, the laws, and suggested
@@ -248,3 +248,82 @@ A worktree of the outer repo does not contain nested repos (a kernel tree, a
 pmaports checkout) at all, and every git operation against their real paths is
 refused from inside it. An agent given that setup can `ls` the files and do
 nothing else — it will burn a long time and return BLOCKED.
+
+---
+
+## 8. Every verb, generated
+
+<!-- BEGIN GENERATED: verbs -->
+| verb | does | json | writes outside its profile |
+|---|---|---|---|
+| `init` | set your identity and pick a device; writes config.env | yes | no |
+| `tui` | open the console: progress, devices, tools, notes, in one screen | no | no |
+| `use` | switch the active device profile, and its working repo | yes | no |
+| `cd` | print a path to cd into: workdir, kernel, pmaports, profile | no | no |
+| `next` | where am I in this port, and what is the one next thing | yes | no |
+| `brief` | everything an agent needs to start a session, in one call | yes | no |
+| `doctor` | check the host, the profile and the device; name every fix | yes | no |
+| `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |
+| `tools` | search the toolbox and read a tool's contract | yes | no |
+| `soc` | find devices sharing your SoC and inherit their working values | yes | no |
+| `dts` | write and check a device tree without starting from blank | yes | no |
+| `blobs` | get at vendor firmware during bring-up, without root | yes | no |
+| `config` | print the resolved config and where each value came from | yes | no |
+| `serial` | UART console: the channel that works before anything else does | yes | no |
+| `kconfig` | catch the kernel symbols olddefconfig silently dropped | yes | no |
+| `devices` | list device profiles | yes | no |
+| `aports` | work on pmaports: status, feature branches, diffs, patches | yes | needs --yes |
+| `channel` | see and switch the postmarketOS release channel | yes | no |
+| `ui` | see and switch the compositor / desktop | yes | no |
+| `brain` | search the second brain | yes | no |
+| `run` | run a tool with the config applied | no | no |
+| `new-device` | scaffold a profile for a device nobody has ported yet | yes | no |
+| `completion` | emit a shell completion script (bash, zsh, fish) | no | no |
+| `docs` | generate the documentation site | yes | no |
+| `version` | version, environment and host tool versions | yes | no |
+<!-- END GENERATED: verbs -->
+
+This table is generated from the live command registry by `porthole docs build`,
+and a test fails if the file on disk disagrees with it. That is deliberate: a
+hand-maintained inventory is wrong the first time a verb is renamed, and an
+agent that trusts a wrong inventory wastes a session discovering it.
+
+The prose in this file is hand-written and stays that way — judgement and war
+stories are why it is worth reading. Only the inventory is generated.
+
+---
+
+## 9. The session contract
+
+If you read nothing else in this file, read this.
+
+**Start.** `porthole brief --json`. One call: the device, its live state, the
+port's progress, the single next milestone, the rules, and this device's encoded
+traps. Read-only.
+
+**Orient.** `porthole next --json` answers "where am I". Progress is DERIVED
+from what is on disk, and **a probe outranks a checklist tick** — where they
+disagree the tool reports `stale` and believes the probe. If you see `stale`,
+that is the port claiming to be further along than it is. Fix that before
+anything else.
+
+**Run without asking:** anything read-only. Every verb marked `json: yes` in §8,
+`porthole tools`, `porthole brain search`, `porthole config`, `porthole soc`,
+`porthole dts` (except `new`), `porthole doctor`.
+
+**Ask first, every time:** flashing, `set_active`, thermal ramps, anything that
+writes to the device, `porthole aports` with `--yes`, and any command a
+milestone does not mark `safe`. The rule is not "be careful" — it is that a bad
+image on the wrong slot leaves a device that will not boot and cannot be talked
+to.
+
+**Never:** invent a value you could measure, report a result from a path you did
+not prove executed, or leave a device in a state you did not find it in.
+
+**Done means:** the thing works AND the evidence is in the transcript AND
+anything that would have saved you a session is written down — `porthole brain
+new <id>`, then `porthole brain lint`. A session that learned something and
+wrote nothing down is unfinished.
+
+**If you are lost:** `porthole next` tells you the one next action and the
+command for it. That is the whole point of it existing.

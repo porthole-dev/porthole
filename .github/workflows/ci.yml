@@ -24,24 +24,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: config resolution
-        run: python3 tests/test_config.py
-      - name: cli
-        run: python3 tests/test_cli.py
-      - name: tool contracts
-        run: python3 tests/test_tools.py
-      - name: privilege broker (escape attempts)
-        run: python3 tests/test_sandbox.py
-      - name: pmaports index
-        run: python3 tests/test_pmaports.py
-      - name: vendor blob tooling
-        run: python3 tests/test_blobs.py
-      - name: kernel config diff
-        run: python3 tests/test_kconfig.py
+      # Every tests/test_*.py, discovered rather than listed. CI hand-listing
+      # test files is how five suites written in one day ran nowhere: a new
+      # test is invisible until somebody remembers to add it here, and nobody
+      # remembers. Same reasoning as the command registry, applied to CI.
+      - name: test suite
+        run: |
+          fail=0
+          for t in tests/test_*.py; do
+            echo "=== $t"
+            python3 "$t" || fail=1
+          done
+          exit $fail
       - name: knowledge base meets the bar
         # A note with no evidence, a scaffold nobody filled in, or a scope that
         # is not one of the three valid shapes fails here rather than landing.
-        run: ./bin/porthole brain --lint
+        run: ./bin/porthole brain lint
       - name: shell lib (and shell/python agreement)
         run: bash tests/test_shell_lib.sh
       - name: device mutex
@@ -81,7 +79,7 @@ jobs:
       - name: bootstrap headlessly, as an agent would
         run: |
           export XDG_CONFIG_HOME="$PWD/.xdg"
-          ./bin/porthole init --device google-taimen --user ci --host 172.16.42.1
+          ./bin/porthole init google-taimen --user ci --host 172.16.42.1
           ./bin/porthole config PHONE | grep -q '^ci@172.16.42.1$'
       - name: doctor reports honestly on a host with nothing installed
         run: |
@@ -120,6 +118,7 @@ jobs:
           ./bin/porthole brief --no-device --json | python3 -m json.tool > /dev/null
           ./bin/porthole tools --json            | python3 -m json.tool > /dev/null
           ./bin/porthole brain --json            | python3 -m json.tool > /dev/null
+          ./bin/porthole next --json             | python3 -m json.tool > /dev/null
       - name: completions generate for every shell
         run: |
           for s in bash zsh fish; do ./bin/porthole completion $s > /dev/null; done

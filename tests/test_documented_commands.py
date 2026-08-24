@@ -16,6 +16,8 @@ Parse only, never execute: the parser is built from the live registry and
 but a command that does not parse is wrong for certain, and that is the whole
 bug class.
 """
+from __future__ import annotations
+
 import argparse
 import contextlib
 import io
@@ -284,6 +286,32 @@ def test_specs_do_not_name_tests_that_do_not_exist():
         if gone:
             missing[spec.name] = sorted(gone)
     assert not missing, f"specs name tests that do not exist: {missing}"
+
+
+def test_the_generated_agent_surface_is_current():
+    """AGENTS.md's verb inventory must match the live registry.
+
+    A hand-maintained list is wrong the first time a verb is renamed, and an
+    agent that trusts a wrong inventory wastes a session finding out. The prose
+    around it stays hand-written; only the block between the markers is
+    checked.
+    """
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_docs as docs
+    on_disk = (ROOT / "AGENTS.md").read_text()
+    assert docs.MARKER in on_disk, "AGENTS.md has lost its generated block"
+    assert docs.render_agents(ROOT) == on_disk, (
+        "AGENTS.md is out of date — run `porthole docs build`")
+
+
+def test_the_session_contract_exists_and_names_the_first_command():
+    """A fresh agent's first question is 'what do I run'. If that answer is not
+    in AGENTS.md it is nowhere an agent looks."""
+    text = (ROOT / "AGENTS.md").read_text()
+    assert "session contract" in text.lower()
+    for needle in ("porthole brief", "porthole next", "probe outranks",
+                   "Ask first", "Never:"):
+        assert needle in text, f"the session contract does not mention {needle!r}"
 
 
 def main():
