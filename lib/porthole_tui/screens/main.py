@@ -50,6 +50,13 @@ class MainScreen(Screen):
         # generated form for whatever is selected, defined on THIS class so
         # it resolves without an `app.` prefix (ruling R20).
         Binding("e", "edit_args", "args"),
+        # PortholeApp sets ENABLE_COMMAND_PALETTE = False so this key is free:
+        # Textual's own App installs a PRIORITY binding on ctrl+p for its own
+        # command_palette action whenever that flag is left at its True
+        # default, and a priority binding on the App wins over a normal one
+        # declared here on the Screen regardless of focus -- confirmed with a
+        # pilot probe, the same way ruling R20 keeps finding these.
+        Binding("ctrl+p", "palette", "palette"),
         # ctrl+c is otherwise claimed by Textual itself: App binds it to
         # help_quit (a "press q to quit" nag) and Screen binds it to
         # copy_text. Declaring it again here, in MainScreen's own BINDINGS,
@@ -187,6 +194,53 @@ class MainScreen(Screen):
                 self.launch(command, safe=False)
 
         self.app.push_screen(ArgForm(specs[verb]), built)
+
+    def action_palette(self) -> None:
+        """Everything reachable in two keystrokes.
+
+        A porter does not think "is what I want a verb or a tool", they think
+        "suspend" and want whatever matches -- so the palette searches all
+        four namespaces at once. The old palette built `porthole <verb>` for
+        every verb and ran it, reaching a verb's default and nothing past it;
+        an item that takes arguments now opens its form instead.
+        """
+        from ..content import for_milestone, for_note, for_tool
+        from ..widgets.palette import Palette, collect
+        from .form import ArgForm
+        from .reader import Reader
+
+        def chosen(item):
+            if not item:
+                return
+            if item["kind"] == "verb" and item["needs_args"]:
+                def built(command):
+                    if command:
+                        self.launch(command, safe=False)
+                self.app.push_screen(ArgForm(item["spec"]), built)
+                return
+            if item["kind"] == "note":
+                self.app.push_screen(Reader(for_note(self.app.root, item["id"])))
+                return
+            if item["kind"] == "tool":
+                doc = for_tool(self.app.root, item["id"])
+
+                def ran_tool(command):
+                    if command:
+                        self.launch(command, safe=False)
+                self.app.push_screen(Reader(doc), ran_tool)
+                return
+            if item["kind"] == "milestone":
+                doc = for_milestone(item["row"])
+
+                def ran_step(command):
+                    if command:
+                        self.launch(command, safe=doc.safe)
+                self.app.push_screen(Reader(doc), ran_step)
+                return
+            self.launch(item["run"], safe=False)
+
+        self.app.push_screen(
+            Palette(collect(self.app.root, self.app.store.snapshot)), chosen)
 
     def launch(self, command, safe=False) -> None:
         """Run a porthole command, with the confirmation boundary applied.

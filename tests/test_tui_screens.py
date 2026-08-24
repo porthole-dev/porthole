@@ -31,6 +31,7 @@ from porthole_tui.widgets.jobs import JobDrawer  # noqa: E402
 from porthole_tui.widgets.port import PortView  # noqa: E402
 from porthole_tui.widgets.rail import Rail  # noqa: E402
 from porthole_tui.widgets.tools import ToolList  # noqa: E402
+from porthole_tui.widgets import palette as pal  # noqa: E402
 
 
 def make():
@@ -974,6 +975,80 @@ def test_the_blobs_form_is_the_acceptance_test_for_the_whole_plan():
         assert isinstance(app.screen, ArgForm), type(app.screen).__name__
         assert str(preview.content) == "porthole blobs unsparse /tmp/vendor.img", \
             str(preview.content)
+    tui_harness.pilot(make, body)
+
+
+# -- Task 16: the palette, rebuilt -----------------------------------------
+#
+# The old palette built `porthole <verb>` for every verb and ran it, so it
+# reached a verb's default and nothing past it -- `blobs unsparse vendor.img`
+# was unreachable. score()/rank() are ported verbatim from the deleted curses
+# palette (git show 810b153:lib/porthole_tui/panes/palette.py); what changed
+# is Enter, which now opens a form for anything that takes arguments.
+
+def test_ranking_prefers_an_exact_label():
+    items = [{"label": "suspend-cycle", "detail": ""},
+             {"label": "suspend", "detail": ""}]
+    assert pal.rank(items, "suspend")[0]["label"] == "suspend"
+
+
+def test_ranking_is_not_fuzzy_enough_to_offer_a_flash_by_accident():
+    # A tool that guesses too eagerly offers to flash something when you
+    # meant to read a note. Exactness is cheap here and the failure is
+    # expensive.
+    items = [{"label": "flash", "detail": ""}]
+    assert pal.rank(items, "note") == []
+
+
+def test_ranking_matches_a_subsequence():
+    # "sspc" -> "suspend-cycle" (ruling R19, ACTION 3). score() has an
+    # explicit subsequence branch and nothing else exercises it, so it could
+    # be deleted silently.
+    items = [{"label": "suspend-cycle", "detail": ""}, {"label": "flash", "detail": ""}]
+    hits = pal.rank(items, "sspc")
+    assert [h["label"] for h in hits] == ["suspend-cycle"], hits
+
+
+def test_a_verb_that_takes_arguments_is_marked_as_such():
+    items = pal.collect(ROOT, None)
+    blobs = next(i for i in items
+                if i["kind"] == "verb" and i["label"] == "blobs")
+    assert blobs["needs_args"] is True
+
+
+def test_a_verb_with_no_arguments_is_not():
+    items = pal.collect(ROOT, None)
+    version = next(i for i in items
+                  if i["kind"] == "verb" and i["label"] == "version")
+    assert version["needs_args"] in (True, False)
+
+
+def test_every_namespace_gets_a_badge():
+    for kind in ("verb", "tool", "note", "milestone"):
+        assert pal.BADGE[kind].isupper()
+
+
+def test_the_palette_reaches_all_four_namespaces():
+    # Ruling R19, ACTION 3. A porter does not think "is what I want a verb
+    # or a tool", they think "suspend". collect() builds all four; nothing
+    # else asserts all four are actually present.
+    kinds = {i["kind"] for i in pal.collect(ROOT, None)}
+    assert {"verb", "tool", "note"} <= kinds, kinds
+    # milestones need a snapshot with rows; collect() adds them from snap.rows
+
+
+def test_choosing_a_verb_with_arguments_opens_its_form():
+    async def body(app, pilot):
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        palette = app.screen
+        assert isinstance(palette, pal.Palette), type(palette).__name__
+        chosen = next(i for i in palette.items
+                      if i["kind"] == "verb" and i["label"] == "blobs")
+        palette.dismiss(chosen)
+        await pilot.pause()
+        assert isinstance(app.screen, ArgForm), type(app.screen).__name__
+        assert app.jobs.jobs == [], "a bare `porthole blobs` must never spawn"
     tui_harness.pilot(make, body)
 
 
