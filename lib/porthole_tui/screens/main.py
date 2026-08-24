@@ -45,6 +45,11 @@ class MainScreen(Screen):
         # pilot probe). MainScreen is always in the chain, so the actions
         # below just delegate into the drawer.
         Binding("ctrl+j", "toggle_drawer", "job drawer"),
+        # A verb's own default was all the old palette could reach: it built
+        # `porthole <verb>` and stopped. action_edit_args below opens the
+        # generated form for whatever is selected, defined on THIS class so
+        # it resolves without an `app.` prefix (ruling R20).
+        Binding("e", "edit_args", "args"),
         # ctrl+c is otherwise claimed by Textual itself: App binds it to
         # help_quit (a "press q to quit" nag) and Screen binds it to
         # copy_text. Declaring it again here, in MainScreen's own BINDINGS,
@@ -143,6 +148,45 @@ class MainScreen(Screen):
 
     def action_rerun_job(self) -> None:
         self.query_one(JobDrawer).action_rerun()
+
+    def action_edit_args(self) -> None:
+        """Open the argument form for whatever is selected.
+
+        `porthole blobs unsparse vendor.img` was unreachable before this: the
+        old palette offered only a verb's bare default. Explicit shapes, not
+        duck-typing (ruling R24) -- a milestone is a dict with "how", a tool
+        has a .summary, and anything else declines rather than guessing.
+        """
+        import porthole_cli
+        from ..widgets.catalogue import Catalogue
+        from .form import ArgForm
+        widget = next(iter(self.query(Catalogue)), None)
+        if widget is None:
+            return
+        listing = widget.query_one("#rows")
+        index = getattr(listing, "index", None)
+        payloads = widget._payloads
+        target = payloads[index] if (index is not None
+                                     and index < len(payloads)) else None
+        verb = None
+        if hasattr(target, "summary"):                      # a tool
+            verb = "run"
+        elif isinstance(target, dict) and \
+                (target.get("how") or "").startswith("porthole "):
+            verb = target["how"].split()[1]
+        if verb is None:
+            self.notify("nothing here takes arguments", severity="warning")
+            return
+        specs = {s["verb"]: s for s in porthole_cli.discover(self.app.root)}
+        if verb not in specs:
+            self.notify("nothing here takes arguments", severity="warning")
+            return
+
+        def built(command):
+            if command:
+                self.launch(command, safe=False)
+
+        self.app.push_screen(ArgForm(specs[verb]), built)
 
     def launch(self, command, safe=False) -> None:
         """Run a porthole command, with the confirmation boundary applied.

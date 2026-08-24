@@ -16,11 +16,14 @@ tui_harness.require()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-from textual.widgets import Input, ListView, RichLog, Static  # noqa: E402
+from textual.widgets import (Button, Input, ListView, RichLog,  # noqa: E402
+                             Select, Static)
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
 from porthole_tui.screens.confirm import ConfirmRun  # noqa: E402
+from porthole_tui.screens.form import ArgForm, _picker_start  # noqa: E402
 from porthole_tui.screens.help import HelpScreen  # noqa: E402
+from porthole_tui.screens.picker import FilePicker  # noqa: E402
 from porthole_tui.screens.reader import Reader  # noqa: E402
 from porthole_tui.widgets.brain import NoteList  # noqa: E402
 from porthole_tui.widgets.devices import DeviceList  # noqa: E402
@@ -717,6 +720,260 @@ def test_a_streaming_command_never_touches_suspend():
         assert calls == []
         assert len(app.jobs.jobs) == 1
         app.jobs.cancel_all()
+    tui_harness.pilot(make, body)
+
+
+# -- Task 15: the argument form and the file picker -----------------------
+#
+# The old palette built `porthole <verb>` for every verb and stopped there,
+# so it could reach a verb's default behaviour and nothing past it:
+# `porthole blobs unsparse vendor.img` was unreachable, and there was no
+# filesystem navigation anywhere in the application.
+
+def spec_for(verb):
+    import porthole_cli
+    return {s["verb"]: s for s in porthole_cli.discover(ROOT)}[verb]
+
+
+def test_the_form_builds_the_command_as_you_fill_it():
+    async def body(app, pilot):
+        form = ArgForm(spec_for("blobs"))
+        app.push_screen(form)
+        await pilot.pause()
+        form.values["action"] = "unsparse"
+        form.values["path"] = "~/dl/vendor.img"
+        form.values["out"] = "vendor.raw.img"
+        assert form.command() == (
+            "porthole blobs unsparse ~/dl/vendor.img --out vendor.raw.img"), \
+            form.command()
+    tui_harness.pilot(make, body)
+
+
+def test_an_empty_form_is_still_a_valid_command():
+    async def body(app, pilot):
+        form = ArgForm(spec_for("blobs"))
+        app.push_screen(form)
+        await pilot.pause()
+        assert form.command() == "porthole blobs"
+    tui_harness.pilot(make, body)
+
+
+def test_pressing_an_example_fills_every_field():
+    async def body(app, pilot):
+        spec = spec_for("blobs")
+        form = ArgForm(spec)
+        app.push_screen(form)
+        await pilot.pause()
+        form.use_example(spec["examples"][0])
+        await pilot.pause()
+        assert form.command() == spec["examples"][0], form.command()
+    tui_harness.pilot(make, body)
+
+
+def test_every_verb_opens_a_form_without_crashing():
+    # The old palette could reach a verb's default and nothing past it. This
+    # asserts the replacement can open all of them.
+    import porthole_cli
+
+    async def body(app, pilot):
+        for spec in porthole_cli.discover(ROOT):
+            form = ArgForm(spec)
+            app.push_screen(form)
+            await pilot.pause()
+            assert form.command().startswith("porthole " + spec["verb"]), \
+                spec["verb"]
+            app.pop_screen()
+            await pilot.pause()
+    tui_harness.pilot(make, body)
+
+
+def test_shell_snippet_examples_are_not_offered_as_try_rows():
+    """5 of this project's 107 documented examples are shell snippets
+    (`cd "$(porthole cd)"`, `porthole completion bash > file`) that cannot
+    decompose into form fields -- argspec.is_direct() says so. A clickable
+    "try:" row that silently does nothing when pressed is the exact defect
+    class (R20) this project keeps shipping, so a verb whose examples are
+    ALL shell snippets must render no "try:" rows, and no "try:" heading
+    dangling over nothing, either."""
+    async def body(app, pilot):
+        form = ArgForm(spec_for("cd"))
+        app.push_screen(form)
+        await pilot.pause()
+        buttons = list(form.query(".form--example"))
+        assert buttons == [], [str(b.label) for b in buttons]
+        headings = [str(s.content) for s in form.query(Static)]
+        assert "try:" not in headings, headings
+    tui_harness.pilot(make, body)
+
+
+def test_direct_examples_are_still_offered():
+    # The is_direct() filter must not swallow everything: every one of
+    # blobs' examples is a real verb invocation.
+    async def body(app, pilot):
+        spec = spec_for("blobs")
+        form = ArgForm(spec)
+        app.push_screen(form)
+        await pilot.pause()
+        buttons = list(form.query(".form--example"))
+        assert len(buttons) == len(spec["examples"]), len(buttons)
+    tui_harness.pilot(make, body)
+
+
+def test_ctrl_s_submits_the_form_through_the_boundary():
+    # Proves ArgForm's Binding("ctrl+s", "submit") -> action_submit really
+    # fires, via the actual key, and dismisses the built command.
+    async def body(app, pilot):
+        form = ArgForm(spec_for("blobs"))
+        result = []
+        app.push_screen(form, result.append)
+        await pilot.pause()
+        form.values["action"] = "ls"
+        expected = form.command()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert result == [expected], result
+    tui_harness.pilot(make, body)
+
+
+def test_escape_cancels_the_form():
+    # Proves ArgForm's Binding("escape", "cancel") -> action_cancel really
+    # fires, and dismisses None rather than a half-built command.
+    async def body(app, pilot):
+        form = ArgForm(spec_for("blobs"))
+        result = []
+        app.push_screen(form, result.append)
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert result == [None], result
+    tui_harness.pilot(make, body)
+
+
+def test_escape_cancels_the_file_picker():
+    # Proves FilePicker's Binding("escape", "cancel") -> action_cancel.
+    async def body(app, pilot):
+        picker = FilePicker(start=ROOT)
+        result = []
+        app.push_screen(picker, result.append)
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert result == [None], result
+    tui_harness.pilot(make, body)
+
+
+def test_ctrl_s_chooses_the_typed_path_in_the_picker():
+    # Proves FilePicker's Binding("ctrl+s", "choose") -> action_choose.
+    async def body(app, pilot):
+        picker = FilePicker(start=ROOT)
+        result = []
+        app.push_screen(picker, result.append)
+        await pilot.pause()
+        picker.query_one("#picker-path", Input).value = "/some/typed/path"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert result == ["/some/typed/path"], result
+    tui_harness.pilot(make, body)
+
+
+def test_the_picker_starts_at_porthole_workdir_not_wherever_the_terminal_is():
+    """The image you want is next to the port, not next to wherever the
+    terminal happens to be: PORTHOLE_WORKDIR wins when set, then the
+    device's own resolved workdir, then cwd -- never blindly cwd."""
+    from porthole_tui import state as _state
+
+    def snap(cfg=None, device="d", device_paths=None):
+        return _state.Snapshot(device=device, devices=[], cfg=cfg or {},
+                               rows=[], summary={}, tools=[], error=None,
+                               stamp=1.0, notes=[],
+                               device_paths=device_paths or {})
+
+    assert _picker_start(snap(cfg={"PORTHOLE_WORKDIR": "/vendor/tree"})) \
+        == "/vendor/tree"
+    assert _picker_start(snap(device_paths={"d": {"workdir": "/dev/tree"}})) \
+        == "/dev/tree"
+    assert _picker_start(snap()) == pathlib.Path.cwd()
+    assert _picker_start(None) == pathlib.Path.cwd()
+
+
+def test_pressing_e_opens_the_argument_form_for_the_selection():
+    # Proves MainScreen's Binding("e", "edit_args") -> action_edit_args
+    # really fires, via the actual key, for a real milestone from the real
+    # registry -- not a call to the method directly.
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        view = app.screen.query_one(PortView)
+        view.snapshot = app.store.snapshot
+        await pilot.pause()
+        rows = view.visible_rows()
+        index = next((i for i, (_label, row) in enumerate(rows)
+                      if (row.get("how") or "").startswith("porthole ")), None)
+        if index is None:
+            return                      # no runnable milestone in this checkout
+        verb = rows[index][1]["how"].split()[1]
+        listing = view.query_one("#rows")
+        listing.index = index
+        listing.focus()
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, ArgForm), type(app.screen).__name__
+        assert app.screen.spec["verb"] == verb
+    tui_harness.pilot(make, body)
+
+
+def test_the_blobs_form_is_the_acceptance_test_for_the_whole_plan():
+    """Task 15 brief, Step 7, driven headlessly. `blobs` must show its
+    description, an ACTION select carrying all five actions, a PATH field
+    with a working browse button, and a live preview that reaches
+    `porthole blobs unsparse <path>` once both are set -- via the real
+    widgets and the real message pipeline, not by poking form.values."""
+    async def body(app, pilot):
+        spec = spec_for("blobs")
+        form = ArgForm(spec)
+        app.push_screen(form)
+        await pilot.pause()
+
+        # the description renders
+        texts = [str(s.content) for s in form.query(Static)]
+        assert spec["description"] in texts, texts
+
+        # the ACTION select carries all five actions
+        select = form.query_one("#f-action", Select)
+        choices = {value for _label, value in select._options
+                  if value is not Select.NULL}
+        assert choices == {"unsparse", "unpack", "ls", "extract", "inventory"}, \
+            choices
+
+        # a PATH field with a working browse button
+        assert form.query_one("#f-path", Input) is not None
+        assert form.query_one("#b-path", Button) is not None
+
+        preview = form.query_one("#form-command", Static)
+        assert str(preview.content) == "porthole blobs", str(preview.content)
+
+        # choosing the action through the REAL Select value pipeline (not
+        # form.values directly) is what would catch a _repaint() that never
+        # recomputes.
+        select.value = "unsparse"
+        await pilot.pause()
+        assert str(preview.content) == "porthole blobs unsparse", \
+            str(preview.content)
+
+        # browse, rooted at the resolved start dir -- never blindly cwd
+        await pilot.click("#b-path")
+        await pilot.pause()
+        assert isinstance(app.screen, FilePicker), type(app.screen).__name__
+        expected = pathlib.Path(_picker_start(app.store.snapshot)).expanduser()
+        assert app.screen.start == expected, (app.screen.start, expected)
+
+        app.screen.query_one("#picker-path", Input).value = "/tmp/vendor.img"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+        assert isinstance(app.screen, ArgForm), type(app.screen).__name__
+        assert str(preview.content) == "porthole blobs unsparse /tmp/vendor.img", \
+            str(preview.content)
     tui_harness.pilot(make, body)
 
 
