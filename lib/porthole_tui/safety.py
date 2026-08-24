@@ -33,6 +33,11 @@ def is_risky(command):
 def needs_confirmation(command, safe):
     """Must this be confirmed before it runs?
 
+    A pure function on purpose. The safety boundary is the one piece of this
+    app that must be testable without a terminal, because "we were careful" is
+    not a mechanism and a mis-keystroke that flashes a device is not recoverable
+    by pressing undo.
+
     Two independent reasons to stop, and either is enough:
 
       - the milestone did not mark the step safe (it may be destructive, or
