@@ -24,6 +24,17 @@ class PortView(Catalogue):
                    if r["state"] == ms.BLOCKED and r["source"] != "stale"]
         ordered = stale + blocked
         ordered += [r for r in all_rows if r not in ordered]
+        query = (self.query or "").lower()
+        if query:
+            # After the stale/blocked ordering, not before: a stale milestone
+            # matching the filter must still lead within the filtered set --
+            # it means the port believes it is further along than it is, and
+            # that is the one thing that must never scroll off.
+            ordered = [r for r in ordered
+                      if query in (r["title"] or "").lower()
+                      or query in (r["id"] or "").lower()
+                      or query in (r["evidence"] or "").lower()
+                      or query in (r["phase"] or "").lower()]
         out = []
         for row in ordered:
             if row["source"] == "stale":

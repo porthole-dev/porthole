@@ -24,6 +24,7 @@ from porthole_tui.screens.reader import Reader  # noqa: E402
 from porthole_tui.widgets.brain import NoteList  # noqa: E402
 from porthole_tui.widgets.devices import DeviceList  # noqa: E402
 from porthole_tui.widgets.jobs import JobDrawer  # noqa: E402
+from porthole_tui.widgets.port import PortView  # noqa: E402
 from porthole_tui.widgets.rail import Rail  # noqa: E402
 from porthole_tui.widgets.tools import ToolList  # noqa: E402
 
@@ -521,6 +522,56 @@ def test_ctrl_r_reruns_through_the_confirm_boundary():
         await pilot.pause()
         assert isinstance(app.screen, ConfirmRun)
     tui_harness.pilot(make, body)
+
+
+# -- Ruling R23: the port filter is a dead affordance that lies -----------
+
+def _snapshot_with(rows):
+    # Built the same way test_the_brain_filter_never_hides_the_laws builds
+    # its fixed snapshot -- a fabricated Snapshot, not whatever the repo's
+    # real device state happens to be, so this cannot pass vacuously.
+    from porthole_tui import state as _state
+    return _state.Snapshot(device="test-device", devices=[], cfg={},
+                           rows=rows, summary={}, tools=[], error=None,
+                           stamp=1.0, notes=[])
+
+
+def test_the_port_filter_actually_filters():
+    """`/` opened a filter that accepted text and changed nothing, while the count label
+    claimed a filter was active -- the interface asserting something false. Fourth
+    instance in this project of a control advertising a behaviour it does not have."""
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        await pilot.pause()
+        view = app.screen.query_one(PortView)
+        view.snapshot = app.store.snapshot
+        await pilot.pause()
+        total = len(view.visible_rows())
+        assert total > 1, "need milestones to filter"
+        view.query = "zzzznope-matches-nothing"
+        await pilot.pause()
+        assert view.visible_rows() == [], "a filter matching nothing must empty the list"
+        assert "0" in view.count_label(), view.count_label()
+    tui_harness.pilot(make, body)
+
+
+def test_the_port_filter_keeps_stale_first():
+    # Stale must still lead WITHIN the filtered set: a milestone the probe contradicts is
+    # the one thing that must never be pushed below the fold.
+    import porthole_milestones as ms
+    view = PortView()
+    view.snapshot = _snapshot_with(rows=[
+        {"id": "a", "phase": "first-boot", "title": "usb gadget", "state": ms.BLOCKED,
+         "source": "probe", "evidence": "", "why": "", "how": "", "playbook": "",
+         "safe": False},
+        {"id": "b", "phase": "first-boot", "title": "usb storage", "state": "done",
+         "source": "stale", "evidence": "probe disagrees", "why": "", "how": "",
+         "playbook": "", "safe": False},
+    ])
+    view.query = "usb"
+    labels = [label for label, _ in view.visible_rows()]
+    assert len(labels) == 2, labels
+    assert "stale" in labels[0], "stale must lead within the filtered set: {}".format(labels)
 
 
 def main():
