@@ -25,6 +25,13 @@ SUMMARY_RE = re.compile(r"^#\s*(\S.*?)\s*$", re.M)
 
 REQUIRED_FIELDS = ("scope", "needs", "env", "exits")
 
+# A licence header is not a description. 49 of 114 tools were reporting
+# "SPDX-License-Identifier: MIT" as their summary, and `tools lint` called them
+# all self-describing -- the check tested that a summary was non-empty, which a
+# licence line satisfies while telling a reader nothing at all.
+NOT_A_SUMMARY = re.compile(
+    r"^(SPDX-License-Identifier|Copyright|SPDX-FileCopyrightText)\b", re.I)
+
 
 class Tool:
     def __init__(self, path: pathlib.Path, root: pathlib.Path):
@@ -65,6 +72,8 @@ class Tool:
             stripped = line.strip()
             if stripped.startswith("#!"):
                 continue
+            if NOT_A_SUMMARY.match(stripped.lstrip("# ").strip()):
+                continue
             if not stripped.startswith("#"):
                 if stripped:
                     break
@@ -101,7 +110,14 @@ class Tool:
 
     @property
     def gaps(self) -> list[str]:
-        return [f for f in REQUIRED_FIELDS if f not in self.fields]
+        missing = [f for f in REQUIRED_FIELDS if f not in self.fields]
+        # "Has a summary" is not the same as "says what it does". The lint
+        # passed 114 tools while 49 of them described themselves as
+        # "SPDX-License-Identifier: MIT" -- a check that only tested for
+        # non-empty could not tell a description from a licence.
+        if not self.summary.strip() or NOT_A_SUMMARY.match(self.summary):
+            missing.append("summary")
+        return missing
 
     def as_dict(self) -> dict:
         return {"name": self.name, "kind": self.kind,
