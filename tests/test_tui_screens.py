@@ -7,6 +7,7 @@ CI job installs it and fails if these skip there.
 """
 import collections
 import pathlib
+import shlex
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -20,6 +21,7 @@ from textual.widgets import (Button, Checkbox, Input, ListView, RichLog,  # noqa
                              Select, Static)
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
+from porthole_tui.jobs import Job  # noqa: E402
 from porthole_tui.screens.confirm import ConfirmRun  # noqa: E402
 from porthole_tui.screens.form import ArgForm, _picker_start  # noqa: E402
 from porthole_tui.screens.help import HelpScreen  # noqa: E402
@@ -709,12 +711,27 @@ def test_choosing_a_note_opens_its_reader():
 
 
 def test_choosing_a_device_switches_to_it():
+    # NOTHING here may actually execute. `porthole use` is safe in the sense
+    # safety.py means -- it flashes nothing -- but it rewrites
+    # PORTHOLE_DEVICE in the developer's REAL ~/.config/porthole/config.env,
+    # and it did: this test switched a live port from cheetah to taimen and
+    # nobody noticed, which is the exact silent failure porthole_cmd_use's
+    # own docstring warns about. XDG_CONFIG_HOME cannot fix it either --
+    # the child is session-detached and inherits its environment at spawn.
+    # The assertion only ever read j.command, so stub the spawn.
     async def body(app, pilot):
+        spawned = []
+
+        def fake_spawn(command, on_line=None, on_exit=None):
+            spawned.append(command)
+            return Job(command, shlex.split(command))
+
+        app.jobs.spawn = fake_spawn
         app.screen.on_catalogue_chosen(_Chosen("google-taimen"))
         await pilot.pause()
         # `use` is safe and harmless, so it spawns without a confirm
-        assert any("porthole use google-taimen" == j.command for j in app.jobs.jobs), \
-            [j.command for j in app.jobs.jobs]
+        assert spawned == ["porthole use google-taimen"], spawned
+        assert app.jobs.jobs == [], "the stub must be what ran, not the real spawn"
     tui_harness.pilot(make, body)
 
 
