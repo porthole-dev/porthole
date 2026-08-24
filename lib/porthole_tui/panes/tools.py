@@ -12,12 +12,9 @@ from . import _list
 
 
 def render(win, snap, height, width, sel=0, query=""):
-    import pathlib
-    import porthole_cmd_tools as tmod
-    # Path, not str: collect() builds `root / "tools"`, and passing the config
-    # value straight through crashed the pane the moment it was opened.
-    root = pathlib.Path(snap.cfg.get("PORTHOLE_ROOT", "."))
-    tools = tmod.collect(root, snap.device)
+    # From the warm model, not the filesystem: re-parsing 95 tool headers on
+    # every frame cost 14.3% of a core while the pane sat idle.
+    tools = list(snap.tools or [])
     if query:
         q = query.lower()
         tools = [t for t in tools

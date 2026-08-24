@@ -13,8 +13,10 @@ publishes a new immutable snapshot when it finishes; the UI always renders the
 last complete snapshot. A half-updated model on screen is worse than a stale
 one, because you cannot tell which half is which.
 
-**Nothing here touches the device.** The same rule the milestone probes follow.
-A TUI that hangs because a phone stopped answering is a TUI you close.
+**Nothing here touches the device ON THE EVENT LOOP.** The state probe runs
+here, on the worker, with a bounded timeout -- that is what the rule always
+meant. Refusing to probe at all is what made the header read UNPROBED forever
+while three milestones told the user to leave the TUI and run `doctor`.
 """
 from __future__ import annotations
 
@@ -28,7 +30,12 @@ class Snapshot:
 
     __slots__ = ("device", "devices", "cfg", "rows", "summary", "has_markers",
                  "pmaports", "pmaports_branch", "workdir", "soc", "state",
-                 "error", "stamp")
+                 "error", "stamp",
+                 # The catalogues. They belong here because the panes were
+                 # re-reading 95 tool headers and 55 notes inside render(),
+                 # which runs on every frame -- 14.3% of a core, idle, to
+                 # re-parse files that had not changed.
+                 "tools", "notes")
 
     def __init__(self, **kw):
         for name in self.__slots__:
@@ -43,7 +50,8 @@ class Model:
         self._device = device
         self._lock = threading.Lock()
         self._snapshot = Snapshot(device=device or "", devices=[], rows=[],
-                                  summary={}, error=None, stamp=0.0)
+                                  summary={}, tools=[], notes=[],
+                                  error=None, stamp=0.0)
         self._busy = False
         self.started = time.monotonic()
 
@@ -88,7 +96,8 @@ class Model:
             # A broken profile or an absent pmaports must degrade the display,
             # never take the session down mid-port.
             snap = Snapshot(device=self._device or "", devices=[], rows=[],
-                            summary={}, error=f"{type(exc).__name__}: {exc}",
+                            summary={}, tools=[], notes=[],
+                            error=f"{type(exc).__name__}: {exc}",
                             stamp=time.time())
         with self._lock:
             self._snapshot = snap
@@ -110,8 +119,32 @@ class Model:
         if device:
             rows, summary, has_markers = nxt.collect(ctx)
 
+        # Read once, here, rather than per frame in the panes.
+        import porthole_cmd_tools as tmod
+        import porthole_cmd_brain as bmod
+        try:
+            tools = tmod.collect(self.root, device)
+        except Exception:  # noqa: BLE001
+            tools = []
+        try:
+            notes = bmod.load_notes(self.root)
+        except Exception:  # noqa: BLE001
+            notes = []
+
         pm = pmap.find_pmaports(cfg)
         branch = _branch(pm) if pm else ""
+
+        # The device state is a probe, and probes belong on this thread -- the
+        # header said UNPROBED forever because the model refused to ask, while
+        # three milestones told the user to leave the TUI and run doctor. The
+        # rule was never "no device I/O", it was "no device I/O on the event
+        # loop", and this is the worker.
+        state = cfg.get("TK_DEVICE_STATE", "") or ""
+        if not state:
+            try:
+                state = porthole.Device(cfg).state(max_age=20)
+            except Exception:  # noqa: BLE001
+                state = "unknown"
 
         return Snapshot(
             device=device, devices=devices, cfg=cfg, rows=rows,
@@ -119,7 +152,7 @@ class Model:
             pmaports=str(pm) if pm else "", pmaports_branch=branch,
             workdir=cfg.get("PORTHOLE_WORKDIR", ""),
             soc=cfg.get("PORTHOLE_SOC", ""),
-            state=cfg.get("TK_DEVICE_STATE", "") or "unprobed",
+            state=state or "unknown", tools=tools, notes=notes,
             error=None, stamp=time.time())
 
 

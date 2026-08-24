@@ -115,3 +115,37 @@ def fit(text: str, width: int) -> str:
         return text
     cut = text[:max(0, width - 1)].rsplit(" ", 1)[0]
     return (cut + g("ellipsis"))[:width]
+
+
+def layout(total: int, specs, gap: int = 2, left: int = 2):
+    """Turn column specs into (x, width) pairs that fit `total`.
+
+    `specs` is [(min_width, weight), ...]. Every column gets its minimum; what
+    is left over is shared out by weight. A column that cannot fit its minimum
+    gets zero width and its caller draws nothing -- which is the honest answer,
+    because the alternative is what this replaced: fixed x offsets that wrote
+    past the right edge, and curses WRAPS rather than truncating, so row n
+    overwrote row n+1 and the pane became unreadable below ~60 columns.
+    """
+    usable = max(0, total - left - gap * (len(specs) - 1))
+    mins = [m for m, _ in specs]
+    if sum(mins) > usable:
+        # Not enough room for everyone. Fill from the left; the columns are
+        # already ordered by importance.
+        out, x, spare = [], left, usable
+        for m, _ in specs:
+            w = max(0, min(m, spare))
+            out.append((x, w))
+            x += w + gap
+            spare -= w
+        return out
+    extra = usable - sum(mins)
+    weights = [w for _, w in specs] or [1]
+    scale = sum(weights) or 1
+    widths = [m + (extra * w) // scale for (m, w) in specs]
+    widths[-1] += usable - sum(widths)          # give rounding to the last
+    out, x = [], left
+    for w in widths:
+        out.append((x, w))
+        x += w + gap
+    return out

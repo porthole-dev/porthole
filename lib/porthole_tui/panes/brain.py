@@ -14,9 +14,7 @@ SEV = {"law": T.CRIT, "trap": T.WARN, "technique": T.NOTE, "fact": T.DIM}
 
 
 def render(win, snap, height, width, sel=0, query=""):
-    import porthole_cmd_brain as bmod
-    import pathlib
-    notes = bmod.load_notes(pathlib.Path(snap.cfg.get("PORTHOLE_ROOT", ".")))
+    notes = list(snap.notes or [])
     if query:
         q = query.lower()
         notes = [n for n in notes

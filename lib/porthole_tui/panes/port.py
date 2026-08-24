@@ -34,21 +34,24 @@ def render(win, snap, height, width, sel=0):
     # Numbered because the sequence is real. A port genuinely goes
     # before-device -> first-boot -> storage -> packaging -> subsystems ->
     # upstream, and skipping ahead is how weeks are lost.
+    # (index, name, bar, count, stale, here) -- the last three drop first on a
+    # narrow terminal, because a phase name with no bar still tells you where
+    # you are and a bar with no name does not.
+    spine = T.layout(width, [(1, 0), (12, 4), (8, 0), (5, 0), (3, 0), (7, 0)])
     for i, p in enumerate(ph):
         if y >= height - 8:
             break
-        mark = T.g("here") + " here" if p["current"] else ""
         role = T.ACTIVE if p["current"] else T.BASE
-        win.addstr(y, 2, f"{i}", T.attr(T.DIM))
-        win.addstr(y, 4, T.fit(p["name"], 18).ljust(18),
-                   T.attr(role, bold=p["current"]))
-        win.addstr(y, 23, T.bar(p["done"], p["total"]),
-                   T.attr(T.OK if p["done"] else T.DIM))
-        win.addstr(y, 33, f"{p['done']}/{p['total']}", T.attr(T.DIM))
-        if p["stale"]:
-            win.addstr(y, 40, f"{T.g('bang')}{p['stale']}", T.attr(T.CRIT))
-        if mark:
-            win.addstr(y, 44, mark, T.attr(T.ACTIVE, bold=True))
+        cells = [f"{i}", T.fit(p["name"], spine[1][1]),
+                 T.bar(p["done"], p["total"]), f"{p['done']}/{p['total']}",
+                 (f"{T.g('bang')}{p['stale']}" if p["stale"] else ""),
+                 (T.g("here") + " here" if p["current"] else "")]
+        roles = [T.DIM, role, T.OK if p["done"] else T.DIM, T.DIM, T.CRIT,
+                 T.ACTIVE]
+        for (x, w), text, r in zip(spine, cells, roles):
+            if w and text:
+                win.addstr(y, x, T.fit(text, w),
+                           T.attr(r, bold=(r is T.ACTIVE)))
         y += 1
 
     y += 1
@@ -64,11 +67,12 @@ def render(win, snap, height, width, sel=0):
         stale = row["source"] == "stale"
         tag = f"{T.g('bang')} stale " if stale else f"{T.g('dot')} blocked"
         win.addstr(y, 2, tag, T.attr(T.CRIT if stale else T.WARN))
-        win.addstr(y, 12, T.fit(row["title"], TITLE_W).ljust(TITLE_W),
+        tcol, ecol = T.layout(width, [(14, 2), (12, 3)], left=12)
+        win.addstr(y, tcol[0], T.fit(row["title"], tcol[1]).ljust(tcol[1]),
                    T.attr(T.BASE))
-        win.addstr(y, 12 + TITLE_W + 1,
-                   T.fit(row["evidence"] or "", max(0, width - TITLE_W - 16)),
-                   T.attr(T.DIM))
+        if ecol[1]:
+            win.addstr(y, ecol[0], T.fit(row["evidence"] or "", ecol[1]),
+                       T.attr(T.DIM))
         y += 1
 
     # -- the answer --------------------------------------------------------

@@ -60,7 +60,7 @@ def snapshot(device="google-taimen", rows=None, summary=None, **kw):
                 rows=rows if rows is not None else [], summary=summary or {},
                 has_markers=True, pmaports="", pmaports_branch="",
                 workdir=cfg.get("PORTHOLE_WORKDIR", ""), soc=cfg.get("PORTHOLE_SOC", ""),
-                state="unprobed", error=None, stamp=0.0)
+                state="ABSENT", tools=[], notes=[], error=None, stamp=0.0)
     base.update(kw)
     return Snapshot(**base)
 
@@ -329,6 +329,44 @@ def test_the_first_frame_does_not_need_a_loaded_model():
     assert win.calls, "nothing was drawn for an empty model"
 
 
+class WrappingScreen:
+    """Like curses at the RIGHT edge, where the real bug lived.
+
+    Screen (below) raises on a bad row. This one wraps instead, which is what a
+    terminal actually does -- and wrapping is why the devices pane became
+    unreadable below 60 columns: text written past the right edge landed on the
+    next row and overwrote it. A test that clips silently cannot see that.
+    """
+
+    def __init__(self, h=24, w=100):
+        self.h, self.w = h, w
+        self.grid = [[" "] * w for _ in range(h)]
+        self.overruns = []
+
+    def getmaxyx(self):
+        return (self.h, self.w)
+
+    def erase(self):
+        self.grid = [[" "] * self.w for _ in range(self.h)]
+
+    def refresh(self):
+        pass
+
+    def addstr(self, y, x, text, attr=0):
+        import curses
+        if not 0 <= y < self.h:
+            raise curses.error("addstr out of bounds")
+        if x + len(text) > self.w:
+            self.overruns.append((y, x, len(text), text[:30]))
+        for i, ch in enumerate(text):
+            yy, xx = y + (x + i) // self.w, (x + i) % self.w
+            if 0 <= yy < self.h:
+                self.grid[yy][xx] = ch
+
+    def __str__(self):
+        return "\n".join("".join(r).rstrip() for r in self.grid)
+
+
 class Screen:
     """A fake stdscr that behaves like curses at the edges, so a frame can be
     driven end to end without a terminal."""
@@ -584,6 +622,81 @@ def test_no_pane_is_dead_code():
     src = inspect.getsource(App)
     assert "console_lines" not in src, "the dead console pane is back"
     assert len(PANES) == 4
+
+
+def test_the_catalogues_live_in_the_model_not_in_render():
+    """The tools pane re-parsed 95 file headers and the brain pane 55 notes on
+    EVERY frame -- 14.3% of a core while sitting idle, to re-read files that
+    had not changed. render() must not touch the filesystem."""
+    import inspect
+    from porthole_tui.panes import brain, tools
+    for name, mod in (("tools", tools), ("brain", brain)):
+        src = inspect.getsource(mod.render)
+        for banned in ("collect(", "load_notes(", "rglob", "iterdir", "glob("):
+            assert banned not in src, (
+                f"the {name} pane reads the filesystem inside render(): "
+                f"{banned}")
+
+
+def test_the_model_carries_the_catalogues():
+    from porthole_tui.model import Model
+    m = Model(ROOT, "google-taimen")
+    m.refresh(block=True)
+    assert m.snapshot.tools, "the tool catalogue is not in the snapshot"
+    assert m.snapshot.notes, "the brain index is not in the snapshot"
+
+
+def test_the_header_reports_a_real_device_state():
+    """It said UNPROBED forever, because the model refused to probe -- while
+    three milestones told the user to leave the TUI and run doctor."""
+    from porthole_tui.model import Model
+    m = Model(ROOT, "google-taimen")
+    m.refresh(block=True)
+    assert m.snapshot.state in ("BOOTED", "FROZEN", "FASTBOOT", "ABSENT",
+                                "unknown"), m.snapshot.state
+    assert m.snapshot.state != "unprobed"
+
+
+def test_the_loop_only_repaints_when_something_changed():
+    """A full-screen repaint 16 times a second, to show a clock."""
+    import ast
+    import inspect
+    from porthole_tui.app import App
+    src = inspect.getsource(App.run)
+    assert "dirty" in src, "the loop repaints unconditionally"
+    tree = ast.parse(src.strip())
+    names = {getattr(n.func, "attr", None)
+             for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    assert "update_lines_cols" in names, "KEY_RESIZE is not handled explicitly"
+
+
+def test_no_pane_writes_past_the_right_edge_at_any_width():
+    """Fixed x offsets wrote past the right edge, and curses WRAPS rather than
+    truncating -- so each row overwrote the next and the devices pane was
+    unreadable below ~60 columns. One width was tested before; the bug lived
+    at the widths that were not."""
+    from porthole_tui.app import App, PANES
+    app = App(ROOT, "google-taimen")
+    app.model.refresh(block=True)
+    problems = []
+    for width in (40, 50, 60, 72, 80, 100, 132):
+        for i, (name, _) in enumerate(PANES):
+            screen = WrappingScreen(20, width)
+            app.pane, app.sel = i, 0
+            app.draw(screen)
+            for y, x, n, text in screen.overruns:
+                problems.append(f"{name}@{width}: {n} chars at x={x}: {text!r}")
+    assert not problems, "\n  ".join([""] + problems[:8])
+
+
+def test_the_column_layout_degrades_instead_of_overflowing():
+    from porthole_tui import theme
+    specs = [(18, 0), (16, 3), (10, 2)]
+    for width in range(20, 200, 7):
+        cols = theme.layout(width, specs)
+        for x, w in cols:
+            assert x + w <= width, f"column {x}+{w} exceeds {width}"
+        assert cols[0][1] > 0 or width < 22, "the first column vanished early"
 
 
 def test_the_session_clock_is_monotonic():

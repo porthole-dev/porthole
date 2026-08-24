@@ -15,9 +15,15 @@ from . import _list
 def render(win, snap, height, width, sel=0):
     import porthole
     devices = snap.devices or []
-    win.addstr(1, 2, "device", T.attr(T.DIM))
-    win.addstr(1, 22, "working repo", T.attr(T.DIM))
-    win.addstr(1, 58, "pmaports", T.attr(T.DIM))
+    # Fixed offsets wrote past the right edge, and curses wraps rather than
+    # truncating -- so below ~60 columns each row overwrote the next.
+    cols = T.layout(width, [(18, 0), (16, 3), (10, 2)])
+    (dx, dw), (wx, ww), (px, pw) = cols
+    win.addstr(1, dx, T.fit("device", dw), T.attr(T.DIM))
+    if ww:
+        win.addstr(1, wx, T.fit("working repo", ww), T.attr(T.DIM))
+    if pw:
+        win.addstr(1, px, T.fit("pmaports", pw), T.attr(T.DIM))
     rows = max(1, height - 6)
     visible, offset, sel = _list.window(devices, sel, rows)
     count = _list.scrollbar(offset, len(visible), len(devices))
@@ -28,15 +34,17 @@ def render(win, snap, height, width, sel=0):
         live = name == snap.device
         cur = offset + i == sel
         mark = T.g("tick") if live else " "
-        win.addstr(y, 2, f"{mark} {T.fit(name, 17).ljust(17)}",
+        win.addstr(y, dx, T.fit(f"{mark} {name}", dw).ljust(dw),
                    T.attr(T.ACTIVE if live else T.BASE,
                           bold=live, reverse=cur))
         wd = _peek(snap, name, "PORTHOLE_WORKDIR")
         pm = _peek(snap, name, "PORTHOLE_PMAPORTS")
-        win.addstr(y, 22, T.fit(wd or "not set", 34).ljust(34),
-                   T.attr(T.BASE if wd else T.WARN))
-        win.addstr(y, 58, T.fit(_short(pm) or "shared", max(0, width - 60)),
-                   T.attr(T.BASE if pm else T.DIM))
+        if ww:
+            win.addstr(y, wx, T.fit(wd or "not set", ww).ljust(ww),
+                       T.attr(T.BASE if wd else T.WARN))
+        if pw:
+            win.addstr(y, px, T.fit(_short(pm) or "shared", pw),
+                       T.attr(T.BASE if pm else T.DIM))
     y = min(3 + len(visible), height - 3) + 1
     win.addstr(y, 2, T.fit("A repo shown as 'not set' is not inherited from "
                            "another device.", max(0, width - 4)), T.attr(T.DIM))

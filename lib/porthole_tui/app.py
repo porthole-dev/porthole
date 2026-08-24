@@ -96,7 +96,7 @@ class App:
         # the model never finished loading and the console sat on its "reading
         # the port" frame forever. getch() with a timeout blocks on a read, so
         # the interpreter hands the GIL to the worker while it waits.
-        stdscr.timeout(60)
+        stdscr.timeout(250)
         stdscr.keypad(True)
         T.init()
         # Paint BEFORE loading anything. The first version blocked on a full
@@ -111,15 +111,35 @@ class App:
             pass
         self.model.refresh()
 
+        dirty, last_stamp, last_clock = True, 0.0, 0
         while self.running:
-            try:
-                self.draw(stdscr)
-            except curses.error:
-                pass                      # a resize mid-draw; next frame wins
-            ch = stdscr.getch()           # blocks up to 60ms, releasing the GIL
+            # Repaint on a key, on a new snapshot, or once a second so the
+            # session clock ticks. Redrawing every 60ms regardless meant the
+            # only thing that ever changed was the clock, and it cost a
+            # full-screen repaint 16 times a second to show it.
+            snap = self.model.snapshot
+            clock = int(self.model.uptime())
+            if snap.stamp != last_stamp or clock != last_clock:
+                dirty, last_stamp, last_clock = True, snap.stamp, clock
+            if dirty:
+                try:
+                    self.draw(stdscr)
+                except curses.error:
+                    pass                  # a resize mid-draw; next frame wins
+                dirty = False
+            ch = stdscr.getch()           # blocks up to 250ms, releasing the GIL
+            if ch == curses.KEY_RESIZE:
+                # Explicitly, rather than relying on a full repaint happening
+                # to land: re-clamp the selection, which a narrower terminal
+                # can leave pointing past the end of a shorter list.
+                curses.update_lines_cols()
+                self.sel = max(0, min(self.sel, max(0, self.count - 1)))
+                dirty = True
+                continue
             if ch == -1:
-                continue                  # timed out: redraw and wait again
+                continue
             self.key(stdscr, ch)
+            dirty = True
         return 0
 
     # -------------------------------------------------------------- draw --
@@ -335,8 +355,7 @@ class App:
         root = self.root
         name = PANES[self.pane][0]
         if name == "tools":
-            import porthole_cmd_tools as tmod
-            tools = tmod.collect(root, snap.device)
+            tools = list(snap.tools or [])
             if self.query:
                 q = self.query.lower()
                 tools = [x for x in tools if q in x.name.lower()
@@ -346,8 +365,7 @@ class App:
                 self.doc_sel = 0
             return
         if name == "brain":
-            import porthole_cmd_brain as bmod
-            notes = bmod.load_notes(root)
+            notes = list(snap.notes or [])
             if self.query:
                 q = self.query.lower()
                 notes = [n for n in notes if q in n.title.lower()
@@ -401,7 +419,7 @@ class App:
         # so getch() would return -1 immediately forever and run() would spin a
         # core after every confirmation, accepted or cancelled. Same class as
         # the napms GIL bug this file warns about 200 lines up.
-        stdscr.timeout(60)
+        stdscr.timeout(250)
         return ch == ord("y")
 
     def shell(self, stdscr, command) -> None:
