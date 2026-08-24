@@ -26,6 +26,7 @@ import sys
 import time
 
 MAX_LINES = 20000
+MAX_LINE = 4096
 
 # A build interrupted with SIGKILL first leaves a dirty tree. Escalate:
 # (seconds after cancel, signal).
@@ -118,42 +119,74 @@ class JobManager:
                 stderr=asyncio.subprocess.STDOUT, start_new_session=True)
         except (OSError, ValueError) as exc:
             job.lines.append("could not run it: {}".format(exc))
-            job.rc, job.state = 127, "done"
-            job.finished = time.monotonic()
-            job._done.set()
-            if on_exit:
-                on_exit(job)
+            self._finish(job, 127, "done", on_exit)
             return
 
-        reader = asyncio.ensure_future(self._pump(job, on_line))
-        waiter = asyncio.ensure_future(job._proc.wait())
-        step = 0
-        while not waiter.done():
-            await asyncio.wait({waiter}, timeout=0.25)
-            if job._cancelled_at is None:
-                continue
-            elapsed = time.monotonic() - job._cancelled_at
-            while step + 1 < len(_ESCALATION) and elapsed >= _ESCALATION[step + 1][0]:
-                step += 1
-                job._signal(_ESCALATION[step][1])
-        await reader
-        job.rc = waiter.result()
+        rc = None
+        try:
+            reader = asyncio.ensure_future(self._pump(job, on_line))
+            waiter = asyncio.ensure_future(job._proc.wait())
+            step = 0
+            while not waiter.done():
+                await asyncio.wait({waiter}, timeout=0.25)
+                if job._cancelled_at is None:
+                    continue
+                elapsed = time.monotonic() - job._cancelled_at
+                while step + 1 < len(_ESCALATION) and elapsed >= _ESCALATION[step + 1][0]:
+                    step += 1
+                    job._signal(_ESCALATION[step][1])
+            await reader
+            rc = waiter.result()
+        finally:
+            self._finish(job, rc,
+                         "cancelled" if job._cancelled_at is not None else "done",
+                         on_exit)
+
+    def _finish(self, job, rc, state, on_exit):
+        job.rc = rc
         job.finished = time.monotonic()
-        job.state = "cancelled" if job._cancelled_at is not None else "done"
+        job.state = state
         job._done.set()
         if on_exit:
             on_exit(job)
 
     async def _pump(self, job, on_line):
+        # Chunked, not readline(): asyncio's StreamReader raises once a single line
+        # passes its 64KiB buffer with no newline, and NOTHING here caught that -- the
+        # job's bookkeeping was skipped and job.wait() blocked forever while the
+        # process had already exited. Progress output is exactly that shape: fastboot,
+        # dd, wget and pmbootstrap all draw with carriage returns and never emit a
+        # newline until the end. Splitting on \r as well as \n turns that into
+        # successive lines, which is what a log drawer wants anyway.
         stream = job._proc.stdout
-        while True:
-            raw = await stream.readline()
-            if not raw:
-                return
-            text = raw.decode("utf-8", "replace").rstrip("\n")
+        buf = b""
+
+        def emit(raw):
+            text = raw.decode("utf-8", "replace")
             job.lines.append(text)
             if on_line:
                 on_line(text)
+
+        try:
+            while True:
+                chunk = await stream.read(4096)
+                if not chunk:
+                    break
+                buf = (buf + chunk).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    emit(line)
+                # No separator in sight. Flush rather than grow without bound.
+                while len(buf) > MAX_LINE:
+                    emit(buf[:MAX_LINE])
+                    buf = buf[MAX_LINE:]
+        except Exception as exc:  # noqa: BLE001
+            # A read error must never skip the caller's finish bookkeeping.
+            emit(b"porthole: lost the output stream: "
+                 + str(exc).encode("utf-8", "replace"))
+        finally:
+            if buf:
+                emit(buf)
 
     def cancel_all(self):
         for job in self.running:
@@ -179,5 +212,7 @@ def is_interactive(root, command):
             if spec["verb"] == parts[1]:
                 return bool(spec.get("interactive", False))
     except Exception:  # noqa: BLE001
-        return False
+        # Could not read the registry. Assume interactive: suspending the UI
+        # unnecessarily is recoverable, piping a termios-driven command is not.
+        return True
     return False

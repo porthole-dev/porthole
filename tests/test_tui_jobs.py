@@ -141,6 +141,51 @@ def test_a_tilde_path_is_expanded_before_exec():
     assert "~" not in list(job.lines)[0]
 
 
+def test_progress_output_with_no_newline_does_not_hang_the_job():
+    """fastboot, dd, wget and pmbootstrap all draw progress with carriage returns and
+    emit no newline until the end. readline() raised past its 64KiB buffer, the finish
+    bookkeeping was skipped, and job.wait() blocked forever while the process had already
+    exited -- with JobManager.running still reporting it as live."""
+    async def go():
+        mgr = jobs.JobManager(ROOT)
+        job = mgr.spawn("sh -c 'i=0; while [ $i -lt 9000 ]; do "
+                        "printf \"progress %d of 9000\\r\" $i; i=$((i+1)); done; echo done'")
+        return await asyncio.wait_for(job.wait(), timeout=20), job
+
+    rc, job = run(go())
+    assert rc == 0, rc
+    assert job.state == "done"
+    assert list(job.lines)[-1] == "done", list(job.lines)[-3:]
+    assert len(job.lines) > 100, "carriage returns must become separate lines"
+
+
+def test_a_single_enormous_line_is_chunked_not_fatal():
+    async def go():
+        mgr = jobs.JobManager(ROOT)
+        job = mgr.spawn("sh -c 'printf \"%0100000d\" 7'")
+        return await asyncio.wait_for(job.wait(), timeout=20), job
+
+    rc, job = run(go())
+    assert rc == 0
+    assert job.state == "done"
+    assert job.lines, "output must not be lost"
+
+
+def test_is_interactive_assumes_interactive_when_the_registry_is_unreadable():
+    # Piping a termios-driven command is unrecoverable; an unnecessary suspend is not.
+    import porthole_cli
+    original = porthole_cli.discover
+    porthole_cli.discover = lambda root: (_ for _ in ()).throw(RuntimeError("registry"))
+    try:
+        assert jobs.is_interactive(ROOT, "porthole serial console") is True
+    finally:
+        porthole_cli.discover = original
+
+
+def test_is_interactive_is_false_for_a_non_porthole_command():
+    assert jobs.is_interactive(ROOT, "sh -c true") is False
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
