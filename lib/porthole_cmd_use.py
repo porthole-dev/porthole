@@ -96,20 +96,32 @@ def cmd_use(args, ctx) -> int:
 
     target = config_path()
     set_key(target, "PORTHOLE_DEVICE", codename)
+    per_device = f"PORTHOLE_WORKDIR_{codename.upper().replace('-', '_')}"
 
     # A workdir declared by the profile follows the device. Declared in the
     # PROFILE, not guessed from a sibling directory: guessing which folder goes
     # with which phone is the mistake this command exists to stop making.
     cfg = porthole.load_config(root=root, env={**os.environ,
                                               "PORTHOLE_DEVICE": codename})
-    workdir = cfg.get("PORTHOLE_WORKDIR", "")
     if args.workdir:
         workdir = str(pathlib.Path(args.workdir).expanduser().resolve())
-        set_key(target, "PORTHOLE_WORKDIR", workdir)
+        set_key(target, per_device, workdir)
+        cfg.set("PORTHOLE_WORKDIR", workdir, "user")
+    workdir = cfg.get(per_device) or ""
 
     warnings = []
     if workdir and not pathlib.Path(workdir).is_dir():
-        warnings.append(f"PORTHOLE_WORKDIR does not exist: {workdir}")
+        warnings.append(f"workdir does not exist: {workdir}")
+    elif not workdir:
+        # Report the absence. Inheriting the previous device's repo is exactly
+        # the bug this key exists to remove, so silence here would be a
+        # regression wearing a different name.
+        stale = cfg.get("PORTHOLE_WORKDIR", "")
+        warnings.append(
+            f"{codename} has no working repo set"
+            + (f" (the global PORTHOLE_WORKDIR points at {stale}, which "
+               f"belongs to whichever device set it — it is NOT being used "
+               f"for {codename})" if stale else ""))
 
     branch = ""
     pmaports = pmap.find_pmaports(cfg)
@@ -129,7 +141,7 @@ def cmd_use(args, ctx) -> int:
     def render():
         o = ctx.out
         o(f"{o.paint(o.sym('✓', 'ok'), 'green')} now on {o.paint(codename, 'bold')}")
-        o.kv("workdir", workdir or o.paint("not set", "grey"), 10)
+        o.kv("workdir", workdir or o.paint("not set", "yellow"), 10)
         if pmaports:
             o.kv("pmaports", f"{pmaports}  ({branch or 'unknown branch'})", 10)
         for w in warnings:
@@ -142,6 +154,8 @@ def cmd_use(args, ctx) -> int:
             o.hint(f"pmaports is on {branch!r} — shared across devices, and it "
                    f"did NOT switch")
             o.hint("porthole aports status    check before you build")
+        if not workdir:
+            o.hint(f"porthole use {codename} --workdir <path>   set its repo")
         o.hint('cd "$(porthole cd)"       go to the device repo')
 
     return ctx.emit(payload, render)

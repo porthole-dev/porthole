@@ -274,6 +274,9 @@ def test_specs_do_not_name_tests_that_do_not_exist():
     have = set()
     for path in (ROOT / "tests").glob("test_*.py"):
         have |= set(re.findall(r"^def (test_\w+)", path.read_text(), re.M))
+        # A spec may name the FILE rather than a function in it, which is a
+        # legitimate reference and not drift.
+        have.add(path.stem)
     missing = {}
     for spec in (ROOT / "docs" / "superpowers" / "specs").glob("*.md"):
         named = set(re.findall(r"`(test_\w+)`", spec.read_text()))

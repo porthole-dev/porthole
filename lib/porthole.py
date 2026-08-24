@@ -48,6 +48,8 @@ DEFAULTS = {
     "FASTBOOT": "fastboot",
     "ADB": "adb",
     "PORTHOLE_PMB_DIR": "",
+    # Prefer PORTHOLE_WORKDIR_<CODENAME>; this is the fallback for a
+    # single-device setup and for one-off overrides.
     "PORTHOLE_WORKDIR": "",
     "PORTHOLE_NO_MUX": "0",
     "PORTHOLE_MUX_PERSIST": "60s",
@@ -231,6 +233,40 @@ def load_config(root: str | os.PathLike | None = None,
 
     cfg.set("PORTHOLE_DEVICE", device,
             cfg.source("PORTHOLE_DEVICE") if device else LAYER_DEFAULT)
+
+    # A working repo belongs to ONE device, but PORTHOLE_WORKDIR was a single
+    # global key -- so switching devices silently left the previous device's
+    # repo in place. That is not cosmetic: `docs new` then wrote one device's
+    # notes into another's repository, and the milestone probes read one
+    # device's .dts files as evidence about another. Evidence read from the
+    # wrong tree is worse than no evidence.
+    #
+    # Resolved here rather than in `use` so that EVERY consumer is fixed at
+    # once. The global key stays valid as a fallback, and an explicit
+    # environment override still wins, so no existing setup breaks.
+    if device and "PORTHOLE_WORKDIR" not in env:
+        per_device = f"PORTHOLE_WORKDIR_{device.upper().replace('-', '_')}"
+        mine = cfg.get(per_device)
+        if mine:
+            cfg.set("PORTHOLE_WORKDIR", mine, cfg.source(per_device))
+        elif any(k.startswith("PORTHOLE_WORKDIR_") and cfg.get(k)
+                 for k in list(cfg.keys())):
+            # At least one device declares its own repo, so this is a
+            # multi-device setup -- and in one, the bare global key cannot
+            # answer a per-device question. It belongs to whichever device set
+            # it last, and handing it to a different device is precisely the
+            # contamination this resolution exists to stop. Better to have no
+            # workdir and say so.
+            cfg.set("PORTHOLE_WORKDIR", "", LAYER_DEFAULT)
+    # pmaports is ONE clone that pmbootstrap also writes to, on ONE branch. A
+    # device may have its own git worktree of it, on its own branch, so that
+    # building for one device cannot see another's uncommitted packages.
+    if device and "PORTHOLE_PMAPORTS" not in env:
+        per_device = f"PORTHOLE_PMAPORTS_{device.upper().replace('-', '_')}"
+        if cfg.get(per_device):
+            cfg.set("PORTHOLE_PMAPORTS", cfg.get(per_device),
+                    cfg.source(per_device))
+
     cfg.set("PORTHOLE_ROOT", str(root), cfg.source("PORTHOLE_ROOT"))
     cfg.setdefault("PORTHOLE_RUNDIR", str(root / ".run"))
     # The kernel source directory for an arch is not the arch name: a package

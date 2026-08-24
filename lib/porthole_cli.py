@@ -167,6 +167,87 @@ class Ctx:
 
 # --------------------------------------------------------------- registry --
 
+def _cache_path(root) -> pathlib.Path:
+    base = os.environ.get("XDG_CACHE_HOME") or (pathlib.Path.home() / ".cache")
+    return pathlib.Path(base) / "porthole" / "registry.json"
+
+
+def _registry_key(lib: pathlib.Path) -> str:
+    """A fingerprint of the verb modules: names, sizes and mtimes.
+
+    Cheap (one stat per module, no reads) and it changes whenever a verb is
+    added, removed or edited -- which is exactly when the cache must not be
+    trusted. Content hashing would be more precise and would cost more than the
+    thing it is saving.
+    """
+    import hashlib
+    h = hashlib.sha256()
+    for path in sorted(lib.glob(f"{CMD_PREFIX}*.py")):
+        st = path.stat()
+        h.update(f"{path.name}:{st.st_size}:{st.st_mtime_ns}".encode())
+    return h.hexdigest()[:16]
+
+
+def lookup(root: pathlib.Path, verb: str):
+    """The SPEC for ONE verb, importing only its module.
+
+    `discover()` imports all two dozen verb modules to read their SPECs,
+    because a SPEC holds a function reference -- 51ms on every invocation,
+    including `porthole version`. Dispatch needs exactly one of them.
+
+    So the verb -> module mapping is cached, keyed by the fingerprint above. On
+    a hit we import one module; on a miss, or any error at all, we fall back to
+    full discovery. A cache that can change behaviour is not worth having, so
+    every failure path here ends in the slow, correct answer.
+    """
+    lib = pathlib.Path(root) / "lib"
+    try:
+        cache = json.loads(_cache_path(root).read_text())
+        if cache.get("key") != _registry_key(lib):
+            return None
+        module_name = cache["verbs"].get(verb)
+        if not module_name:
+            return None                      # unknown verb: let the slow path
+        sys.path.insert(0, str(lib))         # explain and suggest
+        module = importlib.import_module(module_name)
+        spec = getattr(module, "SPEC", None)
+        if not spec or spec.get("verb") != verb:
+            return None
+        _defaults(spec)
+        return spec
+    except Exception:  # noqa: BLE001 -- any doubt at all means the slow path
+        return None
+
+
+def write_cache(root: pathlib.Path, specs: list[dict]) -> None:
+    """Record verb -> module after a full discovery. Best effort."""
+    lib = pathlib.Path(root) / "lib"
+    try:
+        path = _cache_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "key": _registry_key(lib),
+            "verbs": {s["verb"]: s["_module"] for s in specs if s.get("_module")},
+        }))
+    except OSError:
+        pass
+
+
+def _defaults(spec: dict) -> dict:
+    spec.setdefault("order", 50)
+    spec.setdefault("args", [])
+    spec.setdefault("help", "")
+    spec.setdefault("examples", [])
+    # Declarative facts about the verb, each defaulting to the common case so
+    # an existing SPEC needs no edit. tests/test_cli_rules.py checks the whole
+    # registry against these: a rule enforced verb by verb drifts the moment
+    # someone adds a tenth verb without reading the other nine.
+    spec.setdefault("device_flag", True)     # does -d/--device apply?
+    spec.setdefault("reports", True)         # does it print a report? (--json)
+    spec.setdefault("escapes_scope", False)  # writes beyond its own profile?
+    return spec
+
+
 def discover(root: pathlib.Path) -> list[dict]:
     """Find every porthole_cmd_*.py in lib/ and collect its SPEC.
 
@@ -187,20 +268,10 @@ def discover(root: pathlib.Path) -> list[dict]:
         spec = getattr(module, "SPEC", None)
         if not spec or "verb" not in spec or "run" not in spec:
             continue
-        spec.setdefault("order", 50)
-        spec.setdefault("args", [])
-        spec.setdefault("help", "")
-        spec.setdefault("examples", [])
-        # Declarative facts about the verb, each defaulting to the common case
-        # so an existing SPEC needs no edit. The contract tests in
-        # tests/test_cli.py check the whole registry against these, which is
-        # the point: a rule enforced verb by verb drifts the moment someone
-        # adds a tenth verb without reading the other nine.
-        spec.setdefault("device_flag", True)    # does -d/--device apply?
-        spec.setdefault("reports", True)        # does it print a report? (--json)
-        spec.setdefault("escapes_scope", False)  # writes beyond its own profile?
-        specs.append(spec)
+        spec["_module"] = name
+        specs.append(_defaults(spec))
     specs.sort(key=lambda s: (s["order"], s["verb"]))
+    write_cache(root, specs)
     return specs
 
 
@@ -369,12 +440,40 @@ def overview(root: pathlib.Path, out: Out) -> int:
 
 def main(argv: list[str], root: pathlib.Path) -> int:
     sys.path.insert(0, str(pathlib.Path(root) / "lib"))
-    specs = discover(root)
-    parser, table = build(root, specs)
 
     if argv and argv[0] in ("-V", "--version"):
         print(f"porthole {version(root)}")
         return EX_OK
+
+    # The fast path: run ONE verb, importing only its module. Everything that
+    # needs to see every SPEC -- the help epilogue, completion, an unknown verb
+    # we want to suggest for -- falls through to full discovery, and none of
+    # those is the hot path.
+    spec = None
+    if argv and not argv[0].startswith("-") and "--help" not in argv \
+            and "-h" not in argv:
+        spec = lookup(root, argv[0])
+
+    if spec is not None:
+        parser = Parser(prog="porthole", add_help=False)
+        parser.add_argument("-d", "--device", metavar="CODENAME")
+        parser.add_argument("--no-color", "--no-colour", action="store_true",
+                            dest="no_color", default=False)
+        sub = parser.add_subparsers(dest="verb")
+        child = with_device(
+            sub.add_parser(spec["verb"], add_help=True,
+                           description=spec.get("description", spec["help"]),
+                           formatter_class=argparse.RawDescriptionHelpFormatter),
+            device_flag=spec.get("device_flag", True))
+        for flags, kwargs in spec["args"]:
+            child.add_argument(*flags, **kwargs)
+        child.set_defaults(_spec=spec)
+        args = parser.parse_args(argv)
+        out = Out(force_colour=False if getattr(args, "no_color", False) else None)
+        return _run(args, out, root)
+
+    specs = discover(root)
+    parser, table = build(root, specs)
 
     # An unknown verb should suggest, not just refuse. Only intercept a bare
     # word: anything starting with - is argparse's business.
@@ -394,7 +493,11 @@ def main(argv: list[str], root: pathlib.Path) -> int:
         return EX_OK
     if not getattr(args, "_spec", None):
         return overview(root, out)
+    return _run(args, out, root)
 
+
+def _run(args, out: Out, root: pathlib.Path) -> int:
+    """Invoke a verb and render its failures consistently."""
     ctx = Ctx(root, args, out)
     try:
         return args._spec["run"](args, ctx)

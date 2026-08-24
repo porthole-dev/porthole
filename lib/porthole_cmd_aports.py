@@ -11,6 +11,7 @@ have typed. Nothing rewrites history and nothing pushes.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import subprocess
@@ -764,12 +765,114 @@ def _rewrite_source(apkbuild: pathlib.Path, patches: list[str]) -> bool:
     return True
 
 
+
+# ------------------------------------------------------------- worktree --
+
+def _cache_dir() -> pathlib.Path:
+    base = os.environ.get("XDG_CACHE_HOME") or (pathlib.Path.home() / ".cache")
+    return pathlib.Path(base) / "porthole" / "aports"
+
+
+def cmd_worktree(args, ctx, pmaports) -> int:
+    """Give this device its own checkout of pmaports, on its own branch.
+
+    pmaports is ONE clone that pmbootstrap also writes to, sitting on ONE
+    branch. Two devices therefore share it: building for cheetah sees whatever
+    taimen left checked out, and a channel switch moves the branch under both.
+    `use` could warn about that; it could not fix it.
+
+    A git worktree fixes it properly -- one clone, one working tree per device,
+    each on its own branch, no second fetch and no duplicated object store.
+    `pmbootstrap -p <path>` then points at the right one, which is how the
+    isolation reaches the build rather than stopping at porthole's edge.
+
+    Opt-in, never automatic: this writes into the user's pmbootstrap clone, and
+    a tool that reorganises a shared resource behind your back is one you stop
+    trusting.
+    """
+    device = ctx.cfg.get("PORTHOLE_DEVICE", "")
+    if not device:
+        raise Bail("no device selected", EX_USAGE, "porthole use <codename>")
+
+    # Already a worktree? Then pmaports resolved to it and there is nothing to
+    # do -- saying so beats a git error about an existing path.
+    rc, common, _ = git(pmaports, "rev-parse", "--git-common-dir")
+    clone = pmaports
+    if common and common not in (".git", str(pmaports / ".git")):
+        clone = pathlib.Path(common).parent
+
+    dest = pathlib.Path(args.out).expanduser() if args.out else _cache_dir() / device
+    branch = args.name or f"{device.split('-', 1)[-1]}-bringup"
+    key = f"PORTHOLE_PMAPORTS_{device.upper().replace('-', '_')}"
+
+    rc, existing, _ = git(clone, "worktree", "list", "--porcelain")
+    already = any(line.split(" ", 1)[1] == str(dest)
+                  for line in existing.splitlines() if line.startswith("worktree "))
+    rc_b, _, _ = git(clone, "rev-parse", "--verify", "--quiet", branch)
+
+    if already and not args.force:
+        raise Bail(f"a worktree already exists at {dest}", EX_FAIL,
+                   f"porthole config {key}   to see if it is wired up, or pass "
+                   f"--force to recreate it")
+    if rc_b == 0 and not args.force:
+        raise Bail(f"branch {branch!r} already exists in {clone.name}", EX_FAIL,
+                   f"pass --name to pick another, or --force to check it out "
+                   f"into the new worktree as-is")
+
+    base = args.base or _channel_branch(ctx, clone) or "master"
+
+    if not args.yes:
+        o = ctx.out
+        o.heading(f"would give {device} its own pmaports checkout")
+        o.kv("clone", str(clone), 10)
+        o.kv("worktree", str(dest), 10)
+        o.kv("branch", f"{branch}  (from {base})", 10)
+        o.blank()
+        o("  One clone, one working tree per device. Nothing is fetched and no")
+        o("  objects are duplicated; only a second working copy is checked out.")
+        o.blank()
+        o.hint(f"porthole aports worktree --yes")
+        return EX_OK
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    argv = ["worktree", "add"]
+    if args.force:
+        argv.append("--force")
+    if rc_b == 0:
+        argv += [str(dest), branch]
+    else:
+        argv += ["-b", branch, str(dest), base]
+    rc, _, err = git(clone, *argv, timeout=300)
+    if rc != 0:
+        raise Bail(f"git worktree add failed: {err}", EX_FAIL)
+
+    import porthole_cmd_use as use
+    use.set_key(use.config_path(), key, str(dest))
+
+    payload = {"device": device, "worktree": str(dest), "branch": branch,
+               "base": base, "clone": str(clone), "config_key": key}
+
+    def render():
+        o = ctx.out
+        o(f"{o.paint(o.sym('✓', 'ok'), 'green')} {device} now has its own "
+          f"pmaports checkout")
+        o.kv("worktree", str(dest), 10)
+        o.kv("branch", f"{branch} (from {base})", 10)
+        o.blank()
+        o(f"  {key} written to your config, so every porthole and pmbootstrap")
+        o(f"  call for {device} uses this tree and not the shared one.")
+        o.blank()
+        o.hint("porthole aports status")
+
+    return ctx.emit(payload, render)
+
 # ---------------------------------------------------------------- dispatch --
 
 ACTIONS = {"status": cmd_status, "start": cmd_start, "diff": cmd_diff,
            "patch": cmd_patch, "new": cmd_new, "checksum": cmd_checksum,
            "build": cmd_build, "lint": cmd_lint, "ci": cmd_ci,
-           "bump": cmd_bump, "patches": cmd_patches}
+           "bump": cmd_bump, "patches": cmd_patches,
+           "worktree": cmd_worktree}
 
 
 def dispatch(args, ctx) -> int:
@@ -795,8 +898,8 @@ SPEC = {
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": list(ACTIONS),
-                      "help": "status | start | new | checksum | build | lint | "
-                              "ci | bump | patches | diff | patch"}),
+                      "help": "status | start | new | worktree | checksum | "
+                              "build | lint | ci | bump | patches | diff | patch"}),
         (["name"], {"nargs": "?", "metavar": "NAME",
                     "help": "start: branch name. new: device codename. "
                             "build/lint/checksum/bump: package"}),
@@ -805,7 +908,8 @@ SPEC = {
                       "help": "diff: only your device's packages"}),
         (["--staged"], {"action": "store_true", "help": "diff: staged changes"}),
         (["--stat"], {"action": "store_true", "help": "diff: summary only"}),
-        (["--out"], {"metavar": "DIR", "help": "patch: output directory"}),
+        (["--out"], {"metavar": "DIR",
+                     "help": "patch: output directory. worktree: where to put it"}),
         (["--soc"], {"metavar": "SOC",
                      "help": "new: seed from the closest sibling on this SoC"}),
         (["--category"], {"metavar": "DIR",
@@ -837,6 +941,7 @@ SPEC = {
     "run": dispatch,
     "examples": [
         "porthole aports status",
+        "porthole aports worktree --yes",
         "porthole aports start cheetah-gs201 --yes",
         "porthole aports new google-cheetah --soc google-gs201 --yes",
         "porthole aports checksum --changed",

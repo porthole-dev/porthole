@@ -15,6 +15,7 @@ run against a tree someone else is mid-edit on.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -71,6 +72,20 @@ class Device:
         self.soc = ""
         self.depends: list[str] = []
         self._parse()
+
+    def to_cache(self) -> dict:
+        return {"info": self.info, "soc": self.soc, "depends": self.depends}
+
+    @classmethod
+    def from_cache(cls, path, row) -> "Device":
+        self = cls.__new__(cls)
+        self.path = path
+        self.codename = path.name.replace("device-", "", 1)
+        self.category = path.parent.name
+        self.info = row["info"]
+        self.soc = row["soc"]
+        self.depends = row["depends"]
+        return self
 
     def _parse(self) -> None:
         di = self.path / "deviceinfo"
@@ -156,11 +171,59 @@ class Device:
         }
 
 
+def _index_path(base: pathlib.Path) -> pathlib.Path:
+    import hashlib
+    root = os.environ.get("XDG_CACHE_HOME") or (pathlib.Path.home() / ".cache")
+    tag = hashlib.sha256(str(base).encode()).hexdigest()[:12]
+    return pathlib.Path(root) / "porthole" / f"pmaports-{tag}.json"
+
+
+def _index_key(base: pathlib.Path) -> str:
+    """Fingerprint of the category directories.
+
+    One stat per category (five of them) rather than per device (664). A
+    package added, removed or renamed changes its category's mtime, which is
+    what has to invalidate the index. An edit INSIDE an existing package does
+    not -- and does not need to, because nothing cached here comes from a file
+    body except deviceinfo, which is re-read on demand by the callers that
+    care.
+    """
+    parts = []
+    for name in CATEGORIES:
+        d = base / name
+        try:
+            parts.append(f"{name}:{d.stat().st_mtime_ns}")
+        except OSError:
+            parts.append(f"{name}:-")
+    return "|".join(parts)
+
+
 def load_devices(pmaports: pathlib.Path) -> list[Device]:
-    """Every device package in the tree. ~55ms for 664 of them."""
+    """Every device package in the tree.
+
+    Walking 664 package directories costs ~245ms, and it was paid on every
+    `porthole next` and every `porthole soc` -- to answer a question whose
+    answer changes when someone adds a package, which is roughly never during a
+    working session.
+
+    So the result is cached, keyed by the category directories' mtimes. A stale
+    cache must never change an answer, so any error at all falls through to the
+    full walk.
+    """
     base = pathlib.Path(pmaports) / "device"
     if not base.is_dir():
         return []
+
+    key = _index_key(base)
+    path = _index_path(base)
+    try:
+        blob = json.loads(path.read_text())
+        if blob.get("key") == key:
+            return [Device.from_cache(base / rel, row)
+                    for rel, row in blob["devices"]]
+    except Exception:  # noqa: BLE001 -- a bad cache is not an error, just slow
+        pass
+
     devices = []
     for info in base.rglob("deviceinfo"):
         parent = info.parent
@@ -168,6 +231,16 @@ def load_devices(pmaports: pathlib.Path) -> list[Device]:
             continue
         devices.append(Device(parent))
     devices.sort(key=lambda d: (d.maturity, d.codename))
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "key": key,
+            "devices": [[str(d.path.relative_to(base)), d.to_cache()]
+                        for d in devices],
+        }))
+    except OSError:
+        pass
     return devices
 
 
