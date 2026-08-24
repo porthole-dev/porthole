@@ -68,7 +68,35 @@ def test_a_broken_build_degrades_into_the_snapshot_not_an_exception():
     assert store.snapshot.error
     assert "pmaports is on fire" in store.snapshot.error
     assert store.snapshot.stamp > 0, "an errored snapshot is still a snapshot"
-    assert store.busy is False, "a raising _build must not wedge the store"
+    # NOT a claim about the finally: -- the except branch below already guaranteed this
+    # long before it existed. What this pins is that a raising _build degrades into an
+    # error snapshot instead of propagating and taking the session down mid-port.
+    assert store.busy is False, "a raising _build must still finish its refresh"
+
+
+def test_a_raising_lock_does_not_wedge_the_store_forever():
+    """The real reason Store._load wraps its publish in a try/finally.
+
+    A raising _build was never the risk -- the except branch already fell through to
+    clear _busy. The risk is the publish step itself raising: without the finally,
+    _busy stays True for the life of the session and refresh()'s `if self._busy: return`
+    guard then rejects EVERY future refresh. The console stops updating and never
+    recovers, with nothing on screen to say why.
+    """
+    class Exploding:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            raise RuntimeError("publish step failed")
+
+    store = state.Store(ROOT)
+    store._lock = Exploding()
+    try:
+        store.refresh(block=True)
+    except RuntimeError:
+        pass                      # the raise propagates; that is fine
+    assert store.busy is False, "a raising publish step must not wedge the store"
 
 
 def test_uptime_advances():
@@ -106,7 +134,9 @@ def test_an_unknown_tool_is_a_document_not_a_crash():
 
 
 def test_an_unknown_note_is_a_document_not_a_crash():
-    assert content.for_note(ROOT, "no-such-note").lines == ["no such note"]
+    doc = content.for_note(ROOT, "no-such-note")
+    assert doc.lines == ["no such note"]
+    assert doc.command == "" and doc.safe is False
 
 
 def test_wrap_preserves_blank_lines_and_indented_blocks():

@@ -1,14 +1,21 @@
 # SPDX-License-Identifier: MIT
-"""A scrollable reader, and the help overlay.
+"""Documents: a tool's contract, a brain note, a milestone.
 
-The biggest hole in the console was that there was no way to LOOK at anything.
-`Enter` did nothing on the tools and brain panes even though both advertised it,
-so reading a tool's contract or a note meant leaving curses entirely. 55 notes
-carrying the laws of two ports were one keystroke away and unreachable.
+The biggest hole in the curses console was that there was no way to LOOK at anything.
+`Enter` did nothing on the tools and brain panes even though both advertised it, so
+reading a tool's contract or a note meant leaving curses entirely. 55 notes carrying the
+laws of two ports were one keystroke away and unreachable.
 
-One pager serves every case, because they are all the same shape: a title and
-some lines you scroll. What differs is who builds the lines, and that belongs to
-whoever knows the subject.
+These builders return DATA -- a title and some lines you scroll -- not drawing calls,
+which is why they crossed from the curses pane almost unchanged and why they are testable
+with no terminal at all. Whoever knows the subject builds the lines; one reader screen
+renders them.
+
+The help overlay used to live here too. It does not any more: help is generated from the
+live Textual BINDINGS instead, because the curses version drifted from what the keys
+actually did -- `/` was documented as "filter" in two panes while it opened the palette,
+and the real filter key appeared in no footer at all. A help screen that reads the
+bindings cannot disagree with them.
 """
 from __future__ import annotations
 
