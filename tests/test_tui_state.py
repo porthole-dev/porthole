@@ -124,6 +124,18 @@ def test_a_refreshed_snapshot_reports_a_real_device_state():
         "unrecognised device state {!r}".format(snap.state)
 
 
+def test_device_paths_are_resolved_in_the_model_not_the_widget():
+    # Constraint 4: no filesystem work in render. The model resolves them
+    # once per refresh (ruling R22).
+    store = state.Store(ROOT)
+    store.refresh(block=True)
+    snap = store.snapshot
+    assert isinstance(snap.device_paths, dict)
+    for name in snap.devices:
+        assert name in snap.device_paths, name
+        assert set(snap.device_paths[name]) == {"workdir", "pmaports"}
+
+
 def test_uptime_advances():
     store = state.Store(ROOT)
     first = store.uptime()

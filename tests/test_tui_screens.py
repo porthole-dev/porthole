@@ -19,6 +19,7 @@ from textual.widgets import Input, ListView  # noqa: E402
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
 from porthole_tui.widgets.brain import NoteList  # noqa: E402
+from porthole_tui.widgets.devices import DeviceList  # noqa: E402
 from porthole_tui.widgets.rail import Rail  # noqa: E402
 from porthole_tui.widgets.tools import ToolList  # noqa: E402
 
@@ -44,12 +45,26 @@ def test_number_keys_switch_section():
     tui_harness.pilot(make, body)
 
 
-def test_tab_cycles_focus_and_never_leaves_nothing_focused():
+def test_tab_actually_moves_focus_between_regions():
+    """Not just 'something is focused' -- that passes against a dead binding.
+
+    Textual's Screen ships `tab -> app.focus_next`; the `app.` prefix routes the
+    action to the App. Redeclaring it unqualified on a Screen REPLACES that
+    default with one that resolves against the Screen, where no
+    action_focus_next exists, and dispatch silently fails. This test exists
+    because that happened (ruling R21).
+    """
     async def body(app, pilot):
-        for _ in range(6):
+        await pilot.pause()
+        seen = [id(app.focused)]
+        for _ in range(4):
             await pilot.press("tab")
             await pilot.pause()
-            assert app.focused is not None, "focus must never be nowhere"
+            seen.append(id(app.focused))
+        assert app.focused is not None, "focus must never be nowhere"
+        assert len(set(seen)) > 1, \
+            "tab never moved focus: {}".format(
+                [type(app.focused).__name__ for _ in seen])
     tui_harness.pilot(make, body)
 
 
@@ -148,6 +163,32 @@ def test_the_brain_filter_never_hides_the_laws():
         await pilot.pause()
         kept = {n.meta.get("severity") for _label, n in notes.visible_rows()}
         assert kept == {"law"}, kept
+    tui_harness.pilot(make, body)
+
+
+def test_every_device_row_shows_its_own_paths_not_the_active_one():
+    """The pane exists to make a cross-device isolation mistake visible.
+
+    The working repo and the pmaports checkout used to be global, so
+    switching devices left you in the previous device's files. A row that
+    shows a path only for the device you are already on cannot reveal that a
+    DIFFERENT device points somewhere wrong (ruling R22).
+    """
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        await pilot.press("2")
+        await pilot.pause()
+        listing = app.screen.query_one(DeviceList)
+        listing.snapshot = app.store.snapshot
+        await pilot.pause()
+        rows = listing.visible_rows()
+        if len(rows) < 2:
+            return                      # single-device checkout: nothing to compare
+        labels = [label for label, _payload in rows]
+        assert not any(label.rstrip().endswith("-") for label in labels), \
+            "a non-active device is showing a dash instead of its own paths: {}".format(labels)
+        # the whole point: two devices must be distinguishable by their paths
+        assert len(set(labels)) == len(labels), labels
     tui_harness.pilot(make, body)
 
 

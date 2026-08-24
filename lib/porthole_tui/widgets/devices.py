@@ -3,13 +3,15 @@
 
 This exists because of a real bug: the working repo and the pmaports checkout
 used to be global, so switching devices left you in the previous device's
-files. Showing device and workdir on one line makes that class of mistake
-visible instead of silent.
+files. Showing workdir AND pmaports on one line per device -- for EVERY
+device, not just the active one -- makes that class of mistake visible
+instead of silent. A row shown as "not set" is not inherited from another
+device; it genuinely has no override.
 
-Only the live device's workdir is shown, read off the warm snapshot -- not
-re-read from another device's profile on disk, which would be exactly the
-per-frame filesystem re-read the tools pane's docstring warns about, just for
-a shorter list.
+Every device's paths are read straight off `snap.device_paths`, resolved once
+per refresh in the warm model (state.py), never re-read from disk here: that
+would be exactly the per-frame filesystem cost the tools pane's docstring
+warns about, just for a shorter list.
 """
 from __future__ import annotations
 
@@ -28,8 +30,10 @@ class DeviceList(Catalogue):
         out = []
         for name in devices:
             live = bool(snap and name == snap.device)
-            workdir = (snap.workdir if live and snap else "") or ""
-            out.append(("{} {:<20} {}".format(
-                "*" if live else " ", name[:20],
-                workdir or ("not set" if live else "-")), name))
+            paths = (snap.device_paths or {}).get(name, {}) if snap else {}
+            workdir = paths.get("workdir") or "not set"
+            pmaports = paths.get("pmaports") or "shared"
+            out.append(("{} {:<18} {:<34} {}".format(
+                "*" if live else " ", name[:18], workdir[-34:],
+                pmaports[-24:]), name))
         return out

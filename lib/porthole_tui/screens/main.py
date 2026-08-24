@@ -27,9 +27,12 @@ from ..widgets.tools import ToolList
 
 
 class MainScreen(Screen):
+    # No tab/shift+tab bindings here: Screen already ships them qualified as
+    # 'app.focus_next' / 'app.focus_previous'. Redeclaring them unqualified
+    # replaces those correct defaults with ones that resolve against THIS
+    # class -- which has no action_focus_next -- and silently does nothing.
+    # Ruling R21: measured dead (focus never moved) before this was deleted.
     BINDINGS = [
-        Binding("tab", "focus_next", "focus", show=False),
-        Binding("shift+tab", "focus_previous", "focus", show=False),
         Binding("r", "refresh", "refresh"),
         Binding("question_mark", "help", "keys", key_display="?"),
         Binding("q", "quit", "quit"),
