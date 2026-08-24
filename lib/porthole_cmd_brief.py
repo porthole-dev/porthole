@@ -55,7 +55,8 @@ def cmd_brief(args, ctx) -> int:
     state = "not probed"
     if not args.no_device:
         try:
-            state = ctx.device().state()
+            # A display verdict: 30s stale is fine, 6.3s of waiting is not.
+            state = ctx.device().state(max_age=30)
         except Exception as exc:  # noqa: BLE001
             state = f"probe failed: {exc}"
 

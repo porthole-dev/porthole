@@ -17,6 +17,7 @@ held together by tests/test_shell_lib.sh, which diffs their output.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shlex
@@ -456,31 +457,120 @@ class Device:
         phone that had not rebooted. The timeout must sit ABOVE that stall or
         retrying buys nothing: two attempts at 12s, not three at 6s.
         """
-        for _ in range(2):
-            out = self.run("cat /proc/sys/kernel/random/boot_id", timeout=12)
+        return self._boot_id(retry="always")
+
+    def _boot_id(self, retry: str = "always") -> str:
+        """boot_id with a choice about when the retry is worth its wall time.
+
+        `retry="stall-only"` retries only when the first attempt looked like
+        the FROZEN/PAM stall it exists for -- that is, it spent most of its
+        timeout waiting. A connection that is refused or has no route comes
+        back in milliseconds, and asking a second time buys nothing but two
+        more seconds of a user staring at a prompt.
+
+        The distinction is measured, not parsed: ssh's error text varies by
+        version and by what went wrong, and elapsed time is exactly the signal
+        that separates "answering slowly" from "not there".
+        """
+        timeout = 12
+        for attempt in range(2):
+            began = time.monotonic()
+            out = self.run("cat /proc/sys/kernel/random/boot_id", timeout=timeout)
             if out:
                 return out
+            if retry == "stall-only" and attempt == 0:
+                if time.monotonic() - began < timeout * 0.5:
+                    return ""       # a fast no is a real no
         return ""
 
-    def state(self) -> str:
+    def state(self, max_age: float = 0.0) -> str:
         """BOOTED | FROZEN | FASTBOOT | ABSENT.
 
         The device lock says WHO is using the device, never WHAT it is doing.
         This is the probe that answers the second question.
 
         Order is forced by the hardware: a device in the bootloader has no USB
-        network at all, so fastboot is asked first. ssh distinguishes BOOTED;
+        network at all, so fastboot is authoritative; ssh distinguishes BOOTED;
         ping alone distinguishes FROZEN (kernel alive, userspace gone) from
         ABSENT (needs a human).
+
+        The three probes now run CONCURRENTLY and the verdict is resolved by
+        that same precedence rather than by which answered first. Serially they
+        cost 6.3s against an absent device -- and `porthole brief`, the one
+        command AGENTS.md tells every agent to run first, paid it every time.
+        Ordering was never about the probes interfering; it was about which
+        answer wins, and that is preserved exactly.
+
+        `max_age` lets a DISPLAY caller reuse a recent verdict. It defaults to
+        0, so anything that is about to act on the device still probes fresh:
+        a cached "BOOTED" handed to something that then flashes is precisely
+        the kind of stale reading `brain/laws/` exists to forbid.
         """
         forced = self.cfg.get("TK_DEVICE_STATE") or self.cfg.get("PORTHOLE_DEVICE_STATE")
         if forced:
             return forced
-        if self.in_fastboot():
-            return "FASTBOOT"
-        if self.boot_id():
-            return "BOOTED"
-        return "FROZEN" if self._pings() else "ABSENT"
+
+        if max_age > 0:
+            cached = self._cached_state(max_age)
+            if cached:
+                return cached
+
+        import threading
+        results = {}
+
+        def probe(name, fn):
+            try:
+                results[name] = fn()
+            except Exception:  # noqa: BLE001 -- one probe failing is a "no"
+                results[name] = None
+
+        threads = [threading.Thread(target=probe, args=a, daemon=True)
+                   for a in (("fastboot", self.in_fastboot),
+                             # A display verdict does not need the stall
+                             # retry unless the device is actually stalling.
+                             ("boot_id",
+                              lambda: self._boot_id(retry="stall-only")),
+                             ("ping", self._pings))]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join(timeout=30)
+
+        if results.get("fastboot"):
+            verdict = "FASTBOOT"
+        elif results.get("boot_id"):
+            verdict = "BOOTED"
+        elif results.get("ping"):
+            verdict = "FROZEN"
+        else:
+            verdict = "ABSENT"
+        self._remember_state(verdict)
+        return verdict
+
+    def _state_cache(self) -> pathlib.Path:
+        import hashlib
+        base = os.environ.get("XDG_CACHE_HOME") or (pathlib.Path.home() / ".cache")
+        tag = hashlib.sha256(str(self.host).encode()).hexdigest()[:12]
+        return pathlib.Path(base) / "porthole" / f"state-{tag}.json"
+
+    def _cached_state(self, max_age: float):
+        """A recent verdict, or None. Never used by a caller that will act."""
+        try:
+            blob = json.loads(self._state_cache().read_text())
+            if time.time() - blob["at"] <= max_age:
+                return blob["state"]
+        except Exception:  # noqa: BLE001 -- a bad cache is not an error
+            pass
+        return None
+
+    def _remember_state(self, verdict: str) -> None:
+        try:
+            path = self._state_cache()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"state": verdict, "at": time.time(),
+                                        "host": self.host}))
+        except OSError:
+            pass
 
     def _pings(self) -> bool:
         """Does the device answer ICMP?

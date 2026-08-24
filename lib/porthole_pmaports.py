@@ -235,10 +235,22 @@ def load_devices(pmaports: pathlib.Path) -> list[Device]:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
-            "key": key,
+            "key": key, "base": str(base),
             "devices": [[str(d.path.relative_to(base)), d.to_cache()]
                         for d in devices],
         }))
+        # Drop indexes for checkouts that no longer exist. The hash is over the
+        # PATH, so a moved or removed pmaports leaves its index behind forever
+        # -- 13 orphans of up to 488 KB had accumulated before anyone looked.
+        for stale in path.parent.glob("pmaports-*.json"):
+            if stale == path:
+                continue
+            try:
+                blob = json.loads(stale.read_text())
+                if not pathlib.Path(blob.get("base", "/nonexistent")).is_dir():
+                    stale.unlink()
+            except Exception:  # noqa: BLE001 -- unreadable is also stale
+                stale.unlink(missing_ok=True)
     except OSError:
         pass
     return devices
