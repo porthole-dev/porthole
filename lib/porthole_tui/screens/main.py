@@ -21,6 +21,7 @@ from textual.widgets import Footer, Label
 
 from ..widgets.brain import NoteList
 from ..widgets.devices import DeviceList
+from ..widgets.jobs import JobDrawer
 from ..widgets.port import PortView
 from ..widgets.rail import Rail
 from ..widgets.tools import ToolList
@@ -36,6 +37,20 @@ class MainScreen(Screen):
         Binding("r", "refresh", "refresh"),
         Binding("question_mark", "help", "keys", key_display="?"),
         Binding("q", "quit", "quit"),
+        # The drawer's own keys live here, not on JobDrawer: a Binding on a
+        # WIDGET only resolves while focus sits inside that widget's own
+        # subtree, and JobDrawer docks outside #content -- with the normal
+        # focus on a catalogue's #rows, a key bound on JobDrawer itself would
+        # never appear in the resolution chain (ruling R20, measured with a
+        # pilot probe). MainScreen is always in the chain, so the actions
+        # below just delegate into the drawer.
+        Binding("ctrl+j", "toggle_drawer", "job drawer"),
+        # ctrl+c is otherwise claimed by Textual itself: App binds it to
+        # help_quit (a "press q to quit" nag) and Screen binds it to
+        # copy_text. Declaring it again here, in MainScreen's own BINDINGS,
+        # wins over both -- confirmed with a pilot probe, not assumed.
+        Binding("ctrl+c", "cancel_job", "cancel job", show=False),
+        Binding("ctrl+r", "rerun_job", "re-run", show=False),
     ]
 
     section = reactive("port")
@@ -55,6 +70,7 @@ class MainScreen(Screen):
         with Horizontal(id="body"):
             yield Rail(self.sections, id="rail")
             yield Vertical(id="content")
+        yield JobDrawer(id="drawer")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -119,6 +135,15 @@ class MainScreen(Screen):
         from .help import HelpScreen
         self.app.push_screen(HelpScreen())
 
+    def action_toggle_drawer(self) -> None:
+        self.query_one(JobDrawer).action_toggle()
+
+    def action_cancel_job(self) -> None:
+        self.query_one(JobDrawer).action_cancel()
+
+    def action_rerun_job(self) -> None:
+        self.query_one(JobDrawer).action_rerun()
+
     def launch(self, command, safe=False) -> None:
         """Run a porthole command, with the confirmation boundary applied.
 
@@ -143,7 +168,8 @@ class MainScreen(Screen):
         self.app.push_screen(ConfirmRun(command, is_risky(command)), answered)
 
     def _spawn(self, command) -> None:
-        self.app.jobs.spawn(command)
+        job = self.app.jobs.spawn(command)
+        self.query_one(JobDrawer).attach(job)
         self.notify("running: {}".format(command))
 
     def on_catalogue_chosen(self, event) -> None:

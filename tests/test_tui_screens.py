@@ -15,7 +15,7 @@ tui_harness.require()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-from textual.widgets import Input, ListView, Static  # noqa: E402
+from textual.widgets import Input, ListView, RichLog, Static  # noqa: E402
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
 from porthole_tui.screens.confirm import ConfirmRun  # noqa: E402
@@ -23,6 +23,7 @@ from porthole_tui.screens.help import HelpScreen  # noqa: E402
 from porthole_tui.screens.reader import Reader  # noqa: E402
 from porthole_tui.widgets.brain import NoteList  # noqa: E402
 from porthole_tui.widgets.devices import DeviceList  # noqa: E402
+from porthole_tui.widgets.jobs import JobDrawer  # noqa: E402
 from porthole_tui.widgets.rail import Rail  # noqa: E402
 from porthole_tui.widgets.tools import ToolList  # noqa: E402
 
@@ -157,8 +158,19 @@ def test_the_brain_filter_never_hides_the_laws():
               _note("fact-one", "fact"), _note("fact-two", "fact")])
 
     async def body(app, pilot):
+        # MainScreen._poll() overwrites every content widget's .snapshot with
+        # the real store's on its first tick (rail.snapshot is None), which
+        # races the fabricated snapshot below -- reproduced for real under
+        # load, with the store's own (still-empty, mid-refresh) snapshot
+        # clobbering this one and failing the assertion for a reason that
+        # had nothing to do with the brain filter. Settling the real store
+        # and priming that first tick before injecting the fixture, the same
+        # way test_a_filtered_list_says_how_many_of_how_many and
+        # test_every_device_row_... already do, makes later ticks no-ops.
+        app.store.refresh(block=True)
         await pilot.press("4")
         await pilot.pause()
+        app.screen._poll()
         notes = app.screen.query_one(NoteList)
         notes.snapshot = snap
         await pilot.pause()
@@ -389,6 +401,125 @@ def test_selecting_a_tool_opens_the_reader_then_x_asks_to_confirm():
         await pilot.pause()
         assert len(app.jobs.jobs) == 1
         app.jobs.cancel_all()
+    tui_harness.pilot(make, body)
+
+
+# -- Task 13: the job drawer ----------------------------------------------
+#
+# The drawer's own ctrl+j/ctrl+c/ctrl+r are declared as Bindings on
+# MainScreen, not on JobDrawer itself, and MainScreen's actions delegate into
+# the drawer. Measured with a probe before writing this: a Binding on a
+# WIDGET only resolves while focus is inside that widget's own subtree --
+# JobDrawer docks outside #content, so with focus on a catalogue's #rows (the
+# normal state) a Binding declared on JobDrawer never appears in the
+# resolution chain at all. That would have been a fifth R20 instance,
+# undetectable by a test that calls action_toggle()/action_rerun() directly
+# instead of pressing the key. Every test below drives the real key.
+
+def test_output_reaches_the_drawer_while_the_job_runs():
+    # drawer.text() reads job.lines directly, which the JobManager's pump
+    # fills regardless of the drawer -- asserting on it alone cannot tell
+    # whether _drain (the 0.1s timer that copies job.lines into the
+    # RichLog) is actually running. It was measured to still pass with
+    # _drain's copy loop stubbed out entirely, so the RichLog itself -- the
+    # thing _drain actually writes -- is asserted on too. RichLog defers
+    # rendering until its size is known, and #job-log is `display: none`
+    # while collapsed, so the drawer is expanded first -- CSS makes it
+    # visible, flushing whatever _drain queued.
+    #
+    # The job outlives the check by cancelling it, rather than a short
+    # `sleep 0.5` raced against `pilot.pause(0.25)`: under real CPU
+    # contention (measured with 8 background `yes` processes on this box)
+    # the 0.5s background sleep sometimes finished before the pause
+    # returned, so "it must still be running" failed for a reason that had
+    # nothing to do with the drawer.
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        job = app.jobs.spawn("sh -c 'echo hello; sleep 100'")
+        drawer.attach(job)
+        await pilot.pause(0.25)
+        assert "hello" in drawer.text(), drawer.text()
+        drawer.expanded = True
+        await pilot.pause()
+        log = drawer.query_one("#job-log", RichLog)
+        rendered = "\n".join(strip.text for strip in log.lines)
+        assert "hello" in rendered, \
+            "the drawer's RichLog never received the job's output: {!r}".format(
+                rendered)
+        assert job.state == "running", "it must still be running"
+        job.cancel()
+        await job.wait()
+    tui_harness.pilot(make, body)
+
+
+def test_the_drawer_expands_and_collapses():
+    # Proves MainScreen's Binding("ctrl+j", "toggle_drawer") ->
+    # MainScreen.action_toggle_drawer -> JobDrawer.action_toggle really fires,
+    # with focus sitting on the default-focused catalogue, not the drawer.
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        assert not drawer.expanded
+        assert not isinstance(app.focused, JobDrawer)
+        await pilot.press("ctrl+j")
+        await pilot.pause()
+        assert drawer.expanded
+        await pilot.press("ctrl+j")
+        await pilot.pause()
+        assert not drawer.expanded
+    tui_harness.pilot(make, body)
+
+
+def test_ctrl_c_actually_cancels_the_running_job():
+    # Proves MainScreen's Binding("ctrl+c", "cancel_job") ->
+    # MainScreen.action_cancel_job -> JobDrawer.action_cancel really fires.
+    # ctrl+c is otherwise claimed by Textual itself (App: help_quit,
+    # Screen: copy_text) -- MainScreen's own binding must win, and must not
+    # quit the app or merely notify.
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        job = app.jobs.spawn("sh -c 'sleep 5'")
+        drawer.attach(job)
+        await pilot.pause()
+        await pilot.press("ctrl+c")
+        await pilot.pause(0.1)
+        assert job._cancelled_at is not None, \
+            "ctrl+c did not reach action_cancel"
+        assert app.is_running, "ctrl+c must cancel the job, not quit the app"
+        await job.wait()
+        assert job.state == "cancelled", job.state
+    tui_harness.pilot(make, body)
+
+
+def test_rerunning_from_history_confirms_again():
+    # A new risk the job runner creates: a dangerous command must never be
+    # one keypress from a drawer. Having run once proves it was confirmed
+    # once, and confirming once must not buy a second run.
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        job = app.jobs.spawn("sh -c 'true'")
+        await job.wait()
+        job.command = "porthole flash boot"
+        drawer.attach(job)
+        drawer.action_rerun()
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmRun)
+    tui_harness.pilot(make, body)
+
+
+def test_ctrl_r_reruns_through_the_confirm_boundary():
+    # Proves MainScreen's Binding("ctrl+r", "rerun_job") ->
+    # MainScreen.action_rerun_job -> JobDrawer.action_rerun really fires, via
+    # the actual key rather than calling the method directly.
+    async def body(app, pilot):
+        drawer = app.screen.query_one(JobDrawer)
+        job = app.jobs.spawn("sh -c 'true'")
+        await job.wait()
+        job.command = "porthole flash boot"
+        drawer.attach(job)
+        await pilot.pause()
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmRun)
     tui_harness.pilot(make, body)
 
 
