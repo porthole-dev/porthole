@@ -433,8 +433,158 @@ def cmd_check(args, ctx) -> int:
     return EX_OK if proc.returncode == 0 else EX_FAIL
 
 
+
+# ------------------------------------------------------------------- port --
+
+def cmd_port(args, ctx) -> int:
+    """Differential mainlining -- carry a device tree across a SoC generation.
+
+    Three sub-actions, because they are three separate decisions and running
+    them as one would hide which step went wrong:
+
+      delta   what moved between two vendor trees        (produces delta.toml)
+      apply   rewrite a mainline template with those moves
+      verify  prove nothing was dropped or invented      (this is what CI runs)
+
+    See lib/porthole_dtsdelta.py for why this is textual and not a parser.
+    """
+    import porthole_dtsdelta as dd
+
+    sub = args.reference or "delta"
+    if sub not in ("delta", "apply", "verify"):
+        raise Bail(f"unknown port step {sub!r}", EX_USAGE,
+                   "porthole dts port delta | apply | verify")
+
+    if sub == "delta":
+        if not (args.from_dts and args.to_dts):
+            raise Bail("port delta needs two vendor trees", EX_USAGE,
+                       "porthole dts port delta --from gs101.dtsi --to gs201.dtsi")
+        delta = dd.Delta(args.from_dts, args.to_dts)
+        doc = delta.to_dict()
+        if args.out:
+            body = dd.to_toml(delta, args.old_soc or "old", args.new_soc or "new")
+            pathlib.Path(args.out).write_text(body)
+
+        def render():
+            o = ctx.out
+            c = doc["counts"]
+            o.heading(f"{pathlib.Path(delta.old_path).name} -> "
+                      f"{pathlib.Path(delta.new_path).name}")
+            o.kv("nodes", f"{c['old_nodes']} -> {c['new_nodes']}", 12)
+            o.kv("identical", str(c["identical"]), 12,
+                 "same label, same address")
+            o.kv("moved", str(c["moved"]), 12)
+            o.kv("added", str(c["added"]), 12)
+            o.kv("removed", str(c["removed"]), 12)
+            for block in doc["blocks"]:
+                o.blank()
+                o.heading(f"  {block['from']} -> {block['to']}   "
+                          f"({len(block['nodes'])} nodes)")
+                for node in block["nodes"]:
+                    o(f"    {node['label']:<24s} 0x{node['from']} -> "
+                      f"0x{node['to']}   {o.paint(node['source'], 'grey')}")
+            if doc["added_nodes"]:
+                o.blank()
+                o.heading("  new in this generation")
+                o(f"    {', '.join(doc['added_nodes'])}")
+            if doc["removed_nodes"]:
+                o.blank()
+                o.heading("  gone in this generation")
+                o(f"    {', '.join(doc['removed_nodes'])}")
+            o.blank()
+            if args.out:
+                o(f"  wrote {args.out}")
+            else:
+                o.hint("--out delta.toml   to check the audit trail in")
+
+        return ctx.emit(doc, render)
+
+    if sub == "apply":
+        for need, flag in ((args.template, "--template"),
+                           (args.delta, "--delta"), (args.out, "--out")):
+            if not need:
+                raise Bail(f"port apply needs {flag}", EX_USAGE)
+        doc = dd.load_toml(args.delta)
+        moves = dd.justified(doc)
+        from_addr = dd.from_addrs(doc)
+        text = pathlib.Path(args.template).read_text()
+        template_nodes = dd.parse(args.template)
+        by_addr = {n.addr: lbl for lbl, n in template_nodes.items()}
+        applied, missed, renamed = [], [], []
+        for label, want in sorted(moves.items()):
+            node = template_nodes.get(label)
+            if node is None:
+                # The delta is in DOWNSTREAM label space; the template is in
+                # MAINLINE label space, and mainlining renames things --
+                # pinctrl_0 became pinctrl_gpio_alive, udc became usbdrd31.
+                # The old ADDRESS survives the rename, so it is the join key.
+                # Matching on it turns a whole class of "the template has no
+                # such node" into an automatic, checkable correspondence.
+                old_addr = from_addr.get(label, "")
+                target = by_addr.get(old_addr)
+                if not target:
+                    missed.append(label)
+                    continue
+                renamed.append((label, target))
+                node = template_nodes[target]
+            old = node.addr
+            # Rewrite the node header AND any reg property carrying the old
+            # address. Both, because a header that moved with a reg that did
+            # not is a device tree that compiles and does not work.
+            text = re.sub(rf"(@){old}\b", rf"\g<1>{want}", text)
+            text = re.sub(rf"(0x0*){old}\b", rf"\g<1>{want}", text)
+            applied.append(label)
+        pathlib.Path(args.out).write_text(text)
+
+        def render():
+            o = ctx.out
+            o(f"  {len(applied)} address(es) rewritten into {args.out}")
+            for label in applied:
+                o(f"    {label} -> 0x{moves[label]}")
+            for src, dst in renamed:
+                o(o.paint(f"    {src} -> {dst} (matched by address; mainlining "
+                          f"renamed it)", "grey"))
+            for label in missed:
+                o.warn(f"delta names {label}; the template has no node at that "
+                       f"address either — mainline may simply not implement it")
+            o.blank()
+            o.hint(f"porthole dts port verify --file {args.out} "
+                   f"--against <mainline sibling> --delta {args.delta}")
+
+        return ctx.emit({"out": args.out, "applied": applied,
+                         "renamed": [{"downstream": s, "mainline": d}
+                                     for s, d in renamed],
+                         "not_in_template": missed}, render)
+
+    # verify
+    if not (args.file and args.against and args.delta):
+        raise Bail("port verify needs a candidate, --against and --delta",
+                   EX_USAGE,
+                   "porthole dts port verify --file gs201.dtsi "
+                   "--against gs101.dtsi --delta delta.toml")
+    findings = dd.verify(pathlib.Path(args.file), pathlib.Path(args.against),
+                         dd.load_toml(args.delta))
+
+    def render():
+        o = ctx.out
+        if not findings:
+            o(o.paint(f"  {o.sym('✓', 'ok')} every node in "
+                      f"{pathlib.Path(args.against).name} has a counterpart, "
+                      f"and every moved address is justified", "green"))
+            return
+        o.heading(f"{len(findings)} finding(s)")
+        for f in findings:
+            colour = {"missing": "red", "unjustified": "yellow",
+                      "contradicted": "red"}[f["kind"]]
+            o(f"  {o.paint(f['kind'], colour)}  {f['label']}")
+            o(f"      {f['detail']}")
+
+    ctx.emit({"findings": findings, "clean": not findings}, render)
+    return EX_OK if not findings else EX_FAIL
+
+
 ACTIONS = {"sources": cmd_sources, "new": cmd_new, "labels": cmd_labels,
-           "compare": cmd_compare, "check": cmd_check}
+           "compare": cmd_compare, "check": cmd_check, "port": cmd_port}
 
 
 def dispatch(args, ctx) -> int:
@@ -443,6 +593,8 @@ def dispatch(args, ctx) -> int:
     if not fn:
         raise Bail(f"unknown action {action!r}", EX_USAGE,
                    f"actions: {', '.join(ACTIONS)}")
+    if action == "port":
+        return cmd_port(args, ctx)
     if action == "compare" and not args.reference:
         raise Bail("name a sibling to compare against", EX_USAGE,
                    "porthole dts compare xiaomi-sagit")
@@ -462,8 +614,22 @@ SPEC = {
         "configures that you have not, and compiles what you wrote."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION", "choices": list(ACTIONS),
-                      "help": "sources | new | labels | compare | check"}),
-        (["reference"], {"nargs": "?", "help": "compare: sibling DTS or codename"}),
+                      "help": "sources | new | labels | compare | check | port"}),
+        (["reference"], {"nargs": "?", "metavar": "REF",
+                         "help": "compare: sibling DTS or codename. "
+                                 "port: delta | apply | verify"}),
+        (["--from"], {"dest": "from_dts", "metavar": "DTS",
+                      "help": "port delta: the OLD vendor tree"}),
+        (["--to"], {"dest": "to_dts", "metavar": "DTS",
+                    "help": "port delta: the NEW vendor tree"}),
+        (["--old-soc"], {"metavar": "SOC", "help": "port delta: label for the old SoC"}),
+        (["--new-soc"], {"metavar": "SOC", "help": "port delta: label for the new SoC"}),
+        (["--template"], {"metavar": "DTS",
+                          "help": "port apply: the mainline sibling to rewrite"}),
+        (["--delta"], {"metavar": "TOML", "help": "port apply/verify: the audit trail"}),
+        (["--against"], {"metavar": "DTS",
+                         "help": "port verify: the mainline sibling to cover"}),
+        (["--out"], {"metavar": "PATH", "help": "where to write the result"}),
         (["--file"], {"metavar": "PATH", "help": "operate on this file"}),
         (["--include"], {"metavar": "DTSI", "help": "new: dtsi to include"}),
         (["--author"], {"help": "new: copyright line"}),
@@ -479,5 +645,8 @@ SPEC = {
         "porthole dts labels",
         "porthole dts compare xiaomi-sagit",
         "porthole dts check",
+        "porthole dts port delta --from gs101.dtsi --to gs201.dtsi --out delta.toml",
+        "porthole dts port apply --template gs101.dtsi --delta delta.toml --out gs201.dtsi",
+        "porthole dts port verify --file gs201.dtsi --against gs101.dtsi --delta delta.toml",
     ],
 }

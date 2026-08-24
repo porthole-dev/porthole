@@ -214,7 +214,7 @@ def test_init_is_non_interactive_without_a_tty():
     """An agent must be able to bootstrap. stdin is a pipe here, so init must
     take its values from flags and never block on input()."""
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    rc, out, err = run("init", "--device", "google-taimen",
+    rc, out, err = run("init", "google-taimen",
                        "--user", "alice", "--host", "10.0.0.9",
                        env={"XDG_CONFIG_HOME": xdg})
     assert rc == 0, f"rc={rc} err={err}"
@@ -232,7 +232,7 @@ def test_init_prints_the_sudoers_snippet_rather_than_applying_it():
     install silently disables the whole toolbox, and an agent whose harness
     refuses to type a sudo password cannot fix it. Hand it to the human."""
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    rc, out, _ = run("init", "--device", "google-taimen", "--user", "alice",
+    rc, out, _ = run("init", "google-taimen", "--user", "alice",
                      env={"XDG_CONFIG_HOME": xdg})
     assert "NOPASSWD" in out, "init must print the sudoers snippet"
     assert "/etc/sudoers.d/" in out
@@ -240,7 +240,7 @@ def test_init_prints_the_sudoers_snippet_rather_than_applying_it():
 
 def test_init_refuses_an_unknown_device():
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    rc, _, err = run("init", "--device", "nosuchdevice",
+    rc, _, err = run("init", "nosuchdevice",
                      env={"XDG_CONFIG_HOME": xdg})
     assert rc != 0
     assert "nosuchdevice" in err
@@ -248,9 +248,9 @@ def test_init_refuses_an_unknown_device():
 
 def test_init_does_not_clobber_an_existing_config_without_force():
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    run("init", "--device", "google-taimen", "--user", "alice",
+    run("init", "google-taimen", "--user", "alice",
         env={"XDG_CONFIG_HOME": xdg})
-    rc, _, err = run("init", "--device", "google-taimen", "--user", "bob",
+    rc, _, err = run("init", "google-taimen", "--user", "bob",
                      env={"XDG_CONFIG_HOME": xdg})
     assert rc != 0, "a second init must not silently overwrite your identity"
     assert "--force" in err

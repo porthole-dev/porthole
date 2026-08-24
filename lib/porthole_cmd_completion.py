@@ -132,6 +132,9 @@ SPEC = {
         "completion for free and this can never drift out of sync."),
     "args": [(["shell"], {"choices": ["bash", "zsh", "fish"],
                           "help": "which shell"})],
+    # Not a report: stdout is a shell script being redirected into a
+    # completions directory.
+    "reports": False,
     "run": cmd_completion,
     "examples": [
         "porthole completion bash > ~/.local/share/bash-completion/completions/porthole",

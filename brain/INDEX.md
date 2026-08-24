@@ -24,6 +24,7 @@ generic notes as well.
 
 | id | scope | title |
 |---|---|---|
+| [a-board-name-is-not-a-soc-name](traps/a-board-name-is-not-a-soc-name.md) | `generic` | A vendor's reference board is not the SoC, and tools will accept it silently |
 | [a-hard-hang-writes-nothing-to-disk](traps/a-hard-hang-writes-nothing-to-disk.md) | `generic` | A hard hang writes nothing to disk — capture on the host, before you trigger |
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
@@ -35,6 +36,7 @@ generic notes as well.
 | [critical-chain-shows-the-longest-path-not-the-floor](traps/critical-chain-shows-the-longest-path-not-the-floor.md) | `generic` | systemd-analyze critical-chain shows the longest path, not the floor |
 | [dmesg-can-be-empty-about-boot](traps/dmesg-can-be-empty-about-boot.md) | `generic` | dmesg can be empty about boot while the journal still has everything |
 | [dtbo-must-match-the-kernel](traps/dtbo-must-match-the-kernel.md) | `generic` | The dtbo must match the kernel, and the bootloader reads it from the active slot |
+| [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
 | [frozen-is-not-hung](traps/frozen-is-not-hung.md) | `generic` | FROZEN (kernel alive, userspace gone) is a distinct state and the watchdog will not save you |
 | [installing-firmware-can-flash-the-boot-partition](traps/installing-firmware-can-flash-the-boot-partition.md) | `generic` | apk add <firmware-pkg> (and apk fix) can FLASH the boot partition |
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
@@ -46,6 +48,7 @@ generic notes as well.
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
 | [stale-dev-package-outranks-your-build](traps/stale-dev-package-outranks-your-build.md) | `generic` | A _p<timestamp> dev snapshot outranks a release, so apk installs a kernel from days ago |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
+| [unmasked-suspend-during-an-automated-wait-is-a-death-loop](traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md) | `generic` | Unmasking suspend before an automated wait can loop a device out of reach |
 | [usb-ids-cannot-tell-booted-from-bootloader](traps/usb-ids-cannot-tell-booted-from-bootloader.md) | `generic` | lsusb can label a running pmOS USB gadget as "fastboot |
 | [wait-long-enough-before-calling-a-boot-failed](traps/wait-long-enough-before-calling-a-boot-failed.md) | `generic` | Wait long enough before calling a boot failed |
 | [watchdog-out-of-range-disarms-instead-of-clamping](traps/watchdog-out-of-range-disarms-instead-of-clamping.md) | `generic` | An out-of-range watchdog timeout turns the watchdog OFF, it does not clamp |
@@ -84,5 +87,6 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 49
+- `generic` — 51
+- `soc:gs201` — 1
 - `soc:msm8998` — 1

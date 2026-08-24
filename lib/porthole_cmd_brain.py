@@ -102,22 +102,35 @@ def scope_matches(note_scope: str, want: str) -> bool:
     return note_scope == want or note_scope.startswith(want + ":")
 
 
+ACTIONS = ("search", "new", "lint", "submit", "reindex")
+
+
 def cmd_brain(args, ctx) -> int:
     root = pathlib.Path(ctx.root)
 
-    if args.new:
+    # `porthole brain watchdog` must keep working, so a first word that is not
+    # an action is treated as the start of the query rather than an error. The
+    # collision set is five words; a note whose id is literally "lint" can be
+    # reached with `brain search lint`.
+    action = "search"
+    query = list(args.query or [])
+    if query and query[0] in ACTIONS:
+        action, query = query[0], query[1:]
+    args.query = query
+
+    if action == "new":
         return cmd_new(args, ctx, root)
-    if args.lint:
+    if action == "lint":
         return cmd_lint(args, ctx, root)
-    if args.submit:
+    if action == "submit":
         return cmd_submit(args, ctx, root)
 
     notes = load_notes(root)
 
-    if args.reindex:
+    if action == "reindex":
         return write_index(root, notes)
 
-    terms = [t.lower() for t in (args.query or [])]
+    terms = [t.lower() for t in query]
     hits = []
     for note in notes:
         if not scope_matches(note.scope, args.scope or ""):
@@ -482,7 +495,9 @@ SPEC = {
         "what applies to your device and always includes the generic notes,\n"
         "because hiding the laws from someone who filtered would be backwards."),
     "args": [
-        (["query"], {"nargs": "*", "help": "words to match, or a note id"}),
+        (["query"], {"nargs": "*", "metavar": "ACTION|WORD",
+                     "help": "search | new | lint | submit | reindex, "
+                             "then words to match or a note id"}),
         (["--scope"], {"metavar": "SCOPE",
                        "help": "generic | soc:<soc> | device:<codename>"}),
         (["--subsystem"], {"metavar": "NAME",
@@ -491,13 +506,6 @@ SPEC = {
                           "help": "law | trap | technique | fact -- filter by, "
                                   "or set on a new note"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
-        (["--reindex"], {"action": "store_true", "help": "regenerate brain/INDEX.md"}),
-        (["--new"], {"action": "store_true",
-                     "help": "scaffold a note: `brain --new <id>`"}),
-        (["--lint"], {"action": "store_true",
-                      "help": "check every note meets the bar"}),
-        (["--submit"], {"action": "store_true",
-                        "help": "branch, commit and open a PR for your notes"}),
         (["--title"], {"help": "new: the note's title"}),
         (["--confidence"], {"help": "new: proven | probable | suspected"}),
         (["--evidence"], {"help": "new: what proves it"}),
@@ -509,9 +517,11 @@ SPEC = {
     ],
     "run": cmd_brain,
     "examples": [
-        "porthole brain --severity law",
+        "porthole brain search --severity law",
         "porthole brain watchdog",
-        "porthole brain --scope soc:sdm845",
-        "porthole brain --reindex",
+        "porthole brain search --scope soc:sdm845",
+        "porthole brain new my-note-id --section traps",
+        "porthole brain lint",
+        "porthole brain reindex",
     ],
 }

@@ -163,10 +163,10 @@ def cmd_start(args, ctx, pmaports) -> int:
                    f"slashes: {topic!r}", EX_USAGE)
 
     _, porcelain, _ = git(pmaports, "status", "--porcelain")
-    if porcelain.strip() and not args.force:
+    if porcelain.strip() and not args.allow_dirty:
         raise Bail("pmaports has uncommitted changes", EX_FAIL,
                    "commit or stash them first (they would follow you onto the "
-                   "new branch), or pass --force if that is what you want")
+                   "new branch), or pass --allow-dirty if that is what you want")
 
     _, current, _ = git(pmaports, "rev-parse", "--abbrev-ref", "HEAD")
     base = args.base or _channel_branch(ctx, pmaports) or current
@@ -315,10 +315,461 @@ def _lint(pmaports, base, ctx) -> list[tuple[str, str]]:
     return out
 
 
+# ------------------------------------------------------------- pmbootstrap --
+
+def pmb(ctx, *args, timeout=1800, capture=False):
+    """Run pmbootstrap, streaming its output by default.
+
+    Streaming matters: a build is minutes long, and a progress bar you cannot
+    see is indistinguishable from a hang. `-y` is passed because every caller
+    here has already taken its own confirmation via --yes, and asking twice
+    trains people to stop reading prompts.
+    """
+    cmd = ["pmbootstrap", "-y", *args]
+    ctx.out(ctx.out.paint(f"  $ {' '.join(cmd)}", "grey"))
+    try:
+        if capture:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=timeout)
+            return proc.returncode, proc.stdout, proc.stderr
+        return subprocess.run(cmd, timeout=timeout).returncode, "", ""
+    except FileNotFoundError:
+        raise Bail("pmbootstrap is not installed", EX_FAIL,
+                   "pipx install pmbootstrap   (`porthole doctor` checks this)"
+                   ) from None
+    except subprocess.TimeoutExpired:
+        raise Bail(f"pmbootstrap timed out after {timeout}s", EX_FAIL) from None
+
+
+def _pkg_dir(pmaports, name):
+    """Where a package lives, or None. pmaports nests packages by category."""
+    for pattern in (f"*/*/{name}", f"*/{name}"):
+        for path in pmaports.glob(pattern):
+            if (path / "APKBUILD").is_file():
+                return path
+    return None
+
+
+def _resolve_pkgs(args, ctx, pmaports) -> list[str]:
+    """Packages named on the command line, or this device's if none were."""
+    if getattr(args, "name", None):
+        return [args.name]
+    mine = [pathlib.Path(p).name for p in _device_paths(ctx, pmaports)]
+    if not mine:
+        raise Bail("name a package", EX_USAGE,
+                   "or set PORTHOLE_CODENAME in the profile so I can work out "
+                   "which packages are yours")
+    return mine
+
+
+# --------------------------------------------------------------------- new --
+
+DEVICEINFO_TEMPLATE = """\
+# Reference: <https://postmarketos.org/deviceinfo>
+# Please use double quotes only. You can source this file in shell
+# scripts.
+
+deviceinfo_format_version="0"
+deviceinfo_name="{name}"
+deviceinfo_manufacturer="{vendor}"
+deviceinfo_codename="{codename}"
+deviceinfo_year="{year}"
+deviceinfo_dtb="{dtb}"
+deviceinfo_arch="{arch}"
+
+# Device related
+deviceinfo_chassis="handset"
+deviceinfo_drm="false"
+
+# Bootloader related
+deviceinfo_flash_method="{flash_method}"
+deviceinfo_generate_bootimg="{generate_bootimg}"
+deviceinfo_flash_pagesize="{pagesize}"
+deviceinfo_header_version="{header_version}"
+"""
+
+APKBUILD_TEMPLATE = """\
+# Reference: <https://postmarketos.org/devicepkg>
+pkgname={pkgname}
+pkgdesc="{name}"
+pkgver=0.1
+pkgrel=0
+url="https://postmarketos.org"
+license="MIT"
+arch="{arch}"
+options="!check !archcheck"
+depends="
+{depends}"
+makedepends="devicepkg-dev"
+source="
+\tdeviceinfo
+\tmodules-initfs
+"
+
+build() {{
+\tdevicepkg_build $startdir $pkgname
+}}
+
+package() {{
+\tdevicepkg_package $startdir $pkgname
+}}
+
+sha512sums=""
+"""
+
+MODULES_INITFS_TEMPLATE = """\
+# Modules the initramfs needs before the rootfs exists: the storage
+# controller, anything needed to unlock FDE, and USB networking for the
+# debug shell. One name per line; '#' comments.
+{modules}
+"""
+
+
+def cmd_new(args, ctx, pmaports) -> int:
+    """Scaffold a pmaports device package, seeded from the closest sibling.
+
+    `pmbootstrap aportgen` forks ALPINE packages; it has nothing for a device
+    nobody has ported. The documented pmOS route is to copy the closest
+    existing device package and edit it, which is what this does -- except it
+    refuses to carry the other device's identity across, because a deviceinfo
+    still naming someone else's phone is the single most common way a new port
+    ships something nonsensical.
+    """
+    codename = args.name or ctx.cfg.get("PORTHOLE_DEVICE", "")
+    if not codename:
+        raise Bail("name the device", EX_USAGE,
+                   "porthole aports new google-cheetah")
+    if not re.fullmatch(r"[a-z0-9]+-[a-z0-9-]+", codename):
+        raise Bail(f"pmOS codenames are <vendor>-<codename>: {codename!r}",
+                   EX_USAGE, "e.g. google-cheetah, oneplus-enchilada")
+
+    vendor = codename.split("-", 1)[0]
+    pkgname = f"device-{codename}"
+    existing = _pkg_dir(pmaports, pkgname)
+    if existing and not args.force:
+        raise Bail(f"{pkgname} already exists at "
+                   f"{existing.relative_to(pmaports)}", EX_FAIL,
+                   "pass --force to overwrite it")
+
+    devices = pmap.load_devices(pmaports)
+    soc = args.soc or ctx.cfg.get("PORTHOLE_SOC", "")
+    # The profile stores a bare SoC ("gs201"); pmaports names it vendor-first
+    # ("google-gs201"). Accept either rather than making the user remember.
+    if soc and not any(d.soc == soc for d in devices):
+        for cand in (f"{vendor}-{soc}", f"qcom-{soc}"):
+            if any(d.soc == cand for d in devices):
+                soc = cand
+                break
+    sibs = pmap.siblings(devices, soc, exclude=codename) if soc else []
+    sibling = sibs[0] if sibs else None
+
+    cfg = ctx.cfg
+    info = dict(sibling.info) if sibling else {}
+    fields = {
+        "codename": codename,
+        "vendor": cfg.get("PORTHOLE_VENDOR") or vendor.capitalize(),
+        "name": cfg.get("PORTHOLE_DEVICE_NAME") or codename,
+        "year": cfg.get("PORTHOLE_YEAR") or "",
+        "arch": cfg.get("PORTHOLE_ARCH") or info.get("arch", "aarch64"),
+        "dtb": cfg.get("PORTHOLE_DTB") or "",
+        # Platform-shaped values CAN come from a sibling: how images reach the
+        # device is a property of the SoC's bootloader, not of the board.
+        "flash_method": info.get("flash_method", "fastboot"),
+        "generate_bootimg": info.get("generate_bootimg", "true"),
+        "pagesize": cfg.get("PORTHOLE_BOOTIMG_PAGESIZE")
+                    or info.get("flash_pagesize", ""),
+        "header_version": cfg.get("PORTHOLE_BOOTIMG_HEADER_VERSION")
+                          or info.get("header_version", ""),
+    }
+
+    category = args.category or "testing"
+    dest = pmaports / "device" / category / pkgname
+
+    depends = ["\tpostmarketos-base"]
+    if soc:
+        depends.append(f"\tsoc-{soc}")
+        depends.append(args.kernel and f"\t{args.kernel}"
+                       or f"\tlinux-postmarketos-{soc.split('-', 1)[-1]}")
+    elif args.kernel:
+        depends.append(f"\t{args.kernel}")
+
+    modules = "\n".join(args.module or []) or (
+        "# TODO: the storage driver belongs here. Without it the rootfs never\n"
+        "# appears and the boot looks exactly like a kernel hang.")
+
+    files = {
+        "deviceinfo": DEVICEINFO_TEMPLATE.format(**fields),
+        "APKBUILD": APKBUILD_TEMPLATE.format(
+            pkgname=pkgname, name=fields["name"], arch=fields["arch"],
+            depends="".join(d + "\n" for d in sorted(depends))),
+        "modules-initfs": MODULES_INITFS_TEMPLATE.format(modules=modules),
+    }
+    blanks = [k for k, v in fields.items() if not v]
+
+    if not args.yes:
+        o = ctx.out
+        o.heading(f"would create device/{category}/{pkgname}")
+        for name in sorted(files):
+            o(f"  {name}")
+        o.blank()
+        if sibling:
+            o(f"  seeded from {o.paint(sibling.codename, 'bold')} "
+              f"({sibling.category}) on {soc}")
+        else:
+            o(o.paint(f"  no sibling on {soc or 'an unknown SoC'} — nothing "
+                      f"seeded", "yellow"))
+        if blanks:
+            o(o.paint(f"  {len(blanks)} field(s) left blank: "
+                      f"{', '.join(blanks)}", "yellow"))
+        o.blank()
+        o.hint(f"porthole aports new {codename} --yes")
+        return EX_OK
+
+    dest.mkdir(parents=True, exist_ok=True)
+    for name, body in files.items():
+        (dest / name).write_text(body)
+
+    payload = {"package": pkgname, "path": str(dest), "category": category,
+               "seeded_from": sibling.codename if sibling else "",
+               "soc": soc, "files": sorted(files), "blank_fields": blanks}
+
+    def render():
+        o = ctx.out
+        o(f"{o.paint(o.sym('✓', 'ok'), 'green')} created "
+          f"device/{category}/{pkgname}")
+        for name in sorted(files):
+            o(f"    {name}")
+        if sibling:
+            o(f"  seeded from {sibling.codename} on {soc}")
+        else:
+            o(o.paint("  no sibling seeding — every value is yours", "yellow"))
+        if blanks:
+            o(o.paint(f"  still blank: {', '.join(blanks)}", "yellow"))
+        o.blank()
+        o.heading("next, in this order")
+        o.hint(f"porthole aports lint {pkgname}")
+        o.hint(f"porthole aports checksum {pkgname}")
+        o.hint(f"porthole aports build {pkgname}")
+        o.blank()
+        o(o.paint("  Blank deviceinfo values are deliberate. A wrong flash "
+                  "offset makes a\n  device that does not boot and says "
+                  "nothing about why.", "grey"))
+
+    return ctx.emit(payload, render)
+
+
+# ------------------------------------------------- checksum / build / lint --
+
+def cmd_checksum(args, ctx, pmaports) -> int:
+    """`pmbootstrap checksum` -- mandatory after touching any listed source."""
+    if args.changed:
+        rc, _, _ = pmb(ctx, "checksum", "--changed", timeout=900)
+    else:
+        rc, _, _ = pmb(ctx, "checksum", *_resolve_pkgs(args, ctx, pmaports),
+                       timeout=900)
+    if rc != 0:
+        raise Bail("checksum failed", EX_FAIL,
+                   "a source in the APKBUILD could not be fetched — check the "
+                   "URL, and that every local file listed actually exists")
+    ctx.out(ctx.out.paint("  checksums updated", "green"))
+    return EX_OK
+
+
+def cmd_build(args, ctx, pmaports) -> int:
+    pkgs = _resolve_pkgs(args, ctx, pmaports)
+    argv = ["build"]
+    if args.force:
+        argv.append("--force")
+    if args.arch:
+        argv += ["--arch", args.arch]
+    rc, _, _ = pmb(ctx, *argv, *pkgs, timeout=args.timeout)
+    if rc != 0:
+        raise Bail(f"build failed for {', '.join(pkgs)}", EX_FAIL,
+                   "pmbootstrap log   shows the build output")
+    ctx.out(ctx.out.paint(f"  built {', '.join(pkgs)}", "green"))
+    return EX_OK
+
+
+def cmd_lint(args, ctx, pmaports) -> int:
+    """apkbuild-lint, on your packages by default.
+
+    The same check pmaports CI runs, so a clean run here is the difference
+    between a merge request that gets reviewed and one bounced before anybody
+    reads it.
+    """
+    rc, _, _ = pmb(ctx, "lint", *_resolve_pkgs(args, ctx, pmaports), timeout=900)
+    if rc != 0:
+        raise Bail("lint found problems", EX_FAIL,
+                   "fix them before opening a merge request — pmaports CI runs "
+                   "this too")
+    ctx.out(ctx.out.paint("  lint clean", "green"))
+    return EX_OK
+
+
+def cmd_ci(args, ctx, pmaports) -> int:
+    """pmaports' own CI, locally, from inside the checkout."""
+    cmd = ["pmbootstrap", "-y", "ci"] + (["--fast"] if args.fast else [])
+    ctx.out(ctx.out.paint(f"  $ (cd {pmaports} && {' '.join(cmd)})", "grey"))
+    try:
+        rc = subprocess.run(cmd, cwd=str(pmaports),
+                            timeout=args.timeout).returncode
+    except FileNotFoundError:
+        raise Bail("pmbootstrap is not installed", EX_FAIL) from None
+    except subprocess.TimeoutExpired:
+        raise Bail(f"ci timed out after {args.timeout}s", EX_FAIL) from None
+    if rc != 0:
+        raise Bail("pmaports CI failed", EX_FAIL,
+                   "this is what your merge request will run — fix it here")
+    ctx.out(ctx.out.paint("  CI clean", "green"))
+    return EX_OK
+
+
+def cmd_bump(args, ctx, pmaports) -> int:
+    """pkgrel_bump: tell the builders a package must be rebuilt."""
+    rc, _, _ = pmb(ctx, "pkgrel_bump", *_resolve_pkgs(args, ctx, pmaports),
+                   timeout=600)
+    if rc != 0:
+        raise Bail("pkgrel_bump failed", EX_FAIL)
+    return EX_OK
+
+
+# ----------------------------------------------------------------- patches --
+
+def cmd_patches(args, ctx, pmaports) -> int:
+    """Export kernel commits into a kernel aport as a numbered patch series.
+
+    This is the loop that hurts. You have a kernel tree with commits on top of
+    an upstream base; the aport wants them as `.patch` files listed in
+    `source=`, with checksums regenerated. By hand that is format-patch, copy,
+    hand-edit a shell array, forget the checksum, and find out twenty minutes
+    into a build.
+
+    Stale patches are REMOVED rather than merged: the series in the aport must
+    equal the series in the tree. A patch dropped from the branch but left in
+    the package is a change nobody can account for, and it will be built.
+    """
+    tree = pathlib.Path(
+        args.tree or ctx.cfg.get("PORTHOLE_WORKDIR", "") or ".").expanduser()
+    if not (tree / ".git").exists():
+        if (tree / "linux" / ".git").exists():
+            tree = tree / "linux"
+        else:
+            raise Bail(f"{tree} is not a git checkout", EX_FAIL,
+                       "pass --tree <kernel repo>, or set PORTHOLE_WORKDIR")
+
+    if not args.base:
+        raise Bail("name the upstream base", EX_USAGE,
+                   "porthole aports patches --base v6.18 --pkg "
+                   "linux-postmarketos-gs201")
+    base = args.base
+
+    pkgname = args.pkg or ctx.cfg.get("PORTHOLE_KERNEL_PKG", "")
+    if not pkgname:
+        raise Bail("which kernel package?", EX_USAGE,
+                   "pass --pkg, or set PORTHOLE_KERNEL_PKG in the profile")
+    pkgdir = _pkg_dir(pmaports, pkgname)
+    if not pkgdir:
+        raise Bail(f"no package {pkgname!r} in pmaports", EX_FAIL,
+                   "porthole aports new   creates a device package; a kernel "
+                   "package is copied from the closest sibling's")
+
+    rc, _, _ = git(tree, "rev-parse", "--verify", "--quiet", base)
+    if rc != 0:
+        raise Bail(f"no such base in the kernel tree: {base}", EX_FAIL,
+                   "fetch the tag first, or name a commit that exists")
+    _, count, _ = git(tree, "rev-list", "--count", f"{base}..HEAD")
+    n = int(count or 0)
+    if n == 0:
+        raise Bail(f"no commits between {base} and HEAD in {tree}", EX_FAIL,
+                   "commit your kernel work first")
+
+    old = sorted(p.name for p in pkgdir.glob("*.patch"))
+
+    if not args.yes:
+        _, subjects, _ = git(tree, "log", "--format=%s", "--reverse",
+                             f"{base}..HEAD")
+        o = ctx.out
+        o.heading(f"{n} commit(s) in {tree.name} since {base}")
+        for i, subject in enumerate(subjects.splitlines(), 1):
+            o(f"  {i:04d}  {subject[:70]}")
+        o.blank()
+        o(f"  into {pkgdir.relative_to(pmaports)}")
+        if old:
+            o(o.paint(f"  replacing {len(old)} existing patch(es)", "yellow"))
+        o.blank()
+        o.hint(f"porthole aports patches --base {base} --pkg {pkgname} --yes")
+        return EX_OK
+
+    for name in old:
+        (pkgdir / name).unlink()
+    # --zero-commit and --no-signature keep the patch files stable across
+    # regenerations, so re-running this does not produce a diff of noise.
+    rc, out, err = git(tree, "format-patch", f"{base}..HEAD", "-o", str(pkgdir),
+                       "--no-signature", "--zero-commit", "--no-numbered",
+                       timeout=300)
+    if rc != 0:
+        raise Bail(f"format-patch failed: {err}", EX_FAIL)
+    new = sorted(pathlib.Path(l).name for l in out.splitlines() if l.strip())
+
+    changed = _rewrite_source(pkgdir / "APKBUILD", new)
+    ctx.out(f"  {len(new)} patch(es) written to {pkgdir.relative_to(pmaports)}")
+    if changed:
+        ctx.out("  APKBUILD source= updated")
+
+    rc, _, _ = pmb(ctx, "checksum", pkgname, timeout=900)
+    if rc != 0:
+        raise Bail("checksum failed after writing patches", EX_FAIL,
+                   "the patches are on disk; fix the APKBUILD, then "
+                   "`porthole aports checksum`")
+
+    payload = {"package": pkgname, "tree": str(tree), "base": base,
+               "patches": new, "removed": [p for p in old if p not in new]}
+
+    def render():
+        o = ctx.out
+        o.blank()
+        o(f"{o.paint(o.sym('✓', 'ok'), 'green')} {pkgname}: {len(new)} "
+          f"patch(es), checksums regenerated")
+        o.blank()
+        o.hint(f"porthole aports build {pkgname} --force")
+        o.hint("porthole aports lint")
+        o.hint("porthole aports patch      when it is ready to send")
+
+    return ctx.emit(payload, render)
+
+
+SOURCE_BLOCK = re.compile(r'^(source=")(.*?)(")', re.M | re.S)
+
+
+def _rewrite_source(apkbuild: pathlib.Path, patches: list[str]) -> bool:
+    """Replace the .patch entries in source= with exactly this series.
+
+    Non-patch entries -- the tarball, the config -- are preserved in their
+    original order. pmaports convention is sources first and patches after, and
+    a rewrite that shuffled them would produce a diff nobody wants to review.
+    """
+    try:
+        text = apkbuild.read_text()
+    except OSError:
+        return False
+    m = SOURCE_BLOCK.search(text)
+    if not m:
+        return False
+    kept = [e for e in m.group(2).split() if not e.endswith(".patch")]
+    body = "\n".join(f"\t{e}" for e in kept + patches)
+    updated = text[:m.start()] + f'{m.group(1)}\n{body}\n{m.group(3)}' + text[m.end():]
+    if updated == text:
+        return False
+    apkbuild.write_text(updated)
+    return True
+
+
 # ---------------------------------------------------------------- dispatch --
 
-ACTIONS = {"status": cmd_status, "start": cmd_start,
-           "diff": cmd_diff, "patch": cmd_patch}
+ACTIONS = {"status": cmd_status, "start": cmd_start, "diff": cmd_diff,
+           "patch": cmd_patch, "new": cmd_new, "checksum": cmd_checksum,
+           "build": cmd_build, "lint": cmd_lint, "ci": cmd_ci,
+           "bump": cmd_bump, "patches": cmd_patches}
 
 
 def dispatch(args, ctx) -> int:
@@ -344,23 +795,54 @@ SPEC = {
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": list(ACTIONS),
-                      "help": "status | start | diff | patch"}),
-        (["name"], {"nargs": "?", "help": "start: the topic branch name"}),
-        (["--base"], {"metavar": "REF", "help": "branch/patch base"}),
+                      "help": "status | start | new | checksum | build | lint | "
+                              "ci | bump | patches | diff | patch"}),
+        (["name"], {"nargs": "?", "metavar": "NAME",
+                    "help": "start: branch name. new: device codename. "
+                            "build/lint/checksum/bump: package"}),
+        (["--base"], {"metavar": "REF", "help": "branch/patch/patches base"}),
         (["--mine"], {"action": "store_true",
                       "help": "diff: only your device's packages"}),
         (["--staged"], {"action": "store_true", "help": "diff: staged changes"}),
         (["--stat"], {"action": "store_true", "help": "diff: summary only"}),
         (["--out"], {"metavar": "DIR", "help": "patch: output directory"}),
+        (["--soc"], {"metavar": "SOC",
+                     "help": "new: seed from the closest sibling on this SoC"}),
+        (["--category"], {"metavar": "DIR",
+                          "help": "new: pmaports category (default testing)"}),
+        (["--kernel"], {"metavar": "PKG",
+                        "help": "new: the kernel package to depend on"}),
+        (["--module"], {"action": "append", "metavar": "NAME",
+                        "help": "new: initramfs module (repeatable)"}),
+        (["--changed"], {"action": "store_true",
+                         "help": "checksum: every package with unstaged changes"}),
+        (["--arch"], {"metavar": "ARCH", "help": "build: target architecture"}),
+        (["--fast"], {"action": "store_true", "help": "ci: fast scripts only"}),
+        (["--timeout"], {"type": int, "default": 3600, "metavar": "SEC",
+                         "help": "build/ci: seconds before giving up"}),
+        (["--tree"], {"metavar": "PATH",
+                      "help": "patches: the kernel checkout (default "
+                              "$PORTHOLE_WORKDIR)"}),
+        (["--pkg"], {"metavar": "PKG",
+                     "help": "patches: the kernel package to write into"}),
         (["--force"], {"action": "store_true",
-                       "help": "start: branch despite uncommitted changes"}),
-        (["--yes"], {"action": "store_true", "help": "start: actually do it"}),
+                       "help": "new: overwrite. build: rebuild anyway"}),
+        (["--allow-dirty"], {"action": "store_true", "dest": "allow_dirty",
+                             "help": "start: branch despite uncommitted changes"}),
+        (["--yes"], {"action": "store_true",
+                     "help": "start/new/patches: actually do it"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
+    "escapes_scope": True,
     "run": dispatch,
     "examples": [
         "porthole aports status",
-        "porthole aports start taimen-camera --yes",
+        "porthole aports start cheetah-gs201 --yes",
+        "porthole aports new google-cheetah --soc google-gs201 --yes",
+        "porthole aports checksum --changed",
+        "porthole aports build device-google-cheetah --force",
+        "porthole aports patches --base v6.18 --pkg linux-postmarketos-gs201 --yes",
+        "porthole aports lint",
         "porthole aports diff --mine --stat",
         "porthole aports patch",
     ],

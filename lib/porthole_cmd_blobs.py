@@ -201,7 +201,7 @@ def cmd_unpack(args, ctx) -> int:
     except zipfile.BadZipFile:
         raise Bail(f"{src} is not a zip", EX_FAIL) from None
 
-    if args.list:
+    if args.dry_run:
         payload = {"archive": str(src), "images": found, "nested_zips": nested}
 
         def render_list():
@@ -463,12 +463,13 @@ SPEC = {
         (["--dir-of"], {"metavar": "DIR",
                         "help": "inventory: classify an already-extracted dir"}),
         (["--match"], {"metavar": "REGEX", "help": "extract: only these names"}),
-        (["--list"], {"action": "store_true", "help": "unpack: list, do not extract"}),
+        (["--dry-run"], {"action": "store_true", "dest": "dry_run",
+                         "help": "unpack: list what is inside, extract nothing"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": dispatch,
     "examples": [
-        "porthole blobs unpack factory.zip --list",
+        "porthole blobs unpack factory.zip --dry-run",
         "porthole blobs unsparse vendor.img --out vendor.raw.img",
         "porthole blobs ls vendor.raw.img --dir /firmware",
         "porthole blobs extract vendor.raw.img --match 'wlan|bdwlan'",

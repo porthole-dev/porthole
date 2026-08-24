@@ -14,6 +14,7 @@ pointer to the playbook that resolves it.
 """
 from __future__ import annotations
 
+import difflib
 import pathlib
 import re
 import shutil
@@ -42,7 +43,14 @@ Run `porthole doctor` first. It will tell you what is missing on the host.
 ## 1. First boot — `brain/playbooks/10-first-boot.md`
 
 - [ ] Boot image offsets sourced, **not guessed**
-- [ ] `fastboot boot` an image from RAM (leaves the installed system alone)
+- [ ] **Check whether this device can RAM-boot at all** —
+      `porthole brain search --scope device:{codename}` before you rely on it.
+      `fastboot boot` leaves the installed system alone and is the usual safety
+      net, but it is NOT universal: on some devices the bootloader ignores the
+      ramdisk, and then every test image is a *flash*. Establish which you have
+      before the first write, not after.
+- [ ] If it cannot RAM-boot: set `PORTHOLE_SLOT_FORBIDDEN` and keep a known-good
+      image on the other slot BEFORE flashing anything
 - [ ] A channel out that works before the display: earlycon, debug shell, or
       the USB gadget
 - [ ] Classify boots with `tools/boot-probe.sh`, not by eye
@@ -166,7 +174,14 @@ def apply_seeds(template: str, seeds: dict[str, str]) -> tuple[str, list[str]]:
     filled = []
     lines = template.splitlines(True)
     for i, line in enumerate(lines):
-        m = re.match(r'^([A-Z_]+)=("")?\s*(#.*)?$', line.rstrip("\n"))
+        # Match a filled default too, not only a blank. The template ships
+        # PORTHOLE_HAS_AB_SLOTS="0" and PORTHOLE_ARCH="aarch64" as sensible
+        # defaults -- but a seed comes from an authoritative source (fastboot
+        # getvar, a sibling's deviceinfo, the caller), and a default that
+        # silently outranks it is worse than no default at all. `getvar`
+        # reporting two slots was being dropped on the floor here, which is
+        # exactly the value you must not get wrong before a first flash.
+        m = re.match(r'^([A-Z_]+)=("[^"]*")?\s*(#.*)?$', line.rstrip("\n"))
         if not m:
             continue
         key = m.group(1)
@@ -213,7 +228,8 @@ def cmd_new_device(args, ctx) -> int:
     template = (root / "profiles" / "_template" / "device.env").read_text()
 
     seeds = {"PORTHOLE_CODENAME": codename}
-    notes = []
+    notes: list[str] = []
+    unknown_soc = ""
 
     if args.from_fastboot:
         import porthole
@@ -245,10 +261,44 @@ def cmd_new_device(args, ctx) -> int:
         #    known to boot, which is worth more than any amount of guessing.
         if not own or args.soc:
             devices = pmap.load_devices(pmaports)
+            known = sorted({d.soc for d in devices if d.soc})
             soc = args.soc
-            if not soc:
+            explicit_miss = False
+            if soc and soc not in known:
+                # An unknown SoC must NOT be fatal. `--soc google-gs201` for
+                # silicon nobody has ported is precisely what this verb exists
+                # for -- and note that a SUCCESSOR generation is one character
+                # from its predecessor by design, so "looks like a typo" cannot
+                # distinguish the two. Treating a near-miss as fatal rejected
+                # google-gs201 for resembling google-gs101, which is the exact
+                # port this was built to start.
+                #
+                # What actually needs protecting against is seeding from the
+                # WRONG silicon, and the fix for that is to not seed at all:
+                # an explicitly named SoC that does not exist skips the
+                # vendor-inference fallback below, so no sibling is ever
+                # chosen on the strength of a name that turned out to be
+                # nothing.
+                explicit_miss = True
+                unknown_soc = soc
+                near = difflib.get_close_matches(soc, known, n=3, cutoff=0.6)
+                note = (f"SoC {soc!r} is not used by any pmaports device — "
+                        f"nothing seeded")
+                if near:
+                    note += (f"; closest existing: {', '.join(near)} "
+                             f"(a typo, or the previous generation?)")
+                else:
+                    note += " (expected for new silicon; if it is a BOARD "\
+                            "name, the SoC belongs here)"
+                notes.append(note)
+                ctx.out.warn(note)
+                soc = ""
+            if not soc and not explicit_miss:
                 # Infer from a same-vendor device, then give up rather than
                 # guess: seeding from the wrong silicon is worse than blanks.
+                # Skipped entirely when the user NAMED a SoC that turned out
+                # not to exist -- falling back after that would seed from
+                # silicon they never asked for.
                 vendor = codename.split("-")[0]
                 same_vendor = [d for d in devices
                                if d.codename.startswith(vendor + "-") and d.soc]
@@ -280,32 +330,53 @@ def cmd_new_device(args, ctx) -> int:
     (dest / "checklist.md").write_text(CHECKLIST.format(codename=codename))
     (dest / "tools").mkdir(exist_ok=True)
     (dest / "tools" / ".gitkeep").write_text("")
-    (dest / "notes.md").write_text(
-        f"# {codename} — device notes\n\n"
-        f"What is peculiar to this device. Anything that generalises belongs in\n"
-        f"`brain/traps/` with a `scope:` line instead — that is how the next\n"
-        f"device benefits from what this one cost you.\n")
+    # No notes.md. It was a third place for device notes to live, competing
+    # with brain/ (for what generalises) and $PORTHOLE_WORKDIR/docs/ (for what
+    # does not). Three homes for one kind of file is how taimen/docs/ became 65
+    # flat entries.
 
-    print(f"created profiles/{codename}/")
-    for note in notes:
-        print(f"  {note}")
-    if sibling:
-        print()
-        print(f"  Inherited values come from a device that BOOTS, which beats")
-        print(f"  guessing -- but same SoC does not guarantee same board.")
-        print(f"  Verify the boot image offsets against your own device's")
-        print(f"  downstream mkbootimg args or an unpacked stock boot.img.")
-        print(f"    porthole soc --inherit {sibling.codename}")
     blanks = len(re.findall(r'^[A-Z_]+=""\s*(?:#.*)?$', content, re.M))
-    print(f"  {len(filled)} key(s) filled, {blanks} still blank")
-    print()
-    print(f"next:")
-    print(f"  1. read   profiles/{codename}/checklist.md")
-    print(f"  2. fill   profiles/{codename}/device.env  (every blank is a "
+    payload = {
+        "codename": codename,
+        "profile": str(dest),
+        "seeded_from": ([sibling.codename] if sibling else []),
+        "sibling_soc": (sibling.soc if sibling else ""),
+        "unknown_soc": unknown_soc,
+        "keys_filled": len(filled),
+        "keys_blank": blanks,
+        "filled": sorted(filled),
+        "notes": notes,
+    }
+
+    def render():
+        o = ctx.out
+        o(f"created profiles/{codename}/")
+        for note in notes:
+            o(f"  {note}")
+        # ALWAYS say whether sibling seeding happened. The original defect was
+        # not that `--soc cloudripper` was accepted -- it was that it was
+        # accepted SILENTLY, leaving an unseeded profile indistinguishable from
+        # a seeded one.
+        if not sibling:
+            o(f"  {o.paint('no sibling seeding', 'yellow')} — every value below "
+              f"is yours to establish")
+        o(f"  {len(filled)} key(s) filled, {blanks} still blank")
+        if sibling:
+            o.blank()
+            o("  Inherited values come from a device that BOOTS, which beats")
+            o("  guessing -- but same SoC does not guarantee same board.")
+            o("  Verify the boot image offsets against your own device's")
+            o("  downstream mkbootimg args or an unpacked stock boot.img.")
+            o(f"    porthole soc inherit {sibling.codename}")
+        o.blank()
+        o("next:")
+        o(f"  1. read   profiles/{codename}/checklist.md")
+        o(f"  2. fill   profiles/{codename}/device.env  (every blank is a "
           f"question you now know to ask)")
-    print(f"  3. run    porthole init --device {codename}")
-    print(f"  4. read   porthole brain --severity law")
-    return EX_OK
+        o(f"  3. run    porthole use {codename}")
+        o(f"  4. read   porthole brain search --severity law")
+
+    return ctx.emit(payload, render)
 
 
 SPEC = {
@@ -319,18 +390,23 @@ SPEC = {
         "It does NOT invent a deviceinfo, defconfig or DTS. A confidently wrong\n"
         "one costs more than a blank: you end up debugging the device instead\n"
         "of the file."),
+    # The positional IS the device, so no -d/--device selector is injected:
+    # it would be a second way to name a device that means the opposite one.
+    "device_flag": False,
     "args": [
         (["codename"], {"help": "lowercase, dashes; e.g. oneplus-enchilada"}),
         (["--from-fastboot"], {"action": "store_true",
                                "help": "seed from a device in the bootloader"}),
         (["--soc"], {"metavar": "SOC",
                      "help": "seed from the closest sibling on this SoC, "
-                             "e.g. qcom-sdm845"}),
+                             "vendor-prefixed, e.g. qcom-sdm845"}),
         (["--force"], {"action": "store_true", "help": "overwrite an existing profile"}),
+        (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_new_device,
     "examples": [
         "porthole new-device oneplus-enchilada",
         "porthole new-device fairphone-fp4 --from-fastboot",
+        "porthole new-device google-cheetah --soc google-gs201   # new silicon",
     ],
 }

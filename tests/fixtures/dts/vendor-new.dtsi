@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Node headers extracted from downstream gs201.dtsi (Google Tensor).
+// Trimmed to the declarations the delta engine reads: this is a
+// fixture for the ALGORITHM, not a usable device tree.
+/ {
+	gic: interrupt-controller@10400000 { };
+	mct: mct@10050000 { };
+	eh: eh@17100000 { };
+	serial_0: uart@10A00000 { };
+	pinctrl_0: pinctrl@180D0000 { };
+	pdma0: pdma0@10110000 { };
+	pinctrl_1: pinctrl@180E0000 { };
+	pinctrl_2: pinctrl@17A80000 { };
+	pinctrl_3: pinctrl@17940000 { };
+	pinctrl_4: pinctrl@10840000 { };
+	pinctrl_5: pinctrl@10C40000 { };
+	pinctrl_6: pinctrl@11840000 { };
+	pinctrl_7: pinctrl@14440000 { };
+	pinctrl_8: pinctrl@14460000 { };
+	pmu_system_controller: system-controller@18060000 { };
+	acpm_mfd_bus0: acpm_mfd_bus@18100000 { };
+	acpm_mfd_bus1: acpm_mfd_bus@18110000 { };
+	smfc: smfc@1C700000 { };
+	udc: usb@11210000 { };
+	usbdrd_phy0: phy@11200000 { };
+	exynos_dm: exynos-dm@17000000 { };
+	devfreq_0: devfreq_mif@17000010 { };
+	devfreq_1: devfreq_int@17000020 { };
+	devfreq_2: devfreq_intcam@17000030 { };
+	devfreq_3: devfreq_disp@17000040 { };
+	devfreq_4: devfreq_cam@17000050 { };
+	devfreq_5: devfreq_tnr@17000060 { };
+	devfreq_6: devfreq_mfc@17000070 { };
+	devfreq_7: devfreq_bo@17000080 { };
+	mif_cpu0_mem_lat: devfreq_mif_cpu0_memlat@17000010 { };
+	mif_cpu1_mem_lat: devfreq_mif_cpu1_memlat@17000010 { };
+	mif_cpu2_mem_lat: devfreq_mif_cpu2_memlat@17000010 { };
+	mif_cpu3_mem_lat: devfreq_mif_cpu3_memlat@17000010 { };
+	mif_cpu4_mem_lat: devfreq_mif_cpu4_memlat@17000010 { };
+	mif_cpu5_mem_lat: devfreq_mif_cpu5_memlat@17000010 { };
+	mif_cpu6_mem_lat: devfreq_mif_cpu6_memlat@17000010 { };
+	mif_cpu7_mem_lat: devfreq_mif_cpu7_memlat@17000010 { };
+	g2d: g2d@1C640000 { };
+	watchdog_cl0: watchdog_cl0@10060000 { };
+	watchdog_cl1: watchdog_cl1@10070000 { };
+};

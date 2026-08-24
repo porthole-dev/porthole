@@ -144,7 +144,15 @@ def cmd_tools(args, ctx) -> int:
         device = ""
     tools = collect(ctx.root, device)
 
-    if args.lint:
+    # A leading ACTION word is a mode; anything else is a tool name. The
+    # collision set is two words and no tool is called "lint" or "list" --
+    # they are all tk-*.sh -- so this costs nothing and keeps
+    # `porthole tools tk-fps.py` exactly as short as it was.
+    action = ""
+    if args.name in ("list", "lint"):
+        action, args.name = args.name, None
+
+    if action == "lint":
         bad = [t for t in tools if t.gaps]
         payload = [{"name": t.name, "missing": t.gaps} for t in bad]
 
@@ -244,7 +252,8 @@ SPEC = {
         "contract without opening it.\n\n"
         "For agents: `porthole tools --json` is the catalogue to consult first."),
     "args": [
-        (["name"], {"nargs": "?", "help": "show this tool's contract"}),
+        (["name"], {"nargs": "?", "metavar": "ACTION|NAME",
+                    "help": "list | lint, or a tool name to read its contract"}),
         (["--scope"], {"metavar": "SCOPE",
                        "help": "generic | soc:<soc> | device:<codename>"}),
         (["--needs"], {"metavar": "STATE",
@@ -252,8 +261,6 @@ SPEC = {
         (["--grep"], {"metavar": "REGEX", "help": "search names and summaries"}),
         (["--core"], {"action": "store_true",
                       "help": "exclude the active profile's tools"}),
-        (["--lint"], {"action": "store_true",
-                      "help": "list tools with an incomplete header"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_tools,
@@ -262,6 +269,6 @@ SPEC = {
         "porthole tools --needs BOOTED",
         "porthole tools --grep suspend",
         "porthole tools tk-suspend-cycle.sh",
-        "porthole tools --lint",
+        "porthole tools lint",
     ],
 }

@@ -102,6 +102,9 @@ SPEC = {
                       "help": "hold the device mutex, declaring the tool's needs"}),
         (["args"], {"nargs": "...", "help": "arguments passed to the tool"}),
     ],
+    # Not a report: stdout belongs to the tool being invoked, and
+    # wrapping that in JSON would corrupt every tool that emits any.
+    "reports": False,
     "run": cmd_run,
     "examples": [
         "porthole run tk-fps.py",

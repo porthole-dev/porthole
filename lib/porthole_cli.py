@@ -191,6 +191,14 @@ def discover(root: pathlib.Path) -> list[dict]:
         spec.setdefault("args", [])
         spec.setdefault("help", "")
         spec.setdefault("examples", [])
+        # Declarative facts about the verb, each defaulting to the common case
+        # so an existing SPEC needs no edit. The contract tests in
+        # tests/test_cli.py check the whole registry against these, which is
+        # the point: a rule enforced verb by verb drifts the moment someone
+        # adds a tenth verb without reading the other nine.
+        spec.setdefault("device_flag", True)    # does -d/--device apply?
+        spec.setdefault("reports", True)        # does it print a report? (--json)
+        spec.setdefault("escapes_scope", False)  # writes beyond its own profile?
         specs.append(spec)
     specs.sort(key=lambda s: (s["order"], s["verb"]))
     return specs
@@ -215,19 +223,31 @@ class Parser(argparse.ArgumentParser):
         raise SystemExit(EX_USAGE)
 
 
-def with_device(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+def with_device(parser: argparse.ArgumentParser,
+                device_flag: bool = True) -> argparse.ArgumentParser:
     """Accept the global flags after the verb as well as before it.
 
-    `porthole doctor --no-color` and `porthole init --device taimen` are what
-    people actually type; requiring a global flag before the verb is a papercut
-    that makes a tool feel hostile.
+    `porthole doctor --no-color` and `porthole doctor -d taimen` are what people
+    actually type; requiring a global flag before the verb is a papercut that
+    makes a tool feel hostile. BOTH spellings are added here, because `-d`
+    working before the verb and not after is the same papercut wearing a hat.
+
+    `device_flag=False` is for a verb whose POSITIONAL names the device --
+    `new-device <codename>`, `init <codename>`. There, `--device` is a second
+    way to say the same thing that means the opposite: the selector picks an
+    EXISTING profile, and those two verbs are handed the profile to create or
+    adopt. Injecting it made `new-device --device X` set PORTHOLE_DEVICE to a
+    profile that does not exist yet, so the command died in ProfileNotFound
+    about the very thing it had been asked to create.
 
     SUPPRESS is load-bearing: without it argparse overwrites the global value
     with the subparser's default whenever the flag is absent after the verb, so
     `porthole --no-color doctor` would silently regain colour.
     """
-    parser.add_argument("--device", default=argparse.SUPPRESS, metavar="CODENAME",
-                        help="act on this device profile")
+    if device_flag:
+        parser.add_argument("-d", "--device", default=argparse.SUPPRESS,
+                            metavar="CODENAME",
+                            help="act on this device profile")
     parser.add_argument("--no-color", "--no-colour", dest="no_color",
                         default=argparse.SUPPRESS, action="store_true",
                         help="plain output (also honours NO_COLOR)")
@@ -277,7 +297,8 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
                 description=spec.get("description", spec["help"]),
                 epilog=("examples:\n  " + "\n  ".join(spec["examples"])
                         if spec["examples"] else None),
-                formatter_class=argparse.RawDescriptionHelpFormatter))
+                formatter_class=argparse.RawDescriptionHelpFormatter),
+                device_flag=spec.get("device_flag", True))
             for flags, kwargs in spec["args"]:
                 child.add_argument(*flags, **kwargs)
         except (argparse.ArgumentError, TypeError, ValueError) as exc:

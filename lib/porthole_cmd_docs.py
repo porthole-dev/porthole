@@ -457,7 +457,212 @@ def cmd_serve(args, ctx) -> int:
     return subprocess.run(["mkdocs", "serve"], cwd=ctx.root).returncode
 
 
-ACTIONS = {"build": cmd_build, "serve": cmd_serve}
+# --------------------------------------------------------- device documents --
+#
+# Three surfaces, three jobs, and one question that routes any document:
+#
+#   Does it generalise past this device?  -> brain/            (scope:, evidence:)
+#   Is it derivable from code?            -> generated docs/   (never hand-written)
+#   Is it this device, this week?         -> $PORTHOLE_WORKDIR/docs/
+#
+# The third is where a port sprawls. taimen/docs/ reached 65 flat entries --
+# HANDOFF-* x19, FINDING-*, MORNING-REPORT-*, NIGHT-SESSION-*, plus status/,
+# campaign/ and BLUEPRINT/ -- while brain/devices/google-taimen/ held one file.
+# The knowledge went where it was easiest to drop, not where it belonged.
+#
+# So device documents get a shape, derived from what those 65 files ACTUALLY
+# are rather than from categories invented for the occasion:
+#
+#   docs/status.md              ONE living document. Overwritten, never appended.
+#   docs/log/YYYY-MM-DD-topic.md  everything dated.
+#
+# Two buckets, not four. Handoff, finding, session and report are all "what
+# happened on date X"; that distinction was never load-bearing, and splitting on
+# it is how you get four directories holding the same kind of file. `kind:` in
+# the frontmatter carries it instead, where it costs nothing.
+
+KINDS = ("handoff", "finding", "session", "status")
+
+LOG_TEMPLATE = """\
+---
+date: {date}
+kind: {kind}
+subsystem: {subsystem}
+status: open
+---
+
+# {title}
+
+## What happened
+
+## Evidence
+
+<!-- Commands run and their output. A claim with no evidence is folklore, and
+     folklore is what brain/ exists to replace. -->
+
+## What is still open
+
+<!-- If something here turns out to generalise past this device, promote it:
+     `porthole brain new <id> --section traps`. That is the ONLY route from a
+     dated note into the second brain, and it forces scope: and evidence:. -->
+"""
+
+STATUS_TEMPLATE = """\
+---
+device: {device}
+updated: {date}
+---
+
+# {device} — status
+
+The one living document. Overwrite it; do not append. Anything with a date
+belongs in `log/` instead.
+
+## Works
+
+## Does not work
+
+## Unknown
+
+<!-- An empty reading means unknown, never "changed". Say which you mean. -->
+
+## Next
+"""
+
+
+def _docs_root(ctx):
+    """$PORTHOLE_WORKDIR/docs -- the device repo, never porthole's own tree.
+
+    Device documents must not land in porthole: it is a shareable toolkit, and
+    someone cloning it should not receive nineteen handoff notes about a phone
+    they do not own.
+    """
+    workdir = ctx.cfg.get("PORTHOLE_WORKDIR", "")
+    if not workdir:
+        raise Bail("PORTHOLE_WORKDIR is not set", EX_FAIL,
+                   "porthole use <codename> --workdir <path>")
+    root = pathlib.Path(workdir).expanduser()
+    if not root.is_dir():
+        raise Bail(f"{root} does not exist", EX_FAIL,
+                   "porthole use <codename> --workdir <path>   to correct it")
+    return root / "docs"
+
+
+def _today(ctx) -> str:
+    import datetime
+    return datetime.date.today().isoformat()
+
+
+def cmd_new(args, ctx) -> int:
+    """Scaffold a device document in the right place, with the right header."""
+    kind = args.name or "handoff"
+    if kind not in KINDS:
+        raise Bail(f"unknown kind {kind!r}", EX_USAGE,
+                   f"kinds: {', '.join(KINDS)}")
+    docs = _docs_root(ctx)
+    device = ctx.cfg.get("PORTHOLE_DEVICE", "device")
+    date = _today(ctx)
+
+    if kind == "status":
+        path = docs / "status.md"
+        body = STATUS_TEMPLATE.format(device=device, date=date)
+    else:
+        topic = args.topic or ""
+        if not topic:
+            raise Bail(f"name the topic", EX_USAGE,
+                       f"porthole docs new {kind} display-first-light")
+        slug = re.sub(r"[^a-z0-9-]+", "-", topic.lower()).strip("-")
+        path = docs / "log" / f"{date}-{slug}.md"
+        body = LOG_TEMPLATE.format(
+            date=date, kind=kind, subsystem=args.subsystem or "",
+            title=topic)
+
+    if path.exists() and not args.force:
+        raise Bail(f"{path} already exists", EX_FAIL,
+                   "pass --force to overwrite, or pick another topic")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+
+    def render():
+        ctx.out(f"{ctx.out.paint(ctx.out.sym('✓', 'ok'), 'green')} {path}")
+        if kind != "status":
+            ctx.out.hint("if it generalises, promote it: porthole brain new <id>")
+
+    return ctx.emit({"path": str(path), "kind": kind}, render)
+
+
+FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+LOG_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9-]+\.md$")
+
+
+def cmd_lint(args, ctx) -> int:
+    """Enforce the taxonomy. Nothing here is a style opinion.
+
+    Each rule exists because breaking it produced a real failure: a document
+    nobody could find, a generated page hand-edited and then regenerated over,
+    or a device note that should have been a brain trap and was lost instead.
+    """
+    findings = []
+    try:
+        docs = _docs_root(ctx)
+    except Bail:
+        docs = None
+
+    if docs and docs.is_dir():
+        for path in sorted(docs.rglob("*.md")):
+            rel = path.relative_to(docs)
+            parts = rel.parts
+            if parts == ("status.md",):
+                continue
+            if parts[0] != "log":
+                findings.append(("layout", str(rel),
+                                 "device documents live in status.md or log/"))
+                continue
+            if len(parts) != 2 or not LOG_NAME.match(parts[-1]):
+                findings.append(("name", str(rel),
+                                 "log entries are log/YYYY-MM-DD-topic.md"))
+                continue
+            m = FRONTMATTER.match(path.read_text(errors="replace"))
+            if not m:
+                findings.append(("frontmatter", str(rel),
+                                 "no frontmatter — date/kind/subsystem/status"))
+                continue
+            keys = {l.split(":", 1)[0].strip()
+                    for l in m.group(1).splitlines() if ":" in l}
+            missing = {"date", "kind", "status"} - keys
+            if missing:
+                findings.append(("frontmatter", str(rel),
+                                 f"missing {', '.join(sorted(missing))}"))
+
+    # A generated page that someone hand-edited is a page that will be silently
+    # reverted by the next `porthole docs build`, taking the edit with it.
+    site = pathlib.Path(ctx.root) / "docs" / "site"
+    if site.is_dir():
+        for path in sorted(site.rglob("*.md")):
+            findings.append(("generated", str(path.relative_to(ctx.root)),
+                             "hand-written file in a generated directory"))
+
+    def render():
+        o = ctx.out
+        if not findings:
+            o(o.paint(f"  {o.sym('✓', 'ok')} document layout clean", "green"))
+            return
+        o.heading(f"{len(findings)} finding(s)")
+        for kind, where, detail in findings:
+            o(f"  {o.paint(kind, 'yellow'):<24s} {where}")
+            o(f"      {detail}")
+        o.blank()
+        o.hint("porthole docs new handoff <topic>   scaffolds it correctly")
+
+    ctx.emit({"findings": [{"kind": k, "path": p, "detail": d}
+                           for k, p, d in findings],
+              "clean": not findings}, render)
+    return EX_OK if not findings else EX_FAIL
+
+
+ACTIONS = {"build": cmd_build, "serve": cmd_serve, "new": cmd_new,
+           "lint": cmd_lint}
+
 
 
 def dispatch(args, ctx) -> int:
@@ -481,11 +686,22 @@ SPEC = {
         "code is impossible rather than merely unlikely."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION", "choices": list(ACTIONS),
-                      "help": "build | serve"}),
+                      "help": "build | serve | new | lint"}),
+        (["name"], {"nargs": "?", "metavar": "KIND",
+                    "help": "new: handoff | finding | session | status"}),
+        (["topic"], {"nargs": "?", "help": "new: what the document is about"}),
+        (["--subsystem"], {"help": "new: display, suspend, ..."}),
+        (["--force"], {"action": "store_true", "help": "new: overwrite"}),
         (["--org"], {"help": "GitHub org/user for links (default Pixel-pmOS)"}),
         (["--repo"], {"help": "repository name (default porthole)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": dispatch,
-    "examples": ["porthole docs build", "porthole docs serve"],
+    "examples": [
+        "porthole docs build",
+        "porthole docs serve",
+        "porthole docs new handoff display-first-light --subsystem display",
+        "porthole docs new status",
+        "porthole docs lint",
+    ],
 }

@@ -84,7 +84,7 @@ def cmd_init(args, ctx) -> int:
         ctx.out(f"  profiles available: {', '.join(devices) or '(none yet)'}")
         ctx.out.blank()
 
-    device = getattr(args, "device", None) or args.device_pos
+    device = args.codename
     if not device:
         device = ask("device codename", devices[0] if devices else "")
     if device and device not in devices:
@@ -119,20 +119,27 @@ def cmd_init(args, ctx) -> int:
     target.write_text(TEMPLATE.format(device=device, user=user, host=host,
                                       port=port, agent=agent, extra=extra))
 
-    ctx.out.blank()
-    ctx.out(f"{ctx.out.paint(ctx.out.sym('✓', 'ok'), 'green')} wrote {target}")
-    if extra:
+    payload = {
+        "config": str(target), "device": device, "user": user,
+        "host": host, "port": port, "agent": agent,
+        "autodetected": dict(
+            line.split("=", 1) for line in extra.strip().splitlines() if line),
+    }
+
+    def render():
+        ctx.out.blank()
+        ctx.out(f"{ctx.out.paint(ctx.out.sym('✓', 'ok'), 'green')} wrote {target}")
         for line in extra.strip().splitlines():
             ctx.out(ctx.out.paint(f"    autodetected {line}", "grey"))
+        emit_sudo_snippet(ctx, user)
+        ctx.out.blank()
+        ctx.out.heading("Then")
+        ctx.out.hint("porthole doctor                       check host and device")
+        ctx.out.hint("porthole tools                        what can I run?")
+        ctx.out.hint("porthole brain search --severity law  what to know first")
+        ctx.out.hint("porthole use <codename>               switch device later")
 
-    emit_sudo_snippet(ctx, user)
-
-    ctx.out.blank()
-    ctx.out.heading("Then")
-    ctx.out.hint("porthole doctor                 check host and device")
-    ctx.out.hint("porthole tools                  what can I run?")
-    ctx.out.hint("porthole brain --severity law   what should I know first?")
-    return EX_OK
+    return ctx.emit(payload, render)
 
 
 SPEC = {
@@ -144,9 +151,12 @@ SPEC = {
         "address, your tool paths. Never committed.\n\n"
         "Interactive at a terminal, flag-driven otherwise, so an agent can\n"
         "bootstrap headless."),
+    # The positional IS the device. `device_pos` used to exist only because the
+    # injected --device selector collided with it; both go away together.
+    "device_flag": False,
     "args": [
-        (["device_pos"], {"nargs": "?", "metavar": "CODENAME",
-                          "help": "device profile to use"}),
+        (["codename"], {"nargs": "?", "metavar": "CODENAME",
+                        "help": "device profile to use"}),
         (["--user"], {"help": "ssh username on the device"}),
         (["--host"], {"help": "device IP"}),
         (["--port"], {"help": "ssh port (default 22)"}),
@@ -156,11 +166,12 @@ SPEC = {
         (["--force"], {"action": "store_true", "help": "overwrite an existing config"}),
         (["--non-interactive"], {"action": "store_true",
                                  "help": "never prompt, even at a terminal"}),
+        (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_init,
     "examples": [
         "porthole init",
         "porthole init google-taimen --user user --host 172.16.42.1",
-        "porthole init --device google-taimen --non-interactive",
+        "porthole init google-taimen --non-interactive",
     ],
 }

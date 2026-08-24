@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pathlib
 
-from porthole_cli import Bail, EX_FAIL, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 import porthole_pmaports as pmap
 
 # deviceinfo keys worth copying from a sibling, and why. A wrong value in any
@@ -71,10 +71,7 @@ def _my_soc(ctx, devices) -> str:
 def cmd_soc(args, ctx) -> int:
     pmaports, devices = _load(ctx)
 
-    if args.list:
-        return _list_families(args, ctx, devices)
-
-    soc = args.soc or _my_soc(ctx, devices)
+    soc = args.name or _my_soc(ctx, devices)
     if not soc:
         raise Bail("could not determine a SoC", EX_FAIL,
                    "name one (`porthole soc qcom-msm8998`), set PORTHOLE_SOC "
@@ -256,12 +253,22 @@ def cmd_diff(args, ctx, devices, reference: str) -> int:
     return ctx.emit(payload, render)
 
 
+ACTIONS = ("show", "list", "inherit", "diff")
+
+
 def dispatch(args, ctx) -> int:
-    if args.inherit or args.diff:
+    action = args.action or "show"
+    if action in ("inherit", "diff"):
+        if not args.name:
+            raise Bail(f"{action} needs a codename", EX_USAGE,
+                       f"porthole soc {action} <codename>   "
+                       f"(`porthole soc list` to find one)")
         _, devices = _load(ctx)
-        if args.inherit:
-            return cmd_inherit(args, ctx, devices, args.inherit)
-        return cmd_diff(args, ctx, devices, args.diff)
+        fn = cmd_inherit if action == "inherit" else cmd_diff
+        return fn(args, ctx, devices, args.name)
+    if action == "list":
+        _, devices = _load(ctx)
+        return _list_families(args, ctx, devices)
     return cmd_soc(args, ctx)
 
 
@@ -275,21 +282,19 @@ SPEC = {
         "offsets that are known to boot, and their kernel tree holds a device\n"
         "tree you can read. Guessing those costs days; this costs 55ms."),
     "args": [
-        (["soc"], {"nargs": "?", "metavar": "SOC",
-                   "help": "e.g. qcom-msm8998 (default: your device's)"}),
-        (["--list"], {"action": "store_true", "help": "every SoC family"}),
-        (["--inherit"], {"metavar": "CODENAME",
-                         "help": "print the values worth copying from a sibling"}),
-        (["--diff"], {"metavar": "CODENAME",
-                      "help": "diff your deviceinfo against a sibling's"}),
+        (["action"], {"nargs": "?", "metavar": "ACTION", "choices": list(ACTIONS),
+                      "help": "show | list | inherit | diff  (default show)"}),
+        (["name"], {"nargs": "?", "metavar": "SOC|CODENAME",
+                    "help": "show: a SoC (default yours). "
+                            "inherit/diff: a sibling codename"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": dispatch,
     "examples": [
         "porthole soc",
-        "porthole soc qcom-sdm845",
-        "porthole soc --list",
-        "porthole soc --inherit oneplus-cheeseburger",
-        "porthole soc --diff xiaomi-sagit",
+        "porthole soc show qcom-sdm845",
+        "porthole soc list",
+        "porthole soc inherit oneplus-cheeseburger",
+        "porthole soc diff xiaomi-sagit",
     ],
 }
