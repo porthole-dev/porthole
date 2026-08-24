@@ -32,19 +32,33 @@ PATH_DESTS = ("path", "out", "dir", "log", "dir_of", "port", "file",
 PATH_METAVARS = ("PATH", "FILE", "DIR", "FILENAME", "DIRECTORY")
 PATH_HELP = re.compile(r"\b(path|file|director|image|archive)", re.I)
 
+# porthole_cli.with_device() injects these into EVERY verb's parser, so they
+# appear in no verb's own `args` -- but they do appear in documented examples.
+# A form must not offer them (the console already knows the device), and an
+# example that uses one must still decompose.
+GLOBAL_FLAGS = ("-d", "--device", "--no-color", "--no-colour")
+_GLOBAL_TAKES_VALUE = ("-d", "--device")
+
+# A bare shell operator means the example documents shell usage, not a verb
+# invocation: `cd "$(porthole cd)"`, `porthole completion bash > ~/...`. Those
+# cannot become form fields and must not be offered as clickable "try:" rows.
+SHELL_OPERATORS = frozenset((">", ">>", "<", "|", "||", "&&", ";", "&"))
+
 
 class Field:
     """One row of a generated form."""
 
     __slots__ = ("dest", "label", "kind", "flag", "choices", "help",
-                 "required", "browse", "dangerous", "default")
+                 "required", "browse", "dangerous", "default", "variadic")
 
     def __init__(self, dest, label, kind, flag="", choices=None, help="",
-                 required=False, browse=False, dangerous=False, default=None):
+                 required=False, browse=False, dangerous=False, default=None,
+                 variadic=False):
         self.dest, self.label, self.kind = dest, label, kind
         self.flag, self.choices, self.help = flag, list(choices or []), help
         self.required, self.browse = required, browse
         self.dangerous, self.default = dangerous, default
+        self.variadic = variadic
 
     def __repr__(self):
         return "Field({!r}, {!r})".format(self.dest, self.kind)
@@ -105,6 +119,7 @@ def fields(spec):
             browse=(kind == "path"),
             dangerous=any(w in dest for w in DANGEROUS_FIELDS),
             default=kw.get("default"),
+            variadic=kw.get("nargs") in ("*", "+"),
         ))
     return out
 
@@ -125,6 +140,16 @@ def _render(value):
     return text if _SAFE.match(text) else shlex.quote(text)
 
 
+def _render_value(field, value):
+    # A variadic value holds several arguments as one whitespace-separated
+    # string, so quoting it as ONE token would send `brain 'new my-note-id'`
+    # -- a single argv element the verb cannot parse. Render each token
+    # separately so build() emits them as separate argv elements.
+    if getattr(field, "variadic", False):
+        return " ".join(_render(tok) for tok in str(value).split())
+    return _render(value)
+
+
 def build(verb, fields_, values):
     """Assemble the command. Positionals in declared order, then flags.
 
@@ -139,7 +164,7 @@ def build(verb, fields_, values):
         value = values.get(f.dest)
         if value in (None, "", False):
             continue
-        parts.append(_render(value))
+        parts.append(_render_value(f, value))
     for f in fields_:
         if not f.flag:
             continue
@@ -153,18 +178,35 @@ def build(verb, fields_, values):
     return " ".join(parts)
 
 
+def tokenise(example):
+    """Shell-split an example, stripping any trailing `# comment`."""
+    try:
+        return shlex.split(example, comments=True)
+    except ValueError:
+        return None
+
+
+def is_direct(example, verb):
+    """Is this a plain `porthole <verb> ...` invocation the form can fill from?
+
+    False for the examples that document shell usage rather than a verb call.
+    The form must not offer those as "try:" rows -- pressing one would
+    silently do nothing.
+    """
+    tokens = tokenise(example)
+    return bool(tokens) and tokens[:2] == ["porthole", verb] \
+        and not (SHELL_OPERATORS & set(tokens))
+
+
 def parse_example(example, verb, fields_):
     """Decompose a SPEC example back into field values, or None.
 
     The form's "try:" rows use this: pressing one back-fills every field, which
     is only honest if the example actually maps onto the fields. The test
-    asserts it for every documented example in the repository.
+    asserts it for every direct-invocation example in the repository.
     """
-    try:
-        tokens = shlex.split(example)
-    except ValueError:
-        return None
-    if len(tokens) < 2 or tokens[0] != "porthole" or tokens[1] != verb:
+    tokens = tokenise(example)
+    if not tokens or tokens[:2] != ["porthole", verb]:
         return None
     rest = tokens[2:]
     by_flag = {}
@@ -180,6 +222,14 @@ def parse_example(example, verb, fields_):
             flag, _, inline = token.partition("=")
             field = by_flag.get(flag)
             if field is None:
+                if flag in GLOBAL_FLAGS:
+                    # Injected into every verb's parser by with_device(), so no
+                    # verb's own fields know it. Skipping the flag without also
+                    # consuming its value would leak the codename in as the
+                    # next positional.
+                    if flag in _GLOBAL_TAKES_VALUE and not inline and rest:
+                        rest.pop(0)
+                    continue
                 if flag.lstrip("-").replace("-", "_") in HIDDEN:
                     continue
                 return None
@@ -190,6 +240,13 @@ def parse_example(example, verb, fields_):
         else:
             if index >= len(positionals):
                 return None
-            values[positionals[index].dest] = token
+            field = positionals[index]
+            if field.variadic:
+                group = [token]
+                while rest and not rest[0].startswith("-"):
+                    group.append(rest.pop(0))
+                values[field.dest] = " ".join(group)
+            else:
+                values[field.dest] = token
             index += 1
     return values

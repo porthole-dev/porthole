@@ -150,17 +150,67 @@ def test_every_discovered_verb_renders_and_builds():
 
 
 def test_every_documented_example_round_trips():
-    """Each SPEC['examples'] entry must parse back into field values.
+    """Each direct `porthole <verb> ...` example must decompose back into field values.
 
-    Examples are the form's "try:" rows: pressing one back-fills every field.
-    If an example cannot be decomposed, that row would silently do nothing.
+    Examples are the form's "try:" rows: pressing one back-fills every field. If
+    an example cannot be decomposed, that row would silently do nothing.
+
+    Examples that document SHELL usage rather than a verb invocation are
+    excluded -- `cd "$(porthole cd)"` and `porthole completion bash > file` are
+    instructions for a shell, and the form must not offer them at all.
     """
+    direct = snippets = 0
     for spec in porthole_cli.discover(ROOT):
         fs = argspec.fields(spec)
         for example in spec.get("examples", []):
+            if not argspec.is_direct(example, spec["verb"]):
+                snippets += 1
+                continue
+            direct += 1
             values = argspec.parse_example(example, spec["verb"], fs)
             assert values is not None, "{}: cannot decompose {!r}".format(
                 spec["verb"], example)
+    assert direct > 90, "expected ~102 direct invocations, got {}".format(direct)
+    assert snippets < 15, "too many examples excluded as shell snippets: {}".format(snippets)
+
+
+def test_a_globally_injected_flag_does_not_leak_its_value():
+    # -d/--device is injected by porthole_cli.with_device() into every verb, so it
+    # is in no verb's args. Skipping the flag without consuming its value would
+    # land the codename in the first positional.
+    spec = {"verb": "tui", "args": []}
+    assert argspec.parse_example("porthole tui -d google-cheetah", "tui",
+                                 argspec.fields(spec)) == {}
+
+
+def test_a_trailing_comment_is_not_an_argument():
+    spec = {"verb": "brief", "args": [
+        (["--no-device"], {"action": "store_true", "help": "skip the probe"})]}
+    fs = argspec.fields(spec)
+    assert argspec.parse_example("porthole brief --no-device    # offline", "brief", fs) \
+        == {"no_device": True}
+
+
+def test_a_variadic_positional_absorbs_its_tokens_and_rebuilds():
+    spec = {"verb": "brain", "args": [
+        (["query"], {"nargs": "*", "metavar": "ACTION|WORD"}),
+        (["--section"], {}),
+    ]}
+    fs = argspec.fields(spec)
+    values = argspec.parse_example(
+        "porthole brain new my-note-id --section traps", "brain", fs)
+    assert values == {"query": "new my-note-id", "section": "traps"}, values
+    # and it must rebuild as SEPARATE argv tokens, not one quoted blob
+    assert argspec.build("brain", fs, values) \
+        == "porthole brain new my-note-id --section traps"
+
+
+def test_shell_snippets_are_recognised_and_excluded():
+    assert not argspec.is_direct('cd "$(porthole cd)"', "cd")
+    assert not argspec.is_direct("porthole completion bash > ~/x", "completion")
+    assert argspec.is_direct("porthole blobs ls vendor.img", "blobs")
+    # a pipe INSIDE a quoted argument is not a shell operator
+    assert argspec.is_direct("porthole blobs extract v.img --match 'wlan|bdwlan'", "blobs")
 
 
 def main():
