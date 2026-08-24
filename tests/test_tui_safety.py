@@ -108,6 +108,21 @@ def test_dangerous_fields_exist():
         "DANGEROUS_FIELDS changed unexpectedly")
 
 
+def test_the_trailing_space_boundary_is_load_bearing():
+    # "dd " and "rm " carry a deliberate trailing space as a crude word boundary.
+    # Removing it widens the match: "/firmware" contains "rm", so a read-only
+    # listing would start demanding a flash confirmation. A boundary people
+    # click through is worse than no boundary.
+    for harmless in ("porthole blobs ls vendor.raw.img --dir /firmware",
+                     "porthole run tk-addfoo.sh",
+                     "porthole brain search firmware"):
+        assert not safety.needs_confirmation(harmless, True), harmless
+    # and the real thing still trips
+    for real in ("porthole run tk-x.sh dd if=/dev/zero of=/dev/block/sda",
+                 "porthole run tk-x.sh rm -rf /data"):
+        assert safety.needs_confirmation(real, True), real
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
