@@ -1140,10 +1140,13 @@ def test_a_verb_that_takes_arguments_is_marked_as_such():
 
 
 def test_a_verb_with_no_arguments_is_not():
+    # `version` declares only --json, which argspec.HIDDEN drops, so it has no form
+    # fields at all. `in (True, False)` was true for any boolean and could not fail
+    # (ruling R7, missed for 16 tasks; ruling R28 item 1).
     items = pal.collect(ROOT, None)
     version = next(i for i in items
                   if i["kind"] == "verb" and i["label"] == "version")
-    assert version["needs_args"] in (True, False)
+    assert version["needs_args"] is False
 
 
 def test_every_namespace_gets_a_badge():
@@ -1172,6 +1175,91 @@ def test_choosing_a_verb_with_arguments_opens_its_form():
         await pilot.pause()
         assert isinstance(app.screen, ArgForm), type(app.screen).__name__
         assert app.jobs.jobs == [], "a bare `porthole blobs` must never spawn"
+    tui_harness.pilot(make, body)
+
+
+# -- Ruling R28 item 2: the palette's other three dispatch branches -------
+#
+# chosen()'s note/tool/milestone branches each open a Reader with different
+# callback wiring. The milestone branch passes safe=doc.safe where the
+# others pass safe=False -- a swapped flag there would let a milestone's
+# command run without the confirm it should have had.
+
+def test_the_palette_opens_a_reader_for_a_note():
+    async def body(app, pilot):
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        item = next(i for i in app.screen.items if i["kind"] == "note")
+        app.screen.dismiss(item)
+        await pilot.pause()
+        assert isinstance(app.screen, Reader), type(app.screen).__name__
+        assert app.jobs.jobs == []
+    tui_harness.pilot(make, body)
+
+
+def test_the_palette_opens_a_reader_for_a_tool():
+    async def body(app, pilot):
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        item = next(i for i in app.screen.items if i["kind"] == "tool")
+        app.screen.dismiss(item)
+        await pilot.pause()
+        assert isinstance(app.screen, Reader)
+        assert app.jobs.jobs == []
+    tui_harness.pilot(make, body)
+
+
+def test_a_palette_milestone_carries_its_own_safe_flag_not_a_hardcoded_one():
+    """The milestone branch passes safe=doc.safe where the others pass safe=False.
+    A swapped flag here would let a milestone's command run without the confirm it
+    should have had -- the one untested branch that touches the safety boundary.
+
+    Checking doc.safe alone does not pin this: doc.safe comes from for_milestone(),
+    set before chosen()'s closure ever runs, so it cannot see a swap of the
+    safe=doc.safe argument passed to launch() inside the closure. To pin that, this
+    drives the closure itself: dismiss the Reader with its command (as `x` does) and
+    watch whether an UNSAFE command is confirmed.
+
+    The row's command must not itself be risky-looking (no DANGEROUS word):
+    needs_confirmation() is `(not safe) or is_risky(command)`, so a risky command
+    stays confirmed regardless of `safe`, and the swap this test exists to catch
+    would hide behind that second clause. Verified by mutating safe=doc.safe to
+    safe=True in main.py's chosen() and watching this test fail, not assumed."""
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        item = next((i for i in app.screen.items if i["kind"] == "milestone"), None)
+        if item is None:
+            return                      # no device configured; nothing to assert
+        row = dict(item["row"])
+        # Force a row that is unsafe, with a command containing no DANGEROUS
+        # word, regardless of what this checkout's real milestones happen to
+        # say -- otherwise is_risky() alone would explain the confirm.
+        row["how"], row["safe"] = "porthole doctor", False
+        item = dict(item, row=row)
+        app.screen.dismiss(item)
+        await pilot.pause()
+        assert isinstance(app.screen, Reader), type(app.screen).__name__
+        assert app.screen.doc.safe is False, "doc.safe must come from the row"
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmRun), (
+            "an unsafe milestone command must be confirmed before it runs "
+            "-- got {}".format(type(app.screen).__name__))
+    tui_harness.pilot(make, body)
+
+
+def test_a_verb_without_arguments_runs_instead_of_opening_an_empty_form():
+    async def body(app, pilot):
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        item = next(i for i in app.screen.items
+                    if i["kind"] == "verb" and not i["needs_args"])
+        app.screen.dismiss(item)
+        await pilot.pause()
+        assert not isinstance(app.screen, ArgForm), \
+            "a verb with no arguments must not open an empty form"
     tui_harness.pilot(make, body)
 
 
