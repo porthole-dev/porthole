@@ -68,7 +68,20 @@ class App:
         self.message_role = T.DIM
         self.items: list = []
         self.console_lines: list = []
+        self.count = 0
+        self.page = 10
         self.running = True
+
+    def move(self, delta: int) -> None:
+        """Move the selection, clamped to what actually exists.
+
+        text_key used to do a bare `self.sel += 1`, so holding the down arrow
+        in the palette or a filter ran the cursor past the end of the list and
+        off the bottom of the screen. Clamping in ONE place is the fix: the
+        alternative is remembering to bound it at four call sites, and the four
+        did not agree.
+        """
+        self.sel = max(0, min(self.sel + delta, max(0, self.count - 1)))
 
     # --------------------------------------------------------------- run --
 
@@ -137,6 +150,14 @@ class App:
             else:
                 n = mod.render(body, snap, h - 2, w, self.sel)
         self.count = n
+        # A page is the visible list, less its header rows -- so PgDn moves by
+        # what you can actually see rather than a guessed constant.
+        self.page = max(1, h - 7)
+        # A pane can shrink under the cursor (a filter narrows the list, the
+        # terminal is resized). Re-clamp after every render, or the selection
+        # points at a row that is no longer there.
+        if self.sel > max(0, n - 1):
+            self.sel = max(0, n - 1)
         self.footer(stdscr, w, h)
         stdscr.refresh()
 
@@ -195,9 +216,17 @@ class App:
             self.items = palette.collect(self.model.snapshot)
             self.note("refreshing", T.DIM)
         elif ch in (curses.KEY_DOWN, ord("j")):
-            self.sel = min(self.sel + 1, max(0, self.count - 1))
+            self.move(1)
         elif ch in (curses.KEY_UP, ord("k")):
-            self.sel = max(0, self.sel - 1)
+            self.move(-1)
+        elif ch in (curses.KEY_NPAGE, 6):        # PgDn, ctrl-F
+            self.move(self.page)
+        elif ch in (curses.KEY_PPAGE, 2):        # PgUp, ctrl-B
+            self.move(-self.page)
+        elif ch in (curses.KEY_HOME, ord("g")):
+            self.sel = 0
+        elif ch in (curses.KEY_END, ord("G")):
+            self.sel = max(0, self.count - 1)
         elif ch == ord("f") and PANES[self.pane][0] in ("tools", "brain"):
             self.in_filter = True
             self.query = ""
@@ -215,10 +244,14 @@ class App:
         elif ch in (curses.KEY_BACKSPACE, 127, 8):
             self.query = self.query[:-1]
             self.sel = 0
-        elif ch == curses.KEY_DOWN:
-            self.sel += 1
-        elif ch == curses.KEY_UP:
-            self.sel = max(0, self.sel - 1)
+        elif ch in (curses.KEY_DOWN, 14):        # down, ctrl-N
+            self.move(1)
+        elif ch in (curses.KEY_UP, 16):          # up, ctrl-P
+            self.move(-1)
+        elif ch in (curses.KEY_NPAGE, 6):
+            self.move(self.page)
+        elif ch in (curses.KEY_PPAGE, 2):
+            self.move(-self.page)
         elif 32 <= ch < 127:
             self.query += chr(ch)
             self.sel = 0

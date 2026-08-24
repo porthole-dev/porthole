@@ -412,6 +412,79 @@ def test_the_event_loop_does_not_hold_the_gil_while_idling():
         "the loop must wait on getch() with a timeout, not spin")
 
 
+def test_every_pane_opens_without_crashing():
+    """Pane 3 raised TypeError the moment it was opened: it passed the config's
+    PORTHOLE_ROOT straight through as a str, and collect() builds `root /
+    "tools"`. No test opened a pane through the app, so nothing caught it."""
+    from porthole_tui.app import App, PANES
+    app = App(ROOT, "google-taimen")
+    app.model.refresh(block=True)
+    screen = Screen()
+    for i, (name, _) in enumerate(PANES):
+        app.pane, app.sel = i, 0
+        app.draw(screen)                   # must not raise
+
+
+def test_no_pane_draws_past_the_bottom_of_the_screen():
+    """The brain pane drew all 55 notes straight off the screen and let the
+    selection run past the end. Every list pane had its own truncation loop,
+    which is not a viewport."""
+    import curses
+    from porthole_tui.app import App, PANES
+    app = App(ROOT, "google-taimen")
+    app.model.refresh(block=True)
+    screen = Screen(24, 100)
+    for i, (name, _) in enumerate(PANES):
+        app.pane, app.sel = i, 0
+        app.draw(screen)
+        for _ in range(500):               # hammer well past the end
+            app.move(1)
+        app.draw(screen)                   # Screen.addstr raises out of bounds
+        assert app.sel <= max(0, app.count - 1), (
+            f"{name}: selection {app.sel} exceeds {app.count} items")
+
+
+def test_the_palette_selection_is_clamped_too():
+    """text_key did a bare `self.sel += 1`, so holding the arrow key in the
+    palette ran the cursor off the end. Clamping lives in one place now."""
+    from porthole_tui.app import App
+    app = App(ROOT, "google-taimen")
+    app.model.refresh(block=True)
+    app.in_palette = True
+    screen = Screen()
+    app.draw(screen)
+    for _ in range(1000):
+        app.move(1)
+    app.draw(screen)
+    assert app.sel <= max(0, app.count - 1)
+
+
+def test_the_viewport_keeps_the_selection_visible():
+    from porthole_tui.panes import _list
+    items = list(range(55))
+    for sel in (0, 1, 20, 54):
+        visible, offset, clamped = _list.window(items, sel, 17)
+        assert clamped == sel
+        assert offset <= sel < offset + len(visible), (
+            f"selection {sel} is outside the drawn window {offset}.."
+            f"{offset + len(visible)}")
+        assert len(visible) <= 17
+
+
+def test_the_viewport_survives_an_empty_list_and_a_stale_selection():
+    """A filter can empty a list under a cursor that was pointing at row 40."""
+    from porthole_tui.panes import _list
+    assert _list.window([], 40, 10) == ([], 0, 0)
+    visible, offset, sel = _list.window([1, 2], 40, 10)
+    assert sel == 1 and offset == 0 and visible == [1, 2]
+
+
+def test_a_long_list_says_where_you_are():
+    from porthole_tui.panes import _list
+    assert _list.scrollbar(0, 17, 114) == "1-17 of 114"
+    assert _list.scrollbar(0, 10, 10) == "", "no indicator when it all fits"
+
+
 def test_the_session_clock_is_monotonic():
     from porthole_tui.model import Model
     m = Model(ROOT)

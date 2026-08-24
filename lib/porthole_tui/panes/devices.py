@@ -43,7 +43,9 @@ def _peek(snap, device, key):
     """Resolve one key for a device that is not the active one."""
     import porthole
     try:
-        cfg = porthole.load_config(root=snap.cfg.get("PORTHOLE_ROOT", "."),
+        import pathlib
+        cfg = porthole.load_config(
+            root=pathlib.Path(snap.cfg.get("PORTHOLE_ROOT", ".")),
                                    env={"PORTHOLE_DEVICE": device})
         return cfg.get(key, "")
     except Exception:  # noqa: BLE001
