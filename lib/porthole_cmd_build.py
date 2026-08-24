@@ -95,25 +95,40 @@ def cmd_build(args, ctx) -> int:
     func, what = ACTIONS[action]
 
     problems = _preflight(ctx)
-    if problems and action in ("kernel", "fast"):
-        raise Bail("this profile cannot build yet", EX_FAIL,
-                   "; ".join(problems))
 
+    # A preview SHOWS what is wrong; it does not refuse. Refusing to describe
+    # the build because the build could not run is unhelpful precisely when you
+    # most need to know why -- and a profile that cannot build yet is the
+    # normal state of a new port.
     if not args.yes and action in ("kernel", "fast"):
         def render():
             o = ctx.out
             o.heading(f"would {what}")
             o.kv("device", ctx.cfg.get("PORTHOLE_DEVICE", ""), 12)
-            o.kv("tree", ctx.cfg.get("PORTHOLE_WORKDIR", ""), 12)
-            o.kv("package", ctx.cfg.get("PORTHOLE_KERNEL_PKG", ""), 12)
-            o.kv("defconfig", ctx.cfg.get("PORTHOLE_DEFCONFIG", ""), 12)
+            o.kv("tree", ctx.cfg.get("PORTHOLE_WORKDIR", "")
+                 or o.paint("not set", "yellow"), 12)
+            o.kv("package", ctx.cfg.get("PORTHOLE_KERNEL_PKG", "")
+                 or o.paint("not set", "yellow"), 12)
+            o.kv("defconfig", ctx.cfg.get("PORTHOLE_DEFCONFIG", "")
+                 or o.paint("not set", "yellow"), 12)
             o.blank()
-            o("  This compiles a kernel. It takes minutes and it writes into")
-            o("  your pmbootstrap chroot.")
-            o.blank()
-            o.hint(f"porthole build {action} --yes")
+            if problems:
+                o.heading(f"{len(problems)} thing(s) missing first")
+                for problem in problems:
+                    o(f"  {o.paint(o.sym('·', '-'), 'yellow')} {problem}")
+                o.blank()
+            else:
+                o("  This compiles a kernel. It takes minutes and it writes")
+                o("  into your pmbootstrap chroot.")
+                o.blank()
+                o.hint(f"porthole build {action} --yes")
         return ctx.emit({"action": action, "function": func,
-                         "would_run": True}, render)
+                         "would_run": not problems, "problems": problems},
+                        render)
+
+    if problems and action in ("kernel", "fast"):
+        raise Bail("this profile cannot build yet", EX_FAIL,
+                   "; ".join(problems))
 
     rc = _run(ctx, func, args.timeout)
     if rc != 0:

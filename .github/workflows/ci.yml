@@ -61,6 +61,11 @@ jobs:
             lib/porthole.sh $(find tools profiles/*/tools -name '*.sh' -not -type l)
       - name: python syntax
         run: python3 -m compileall -q lib bin tools tests
+      - name: the local CI simulation agrees with CI
+        # tests/ci-local.sh is what a developer runs before pushing. If it can
+        # disagree with this workflow it is worse than useless, so it runs here
+        # too -- on the same bare runner it is meant to imitate.
+        run: bash tests/ci-local.sh
 
   smoke:
     name: fresh-clone smoke test

@@ -283,6 +283,72 @@ def cmd_patch(args, ctx, pmaports) -> int:
     return ctx.emit(payload, render)
 
 
+def _authorship(pmaports, base) -> list:
+    """Per-commit author vs sign-off, and cherry-picks that lost their origin.
+
+    The old check tested whether the WORD "Signed-off-by" appeared anywhere in
+    the range. taimen's own audit found all 41 of its patches attributed to one
+    author -- including Caleb Connolly's and Yassine Oudjana's work -- and this
+    check passed the whole series. A substring test cannot see who wrote what.
+
+    Getting this wrong is not a style problem. Sending someone else's patch
+    under your name is the highest-severity mistake either port made, and it is
+    invisible in a diff.
+    """
+    findings = []
+    sep = "\x1e"
+    fmt = f"%H{sep}%an <%ae>{sep}%s{sep}%b\x1d"
+    _, log, _ = git(pmaports, "log", f"--format={fmt}", f"{base}..HEAD")
+    commits = [c for c in log.split("\x1d") if c.strip()]
+    if not commits:
+        return findings
+
+    unsigned, mismatched, picked = [], [], []
+    for entry in commits:
+        # strip("\n"), not strip(): \x1e is whitespace to Python, so a bare
+        # .strip() ate the final separator whenever the body was empty -- and
+        # an empty body is exactly the unsigned commit this is looking for.
+        parts = entry.strip("\n").split(sep)
+        parts += [""] * (4 - len(parts))
+        sha, author, subject, body = parts[0][:8], parts[1], parts[2], parts[3]
+        if not sha:
+            continue
+        signers = re.findall(r"^\s*Signed-off-by:\s*(.+)$", body, re.M | re.I)
+        if not signers:
+            unsigned.append(f"{sha} {subject[:48]}")
+            continue
+        # The AUTHOR must be among the signers. A committer may add their own
+        # sign-off on top; what must never happen is a series where one person
+        # signed off on work git records as somebody else's, with no trace of
+        # the original author.
+        norm = author.strip().lower()
+        if not any(norm == s.strip().lower() for s in signers):
+            mismatched.append(f"{sha} author {author} signed by "
+                              f"{', '.join(signers)[:60]}")
+        # A cherry-pick that lost `-x` has no record of where it came from.
+        if re.search(r"^\s*\(cherry picked from", body, re.M):
+            continue
+        if re.search(r"\bcherry[- ]pick", subject, re.I):
+            picked.append(f"{sha} {subject[:48]}")
+
+    if unsigned:
+        findings.append(("warn", f"{len(unsigned)} commit(s) with no "
+                                 f"Signed-off-by: {unsigned[0]}"))
+    if mismatched:
+        findings.append(("fail", f"{len(mismatched)} commit(s) whose AUTHOR is "
+                                 f"not among the sign-offs — sending someone "
+                                 f"else's work under your name: "
+                                 f"{mismatched[0]}"))
+    if picked:
+        findings.append(("warn", f"{len(picked)} cherry-pick(s) with no "
+                                 f"'(cherry picked from ...)' line — the origin "
+                                 f"is unrecoverable: {picked[0]}"))
+    if not (unsigned or mismatched or picked):
+        findings.append(("ok", f"{len(commits)} commit(s): every author is "
+                               f"among its own sign-offs"))
+    return findings
+
+
 def _lint(pmaports, base, ctx) -> list[tuple[str, str]]:
     """Cheap checks that catch what pmaports review always catches."""
     out: list[tuple[str, str]] = []
@@ -298,10 +364,7 @@ def _lint(pmaports, base, ctx) -> list[tuple[str, str]]:
         elif len(subject) > 72:
             out.append(("warn", f"subject over 72 chars: {subject[:50]}..."))
 
-    _, bodies, _ = git(pmaports, "log", "--format=%b%n---", f"{base}..HEAD")
-    if "Signed-off-by" not in bodies:
-        out.append(("warn", "no Signed-off-by trailer — pmaports does not "
-                            "require DCO, but your kernel commits do"))
+    out += _authorship(pmaports, base)
 
     _, files, _ = git(pmaports, "diff", "--name-only", f"{base}..HEAD")
     changed = files.splitlines()

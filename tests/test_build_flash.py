@@ -84,6 +84,17 @@ def test_build_does_nothing_without_yes():
     assert "$ source" not in out, "it started a build on a preview"
 
 
+def test_a_preview_names_what_is_missing_instead_of_refusing():
+    """A profile that cannot build yet is the normal state of a new port.
+    Refusing to describe the build because the build cannot run withholds the
+    answer exactly when it is wanted -- and it broke CI, where pmbootstrap is
+    not installed."""
+    rc, out, err = run("-d", "google-cheetah", "build")
+    assert rc == 0, f"a preview must not fail: {err}"
+    assert "would build" in out
+    assert "missing first" in out, out
+
+
 def test_build_reports_every_missing_value_at_once():
     """An envkernel build is minutes long. Finding out about the second
     missing key after fixing the first is how an afternoon goes."""
@@ -124,6 +135,80 @@ def test_the_build_script_is_still_valid_bash():
     rc = subprocess.run(["bash", "-n", str(ROOT / "tools" / "ph-build.sh")],
                         capture_output=True).returncode
     assert rc == 0, "ph-build.sh does not parse"
+
+
+# ------------------------------------------------------------- authorship --
+
+def _repo(tmp):
+    import subprocess as sp
+    repo = pathlib.Path(tmp)
+    sp.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], capture_output=True)
+    sp.run(["git", "-C", str(repo), "config", "user.email", "me@example.com"],
+           capture_output=True)
+    sp.run(["git", "-C", str(repo), "config", "user.name", "Me"], capture_output=True)
+    return repo
+
+
+def _commit(repo, subject, body, author):
+    import subprocess as sp
+    name, email = author.split(" <")[0], author.split("<")[1].rstrip(">")
+    env = {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+           "GIT_COMMITTER_NAME": "Me", "GIT_COMMITTER_EMAIL": "me@example.com"}
+    (repo / "f.txt").write_text(subject)
+    sp.run(["git", "-C", str(repo), "add", "-A"], capture_output=True)
+    sp.run(["git", "-C", str(repo), "commit", "-q", "-m", f"{subject}\n\n{body}"],
+           env=env, capture_output=True)
+
+
+def test_a_patch_authored_by_someone_else_is_caught():
+    """taimen's audit found all 41 of its patches attributed to one author,
+    including Caleb Connolly's and Yassine Oudjana's work -- and the old check
+    passed the series, because it tested whether the WORD "Signed-off-by"
+    appeared anywhere in the range.
+
+    Sending someone else's patch under your name is the highest-severity
+    mistake either port made, and it is invisible in a diff."""
+    import subprocess as sp
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_aports as ap
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _repo(tmp)
+        _commit(repo, "base: start", "", "Me <me@example.com>")
+        sp.run(["git", "-C", str(repo), "tag", "base"], capture_output=True)
+        _commit(repo, "pkg: someone else's work",
+                "Signed-off-by: Me <me@example.com>",
+                "Caleb Connolly <caleb@example.com>")
+        found = ap._authorship(repo, "base")
+    assert any(s == "fail" for s, _ in found), found
+    assert any("AUTHOR is not among the sign-offs" in text for _, text in found)
+
+
+def test_a_correctly_attributed_series_passes():
+    import subprocess as sp
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_aports as ap
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _repo(tmp)
+        _commit(repo, "base: start", "", "Me <me@example.com>")
+        sp.run(["git", "-C", str(repo), "tag", "base"], capture_output=True)
+        _commit(repo, "pkg: my own work", "Signed-off-by: Me <me@example.com>",
+                "Me <me@example.com>")
+        found = ap._authorship(repo, "base")
+    assert not any(s == "fail" for s, _ in found), found
+    assert any(s == "ok" for s, _ in found), found
+
+
+def test_an_unsigned_commit_is_reported():
+    import subprocess as sp
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_aports as ap
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _repo(tmp)
+        _commit(repo, "base: start", "", "Me <me@example.com>")
+        sp.run(["git", "-C", str(repo), "tag", "base"], capture_output=True)
+        _commit(repo, "pkg: unsigned", "", "Me <me@example.com>")
+        found = ap._authorship(repo, "base")
+    assert any("no Signed-off-by" in text for _, text in found), found
 
 
 def main():
