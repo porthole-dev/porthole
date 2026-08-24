@@ -118,3 +118,52 @@ class MainScreen(Screen):
     def action_help(self) -> None:
         from .help import HelpScreen
         self.app.push_screen(HelpScreen())
+
+    def launch(self, command, safe=False) -> None:
+        """Run a porthole command, with the confirmation boundary applied.
+
+        Refuses anything that does not start with `porthole `: a milestone's
+        `how` field is sometimes prose ("read the panel datasheet"), and prose
+        must never reach a shell.
+        """
+        from ..safety import is_risky, needs_confirmation
+        from .confirm import ConfirmRun
+        if not command or not command.startswith("porthole "):
+            self.notify("that step is a description, not a command",
+                        severity="warning")
+            return
+        if not needs_confirmation(command, safe):
+            self._spawn(command)
+            return
+
+        def answered(agreed):
+            if agreed:
+                self._spawn(command)
+
+        self.app.push_screen(ConfirmRun(command, is_risky(command)), answered)
+
+    def _spawn(self, command) -> None:
+        self.app.jobs.spawn(command)
+        self.notify("running: {}".format(command))
+
+    def on_catalogue_chosen(self, event) -> None:
+        from ..content import for_milestone, for_note, for_tool
+        from .reader import Reader
+        payload = event.payload
+        if isinstance(payload, dict) and "phase" in payload:
+            doc = for_milestone(payload)
+        elif hasattr(payload, "body"):
+            doc = for_note(self.app.root, payload.id)
+        elif hasattr(payload, "summary"):
+            doc = for_tool(self.app.root, payload.name)
+        else:
+            self.launch("porthole use {}".format(payload), safe=True)
+            return
+
+        def closed(command):
+            self.reader_open = False
+            if command:
+                self.launch(command, safe=getattr(doc, "safe", False))
+
+        self.reader_open = True
+        self.app.push_screen(Reader(doc), closed)

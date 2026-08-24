@@ -15,9 +15,12 @@ tui_harness.require()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-from textual.widgets import Input, ListView  # noqa: E402
+from textual.widgets import Input, ListView, Static  # noqa: E402
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
+from porthole_tui.screens.confirm import ConfirmRun  # noqa: E402
+from porthole_tui.screens.help import HelpScreen  # noqa: E402
+from porthole_tui.screens.reader import Reader  # noqa: E402
 from porthole_tui.widgets.brain import NoteList  # noqa: E402
 from porthole_tui.widgets.devices import DeviceList  # noqa: E402
 from porthole_tui.widgets.rail import Rail  # noqa: E402
@@ -223,6 +226,169 @@ def test_a_filtered_list_says_how_many_of_how_many():
         assert 0 < shown < total, (shown, total)
         summary = listing.count_label()
         assert str(shown) in summary and str(total) in summary, summary
+    tui_harness.pilot(make, body)
+
+
+def test_a_dangerous_command_cannot_run_without_a_confirm():
+    async def body(app, pilot):
+        app.screen.launch("porthole flash boot --slot b", safe=True)
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmRun), \
+            "a flash marked safe in the table must still confirm"
+        assert app.jobs.jobs == [], "nothing may spawn before the confirm"
+    tui_harness.pilot(make, body)
+
+
+def test_the_confirm_reproduces_the_exact_command():
+    async def body(app, pilot):
+        command = "porthole flash boot --slot b"
+        app.screen.launch(command, safe=True)
+        await pilot.pause()
+        assert app.screen.command == command
+    tui_harness.pilot(make, body)
+
+
+def test_any_key_but_y_cancels():
+    async def body(app, pilot):
+        app.screen.launch("porthole flash boot", safe=True)
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        assert app.jobs.jobs == [], "cancel must not spawn"
+    tui_harness.pilot(make, body)
+
+
+def test_enter_does_not_confirm():
+    # No default button, no enter-to-accept: this is the one dialog where
+    # muscle memory must not be able to answer.
+    async def body(app, pilot):
+        app.screen.launch("porthole flash boot", safe=True)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.jobs.jobs == []
+    tui_harness.pilot(make, body)
+
+
+def test_a_safe_read_only_command_runs_without_asking():
+    async def body(app, pilot):
+        app.screen.launch("porthole brief", safe=True)
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmRun)
+        assert len(app.jobs.jobs) == 1
+        app.jobs.cancel_all()
+    tui_harness.pilot(make, body)
+
+
+def test_a_description_is_refused_as_a_command():
+    async def body(app, pilot):
+        app.screen.launch("read the panel datasheet", safe=True)
+        await pilot.pause()
+        assert app.jobs.jobs == [], "only `porthole ...` may be spawned"
+    tui_harness.pilot(make, body)
+
+
+# -- Binding-resolution proofs -------------------------------------------
+#
+# R20: a Binding whose action is not defined on the Screen it is declared on
+# silently does nothing. Every Binding added in this task resolves against
+# its OWN class (Reader.action_close/action_run, HelpScreen.action_close), so
+# there is no app.-prefix case to prove here -- but "defined on the right
+# class" is exactly the kind of thing that looks right and is dead, so each
+# one is driven with the pilot and its effect is asserted, not assumed.
+
+def test_reader_x_actually_runs_the_bound_command():
+    # Proves Reader's Binding("x", "run", ...) -> action_run really fires.
+    async def body(app, pilot):
+        from porthole_tui.content import Doc
+        doc = Doc("a tool", ["some lines"], command="porthole brief",
+                  safe=True)
+        seen = []
+        app.push_screen(Reader(doc), seen.append)
+        await pilot.pause()
+        assert isinstance(app.screen, Reader)
+        await pilot.press("x")
+        await pilot.pause()
+        assert seen == ["porthole brief"], \
+            "pressing x did not dismiss with the doc's command: {}".format(seen)
+    tui_harness.pilot(make, body)
+
+
+def test_reader_escape_and_q_close_without_running():
+    # Proves Reader's Binding("escape,q", "close", ...) -> action_close.
+    async def body(app, pilot):
+        from porthole_tui.content import Doc
+        for key in ("escape", "q"):
+            doc = Doc("a tool", ["some lines"], command="porthole brief")
+            seen = []
+            app.push_screen(Reader(doc), seen.append)
+            await pilot.pause()
+            await pilot.press(key)
+            await pilot.pause()
+            assert seen == [None], \
+                "{!r} must close the reader without running anything: {}".format(
+                    key, seen)
+    tui_harness.pilot(make, body)
+
+
+def test_question_mark_opens_help_and_escape_closes_it():
+    # Proves MainScreen's existing Binding("question_mark", "help", ...) now
+    # reaches a real HelpScreen (Task 9 shipped only a stub), and that
+    # HelpScreen's own Binding("escape,q,question_mark", "close", ...) ->
+    # action_close fires and returns to MainScreen rather than quitting.
+    async def body(app, pilot):
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+        assert app.is_running
+    tui_harness.pilot(make, body)
+
+
+def test_generated_help_lists_a_real_binding_it_did_not_hardcode():
+    # If this drifted to a hand-written string, this test could not tell --
+    # it asserts against MainScreen's OWN live BINDINGS, the same source the
+    # screen reads, so it only passes if _sources()/_of() actually walked
+    # the real bindings map rather than returning nothing.
+    async def body(app, pilot):
+        main_screen = app.screen
+        expected = [b for _key, b in main_screen._bindings
+                    if b.description]
+        assert expected, "MainScreen has no described bindings to check against"
+        sample = expected[0]
+
+        await pilot.press("question_mark")
+        await pilot.pause()
+        blob = "\n".join(str(widget.render())
+                         for widget in app.screen.query(Static))
+        assert (sample.key_display or sample.key) in blob, blob
+        assert sample.description in blob, blob
+    tui_harness.pilot(make, body)
+
+
+def test_selecting_a_tool_opens_the_reader_then_x_asks_to_confirm():
+    # End-to-end: a real Chosen message drives on_catalogue_chosen, which
+    # pushes a real Reader; x inside it dismisses with the tool's command,
+    # whose safe=False routes it back through launch() into a real confirm.
+    async def body(app, pilot):
+        await pilot.press("3")
+        await pilot.pause()
+        listing = app.screen.query_one(ToolList)
+        if not listing.visible_rows():
+            return                      # no tools in this checkout
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, Reader), type(app.screen)
+        await pilot.press("x")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmRun), \
+            "a tool's run command must still be confirmed"
+        await pilot.press("y")
+        await pilot.pause()
+        assert len(app.jobs.jobs) == 1
+        app.jobs.cancel_all()
     tui_harness.pilot(make, body)
 
 
