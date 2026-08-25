@@ -17,8 +17,8 @@ tui_harness.require()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-from textual.widgets import (Button, Checkbox, Footer, Input, ListView,  # noqa: E402
-                             RichLog, Select, Static)
+from textual.widgets import (Button, Checkbox, Footer, Input, Label,  # noqa: E402
+                             ListView, RichLog, Select, Static)
 from textual.widgets._footer import FooterKey  # noqa: E402
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
@@ -1407,6 +1407,90 @@ def test_the_confirm_stays_bare():
         assert isinstance(app.screen, ConfirmRun)
         assert not app.screen.query(Footer), "ConfirmRun must have no footer"
         assert not app.screen.query(FooterKey)
+    tui_harness.pilot(make, body)
+
+
+# -- Group 4: the three unwired seams -------------------------------------
+
+def _text(widget):
+    # Static.content, not .renderable -- textual 8.2.8 dropped the latter.
+    return str(getattr(widget, "content", ""))
+
+
+def test_the_header_names_the_device_the_soc_and_the_state():
+    # snapshot.soc/.state/.pmaports_branch/.workdir were computed on every
+    # refresh and rendered nowhere. state.py's probe justifies itself by "the
+    # header once read UNPROBED forever" -- and then its result went nowhere.
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        app.screen._poll()
+        await pilot.pause()
+        snap = app.store.snapshot
+        header = _text(app.screen.query_one("#header", Label))
+        assert snap.device and snap.device in header, (snap.device, header)
+        assert snap.state.upper() in header, (snap.state, header)
+        # kernel-timestamp format, so console actions line up against a kmsg
+        # tail -- e.g. "[  12.44]".
+        import re as _re
+        assert _re.search(r"\[\s*\d+\.\d\d\]", header), header
+    tui_harness.pilot(make, body)
+
+
+def test_a_broken_snapshot_says_what_broke_instead_of_going_blank():
+    from porthole_tui import state as _state
+
+    async def body(app, pilot):
+        broken = _state.Snapshot(device="", devices=[], cfg={}, rows=[],
+                                 summary={}, tools=[], notes=[],
+                                 device_paths={}, soc="", state="unknown",
+                                 error="ProfileNotFound: no profile for x",
+                                 stamp=99.0)
+        app.store._snapshot = broken
+        app.screen._poll()
+        await pilot.pause()
+        line = app.screen.query_one("#snapshot-error", Label)
+        assert line.display, "a failed _build must not degrade to a blank pane"
+        assert "ProfileNotFound" in _text(line), _text(line)
+    tui_harness.pilot(make, body)
+
+
+def test_a_clean_snapshot_shows_no_error_line():
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        app.screen._poll()
+        await pilot.pause()
+        assert not app.screen.query_one("#snapshot-error", Label).display
+    tui_harness.pilot(make, body)
+
+
+def test_a_finished_streaming_job_refreshes_the_model():
+    # `porthole use` chosen in the devices pane succeeded while the rail, the
+    # port pane and the `*` marker kept showing the old device: the streaming
+    # path passed no on_exit, and _poll only republishes when the stamp moves.
+    async def body(app, pilot):
+        calls = []
+        app.store.refresh = lambda *a, **kw: calls.append(1)
+        app.screen._spawn("porthole version")
+        await pilot.pause()
+        await app.jobs.jobs[-1].wait()
+        await pilot.pause()
+        assert calls, "a job that finished must refresh the model"
+    tui_harness.pilot(make, body)
+
+
+def test_the_confirm_names_the_device_it_is_aimed_at():
+    # `porthole flash boot --slot b` reproduces exactly and is still the same
+    # string for every phone you own.
+    async def body(app, pilot):
+        app.store.refresh(block=True)
+        app.screen.launch("porthole flash boot --slot b", safe=True)
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmRun)
+        device = app.store.snapshot.device
+        assert device, "this repo must have an active device for the check"
+        assert app.screen.device == device
+        body_text = " ".join(_text(w) for w in app.screen.query(Label))
+        assert device in body_text, body_text
     tui_harness.pilot(make, body)
 
 

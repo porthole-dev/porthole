@@ -79,6 +79,12 @@ class MainScreen(Screen):
                                 show=False)
 
     def compose(self) -> ComposeResult:
+        yield Label("", id="header")
+        # snapshot.error was caught into the model so a broken profile
+        # "degrades the display, never takes the session down" -- and then
+        # degraded to blank panes with no explanation. This is where it says
+        # so. Hidden entirely while there is nothing to report.
+        yield Label("", id="snapshot-error", classes="error")
         with Horizontal(id="body"):
             yield Rail(self.sections, id="rail")
             yield Vertical(id="content")
@@ -87,6 +93,7 @@ class MainScreen(Screen):
 
     def on_mount(self) -> None:
         self._show(self.section)
+        self._paint_header(self.app.store.snapshot)
         self.app.store.refresh()
         self.set_interval(0.4, self._poll)
 
@@ -123,12 +130,35 @@ class MainScreen(Screen):
         bug the old model's comments warn about.
         """
         snap = self.app.store.snapshot
+        self._paint_header(snap)
         rail = self.query_one(Rail)
         if rail.snapshot is None or rail.snapshot.stamp != snap.stamp:
             rail.snapshot = snap
             for widget in self.query("#content > *"):
                 if hasattr(widget, "snapshot"):
                     widget.snapshot = snap
+
+    def _paint_header(self, snap) -> None:
+        """device · soc · state, and the session clock.
+
+        The curses console showed `google-cheetah · gs201 · BOOTED`; the
+        Textual one computed all three every refresh and rendered them
+        nowhere, which is the orphaned-pane pattern this branch deleted,
+        reproduced inside the branch that deleted it. It also has a safety
+        edge: `porthole flash boot --slot b` does not name the phone it is
+        aimed at, and until this line nothing else on screen did either.
+
+        The clock is in kernel-timestamp format on purpose -- it lets you
+        line up what you did in here against a kmsg you are tailing, which
+        is the single most common correlation a porter makes.
+        """
+        parts = [snap.device or "no device", snap.soc or "?",
+                 (snap.state or "unknown").upper()]
+        self.query_one("#header", Label).update("{}   [{:>7.2f}]".format(
+            "  \u00b7  ".join(parts), self.app.store.uptime()))
+        error = self.query_one("#snapshot-error", Label)
+        error.update(snap.error or "")
+        error.display = bool(snap.error)
 
     def action_section(self, key: str) -> None:
         self.section = key
@@ -263,14 +293,26 @@ class MainScreen(Screen):
             if agreed:
                 self._spawn(command)
 
-        self.app.push_screen(ConfirmRun(command, is_risky(command)), answered)
+        # The device goes in the dialog: `porthole flash boot --slot b`
+        # reproduces exactly and still does not name the phone it is aimed
+        # at, and that is the one dialog where that has to be on screen.
+        self.app.push_screen(
+            ConfirmRun(command, is_risky(command),
+                       self.app.store.snapshot.device), answered)
 
     def _spawn(self, command) -> None:
         from ..jobs import is_interactive
         if is_interactive(self.app.root, command):
             self._suspend_and_run(command)
             return
-        job = self.app.jobs.spawn(command)
+        # on_exit, or the model goes stale behind a job that changed it:
+        # _suspend_and_run refreshes when it comes back, this path did not,
+        # and _poll only republishes when the stamp moves. Choosing a device
+        # in the devices pane ran `porthole use` successfully while the rail,
+        # the port pane and the `*` marker kept showing the old device until
+        # the user pressed r.
+        job = self.app.jobs.spawn(
+            command, on_exit=lambda _job: self.app.store.refresh())
         self.query_one(JobDrawer).attach(job)
         self.notify("running: {}".format(command))
 

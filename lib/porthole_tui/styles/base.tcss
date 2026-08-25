@@ -5,6 +5,9 @@
  * in both light and dark terminals from the first commit.
  */
 
+#header { height: 1; padding: 0 2; text-style: bold; color: $accent; }
+#snapshot-error { height: auto; padding: 0 2; }
+
 #body { height: 1fr; }
 
 Rail {

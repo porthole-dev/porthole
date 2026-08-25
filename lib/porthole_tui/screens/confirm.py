@@ -17,9 +17,10 @@ from textual.widgets import Label, Static
 
 
 class ConfirmRun(ModalScreen):
-    def __init__(self, command, risky, **kw):
+    def __init__(self, command, risky, device="", **kw):
         super().__init__(**kw)
         self.command, self.risky = command, risky
+        self.device = device
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm"):
@@ -27,6 +28,12 @@ class ConfirmRun(ModalScreen):
                         else "Run this?",
                         classes="error" if self.risky else "")
             yield Static(self.command, id="confirm-command")
+            # The command reproduces exactly and still does not name the
+            # phone: `porthole flash boot --slot b` is the same string for
+            # every device you own.
+            if self.device:
+                yield Label("on device: {}".format(self.device),
+                            classes="error" if self.risky else "empty")
             if self.risky:
                 yield Label("A bad image on the wrong slot can leave this "
                             "device unbootable.", classes="error")
