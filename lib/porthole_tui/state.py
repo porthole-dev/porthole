@@ -35,14 +35,20 @@ class Snapshot:
                  # re-reading 95 tool headers and 55 notes inside render(),
                  # which runs on every frame -- 14.3% of a core, idle, to
                  # re-parse files that had not changed.
-                 "tools", "notes")
+                 "tools", "notes",
+                 # {device: {"workdir": ..., "pmaports": ...}} for EVERY
+                 # device, not just the active one -- the devices pane exists
+                 # to make a cross-device isolation mistake visible, and it
+                 # cannot do that from only the active device's paths.
+                 # Resolved once per refresh, here, not per frame in the pane.
+                 "device_paths")
 
     def __init__(self, **kw):
         for name in self.__slots__:
             setattr(self, name, kw.get(name))
 
 
-class Model:
+class Store:
     """Owns the snapshot and the thread that refreshes it."""
 
     def __init__(self, root, device=None):
@@ -51,7 +57,7 @@ class Model:
         self._lock = threading.Lock()
         self._snapshot = Snapshot(device=device or "", devices=[], rows=[],
                                   summary={}, tools=[], notes=[],
-                                  error=None, stamp=0.0)
+                                  device_paths={}, error=None, stamp=0.0)
         self._busy = False
         self.started = time.monotonic()
 
@@ -96,16 +102,17 @@ class Model:
             # A broken profile or an absent pmaports must degrade the display,
             # never take the session down mid-port.
             snap = Snapshot(device=self._device or "", devices=[], rows=[],
-                            summary={}, tools=[], notes=[],
-                            error=f"{type(exc).__name__}: {exc}",
+                            summary={}, tools=[], notes=[], device_paths={},
+                            error="{}: {}".format(type(exc).__name__, exc),
                             stamp=time.time())
-        with self._lock:
-            self._snapshot = snap
-        self._busy = False
+        try:
+            with self._lock:
+                self._snapshot = snap
+        finally:
+            self._busy = False
 
     def _build(self) -> Snapshot:
         import porthole
-        import porthole_milestones as ms
         import porthole_pmaports as pmap
         import porthole_cmd_next as nxt
 
@@ -134,6 +141,23 @@ class Model:
         pm = pmap.find_pmaports(cfg)
         branch = _branch(pm) if pm else ""
 
+        # Resolved per device, once per refresh -- NOT per frame, and not in
+        # render. The devices pane exists to make a cross-device isolation
+        # mistake visible, and it cannot do that showing only the active
+        # device's paths. Measured at 0.3ms for the whole set, so the warm
+        # model is the right place for it.
+        device_paths = {}
+        for name in devices:
+            try:
+                one = porthole.load_config(root=self.root,
+                                           env={"PORTHOLE_DEVICE": name})
+                device_paths[name] = {
+                    "workdir": one.get("PORTHOLE_WORKDIR", ""),
+                    "pmaports": one.get("PORTHOLE_PMAPORTS", ""),
+                }
+            except Exception:  # noqa: BLE001
+                device_paths[name] = {"workdir": "", "pmaports": ""}
+
         # The device state is a probe, and probes belong on this thread -- the
         # header said UNPROBED forever because the model refused to ask, while
         # three milestones told the user to leave the TUI and run doctor. The
@@ -153,7 +177,7 @@ class Model:
             workdir=cfg.get("PORTHOLE_WORKDIR", ""),
             soc=cfg.get("PORTHOLE_SOC", ""),
             state=state or "unknown", tools=tools, notes=notes,
-            error=None, stamp=time.time())
+            device_paths=device_paths, error=None, stamp=time.time())
 
 
 class _Ctx:

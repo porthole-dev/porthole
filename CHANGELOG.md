@@ -5,6 +5,14 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- The console is rebuilt on Textual. Argument forms, generated from the
+  argparse specs each verb already declares — every verb is now reachable
+  with real arguments, where previously the palette could run a verb's
+  default and nothing past it, so `blobs unsparse vendor.img` could not be
+  reached from the console at all.
+- A file picker, starting at the port's working directory.
+- A job drawer: commands stream in-app instead of dropping out of the
+  console, so a long build stays watchable while you read a note.
 - `porthole soc` — find devices sharing your SoC in pmaports (664 device
   packages, indexed in 55ms) and inherit their known-good boot image offsets.
   `new-device` now seeds from the closest sibling automatically.
@@ -33,6 +41,8 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 - `Makefile` with `test`, `lint`, `check`, `install-completion`.
 
 ### Changed
+- The console needs Python 3.10 and `textual`; the CLI and every tool still
+  need neither and run on 3.8 with nothing installed.
 - 22 tools that opened their own ssh with hand-rolled flags now use the shared
   lib, so they inherit the mandatory host-key options and connection
   multiplexing. Measured: 302 ms → 14 ms per round trip.
@@ -41,6 +51,16 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   missing, and refuses (in code) to report a failure without a fix.
 
 ### Fixed
+- `panes/console.py` was imported by nothing, so the device-log colouring it
+  contained had never been reachable.
+- The reader's `r` binding was shadowed by an earlier `elif` and refreshed
+  instead of running, while the footer advertised "run it".
+- `T.BAR` was declared with no colour pair, so the chrome had no identity.
+- Filtering a list and opening a result took two identical-looking
+  keystrokes, only the second of which did anything.
+- The palette built every entry as a bare `porthole <verb>`, so it reached a
+  verb's default and nothing past it — `blobs unsparse vendor.img` was
+  unreachable, and nothing in the app navigated a filesystem.
 - An error's remedy went to stdout while the error went to stderr, so
   `2>log` captured the problem and lost the fix.
 - Built-in defaults beat the device profile — exactly backwards.

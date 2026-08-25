@@ -377,6 +377,9 @@ SPEC = {
         "The terminal is built in (termios, stdlib) rather than shelling out to\n"
         "picocom, because 'install a terminal emulator first' is a poor answer\n"
         "to 'my device is printing something and I cannot see it'."),
+    # It drives termios directly and expects to own the terminal. The console
+    # hands the real tty over rather than streaming it into a pane.
+    "interactive": True,
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION", "choices": list(ACTIONS),
                       "help": "list | console | hardware"}),

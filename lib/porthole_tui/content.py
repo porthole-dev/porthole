@@ -1,20 +1,25 @@
 # SPDX-License-Identifier: MIT
-"""A scrollable reader, and the help overlay.
+"""Documents: a tool's contract, a brain note, a milestone.
 
-The biggest hole in the console was that there was no way to LOOK at anything.
-`Enter` did nothing on the tools and brain panes even though both advertised it,
-so reading a tool's contract or a note meant leaving curses entirely. 55 notes
-carrying the laws of two ports were one keystroke away and unreachable.
+The biggest hole in the curses console was that there was no way to LOOK at anything.
+`Enter` did nothing on the tools and brain panes even though both advertised it, so
+reading a tool's contract or a note meant leaving curses entirely. 55 notes carrying the
+laws of two ports were one keystroke away and unreachable.
 
-One pager serves every case, because they are all the same shape: a title and
-some lines you scroll. What differs is who builds the lines, and that belongs to
-whoever knows the subject.
+These builders return DATA -- a title and some lines you scroll -- not drawing calls,
+which is why they crossed from the curses pane almost unchanged and why they are testable
+with no terminal at all. Whoever knows the subject builds the lines; one reader screen
+renders them.
+
+The help overlay used to live here too. It does not any more: help is generated from the
+live Textual BINDINGS instead, because the curses version drifted from what the keys
+actually did -- `/` was documented as "filter" in two panes while it opened the palette,
+and the real filter key appeared in no footer at all. A help screen that reads the
+bindings cannot disagree with them.
 """
 from __future__ import annotations
 
 import textwrap
-
-from .. import theme as T
 
 
 class Doc:
@@ -107,62 +112,3 @@ def for_milestone(row) -> Doc:
     if row["playbook"]:
         lines += ["read", "", f"  {row['playbook']}"]
     return Doc(row["title"], lines, command=row["how"], safe=row["safe"])
-
-
-def for_help(panes) -> Doc:
-    """Built from each pane's own keys(), which until now was dead code.
-
-    Making the overlay read the panes means the footer, the panes and the help
-    cannot disagree -- and they did: `/` was documented as "filter" in two
-    panes while it actually opened the palette, and the real filter key was
-    undiscoverable.
-    """
-    lines = ["Global", ""]
-    for key, what in (("1-4", "switch pane"), ("tab", "next pane"),
-                      ("/", "filter this list"), ("ctrl-p", "command palette"),
-                      ("enter", "open / run the selection"),
-                      ("j k ↑ ↓", "move"), ("pgup pgdn g G", "jump"),
-                      ("esc", "close / cancel"), ("r", "refresh"),
-                      ("?", "this help"), ("q", "quit")):
-        lines.append(f"  {key:<14} {what}")
-    for name, mod in panes:
-        try:
-            rows = mod.keys()
-        except Exception:  # noqa: BLE001
-            continue
-        if rows:
-            lines += ["", name, ""]
-            lines += [f"  {k:<14} {v}" for k, v in rows]
-    lines += ["", "Anything that flashes, writes to the device or touches a",
-              "slot needs an explicit confirmation naming the command."]
-    return Doc("keys", lines)
-
-
-# ------------------------------------------------------------------- render --
-
-def render(win, snap, height, width, sel=0, doc=None):
-    if doc is None:
-        return 0
-    from . import _list
-    body = [T.fit(l, max(10, width - 4)) for l in doc.lines]
-    rows = max(1, height - 5)
-    visible, offset, sel = _list.window(body, sel, rows)
-    count = _list.scrollbar(offset, len(visible), len(body))
-
-    win.addstr(1, 2, T.fit(doc.title, max(10, width - 20)),
-               T.attr(T.ACTIVE, bold=True))
-    if count:
-        win.addstr(1, max(0, width - len(count) - 2), count, T.attr(T.DIM))
-    for i, line in enumerate(visible):
-        role = T.BASE
-        stripped = line.strip()
-        if stripped.isupper() and len(stripped) > 3:
-            role = T.CRIT
-        elif line and not line.startswith((" ", "\t")):
-            role = T.NOTE
-        win.addstr(3 + i, 2, line, T.attr(role))
-    return len(body)
-
-
-def keys():
-    return [("esc", "back"), ("j k", "scroll"), ("r", "run it, if it has one")]

@@ -45,6 +45,29 @@ jobs:
       - name: device mutex
         run: bash tools/tk-device-test.sh
 
+  console:
+    name: console (textual, python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install the console extra
+        run: python3 -m pip install 'textual>=8,<9'
+      # The matrix job runs these same files WITHOUT textual, where they skip.
+      # A skip that nothing verifies is a hole, so this job fails if any
+      # console test skips here -- where it has no excuse to.
+      - name: console tests must run, not skip
+        run: |
+          fail=0
+          for t in tests/test_tui_*.py; do
+            out="$(python3 "$t")" || fail=1
+            echo "$out"
+            case "$out" in *SKIP*) echo "::error::$t skipped where textual IS installed"; fail=1;; esac
+          done
+          exit $fail
+
   lint:
     runs-on: ubuntu-latest
     steps:
