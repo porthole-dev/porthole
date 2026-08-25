@@ -34,39 +34,30 @@ class HelpScreen(ModalScreen):
                 "slot needs an explicit confirmation naming the command.")
 
     def _sources(self):
-        out = [("Global", self._of(self.app))]
+        """Grouped from the screen below's active_bindings.
+
+        `below.query("*")` was wrong twice over. It walked every widget's
+        Textual-internal bindings, so the reference grew sections for Input,
+        ListView, RichLog and Footer and gave `up` four different meanings --
+        and two of those sections were false, because neither Footer nor
+        RichLog is focusable in that state and neither binding could ever
+        fire. active_bindings is public API, it is exactly what the footer
+        computes, and it resolves the real focus chain instead of guessing at
+        it, so help and footer cannot disagree. It also removes the last
+        private-attribute access in this file.
+        """
         stack = self.app.screen_stack
         below = stack[-2] if len(stack) > 1 else None
-        if below is not None:
-            out.append((type(below).__name__, self._of(below)))
-            for widget in below.query("*"):
-                bindings = self._of(widget)
-                if bindings:
-                    out.append((type(widget).__name__, bindings))
-        return out
-
-    @staticmethod
-    def _of(node):
-        holder = getattr(node, "_bindings", None)
-        if holder is None:
+        if below is None:
             return []
-        try:
-            # Older textual: BindingsMap.keys is a {key: Binding} dict.
-            return list(holder.keys.values())
-        except AttributeError:
-            pass
-        # textual 8.2.8: no .keys attribute. key_to_bindings is a
-        # {key: [Binding, ...]} dict instead -- confirmed on the installed
-        # version, not guessed. Flatten it; a multi-key Binding ("escape,q")
-        # already comes back as one distinct Binding object per key, so no
-        # dedup is needed.
-        try:
-            out = []
-            for bindings in holder.key_to_bindings.values():
-                out.extend(bindings)
-            return out
-        except AttributeError:
-            return []
+        groups, order = {}, []
+        for active in below.active_bindings.values():
+            name = type(active.node).__name__
+            if name not in groups:
+                groups[name] = []
+                order.append(name)
+            groups[name].append(active.binding)
+        return [(name, groups[name]) for name in order]
 
     def action_close(self) -> None:
         self.dismiss(None)

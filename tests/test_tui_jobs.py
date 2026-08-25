@@ -173,13 +173,27 @@ def test_a_single_enormous_line_is_chunked_not_fatal():
 
 def test_is_interactive_assumes_interactive_when_the_registry_is_unreadable():
     # Piping a termios-driven command is unrecoverable; an unnecessary suspend is not.
+    #
+    # This test could not fail before. It broke discover() only, but
+    # is_interactive() calls lookup() FIRST and reaches discover() only on a
+    # miss -- lookup succeeded, so the exception never fired. And it asked
+    # about `serial`, which declares interactive: True, so the answer was
+    # True down both paths. Break both, and ask about a verb whose honest
+    # answer is False.
     import porthole_cli
-    original = porthole_cli.discover
-    porthole_cli.discover = lambda root: (_ for _ in ()).throw(RuntimeError("registry"))
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("registry")
+
+    original = porthole_cli.lookup, porthole_cli.discover
+    porthole_cli.lookup, porthole_cli.discover = boom, boom
     try:
-        assert jobs.is_interactive(ROOT, "porthole serial console") is True
+        assert jobs.is_interactive(ROOT, "porthole brief") is True, \
+            "an unreadable registry must fall back to interactive"
     finally:
-        porthole_cli.discover = original
+        porthole_cli.lookup, porthole_cli.discover = original
+    # ...and with the registry readable again, brief is honestly not.
+    assert jobs.is_interactive(ROOT, "porthole brief") is False
 
 
 def test_is_interactive_is_false_for_a_non_porthole_command():

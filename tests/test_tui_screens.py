@@ -93,11 +93,15 @@ def test_escape_does_not_quit():
 
 def test_an_unimplemented_section_shows_a_placeholder_not_a_crash():
     # LOGS and JOBS land in later plans. Until then the screen must say so.
+    # It used to assert only that the section changed and the app lived --
+    # neither of which is the placeholder -- so it could not fail.
     async def body(app, pilot):
         await pilot.press("5")
         await pilot.pause()
         assert app.screen.section == "logs"
         assert app.is_running
+        placeholder = app.screen.query_one("#content .empty", Label)
+        assert "logs" in _text(placeholder), _text(placeholder)
     tui_harness.pilot(make, body)
 
 
@@ -217,13 +221,25 @@ def test_every_device_row_shows_its_own_paths_not_the_active_one():
 
 
 def test_a_pane_with_no_data_shows_its_empty_message_not_a_blank():
+    # visible_rows() == [] alone is not the empty MESSAGE -- it says only
+    # that the pure method returned nothing, which is what it did before the
+    # message existed. Assert the row the user actually sees.
     async def body(app, pilot):
+        # Settle the store and prime _poll's first tick before injecting the
+        # fixture, or the 0.4s poller republishes the real snapshot over it
+        # -- the same race test_the_brain_filter_never_hides_the_laws
+        # documents. Reproduced here as an intermittent failure.
+        app.store.refresh(block=True)
         await pilot.press("3")
         await pilot.pause()
+        app.screen._poll()
         listing = app.screen.query_one(ToolList)
         listing.snapshot = None
         await pilot.pause()
         assert listing.visible_rows() == []
+        rows = listing.query_one("#rows", ListView)
+        shown = [_text(label) for label in rows.query(".empty")]
+        assert shown == [listing.empty_message], shown
     tui_harness.pilot(make, body)
 
 
@@ -386,6 +402,28 @@ def test_generated_help_lists_a_real_binding_it_did_not_hardcode():
                          for widget in app.screen.query(Static))
         assert (sample.key_display or sample.key) in blob, blob
         assert sample.description in blob, blob
+    tui_harness.pilot(make, body)
+
+
+def test_help_invents_no_sections_and_gives_no_key_two_meanings():
+    # `below.query("*")` listed every widget's Textual-internal bindings, so
+    # the reference grew sections for Input, ListView, RichLog and Footer and
+    # `up` carried four different meanings. Two of those sections were flatly
+    # false: neither Footer nor RichLog is focusable in that state, so
+    # neither binding could ever fire.
+    async def body(app, pilot):
+        await pilot.press("question_mark")
+        await pilot.pause()
+        sources = app.screen._sources()
+        titles = [title for title, _ in sources]
+        assert "MainScreen" in titles, titles
+        for phantom in ("Footer", "RichLog"):
+            assert phantom not in titles, titles
+        keys = [(b.key_display or b.key) for _t, group in sources
+                for b in group if b.description]
+        assert len(keys) == len(set(keys)), \
+            "a key must not carry two meanings at once: {}".format(
+                sorted(k for k in keys if keys.count(k) > 1))
     tui_harness.pilot(make, body)
 
 
