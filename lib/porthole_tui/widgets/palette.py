@@ -15,9 +15,10 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, Label, ListItem, ListView
+from textual.widgets import DataTable, Footer, Input, Label
 
-from .. import argspec
+from .. import argspec, ink
+from .catalogue import FILTER_DEBOUNCE
 
 # The badge each namespace wears. A nine-character lowercase word in one of
 # four foreground colours was the only signal separating a verb from a tool,
@@ -99,54 +100,82 @@ def collect(root, snap) -> list:
 
 
 class Palette(ModalScreen):
+    """Everything addressable, in two keystrokes.
+
+    A DataTable rather than a ListView for the same reason the catalogues
+    changed: ListView mounts a widget per row, and this list is ~180 items
+    re-ranked on every keystroke. It also gives the badge a column of its
+    own, so a verb and a tool are told apart by a reverse-video chip instead
+    of a nine-character lowercase word in one of four colours -- two of which
+    collapsed into each other on an eight-colour terminal.
+    """
+
     BINDINGS = [Binding("escape", "cancel", "close")]
 
     def __init__(self, items, **kw):
         super().__init__(**kw)
         self.items = items
         self.hits = []
+        self._debounce = None
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder="search verbs, tools, notes, milestones",
                     id="palette-query")
-        yield ListView(id="palette-rows")
-        # A modal fills the screen, so MainScreen's own footer is
-        # covered while this is up. Without one here the keys below
-        # are advertised nowhere at all -- and no modal binds `?`,
-        # so help cannot be reached from one either.
+        table = DataTable(id="palette-rows", cursor_type="row",
+                          show_header=False)
+        yield table
+        # A modal fills the screen, so MainScreen's own footer is covered
+        # while this is up. Without one here the keys below are advertised
+        # nowhere at all -- and no modal binds `?`, so help cannot be
+        # reached from one either.
         yield Footer()
 
-    async def on_mount(self) -> None:
+    def on_mount(self) -> None:
+        table = self.query_one("#palette-rows", DataTable)
+        table.add_column("", width=6)
+        table.add_column("", width=30)
+        table.add_column("", width=None)
+        self._repopulate("")
         self.query_one("#palette-query", Input).focus()
-        await self._repopulate("")
 
-    async def _repopulate(self, query) -> None:
-        # Awaited for the same reason Catalogue._repopulate is: clear()
-        # returns an AwaitRemove and the rows are still there when it
-        # returns, so an un-awaited clear leaves the previous result set
-        # stacked under the new one -- and on_list_view_selected's
-        # `index < len(self.hits)` guard then makes Enter dead on the half
-        # that has no hit behind it.
-        listing = self.query_one("#palette-rows", ListView)
-        await listing.clear()
+    def _repopulate(self, query) -> None:
+        """Synchronous: DataTable.clear() does not defer removal, so there is
+        no un-awaited AwaitRemove to leave the previous result set stacked
+        under the new one."""
+        table = self.query_one("#palette-rows", DataTable)
+        if not table.columns:
+            return                      # see Catalogue._repopulate
         self.hits = rank(self.items, query)
+        table.clear()
         if not self.hits:
-            listing.append(ListItem(Label("nothing matches", classes="empty")))
+            table.add_row(ink.ink("nothing matches", ink.DIM), "", "")
             return
         for item in self.hits[:200]:
-            listing.append(ListItem(Label("{:<5} {:<28} {}".format(
-                BADGE.get(item["kind"], "?"), item["label"][:28],
-                item["detail"][:50]))))
+            table.add_row(
+                ink.badge(item["kind"]),
+                ink.ink(item["label"], ink.BASE, 30),
+                ink.ink(item["detail"], ink.DIM, 60))
 
-    async def on_input_changed(self, event) -> None:
-        await self._repopulate(event.value)
+    def on_input_changed(self, event) -> None:
+        if self._debounce is not None:
+            self._debounce.stop()
+        value = event.value
+        self._debounce = self.set_timer(
+            FILTER_DEBOUNCE, lambda: self._apply(value))
+
+    def _apply(self, value) -> None:
+        self._debounce = None
+        self._repopulate(value)
 
     def on_input_submitted(self, event) -> None:
-        self.query_one("#palette-rows", ListView).focus()
+        if self._debounce is not None:
+            self._debounce.stop()
+            self._apply(event.value)
+        self.query_one("#palette-rows", DataTable).focus()
 
-    def on_list_view_selected(self, event) -> None:
-        index = event.list_view.index
-        if index is not None and index < len(self.hits):
+    def on_data_table_row_selected(self, event) -> None:
+        index = event.cursor_row
+        if index is not None and 0 <= index < len(self.hits):
             self.dismiss(self.hits[index])
 
     def action_cancel(self) -> None:

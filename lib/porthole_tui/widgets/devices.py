@@ -1,26 +1,37 @@
 # SPDX-License-Identifier: MIT
 """Devices: which ports exist, which is live, and what each is wired to.
 
-This exists because of a real bug: the working repo and the pmaports checkout
-used to be global, so switching devices left you in the previous device's
-files. Showing workdir AND pmaports on one line per device -- for EVERY
-device, not just the active one -- makes that class of mistake visible
-instead of silent. A row shown as "not set" is not inherited from another
-device; it genuinely has no override.
+This pane exists because of a real bug: the working repo and the pmaports
+checkout used to be global, so switching devices left you in the previous
+device's files. Showing each device's OWN paths on its own row makes that
+class of mistake visible instead of silent -- which is why a row must never
+render a dash for a device that is merely not the active one.
 
-Every device's paths are read straight off `snap.device_paths`, resolved once
-per refresh in the warm model (state.py), never re-read from disk here: that
-would be exactly the per-frame filesystem cost the tools pane's docstring
-warns about, just for a shorter list.
+Paths are shortened relative to home rather than sliced from the left. A
+mid-path cut like `le/aports/google-cheetah` reads as corruption.
 """
 from __future__ import annotations
 
+import pathlib
+
+from .. import ink
 from .catalogue import Catalogue
+
+
+def short(path):
+    """`~/rest`, so a long path stays recognisable at the front."""
+    if not path:
+        return ""
+    try:
+        return "~/" + str(pathlib.Path(path).relative_to(pathlib.Path.home()))
+    except ValueError:
+        return str(path)
 
 
 class DeviceList(Catalogue):
     noun = "devices"
     empty_message = "no device profiles yet — try `porthole new-device`"
+    COLUMNS = (("", 2), ("device", 20), ("working repo", 34), ("pmaports", None))
 
     def rows(self, snap):
         devices = list((snap.devices if snap else None) or [])
@@ -31,9 +42,11 @@ class DeviceList(Catalogue):
         for name in devices:
             live = bool(snap and name == snap.device)
             paths = (snap.device_paths or {}).get(name, {}) if snap else {}
-            workdir = paths.get("workdir") or "not set"
-            pmaports = paths.get("pmaports") or "shared"
-            out.append(("{} {:<18} {:<34} {}".format(
-                "*" if live else " ", name[:18], workdir[-34:],
-                pmaports[-24:]), name))
+            out.append((
+                (ink.ink("●" if live else "", ink.ACTIVE, 2),
+                 ink.ink(name, ink.ACTIVE if live else ink.BASE, 20),
+                 ink.ink(short(paths.get("workdir")) or "not set",
+                         ink.BASE if paths.get("workdir") else ink.WARN, 34),
+                 ink.ink(short(paths.get("pmaports")) or "shared", ink.DIM, 30)),
+                name))
         return out

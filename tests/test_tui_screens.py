@@ -18,7 +18,7 @@ tui_harness.require()
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 from textual.widgets import (Button, Checkbox, Footer, Input, Label,  # noqa: E402
-                             ListView, RichLog, Select, Static)
+                             DataTable, RichLog, Select, Static)
 from textual.widgets._footer import FooterKey  # noqa: E402
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
@@ -36,6 +36,15 @@ from porthole_tui.widgets.port import PortView  # noqa: E402
 from porthole_tui.widgets.rail import Rail  # noqa: E402
 from porthole_tui.widgets.tools import ToolList  # noqa: E402
 from porthole_tui.widgets import palette as pal  # noqa: E402
+
+
+def _row_text(cells):
+    """A row's cells joined back into one string.
+
+    Catalogues return CELLS now, not a preformatted label -- that is what lets
+    a column carry its own colour. Tests that assert on row content join them.
+    """
+    return "  ".join(getattr(c, "plain", str(c)) for c in cells)
 
 
 def make():
@@ -130,7 +139,7 @@ def test_filtering_and_opening_takes_one_enter_not_two():
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert listing.query_one("#rows", ListView).has_focus, \
+        assert listing.query_one("#rows", DataTable).has_focus, \
             "enter must move focus to the list"
         assert listing.query == "firstpaint", \
             "enter must not clear the filter it just narrowed: {!r}".format(
@@ -213,7 +222,7 @@ def test_every_device_row_shows_its_own_paths_not_the_active_one():
         rows = listing.visible_rows()
         if len(rows) < 2:
             return                      # single-device checkout: nothing to compare
-        labels = [label for label, _payload in rows]
+        labels = [_row_text(cells) for cells, _payload in rows]
         assert not any(label.rstrip().endswith("-") for label in labels), \
             "a non-active device is showing a dash instead of its own paths: {}".format(labels)
         # the whole point: two devices must be distinguishable by their paths
@@ -238,9 +247,12 @@ def test_a_pane_with_no_data_shows_its_empty_message_not_a_blank():
         listing.snapshot = None
         await pilot.pause()
         assert listing.visible_rows() == []
-        rows = listing.query_one("#rows", ListView)
-        shown = [_text(label) for label in rows.query(".empty")]
-        assert shown == [listing.empty_message], shown
+        rows = listing.query_one("#rows", DataTable)
+        # DataTable cells are values, not widgets, so there is no ".empty"
+        # node to query -- read the row the user actually sees.
+        assert rows.row_count == 1, rows.row_count
+        first = _row_text(rows.get_row_at(0)).strip()
+        assert first.startswith(listing.empty_message), first
     tui_harness.pilot(make, body)
 
 
@@ -715,7 +727,7 @@ def test_the_port_filter_keeps_stale_first():
          "playbook": "", "safe": False},
     ]))
     view.set_reactive(Catalogue.query, "usb")
-    labels = [label for label, _ in view.visible_rows()]
+    labels = [_row_text(cells) for cells, _ in view.visible_rows()]
     assert len(labels) == 2, labels
     assert "stale" in labels[0], "stale must lead within the filtered set: {}".format(labels)
 
@@ -1341,26 +1353,26 @@ def test_a_catalogue_renders_exactly_as_many_rows_as_it_has_payloads():
         await pilot.press("3")
         await pilot.pause()
         listing = app.screen.query_one(ToolList)
-        rows = listing.query_one("#rows", ListView)
+        rows = listing.query_one("#rows", DataTable)
         assert len(listing._payloads) > 1, \
             "this repo must have tools for the check to mean anything"
-        assert len(rows.children) == len(listing._payloads), \
+        assert rows.row_count == len(listing._payloads), \
             "on entry: {} rows drawn for {} payloads".format(
-                len(rows.children), len(listing._payloads))
+                rows.row_count, len(listing._payloads))
         await pilot.press("r")
         await pilot.pause(0.6)          # let the worker land and _poll tick
-        assert len(rows.children) == len(listing._payloads), \
+        assert rows.row_count == len(listing._payloads), \
             "after r: {} rows drawn for {} payloads".format(
-                len(rows.children), len(listing._payloads))
+                rows.row_count, len(listing._payloads))
         await pilot.press("1")
         await pilot.pause()
         await pilot.press("3")
         await pilot.pause()
         listing = app.screen.query_one(ToolList)
-        rows = listing.query_one("#rows", ListView)
-        assert len(rows.children) == len(listing._payloads), \
+        rows = listing.query_one("#rows", DataTable)
+        assert rows.row_count == len(listing._payloads), \
             "re-entering: {} rows drawn for {} payloads".format(
-                len(rows.children), len(listing._payloads))
+                rows.row_count, len(listing._payloads))
     tui_harness.pilot(make, body)
 
 
@@ -1373,17 +1385,17 @@ def test_enter_opens_the_last_row_too_not_just_the_first_half():
         await pilot.press("3")
         await pilot.pause()
         listing = app.screen.query_one(ToolList)
-        rows = listing.query_one("#rows", ListView)
-        last = len(rows.children) - 1
+        rows = listing.query_one("#rows", DataTable)
+        last = rows.row_count - 1
         assert last > 0, "needs more than one row"
         rows.focus()
-        rows.index = last
-        await pilot.pause()
+        rows.move_cursor(row=last)      # DataTable has no .index; assigning
+        await pilot.pause()             # one silently does nothing at all
         await pilot.press("enter")
         await pilot.pause()
         assert isinstance(app.screen, Reader), \
             "enter on row {} of {} opened nothing: {}".format(
-                last, len(rows.children), type(app.screen).__name__)
+                last, rows.row_count, type(app.screen).__name__)
     tui_harness.pilot(make, body)
 
 
@@ -1392,13 +1404,13 @@ def test_the_palette_draws_one_row_per_hit():
         await pilot.press("ctrl+p")
         await pilot.pause()
         screen = app.screen
-        rows = screen.query_one("#palette-rows", ListView)
+        rows = screen.query_one("#palette-rows", DataTable)
         screen.query_one("#palette-query", Input).value = "br"
         await pilot.pause()
         assert screen.hits, "the filter must match something"
-        assert len(rows.children) == len(screen.hits[:200]), \
+        assert rows.row_count == len(screen.hits[:200]), \
             "{} rows drawn for {} hits".format(
-                len(rows.children), len(screen.hits))
+                rows.row_count, len(screen.hits))
     tui_harness.pilot(make, body)
 
 
@@ -1484,6 +1496,12 @@ def test_a_broken_snapshot_says_what_broke_instead_of_going_blank():
     from porthole_tui import state as _state
 
     async def body(app, pilot):
+        # Settle the background refresh MainScreen.on_mount kicks off before
+        # injecting, or that worker lands after and replaces the fixture with
+        # a real (error-free) snapshot -- the same race the sibling
+        # empty-message test documents.
+        app.store.refresh(block=True)
+        await pilot.pause()
         broken = _state.Snapshot(device="", devices=[], cfg={}, rows=[],
                                  summary={}, tools=[], notes=[],
                                  device_paths={}, soc="", state="unknown",
