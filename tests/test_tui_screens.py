@@ -29,6 +29,7 @@ from porthole_tui.screens.help import HelpScreen  # noqa: E402
 from porthole_tui.screens.picker import FilePicker  # noqa: E402
 from porthole_tui.screens.reader import Reader  # noqa: E402
 from porthole_tui.widgets.brain import NoteList  # noqa: E402
+from porthole_tui.widgets.catalogue import Catalogue  # noqa: E402
 from porthole_tui.widgets.devices import DeviceList  # noqa: E402
 from porthole_tui.widgets.jobs import JobDrawer  # noqa: E402
 from porthole_tui.widgets.port import PortView  # noqa: E402
@@ -700,15 +701,20 @@ def test_the_port_filter_keeps_stale_first():
     # the one thing that must never be pushed below the fold.
     import porthole_milestones as ms
     view = PortView()
-    view.snapshot = _snapshot_with(rows=[
+    # set_reactive, not plain assignment: this widget was never mounted, so it
+    # has no message pump to run the (now async) watcher on and the coroutine
+    # would be created and dropped -- "coroutine ... was never awaited" in the
+    # middle of an otherwise clean run. rows() is pure, and pure is all this
+    # test needs.
+    view.set_reactive(Catalogue.snapshot, _snapshot_with(rows=[
         {"id": "a", "phase": "first-boot", "title": "usb gadget", "state": ms.BLOCKED,
          "source": "probe", "evidence": "", "why": "", "how": "", "playbook": "",
          "safe": False},
         {"id": "b", "phase": "first-boot", "title": "usb storage", "state": "done",
          "source": "stale", "evidence": "probe disagrees", "why": "", "how": "",
          "playbook": "", "safe": False},
-    ])
-    view.query = "usb"
+    ]))
+    view.set_reactive(Catalogue.query, "usb")
     labels = [label for label, _ in view.visible_rows()]
     assert len(labels) == 2, labels
     assert "stale" in labels[0], "stale must lead within the filtered set: {}".format(labels)
