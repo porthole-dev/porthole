@@ -33,6 +33,7 @@ generic notes as well.
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
+| [apr-service-inherits-a-protection-domain-the-board-deletes](traps/apr-service-inherits-a-protection-domain-the-board-deletes.md) | `soc:qcom` | A new APR service inherits a protection domain the board deletes |
 | [busybox-reboot-eats-the-mode-string](traps/busybox-reboot-eats-the-mode-string.md) | `generic` | busybox `reboot bootloader` silently discards the word "bootloader |
 | [critical-chain-shows-the-longest-path-not-the-floor](traps/critical-chain-shows-the-longest-path-not-the-floor.md) | `generic` | systemd-analyze critical-chain shows the longest path, not the floor |
 | [dmesg-can-be-empty-about-boot](traps/dmesg-can-be-empty-about-boot.md) | `generic` | dmesg can be empty about boot while the journal still has everything |
@@ -92,3 +93,4 @@ generic notes as well.
 - `generic` — 53
 - `soc:gs201` — 1
 - `soc:msm8998` — 1
+- `soc:qcom` — 1
