@@ -29,9 +29,12 @@
 #   - lsusb mislabels the running pmOS gadget as "fastboot" (18d1:d001), so USB
 #     IDs can't tell a booted phone from a bootloader. `fastboot devices` only
 #     prints in the real bootloader -- that is what we key off.
-#   - `sudo -n reboot` over ssh occasionally gets swallowed. If the OLD boot_id
-#     is still answering after 25s, the request is re-issued rather than
-#     silently burning the whole timeout.
+#   - `sudo -n reboot` over ssh gets swallowed, and on this device it can be
+#     swallowed EVERY time: it exits 0, queues no job, and the phone stays up.
+#     So a stuck reboot ESCALATES rather than repeating -- systemd, then
+#     `reboot -f`, then sysrq -- at 12s per step. Repeating the request that
+#     just failed is how this used to burn a full 180s timeout and still not
+#     reboot.
 #
 # Measured on this device, host-side wall clock:
 #
@@ -71,7 +74,7 @@ else
     fi
 fi
 
-if NEW_ID=$(tk_wait_ssh "$OLD_ID" "$DEADLINE" tk_request_reboot 25); then
+if NEW_ID=$(tk_wait_ssh "$OLD_ID" "$DEADLINE" tk_reboot_escalate 12); then
     echo ">> up in $(tk_since "$START")s (boot_id ${NEW_ID%%-*}, uptime $(tk_uptime)s)"
     exit 0
 fi

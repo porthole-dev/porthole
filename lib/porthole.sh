@@ -331,6 +331,39 @@ tk_request_reboot() {
     return 0
 }
 
+# The kernel's own reset path, below systemd, below busybox, below anything that
+# can swallow a request. Syncs twice first because nothing else is going to.
+#
+# sysrq is a bitmask and is usually NOT set to allow reboot (taimen ships 16,
+# sync only), so the allow-all bit has to be written before the trigger.
+tk_request_sysrq_reboot() {
+    ph_ssh_mux_reset
+    timeout 12 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
+        'sudo -n sh -c "sync; sync; echo 1 > /proc/sys/kernel/sysrq; \
+                        echo b > /proc/sysrq-trigger"' \
+        >/dev/null 2>&1 </dev/null
+    ph_ssh_mux_reset
+    return 0
+}
+
+# ESCALATE, never repeat. Paid for on taimen 2026-08-25: `systemctl reboot`
+# returned 0, `systemctl is-system-running` said `running`, `list-jobs` was
+# empty and the device stayed up -- so re-issuing the identical request every
+# 25s did nothing except burn the entire timeout, three times over. Each retry
+# now drops a level instead: systemd, then reboot -f, then sysrq.
+#
+# Pass this to tk_wait_ssh as the reissue function.
+TK_REBOOT_LEVEL=0
+tk_reboot_escalate() {
+    TK_REBOOT_LEVEL=$((TK_REBOOT_LEVEL + 1))
+    case $TK_REBOOT_LEVEL in
+        1)  echo ">> reboot not taken -- escalating to reboot -f" >&2
+            TK_FORCE=1 tk_request_reboot ;;
+        *)  echo ">> still up -- escalating to a sysrq reset" >&2
+            tk_request_sysrq_reboot ;;
+    esac
+}
+
 # Ask the device to reboot INTO THE BOOTLOADER, the way `adb reboot bootloader`
 # does it. On taimen: lands in fastboot in ~9s, first try.
 #
