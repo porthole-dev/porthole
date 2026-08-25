@@ -40,6 +40,7 @@ generic notes as well.
 | [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
 | [frozen-is-not-hung](traps/frozen-is-not-hung.md) | `generic` | FROZEN (kernel alive, userspace gone) is a distinct state and the watchdog will not save you |
 | [installing-firmware-can-flash-the-boot-partition](traps/installing-firmware-can-flash-the-boot-partition.md) | `generic` | apk add <firmware-pkg> (and apk fix) can FLASH the boot partition |
+| [never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport](traps/never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport.md) | `generic` | Never flash a kernel built from the source tree when the device ships from an aport series |
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
@@ -88,6 +89,6 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 52
+- `generic` — 53
 - `soc:gs201` — 1
 - `soc:msm8998` — 1
