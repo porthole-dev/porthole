@@ -18,7 +18,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, Label, Select, Static
+from textual.widgets import (Button, Checkbox, Footer, Input, Label, Select,
+                             Static)
 
 from .. import argspec
 
@@ -95,6 +96,11 @@ class ArgForm(ModalScreen):
                     yield Button(example, id="ex-{}".format(index),
                                 classes="form--example")
         yield Static(self.command(), id="form-command")
+        # A modal fills the screen, so MainScreen's own footer is
+        # covered while this is up. Without one here the keys below
+        # are advertised nowhere at all -- and no modal binds `?`,
+        # so help cannot be reached from one either.
+        yield Footer()
 
     def _row(self, field):
         # A dest naming a slot or a partition (safety.DANGEROUS_FIELDS,

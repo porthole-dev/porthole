@@ -15,7 +15,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, ListItem, ListView
+from textual.widgets import Footer, Input, Label, ListItem, ListView
 
 from .. import argspec
 
@@ -110,6 +110,11 @@ class Palette(ModalScreen):
         yield Input(placeholder="search verbs, tools, notes, milestones",
                     id="palette-query")
         yield ListView(id="palette-rows")
+        # A modal fills the screen, so MainScreen's own footer is
+        # covered while this is up. Without one here the keys below
+        # are advertised nowhere at all -- and no modal binds `?`,
+        # so help cannot be reached from one either.
+        yield Footer()
 
     async def on_mount(self) -> None:
         self.query_one("#palette-query", Input).focus()

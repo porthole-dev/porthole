@@ -15,7 +15,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Label, Static
+from textual.widgets import Footer, Label, Static
 
 
 class Reader(ModalScreen):
@@ -35,6 +35,11 @@ class Reader(ModalScreen):
         yield Label(self.doc.title, id="reader-title")
         with VerticalScroll(id="reader-body"):
             yield Static("\n".join(self.doc.lines))
+        # A modal fills the screen, so MainScreen's own footer is
+        # covered while this is up. Without one here the keys below
+        # are advertised nowhere at all -- and no modal binds `?`,
+        # so help cannot be reached from one either.
+        yield Footer()
 
     def action_close(self) -> None:
         self.dismiss(None)

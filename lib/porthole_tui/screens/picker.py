@@ -16,7 +16,7 @@ import pathlib
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import ModalScreen
-from textual.widgets import DirectoryTree, Input, Label
+from textual.widgets import DirectoryTree, Footer, Input, Label
 
 
 class _FilteredTree(DirectoryTree):
@@ -59,6 +59,11 @@ class FilePicker(ModalScreen):
         yield Label("choose a file -- {}".format(self.start), id="reader-title")
         yield _FilteredTree(str(self.start), self.extensions, id="picker-tree")
         yield Input(placeholder="...or type a path", id="picker-path")
+        # A modal fills the screen, so MainScreen's own footer is
+        # covered while this is up. Without one here the keys below
+        # are advertised nowhere at all -- and no modal binds `?`,
+        # so help cannot be reached from one either.
+        yield Footer()
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         self._chosen = str(event.path)

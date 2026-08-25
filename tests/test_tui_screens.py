@@ -17,8 +17,9 @@ tui_harness.require()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-from textual.widgets import (Button, Checkbox, Input, ListView, RichLog,  # noqa: E402
-                             Select, Static)
+from textual.widgets import (Button, Checkbox, Footer, Input, ListView,  # noqa: E402
+                             RichLog, Select, Static)
+from textual.widgets._footer import FooterKey  # noqa: E402
 
 from porthole_tui.app import PortholeApp, SECTIONS  # noqa: E402
 from porthole_tui.jobs import Job  # noqa: E402
@@ -1354,6 +1355,58 @@ def test_the_palette_draws_one_row_per_hit():
         assert len(rows.children) == len(screen.hits[:200]), \
             "{} rows drawn for {} hits".format(
                 len(rows.children), len(screen.hits))
+    tui_harness.pilot(make, body)
+
+
+# -- Group 3: a modal covers MainScreen's footer, so it needs its own -----
+
+def test_the_reader_advertises_its_run_key():
+    # `x` = "run it" is the direct successor to the curses `r` = "run it"
+    # bug this whole branch exists to fix. Without a Footer here it was
+    # advertised NOWHERE: the modal covers MainScreen's footer and no modal
+    # binds `?`, so help cannot be opened from one either.
+    async def body(app, pilot):
+        from porthole_tui.content import Doc
+        app.push_screen(Reader(Doc("a tool", ["some lines"],
+                                   command="porthole brief")))
+        await pilot.pause()
+        footer = app.screen.query_one(Footer)
+        assert footer.display, "the footer must actually be on screen"
+        shown = {(k.key_display or k.key): k.description
+                 for k in footer.query(FooterKey)}
+        assert shown.get("x") == "run it", shown
+    tui_harness.pilot(make, body)
+
+
+def test_every_modal_that_covers_the_footer_carries_one():
+    async def body(app, pilot):
+        from porthole_tui.content import Doc
+        from porthole_tui.widgets.palette import Palette, collect
+        opens = [Reader(Doc("t", ["l"])),
+                 ArgForm({"verb": "brief", "help": "", "options": []}),
+                 FilePicker(str(ROOT)),
+                 Palette(collect(ROOT, app.store.snapshot))]
+        for screen in opens:
+            app.push_screen(screen)
+            await pilot.pause()
+            keys = app.screen.query(FooterKey)
+            assert keys, "{} advertises nothing".format(
+                type(app.screen).__name__)
+            app.pop_screen()
+            await pilot.pause()
+    tui_harness.pilot(make, body)
+
+
+def test_the_confirm_stays_bare():
+    # Deliberately exempt: it prints its own instruction in the body and must
+    # gain no footer and no bindings -- there is nothing for muscle memory to
+    # aim at.
+    async def body(app, pilot):
+        app.screen.launch("porthole flash boot", safe=True)
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmRun)
+        assert not app.screen.query(Footer), "ConfirmRun must have no footer"
+        assert not app.screen.query(FooterKey)
     tui_harness.pilot(make, body)
 
 
