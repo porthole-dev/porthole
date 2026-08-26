@@ -167,5 +167,18 @@ agree 'PORTHOLE_DEVICE=google-taimen' PORTHOLE_SLOT_FORBIDDEN
 agree 'PORTHOLE_DEVICE=google-taimen' PORTHOLE_DEVICE_NAME
 agree 'PORTHOLE_DEVICE=google-taimen' PORTHOLE_WATCHDOG_MAX_S
 
+# tk_pkill exists so nobody types the short form. `pkill -f <pattern>` over ssh
+# matches the ssh command line CARRYING the pattern, and kills the session
+# running it -- twice in one session, and once as `pkill -f
+# xdg-permission-store` on 2026-08-20. Refusing the flag is the whole feature,
+# so it is asserted rather than trusted.
+out=$(phsh '' 'tk_pkill -f something 2>&1; echo "rc=$?"')
+has  "tk_pkill refuses -f"        "$out" "refusing the flag"
+has  "tk_pkill -f exits usage"    "$out" "rc=64"
+out=$(phsh '' 'tk_pkill 2>&1; echo "rc=$?"')
+has  "tk_pkill needs a name"      "$out" "rc=64"
+out=$(phsh '' 'type tk_pkill 2>&1')
+hasnt "tk_pkill never uses -f"    "$out" "pkill -f"
+
 echo "$PASS/$((PASS+FAIL)) passed"
 [ "$FAIL" -eq 0 ]

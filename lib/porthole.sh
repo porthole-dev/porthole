@@ -284,6 +284,41 @@ tk_uptime() {
         'cut -d. -f1 /proc/uptime' 2>/dev/null </dev/null
 }
 
+# tk_pkill NAME [NAME...] -- kill processes on the DEVICE, by exact name.
+#
+# `pkill -f <pattern>` over ssh matches YOUR OWN command line: the ssh invocation
+# carries the pattern, so the pattern matches it, and the shell running it dies
+# mid-command. That killed a working ssh session twice in one session, and once
+# on 2026-08-20 with `pkill -f xdg-permission-store`.
+# brain/traps/a-journal-grep-matches-your-own-command-line.md names the trap;
+# this is the fix, because a note cannot stop you typing the short form.
+#
+# -x matches the executable name only, never the command line, so it cannot
+# match the ssh that is asking. If you genuinely need a pattern, kill by
+# recorded PID instead -- every tool here that kills does that.
+#
+# Prints what it killed. Returns 0 even when nothing matched: "it was not
+# running" is the desired end state, not a failure.
+tk_pkill() {
+    [ $# -gt 0 ] || { echo "tk_pkill: name required" >&2; return 64; }
+    local n
+    for n in "$@"; do
+        case "$n" in
+        -*) echo "tk_pkill: refusing the flag '$n' -- names only." >&2
+            echo "  -f matches this ssh command line and kills the session." >&2
+            return 64 ;;
+        esac
+    done
+    local remote=""
+    for n in "$@"; do
+        remote="$remote if pgrep -x $(printf '%q' "$n") >/dev/null 2>&1; then"
+        remote="$remote sudo -n pkill -x $(printf '%q' "$n") 2>/dev/null;"
+        remote="$remote echo killed $n; fi;"
+    done
+    timeout 15 ssh "${TK_SSH_OPTS[@]}" "$PHONE" "$remote" 2>/dev/null </dev/null
+    return 0
+}
+
 # tk_device_state -> FASTBOOT | BOOTED | FROZEN | ABSENT
 #
 # The device lock says WHO is using the device, never WHAT the device is doing.
