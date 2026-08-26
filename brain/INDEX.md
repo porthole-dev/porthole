@@ -11,6 +11,7 @@ generic notes as well.
 | id | scope | title |
 |---|---|---|
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
+| [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 
 ## laws
 
@@ -104,7 +105,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 2
-- `generic` — 60
+- `generic` — 61
 - `soc:gs201` — 1
 - `soc:msm8998` — 2
 - `soc:qcom` — 1
