@@ -12,6 +12,7 @@ skip honest rather than a hole.
 from __future__ import annotations
 
 import asyncio
+import os
 import pathlib
 import sys
 
@@ -33,6 +34,18 @@ def _available():
 
 
 AVAILABLE, _REASON = _available()
+
+# Pin the device the console reads.
+#
+# Without this the TUI tests assert against whatever device the machine
+# happens to have selected, so they pass for anyone with a configured repo and
+# fail in CI with "this repo must have an active device" -- a property of the
+# checkout, not of the code under test. PORTHOLE_DEVICE wins over every config
+# layer, and this profile ships in the repo, so the console renders the same
+# thing everywhere.
+FIXTURE_DEVICE = "google-taimen"
+if not os.environ.get("PORTHOLE_DEVICE"):
+    os.environ["PORTHOLE_DEVICE"] = FIXTURE_DEVICE
 
 
 def require():

@@ -20,6 +20,7 @@ while three milestones told the user to leave the TUI and run `doctor`.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import threading
 import time
@@ -117,7 +118,15 @@ class Store:
         import porthole_cmd_next as nxt
 
         devices = porthole.list_profiles(self.root)
-        env = {"PORTHOLE_DEVICE": self._device} if self._device else {}
+        # Extend the environment, never replace it. load_config treats an env
+        # argument as THE environment, so passing a bare dict here dropped
+        # every other PORTHOLE_* variable the process was started with -- the
+        # console then disagreed with `porthole config` about the user, the
+        # host and the workdir, and about the device itself when it came from
+        # the environment rather than a config file.
+        env = dict(os.environ)
+        if self._device:
+            env["PORTHOLE_DEVICE"] = self._device
         cfg = porthole.load_config(root=self.root, env=env)
         device = cfg.get("PORTHOLE_DEVICE", "")
 
