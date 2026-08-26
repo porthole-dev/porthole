@@ -72,6 +72,11 @@ STOPWORDS = {"and", "the", "for", "is", "are", "has", "have", "not", "been",
 # what went wrong, and the broken invocation is the evidence. A line carrying
 # this marker is documentation OF a command, not documentation THAT it works.
 HISTORICAL = "porthole:historical"
+# A whole document that describes work not yet built. Its commands are a
+# proposal, so argparse is the wrong judge of them -- but the document is
+# still real documentation and must not be quietly excluded by living in a
+# magic directory, which is how docs/superpowers/ used to get a pass.
+DESIGN = "porthole:design-doc"
 BACKTICKED = re.compile(r"`(porthole [^`\n]+)`")
 FENCE = re.compile(r"^\s*(?:\$ )?(porthole .+)$")
 
@@ -134,11 +139,12 @@ def documented() -> list[tuple[str, int, str]]:
         for path in sorted(ROOT.glob(pattern)):
             if not path.is_file() or ".git" in path.parts:
                 continue
-            # The specs describe history, including commands as they used to
-            # be. They are a record, not instructions.
-            if "superpowers" in path.parts:
+            text = path.read_text(errors="replace")
+            # A design document proposes verbs that do not exist yet. It says so
+            # in its own body rather than earning the exemption by its path.
+            if DESIGN in text:
                 continue
-            lines = path.read_text(errors="replace").splitlines()
+            lines = text.splitlines()
             grab = _from_python if path.suffix == ".py" else _from_text
             for line, raw in grab(path):
                 context = lines[line - 1] if 0 < line <= len(lines) else ""
@@ -280,7 +286,7 @@ def test_specs_do_not_name_tests_that_do_not_exist():
         # legitimate reference and not drift.
         have.add(path.stem)
     missing = {}
-    for spec in (ROOT / "docs" / "superpowers" / "specs").glob("*.md"):
+    for spec in sorted((ROOT / "docs").glob("*.md")):
         named = set(re.findall(r"`(test_\w+)`", spec.read_text()))
         gone = named - have
         if gone:

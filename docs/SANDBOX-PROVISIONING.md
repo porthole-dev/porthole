@@ -1,5 +1,7 @@
 # Sandbox provisioning — design
 
+<!-- porthole:design-doc -- the verbs below are proposed, not built -->
+
 **Status:** designed, not built. The iteration ladder shipped 2026-08-26; this is the other half.
 
 ## The problem
