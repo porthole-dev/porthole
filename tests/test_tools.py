@@ -149,6 +149,30 @@ def test_executable_tools_have_a_shebang():
     assert not bad, "executable but no shebang:\n  " + "\n  ".join(bad)
 
 
+def test_tools_with_a_shebang_are_executable():
+    """The converse of the test above, and the one that was missing.
+
+    Thirty-two tools -- every Easel and FTM4 probe among them -- were committed
+    mode 644 with a shebang. `porthole run` reached posix_spawn and returned a
+    raw PermissionError traceback, which reads as "porthole crashed" rather than
+    "chmod +x this file". Profile tools are the usual victims: they are added by
+    hand and nothing on the way in checked the mode.
+
+    A file with a shebang is asking to be executed. `tools/ph-build.sh` is
+    deliberately not one -- it must be SOURCED -- and carries no shebang, which
+    is what keeps it out of this check.
+    """
+    bad = []
+    for path in tools():
+        if path.is_symlink() or path.read_bytes()[:2] != b"#!":
+            continue
+        if not os.access(path, os.X_OK):
+            bad.append(str(path.relative_to(ROOT)))
+    assert not bad, ("has a shebang but is not executable:\n  "
+                     + "\n  ".join(sorted(bad))
+                     + "\n\nchmod +x them, and commit the mode change.")
+
+
 def test_tk_lib_is_a_symlink_to_the_shared_lib():
     """It has been materialised into a real file by a stray `sed -i` before.
     That silently forks the shared library: edits to lib/porthole.sh stop

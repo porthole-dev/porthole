@@ -53,7 +53,23 @@ def cmd_run(args, ctx) -> int:
         env.setdefault("TK_AGENT", cfg.get("PORTHOLE_AGENT") or os.environ.get("USER", "porthole"))
         argv = wrapper + argv
 
-    return subprocess.run(argv, env=env).returncode
+    # A tool committed without the execute bit reached posix_spawn and came
+    # back as a raw PermissionError traceback -- which reads as "porthole
+    # crashed", not "chmod +x this file". Profile tools are the usual victims:
+    # they are added by hand, and nothing on the way in checks the mode.
+    if not os.access(tool.path, os.X_OK):
+        raise Bail(f"{tool.path.name} is not executable", EX_FAIL,
+                   f"chmod +x {tool.path}")
+    try:
+        return subprocess.run(argv, env=env).returncode
+    except PermissionError:
+        raise Bail(f"{tool.path.name} could not be executed", EX_FAIL,
+                   f"chmod +x {tool.path}") from None
+    except OSError as exc:
+        # A missing shebang interpreter lands here too, and "Exec format error"
+        # on a shell script means exactly that.
+        raise Bail(f"could not run {tool.path.name}: {exc.strerror}", EX_FAIL,
+                   "check the file's shebang and its execute bit") from None
 
 
 def _run_on_device(tool, args, ctx, cfg) -> int:
