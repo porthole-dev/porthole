@@ -64,6 +64,7 @@ generic notes as well.
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [unmasked-suspend-during-an-automated-wait-is-a-death-loop](traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md) | `generic` | Unmasking suspend before an automated wait can loop a device out of reach |
+| [usb-gadget-rerandomises-the-host-mac](traps/usb-gadget-rerandomises-the-host-mac.md) | `generic` | The USB gadget hands the host a new MAC on every boot |
 | [usb-ids-cannot-tell-booted-from-bootloader](traps/usb-ids-cannot-tell-booted-from-bootloader.md) | `generic` | lsusb can label a running pmOS USB gadget as "fastboot |
 | [wait-long-enough-before-calling-a-boot-failed](traps/wait-long-enough-before-calling-a-boot-failed.md) | `generic` | Wait long enough before calling a boot failed |
 | [watchdog-out-of-range-disarms-instead-of-clamping](traps/watchdog-out-of-range-disarms-instead-of-clamping.md) | `generic` | An out-of-range watchdog timeout turns the watchdog OFF, it does not clamp |
@@ -102,7 +103,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 59
+- `generic` — 60
 - `soc:gs201` — 1
 - `soc:msm8998` — 2
 - `soc:qcom` — 1
