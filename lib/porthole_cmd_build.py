@@ -50,7 +50,7 @@ ACTIONS = {
     "fast": ("tkbuild-kernel",
              "build the kernel and flash boot only, UUIDs untouched (~6m)"),
     "kernel": ("tkbuild",
-               "build the kernel, package it, install and verify (~10m)"),
+               "build the kernel, package it, install and verify, but NOT flash (~10m)"),
     "clean": ("tkclean", "unstack /mnt/linux binds"),
     "purge": ("tkpurge-devpkgs", "remove envkernel apks that outrank a release"),
 }
@@ -64,7 +64,8 @@ LADDER = [
     ("mod", "a driver that is a module", "no reboot at all"),
     ("boot", "DTS, or built-in code you can RAM-boot", "one fastboot boot"),
     ("fast", "a CONFIG change (module CRCs move)", "flashes boot only"),
-    ("kernel", "rootfs contents changed, or boot/rootfs desynced", "reflash both"),
+    ("kernel", "rootfs contents changed, or boot/rootfs desynced",
+     "then `porthole flash --yes`"),
 ]
 
 
