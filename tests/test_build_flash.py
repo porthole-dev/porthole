@@ -11,6 +11,7 @@ PORTHOLE_ACTIVE_SLOT sat unread in the schema.
 Every test here is a refusal. Nothing in this file builds or flashes anything.
 """
 import json
+import re
 import os
 import pathlib
 import subprocess
@@ -209,6 +210,68 @@ def test_an_unsigned_commit_is_reported():
         _commit(repo, "pkg: unsigned", "", "Me <me@example.com>")
         found = ap._authorship(repo, "base")
     assert any("no Signed-off-by" in text for _, text in found), found
+
+
+# ------------------------------------------------- the ladder is reachable --
+
+def test_every_action_names_a_function_that_exists():
+    """`fast` mapped to `tkfast` for the whole life of the verb, and tkfast has
+    never existed -- the function is `tkbuild-kernel`. So `porthole build fast`
+    died with "command not found" and the only fast rung anyone could reach was
+    the slow one. A name is not a link; assert the target is really there."""
+    import porthole_cmd_build as B
+    src = (ROOT / "tools" / "ph-build.sh").read_text()
+    for action, (func, _) in B.ACTIONS.items():
+        assert re.search(rf"^{re.escape(func)}\(\)", src, re.M), \
+            f"action {action!r} calls {func}(), which ph-build.sh does not define"
+
+
+def test_the_cheap_rungs_are_in_the_verb_table():
+    """tkmod (~40s) and tkboot (~40s) existed only as shell functions no verb
+    named, so an agent reading the table found the ~10 minute rung first."""
+    import porthole_cmd_build as B
+    assert "mod" in B.ACTIONS and "boot" in B.ACTIONS
+
+
+def test_mod_refuses_without_both_arguments():
+    """One argument builds every module in the tree before failing on the path."""
+    rc, out, err = run("-d", DEV, "build", "mod", "just-one.ko", "--yes")
+    assert rc != 0
+    assert "path and its name" in (out + err)
+
+
+def test_a_rung_that_takes_no_arguments_says_so():
+    rc, out, err = run("-d", DEV, "build", "fast", "stray-arg", "--yes")
+    assert rc != 0
+    assert "no extra arguments" in (out + err)
+
+
+def test_the_preview_prints_the_ladder():
+    """The expensive mistake is iterating on the wrong rung, so every preview
+    shows what the cheaper ones cover."""
+    rc, out, _ = run("-d", DEV, "build", "kernel")
+    assert rc == 0
+    for rung in ("mod", "boot", "fast"):
+        assert rung in out, f"the preview never mentions the {rung} rung"
+
+
+def test_the_fast_rungs_wait_instead_of_handing_back_mid_reboot():
+    """tkboot ended at `fastboot boot` and tkflash-boot at `fastboot reboot`,
+    so the caller had nothing to poll and wrote `sleep 60` -- wrong in both
+    directions per brain/laws/poll-never-sleep.md."""
+    src = (ROOT / "tools" / "ph-build.sh").read_text()
+    for func in ("tkboot", "tkflash-boot"):
+        body = src.split(f"\n{func}() {{", 1)[1].split("\n}\n", 1)[0]
+        assert "_ph_wait_up" in body, f"{func} still hands back mid-reboot"
+    assert "tk_wait_ssh" in src.split("_ph_wait_up() {", 1)[1][:800], \
+        "_ph_wait_up must poll via tk_wait_ssh, not sleep"
+
+
+def test_tkmod_proves_the_new_module_is_the_running_one():
+    """insmod exiting 0 does not mean the old module unloaded."""
+    src = (ROOT / "tools" / "ph-build.sh").read_text()
+    body = src.split("\ntkmod() {", 1)[1].split("\n}\n", 1)[0]
+    assert "srcversion" in body, "tkmod does not verify which build is loaded"
 
 
 def main():

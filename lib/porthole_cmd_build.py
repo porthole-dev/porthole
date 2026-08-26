@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 
@@ -29,12 +30,42 @@ from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 # Each verb maps to a shell function ph-build.sh defines. The names are kept
 # from the taimen toolbox because they are what every runbook prints and what
 # people already type interactively.
+#
+# The ladder, cheapest rung first. Picking the lowest rung that covers your
+# change is the single biggest speed lever in this toolbox, and it was
+# unreachable: `mod` and `boot` existed only as shell functions nothing in the
+# verb table named, so an agent reading `porthole build --help` saw the ~10
+# minute rung and used it to iterate on one driver.
+#
+# `fast` named `tkfast`, which has never existed in ph-build.sh -- the function
+# is `tkbuild-kernel`, so the verb failed with "command not found" for every
+# caller. tests/test_build_flash.py now asserts every name here is real.
+# The descriptions are printed as "would <description>", so they read as verb
+# phrases rather than labels.
 ACTIONS = {
-    "kernel": ("tkbuild", "build the kernel, package it, install and verify"),
-    "fast": ("tkfast", "kernel only, UUIDs untouched -- the iteration loop"),
+    "mod": ("tkmod",
+            "build one module, push it, reload it and verify -- no reboot (~40s)"),
+    "boot": ("tkboot",
+             "build the dtb, repack and RAM-boot it -- no pmbootstrap (~40s)"),
+    "fast": ("tkbuild-kernel",
+             "build the kernel and flash boot only, UUIDs untouched (~6m)"),
+    "kernel": ("tkbuild",
+               "build the kernel, package it, install and verify (~10m)"),
     "clean": ("tkclean", "unstack /mnt/linux binds"),
     "purge": ("tkpurge-devpkgs", "remove envkernel apks that outrank a release"),
 }
+
+# The rungs that compile and move the device. `clean` and `purge` are neither.
+BUILD_ACTIONS = ("mod", "boot", "fast", "kernel")
+
+# What each rung covers, so the preview can say why you would pick another.
+# This is the table an agent needs and had no way to get.
+LADDER = [
+    ("mod", "a driver that is a module", "no reboot at all"),
+    ("boot", "DTS, or built-in code you can RAM-boot", "one fastboot boot"),
+    ("fast", "a CONFIG change (module CRCs move)", "flashes boot only"),
+    ("kernel", "rootfs contents changed, or boot/rootfs desynced", "reflash both"),
+]
 
 
 def _script(ctx) -> pathlib.Path:
@@ -65,7 +96,7 @@ def _preflight(ctx) -> list[str]:
     return problems
 
 
-def _run(ctx, func: str, timeout: int) -> int:
+def _run(ctx, func: str, timeout: int, extra: list[str] | None = None) -> int:
     """Source ph-build.sh and call one of its functions.
 
     bash, not sh: it uses arrays, `shopt -s expand_aliases` and `pushd`, and
@@ -76,8 +107,12 @@ def _run(ctx, func: str, timeout: int) -> int:
     for key, value in ctx.cfg.items():
         if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
             env[key] = value
-    cmd = ["bash", "-c", f'source "{script}" && {func}']
-    ctx.out(ctx.out.paint(f"  $ source ph-build.sh && {func}", "grey"))
+    # shlex.quote, not naive interpolation: these arguments are a path and a
+    # module name that reach a shell, and a path with a space in it would
+    # otherwise arrive as two arguments.
+    call = " ".join([func, *(shlex.quote(a) for a in extra or [])])
+    cmd = ["bash", "-c", f'source "{script}" && {call}']
+    ctx.out(ctx.out.paint(f"  $ source ph-build.sh && {call}", "grey"))
     try:
         return subprocess.run(cmd, env=env, cwd=str(ctx.root),
                               timeout=timeout).returncode
@@ -87,12 +122,36 @@ def _run(ctx, func: str, timeout: int) -> int:
         raise Bail(f"{func} timed out after {timeout}s", EX_FAIL) from None
 
 
+def _rung_args(args, action: str) -> list[str]:
+    """Validate and shape the trailing arguments a rung takes.
+
+    Checked here rather than in the shell because `tkmod` with one argument
+    builds every module in the tree and then fails on a path it cannot resolve
+    -- minutes spent to learn about a typo.
+    """
+    rest = list(getattr(args, "rest", None) or [])
+    if action == "mod":
+        if len(rest) != 2:
+            raise Bail("mod needs the module's path and its name", EX_USAGE,
+                       "porthole build mod drivers/media/i2c/imx179.ko imx179 --yes")
+        return rest
+    if rest:
+        raise Bail(f"{action} takes no extra arguments", EX_USAGE,
+                   "only `mod` takes arguments (MODULE.ko NAME)")
+    if action == "boot" and getattr(args, "kernel", False):
+        return ["--kernel"]
+    if getattr(args, "kernel", False):
+        raise Bail(f"--kernel applies to `boot`, not `{action}`", EX_USAGE)
+    return []
+
+
 def cmd_build(args, ctx) -> int:
     action = args.action or "kernel"
     if action not in ACTIONS:
         raise Bail(f"unknown action {action!r}", EX_USAGE,
                    f"actions: {', '.join(ACTIONS)}")
     func, what = ACTIONS[action]
+    extra = _rung_args(args, action)
 
     problems = _preflight(ctx)
 
@@ -100,7 +159,7 @@ def cmd_build(args, ctx) -> int:
     # the build because the build could not run is unhelpful precisely when you
     # most need to know why -- and a profile that cannot build yet is the
     # normal state of a new port.
-    if not args.yes and action in ("kernel", "fast"):
+    if not args.yes and action in BUILD_ACTIONS:
         def render():
             o = ctx.out
             o.heading(f"would {what}")
@@ -117,20 +176,29 @@ def cmd_build(args, ctx) -> int:
                 for problem in problems:
                     o(f"  {o.paint(o.sym('·', '-'), 'yellow')} {problem}")
                 o.blank()
-            else:
-                o("  This compiles a kernel. It takes minutes and it writes")
-                o("  into your pmbootstrap chroot.")
-                o.blank()
-                o.hint(f"porthole build {action} --yes")
-        return ctx.emit({"action": action, "function": func,
-                         "would_run": not problems, "problems": problems},
+            # The ladder, every time. The expensive mistake here is not a bad
+            # build, it is iterating on the ~10 minute rung when the ~40 second
+            # one covers the change -- and nothing used to say the cheap rungs
+            # existed.
+            o.heading("pick the cheapest rung that covers your change")
+            for name, covers, cost in LADDER:
+                mark = o.sym(">", "*") if name == action else " "
+                o(f"  {mark} {o.paint(name.ljust(7), 'cyan')} {covers}"
+                  f"  {o.paint('(' + cost + ')', 'grey')}")
+            o.blank()
+            if not problems:
+                o.hint(f"porthole build {' '.join([action, *extra])} --yes")
+        return ctx.emit({"action": action, "function": func, "args": extra,
+                         "would_run": not problems, "problems": problems,
+                         "ladder": [dict(zip(("rung", "covers", "cost"), r))
+                                    for r in LADDER]},
                         render)
 
-    if problems and action in ("kernel", "fast"):
+    if problems and action in BUILD_ACTIONS:
         raise Bail("this profile cannot build yet", EX_FAIL,
                    "; ".join(problems))
 
-    rc = _run(ctx, func, args.timeout)
+    rc = _run(ctx, func, args.timeout, extra)
     if rc != 0:
         raise Bail(f"{func} failed", EX_FAIL,
                    "the output above is the build's; `pmbootstrap log` has more")
@@ -154,6 +222,10 @@ SPEC = {
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION", "choices": list(ACTIONS),
                       "help": " | ".join(ACTIONS) + "  (default kernel)"}),
+        (["rest"], {"nargs": "*", "metavar": "ARG",
+                    "help": "mod: MODULE.ko NAME"}),
+        (["--kernel"], {"action": "store_true",
+                        "help": "boot: rebuild Image.gz too, not just dtbs"}),
         (["--timeout"], {"type": int, "default": 5400, "metavar": "SEC",
                          "help": "seconds before giving up (default 5400)"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),
@@ -162,8 +234,11 @@ SPEC = {
     "run": cmd_build,
     "examples": [
         "porthole build",
-        "porthole build kernel --yes",
+        "porthole build mod drivers/media/i2c/imx179.ko imx179 --yes",
+        "porthole build boot --yes",
+        "porthole build boot --kernel --yes",
         "porthole build fast --yes",
+        "porthole build kernel --yes",
         "porthole build clean",
     ],
 }
