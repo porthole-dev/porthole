@@ -16,3 +16,9 @@ __pycache__/
 site-src/
 site/
 mkdocs.yml
+
+# Agent session artifacts: design specs, plans and scratch notes written during
+# a working session. They record how the work was done rather than what the
+# tool is, they go stale the moment the code moves, and they are not something
+# a public repository should carry. Durable design belongs in docs/.
+docs/superpowers/
