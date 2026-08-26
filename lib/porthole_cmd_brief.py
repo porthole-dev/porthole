@@ -65,6 +65,8 @@ def cmd_brief(args, ctx) -> int:
                                 "PORTHOLE_REBOOT_BUDGET_S")
                     if not cfg.get(k)]
 
+    _laws, _findings = _from_brain(pathlib.Path(ctx.root), device,
+                                   cfg.get("PORTHOLE_SOC", ""))
     payload = {
         "porthole_version": version(root),
         "root": str(root),
@@ -98,6 +100,8 @@ def cmd_brief(args, ctx) -> int:
             },
         },
         "rules": [{"rule": r, "why": w} for r, w in RULES],
+        "laws": _laws,
+        "findings": _findings,
         "entrypoints": {
             "agents": "AGENTS.md",
             "humans": "README.md",
@@ -138,6 +142,25 @@ def cmd_brief(args, ctx) -> int:
         for rule, why in RULES:
             ctx.out(f"  {ctx.out.sym('•', '-')} {ctx.out.paint(rule, 'bold')}")
             ctx.out(f"    {ctx.out.paint(why, 'grey')}")
+        if _laws:
+            ctx.out.blank()
+            ctx.out.heading(f"the {len(_laws)} laws — read once, properly")
+            for law in _laws:
+                ctx.out(f"  {ctx.out.sym('•', '-')} {law['law']}")
+            ctx.out(ctx.out.paint("    porthole brain <id>   to read one in full",
+                                  "grey"))
+        if _findings:
+            ctx.out.blank()
+            _n = len(_findings)
+            ctx.out.heading(f"already answered on this port — {_n} "
+                            f"{'finding' if _n == 1 else 'findings'}")
+            ctx.out(ctx.out.paint(
+                "  Read these BEFORE forming a theory. Each one closes a "
+                "question and names\n  the ideas it kills; re-deriving one has "
+                "already cost a day.", "grey"))
+            for f in _findings:
+                ctx.out(f"  {ctx.out.sym('•', '-')} {f['finding']}")
+                ctx.out(f"    {ctx.out.paint('porthole brain ' + f['id'], 'grey')}")
         ctx.out.blank()
         ctx.out.heading("read next")
         for label, path in payload["entrypoints"].items():
@@ -218,6 +241,42 @@ def _port_state(ctx, device: str) -> dict:
         return {**summary, "checklist_has_markers": has_markers}
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _from_brain(root: pathlib.Path, device: str, soc: str):
+    """The laws and the findings, READ from brain/ rather than restated here.
+
+    RULES below is hand-written and stayed that way while brain/laws/ grew to
+    ten notes, so the brief showed three of them and silently omitted seven --
+    including "read the vendor before inventing a mechanism", which cost a day.
+    Writing a law had no effect on what any agent was shown. Generated now, so
+    it cannot drift again.
+
+    Findings are surfaced unprompted because that is the whole point of them: a
+    question already answered is only useful to someone who has not yet decided
+    to go looking.
+    """
+    try:
+        from porthole_cmd_brain import load_notes
+        notes = load_notes(root)
+    except Exception:  # noqa: BLE001 -- the brief must never fail on brain/
+        return [], []
+    want = {"generic"}
+    if soc:
+        want.add(f"soc:{soc}")
+    if device:
+        want.add(f"device:{device}")
+    laws, findings = [], []
+    for n in notes:
+        sev = n.meta.get("severity", "")
+        if sev == "law":
+            laws.append({"law": n.title, "id": n.id})
+        elif sev == "finding" and n.scope in want:
+            findings.append({"finding": n.title, "id": n.id,
+                             "refutes": n.meta.get("refutes", "")})
+    laws.sort(key=lambda d: d["id"])
+    findings.sort(key=lambda d: d["id"])
+    return laws, findings
 
 
 def _next_steps(cfg, device: str, state: str, gaps: list[str]) -> list[str]:
