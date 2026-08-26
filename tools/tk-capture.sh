@@ -99,9 +99,18 @@ if ! ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n true' 2>/dev/null; then
 fi
 
 BOOT_BEFORE=$(tk_boot_id)
-HOST_USB_MAC=$(cat /sys/class/net/enp5s0f3u2/address 2>/dev/null)
-HOST_WLAN_MAC=$(cat /sys/class/net/wlp3s0/address 2>/dev/null)
-HOST_WLAN_IP=$(ip -4 -br addr show wlp3s0 2>/dev/null | awk '{print $3}' | cut -d/ -f1)
+
+# Sampled per arming, NOT once at startup. u_ether hands the host a freshly
+# randomised MAC every time the gadget re-enumerates, so the address is only
+# good for the boot it was read on. Re-arming with the previous one leaves
+# netconsole cheerfully reporting enabled=1 while transmitting at a MAC that no
+# longer exists -- which is the worst failure this tool can have. It cost the
+# first capture that crossed a reboot, and arm.log looked perfect throughout.
+host_ifaces() {
+	HOST_USB_MAC=$(cat /sys/class/net/enp5s0f3u2/address 2>/dev/null)
+	HOST_WLAN_MAC=$(cat /sys/class/net/wlp3s0/address 2>/dev/null)
+	HOST_WLAN_IP=$(ip -4 -br addr show wlp3s0 2>/dev/null | awk '{print $3}' | cut -d/ -f1)
+}
 
 # ---------------------------------------------------------------- arm the device
 # netconsole is CONFIG_NETCONSOLE=y since kernel r28, so the modprobe is a no-op
@@ -127,8 +136,9 @@ arm_target() {  # name dev local_ip remote_ip remote_mac port
 # A reboot takes the configfs target with it, so this has to be re-runnable:
 # in forever mode (DUR=0) watch_forever calls it again on every new boot_id.
 arm_device() {
+host_ifaces
 {
-	echo "--- armed $(date -Iseconds) boot=$(tk_boot_id)"
+	echo "--- armed $(date -Iseconds) boot=$(tk_boot_id) host_mac=$HOST_USB_MAC"
 	ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n modprobe netconsole 2>/dev/null; true'
 	echo "usb0  enabled=$(arm_target usb usb0 "$HOST" 172.16.42.2 "$HOST_USB_MAC" "$TK_CAP_PORT")"
 	if [ "$TK_CAP_WLAN" = 1 ]; then
@@ -205,6 +215,29 @@ start_followers() {
 	echo "$NC_PID $DM_PID $JR_PID" > "$OUT/pids"
 }
 start_followers
+
+# enabled=1 says the target was accepted, not that a packet reaches the host.
+# Push a token through /dev/kmsg and wait for the sink to print it back. This is
+# the only statement about netconsole worth trusting, and it is the check that
+# catches the stale-MAC case, a firewall, and a sink that never bound its port.
+_probe_n=0
+verify_channel() {
+	local tok i
+	_probe_n=$((_probe_n + 1))
+	tok="tk-capture-probe-$$-$_probe_n"
+	ssh "${TK_SSH_OPTS[@]}" "$PHONE" "echo '$tok' | sudo -n tee /dev/kmsg >/dev/null" 2>/dev/null
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		if grep -q "$tok" "$OUT/netconsole.log" 2>/dev/null; then
+			echo ">> netconsole VERIFIED end to end" | tee -a "$OUT/arm.log"
+			return 0
+		fi
+		sleep 1
+	done
+	echo ">> netconsole SILENT -- armed, but nothing arrives on the host." | tee -a "$OUT/arm.log"
+	echo ">> check the host MAC ($HOST_USB_MAC), the sink, and the firewall." | tee -a "$OUT/arm.log"
+	return 1
+}
+verify_channel
 
 cleanup() {
 	# By PID, never by pattern -- see TRAP 2.
@@ -287,6 +320,7 @@ watch_forever() {
 		kill "$DM_PID" "$JR_PID" 2>/dev/null
 		arm_device
 		start_followers
+		verify_channel
 		last=$now
 	done
 }

@@ -311,6 +311,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `channel` | see and switch the postmarketOS release channel | yes | no |
 | `experiment` | run something with the device state captured either side | yes | no |
 | `ui` | see and switch the compositor / desktop | yes | no |
+| `push` | install a helper on the device where it survives a reboot | yes | no |
 | `brain` | search the second brain | yes | no |
 | `run` | run a tool with the config applied | no | no |
 | `new-device` | scaffold a profile for a device nobody has ported yet | yes | no |

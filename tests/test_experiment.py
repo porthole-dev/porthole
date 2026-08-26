@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""`porthole experiment`: the confound gate, and the probe format.
+"""`porthole experiment` and `porthole push`: the session-hygiene verbs.
+
+Both come from docs/RETRO-2026-08-26.md and both exist because a session's
+state was invisible or thrown away.
 
 Motivated by docs/RETRO-2026-08-26.md item 10 -- three findings in one day were
 later refuted by device state nobody had captured: a leftover aplay holding a
@@ -151,6 +154,37 @@ def test_depends_parsing_degrades_without_pmaports():
                                        "PORTHOLE_WORKDIR": "/nonexistent"},
                                       pathlib.Path("/nonexistent"))
     assert deps is None and found is None
+
+
+# --------------------------------------------------------------- push --
+
+def test_push_with_nothing_is_a_usage_error():
+    rc, out, err = run("-d", "google-taimen", "push")
+    assert rc == 64, f"expected EX_USAGE, got {rc}: {out}{err}"
+
+
+def test_push_refuses_a_file_that_does_not_exist():
+    """Before touching the device: a typo should cost a second, not a round
+    trip and a half-written scratch."""
+    rc, out, err = run("-d", "google-taimen", "push", "/nonexistent/thing.sh")
+    assert rc == 64, f"{rc}: {out}{err}"
+    assert "no such file" in (out + err).lower()
+
+
+def test_push_defaults_to_a_path_on_the_device_PATH():
+    import porthole_cmd_push as P
+    assert P.DEFAULT_SCRATCH == "/usr/local/bin", \
+        "a scratch not on PATH loses most of the point"
+    assert P.MANIFEST.startswith("."), "the manifest should not clutter PATH"
+
+
+def test_push_records_what_it_installed_so_clear_is_targeted():
+    """--clear must remove what porthole put there and nothing else. A device
+    with other things in /usr/local/bin should not be surprised."""
+    src = (ROOT / "lib" / "porthole_cmd_push.py").read_text()
+    assert "MANIFEST" in src
+    assert "rm -rf" not in src, "clear must not recurse"
+    assert "while read -r n" in src, "clear should iterate the manifest"
 
 
 def main():
