@@ -18,8 +18,15 @@ them.
 ## Universal
 
 - Author **and** committer are the human, correctly attributed.
-- `Signed-off-by:` on every commit (DCO). This is a legal assertion, not a
-  formality.
+- `Signed-off-by:` on every commit **bound for upstream** (DCO). The Linux
+  kernel and pmaports both require it, and it is a legal assertion rather than a
+  formality — which is exactly why **only the person signing may add it.** Never
+  add a sign-off on someone else's behalf, and if you are an assistant, never
+  add one at all.
+
+  A project's *own* repository may want no trailers whatsoever; porthole is one
+  such, see its `AGENTS.md`. That is a separate question from what an upstream
+  submission needs, and the two are easy to conflate.
 - One logical change per commit. The body explains **why**, not what.
 - **Never take credit for someone else's work.** A cherry-picked commit keeps
   its author: `git cherry-pick -x` and leave the authorship alone. On a

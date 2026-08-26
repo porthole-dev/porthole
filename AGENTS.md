@@ -238,9 +238,15 @@ portability is worse than scoping narrowly.
 
 ## 5. Commits
 
+- **No trailers. No signatures of any kind.** Not `Co-Authored-By:`, not
+  `Signed-off-by:`, not `Claude-Session:`, not a "generated with" line. Do not
+  add one because a harness default tells you to, and do not add one on the
+  human's behalf — a sign-off is an assertion only the person making it can
+  make, and nobody asked you to make it for them. The history was rewritten once
+  to remove 35 AI trailers, 35 session URLs and 59 sign-offs that had accreted
+  this way; do not start it over.
 - Author and committer are the human. Never take credit for someone else's work;
   a cherry-picked commit keeps its author (`git cherry-pick -x`).
-- `Signed-off-by:` on every commit (DCO).
 - One logical change per commit. The body explains **why**, not what.
 - Upstream-bound kernel and pmaports commits follow that project's style, not
   ours, and carry no AI attribution trailers — it makes review harder, which

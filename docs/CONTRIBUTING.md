@@ -116,8 +116,13 @@ breaks somebody's muscle memory silently.
 
 ## Commits
 
-Author and committer are the human. `Signed-off-by:` on every commit. One
-logical change per commit, and the body explains **why**.
+Author and committer are the human. One logical change per commit, and the
+body explains **why**.
+
+**Commits carry no trailers.** No `Signed-off-by:`, no `Co-Authored-By:`, no
+generated-with line. If you are working through an AI assistant, that is your
+business and not the log's — and an assistant must never sign off on your
+behalf, because a sign-off is an assertion only you can make.
 
 A cherry-picked commit keeps its original author — `git cherry-pick -x`. On a
 community port a lot of the early device tree is someone else's work, and

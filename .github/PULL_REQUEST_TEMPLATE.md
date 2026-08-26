@@ -12,7 +12,7 @@
 - [ ] device-specific probes live in `profiles/<codename>/tools/`, not `tools/`
 - [ ] non-trivial logic leaves one runnable check behind
 - [ ] a lesson that generalises became a `brain/` note with its evidence
-- [ ] `Signed-off-by:` on every commit (DCO)
+- [ ] no trailers on any commit — no `Signed-off-by:`, no AI attribution
 
 ## Device coverage
 
