@@ -387,6 +387,33 @@ tkbuild() {
 		--ref-config "$_PH_OUT/.config"
 }
 
+# Wait for the phone to come back, and say which kernel answered.
+#
+# Why this is in the build path at all: every function below used to hand back
+# the instant the device was ASKED to move -- `fastboot boot`, `fastboot reboot`
+# -- which leaves the caller with nothing to do but guess. An agent then writes
+# `sleep 60`, and that is wrong in both directions (see
+# brain/laws/poll-never-sleep.md): it wastes 40 s when the phone came back in 18
+# and calls a failure when it needed 65. The wait belongs in the tool, where the
+# boot id baseline actually exists.
+#
+# TK_BOOT_DEADLINE overrides the deadline; it is the worst case you are willing
+# to call a failure, NOT a poll interval.
+_ph_wait_up() {
+	local old_id=${1:-} secs=${TK_BOOT_DEADLINE:-300} new_id
+	echo ">> waiting for the phone (deadline ${secs}s, polling -- not sleeping)"
+	if ! new_id=$(tk_wait_ssh "$old_id" "$(tk_deadline_ms "$secs")"); then
+		echo ">> phone did not come back within ${secs}s" >&2
+		echo ">>   tools/tk-recover.sh, or porthole serial console, to see why" >&2
+		return 1
+	fi
+	# Which kernel answered is the one question a boot test must not assume.
+	# brain/traps/prove-which-kernel-answered.md
+	echo ">> up: boot_id $new_id"
+	ssh "${TK_SSH_OPTS[@]}" "${PHONE:-$PORTHOLE_USER@$HOST}" \
+		'cat /proc/version' 2>/dev/null | sed 's/^/>> /'
+}
+
 # Flash rootfs AND boot, as a pair.
 #
 # `pmbootstrap install` runs mkfs, which mints NEW filesystem UUIDs, and boot.img
@@ -407,6 +434,13 @@ tkflash() {
 }
 
 tkflash-boot() {
+	# Baseline the boot id BEFORE the device moves, so the wait at the end can
+	# tell "came back" from "never left". Read it while the phone is still up:
+	# once it is in the bootloader there is no ssh to ask, and an empty baseline
+	# compares unequal to every real id -- see
+	# brain/laws/empty-must-mean-unknown-never-changed.md.
+	local old_id; old_id=$(tk_boot_id 2>/dev/null || true)
+
 	# Get there ourselves. tkpush-modules has to run while the phone is UP,
 	# so the caller cannot have parked it in the bootloader beforehand.
 	"$FASTBOOT" devices 2>/dev/null | grep -q fastboot || \
@@ -504,6 +538,7 @@ tkflash-boot() {
 		echo ">> PORTHOLE_ACTIVE_SLOT is unset -- leaving the active slot alone"
 	fi
 	fastboot reboot
+	_ph_wait_up "$old_id"
 }
 
 # FAST cycle: kernel only, UUIDs untouched.
@@ -692,6 +727,34 @@ tkmod() {
 
 		sudo insmod /tmp/$name.ko
 		echo '>> loaded $name'" || return 1
+
+	# Prove the module that is RUNNING is the one just built.
+	#
+	# `insmod` exiting 0 is not that proof: the unbind/rmmod above can leave the
+	# old module in place when something still holds it, and insmod then fails
+	# in ways that read as success at this level. srcversion is a hash of the
+	# module source as built, so comparing the .ko on disk against
+	# /sys/module/<name>/srcversion answers "which binary answered" -- the same
+	# discipline brain/traps/prove-which-kernel-answered.md applies to kernels.
+	#
+	# This is also what removes the caller's reason to sleep-then-poll: when
+	# this returns 0 the new code is loaded, now, and the next test can run.
+	local want sysname
+	want=$(modinfo -F srcversion "$ko" 2>/dev/null)
+	sysname=${name//-/_}
+	if [ -z "$want" ]; then
+		echo ">> WARNING: built $name.ko has no srcversion -- cannot verify the load"
+		return 0
+	fi
+	ssh "${TK_SSH_OPTS[@]}" "$phone" "
+		got=\$(cat /sys/module/$sysname/srcversion 2>/dev/null)
+		if [ -z \"\$got\" ]; then
+			echo '>> $name is NOT loaded (/sys/module/$sysname absent)'; exit 1; fi
+		if [ \"\$got\" != '$want' ]; then
+			echo \">> STALE: running $name is srcversion \$got, built is $want\"
+			echo '>> the old module never unloaded -- something still holds it'
+			exit 1; fi
+		echo '>> verified: running $name is the build just pushed ($want)'" || return 1
 }
 
 # FAST loop for DTS and built-in code: make, repack, RAM-boot. No pmbootstrap.
@@ -711,7 +774,7 @@ _PH_BASEIMG=${TK_BASEIMG:-/tmp/tk-base-boot.img}
 
 tkboot() {
 	local with_kernel=""
-	[ "$1" = "--kernel" ] && with_kernel=1
+	[ "${1:-}" = "--kernel" ] && with_kernel=1
 
 	[ -f "$_PH_BASEIMG" ] || {
 		echo ">> no base image at $_PH_BASEIMG"
@@ -744,6 +807,9 @@ tkboot() {
 			"$_PH_DTB_BUILT" "$out" || return 1
 	fi
 
+	# Baseline before the device moves; see the comment in tkflash-boot.
+	local old_id; old_id=$(tk_boot_id 2>/dev/null || true)
 	"$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
-	"$FASTBOOT" boot "$out"
+	"$FASTBOOT" boot "$out" || return 1
+	_ph_wait_up "$old_id"
 }
