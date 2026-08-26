@@ -84,6 +84,33 @@ to whatever runs in there.
 end against the real thing.** A denial is information; investigate it rather
 than relaxing the rule that produced it.
 
+### What the broker cannot do: build a package
+
+`pmbootstrap chroot`, `shutdown` and the device work around them run under the
+broker. **A package build does not, and cannot.**
+
+Building runs `$WORKDIR/apk.static` as root, on the host. The work directory is
+writable by the invoking user, so permitting an executable out of it would let
+anyone who can write there swap that binary and be root -- which is the whole
+of what this exists to prevent. So the broker refuses it, and that refusal is
+the boundary working rather than a gap to close:
+
+```
+sh -c "exec 3>…/apk_progress_fifo; …/apk.static --root … add …"   ->  DENIED
+                                                    executable must live in a
+                                                    system bin directory
+```
+
+The `exec 3>FIFO; <command>` shape itself IS accepted -- pmbootstrap uses it so
+apk can report progress on fd 3 -- and the command inside it is pulled apart
+and validated exactly like a top-level request, so nothing is laundered by
+appearing in there. It is the apk binary's location that is refused.
+
+For builds, use the container tier, where root maps to your own uid and there
+is no host privilege to confine in the first place. Keeping plain sudo for
+builds is the other option, and an honest one -- but then say so out loud
+rather than believing the broker is covering them.
+
 Reproduce it on your own setup before trusting this list:
 
 ```sh

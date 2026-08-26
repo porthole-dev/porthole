@@ -373,6 +373,41 @@ def test_refuses_a_fifo_outside_the_roots():
     denied("mkfifo", str(OUTSIDE / "fifo"), because="escapes the declared roots")
 
 
+# ------------------------------------------- the apk progress-fifo shape --
+
+def test_allows_the_fifo_redirect_when_the_inner_command_is_allowed():
+    """pmbootstrap runs apk as `sh -c "exec 3>FIFO; <cmd>"` so apk can report
+    progress. The inner command is validated as a request in its own right."""
+    allowed("sh", "-c",
+            f"exec 3>{WORKDIR}/tmp/apk_progress_fifo; "
+            f"touch {WORKDIR}/chroot_native/x")
+
+
+def test_refuses_a_fifo_redirect_out_of_the_roots():
+    denied("sh", "-c", f"exec 3>{OUTSIDE}/fifo; touch {WORKDIR}/x",
+           because="escapes the declared roots")
+
+
+def test_refuses_an_inner_command_that_would_be_refused_on_its_own():
+    """The redirect must not launder anything. A command is not trusted for
+    appearing inside a shape the broker accepts."""
+    denied("sh", "-c",
+           f"exec 3>{WORKDIR}/tmp/f; rm -rf /etc", because="escapes")
+
+
+def test_refuses_running_apk_static_out_of_the_work_directory():
+    """The real reason a package BUILD cannot go through this broker.
+
+    pmbootstrap runs $WORKDIR/apk.static as root, and the work directory is
+    writable by the invoking user -- so permitting it would let anyone who can
+    write there swap the binary and be root. Refusing it is the boundary
+    working, not a gap; see docs/SANDBOX.md."""
+    denied("sh", "-c",
+           f"exec 3>{WORKDIR}/tmp/f; {WORKDIR}/apk.static --root "
+           f"{WORKDIR}/chroot_native add hello",
+           because="system bin directory")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

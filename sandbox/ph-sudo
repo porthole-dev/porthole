@@ -245,6 +245,11 @@ ALLOWED_NODES = {
 # through a shell is unbounded by definition.
 SH_APPEND = re.compile(r"^echo\s+(?P<text>[^|;&<>`$()]*?)\s*>>\s*(?P<path>\S+)$")
 
+# `sh -c "exec 3>FIFO; <command>"` -- how pmbootstrap runs apk so that apk can
+# report progress on fd 3. The command is not trusted because it appears here:
+# it is pulled apart and validated exactly like a top-level request.
+SH_FIFO = re.compile(r"^exec\s+3>(?P<fifo>[^\s;|&<>`$()]+)\s*;\s*(?P<rest>.+)$")
+
 # Mount options that turn a confined mount into an unconfined one.
 FORBIDDEN_MOUNT_OPTS = ("remount", "rbind", "move")
 
@@ -360,10 +365,32 @@ def handle_mount(argv, policy):
 def handle_sh(argv, policy):
     if len(argv) != 3 or argv[1] != "-c":
         deny("only `sh -c <single command>` is accepted", argv)
-    m = SH_APPEND.match(argv[2].strip())
+
+    script = argv[2].strip()
+
+    fifo = SH_FIFO.match(script)
+    if fifo:
+        target = fifo.group("fifo")
+        if not policy.contains(target):
+            deny(f"`sh -c` fd-3 redirect escapes the declared roots: {target}",
+                 argv)
+        try:
+            inner = shlex.split(fifo.group("rest"))
+        except ValueError as exc:
+            deny(f"cannot parse the command after the redirect ({exc})", argv)
+        if not inner:
+            deny("nothing to run after the fd-3 redirect", argv)
+        # Validated as a request in its own right, by the same dispatcher. A
+        # command is not trusted for appearing inside a redirect, and this is
+        # the only reason the shape can be permitted at all.
+        dispatch(inner, policy)
+        return
+
+    m = SH_APPEND.match(script)
     if not m:
         deny("`sh -c` is accepted only for appending a literal line to a "
-             "confined file (`echo TEXT >> PATH`). A shell command is "
+             "confined file (`echo TEXT >> PATH`), or for pmbootstrap's "
+             "`exec 3>FIFO; <command>` progress shape. A shell command is "
              "unbounded by definition, so anything else is refused.", argv)
     path = m.group("path")
     if not policy.contains(path):
@@ -480,21 +507,13 @@ SIMPLE_VERBS = {
 }
 
 
-def main(argv: list[str]) -> int:
-    if not argv:
-        print(__doc__, file=sys.stderr)
-        return EX_MISCONFIG
+def dispatch(argv: list, policy) -> None:
+    """Validate one request. Raises (via deny) rather than returning a verdict.
 
-    # Refuse to run as anything but a root-invoked broker: if this is somehow
-    # executed without privilege the caller should hear about it rather than
-    # silently getting a different result.
-    if os.geteuid() != 0 and not TEST_MODE:
-        print("ph-sudo: must be invoked through sudo (it is the broker, not "
-              "the client)", file=sys.stderr)
-        return EX_MISCONFIG
-
-    policy = Policy.load(POLICY)
-
+    Split out of main() so that a command found inside an accepted `sh -c`
+    shape goes through exactly this, and cannot be waved through by the shell
+    handler having already looked at the string.
+    """
     verb = os.path.basename(argv[0])
     # An absolute argv[0] must itself be a normal system binary; a path into a
     # user-writable directory would let the caller supply the "verb".
@@ -513,6 +532,25 @@ def main(argv: list[str]) -> int:
         deny(f"verb {verb!r} is not in the allowlist. pmbootstrap's observed "
              f"root operations are: "
              f"{', '.join(sorted(set(HANDLERS) | SIMPLE_VERBS))}", argv)
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print(__doc__, file=sys.stderr)
+        return EX_MISCONFIG
+
+    # Refuse to run as anything but a root-invoked broker: if this is somehow
+    # executed without privilege the caller should hear about it rather than
+    # silently getting a different result.
+    if os.geteuid() != 0 and not TEST_MODE:
+        print("ph-sudo: must be invoked through sudo (it is the broker, not "
+              "the client)", file=sys.stderr)
+        return EX_MISCONFIG
+
+    policy = Policy.load(POLICY)
+
+
+    dispatch(argv, policy)
 
     audit("ALLOW", argv)
 
