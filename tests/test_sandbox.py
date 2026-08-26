@@ -325,6 +325,35 @@ def test_refuses_a_copy_out_of_the_roots_even_from_inside():
            because="destination", policy=POLICY_READABLE)
 
 
+def test_allows_the_multi_target_symlink_pmbootstrap_makes():
+    """`ln -s usr/bin usr/sbin usr/lib <chroot>/` is the usrmerge step in a
+    fresh chroot. The links land inside the confined directory."""
+    allowed("ln", "-s", "usr/bin", "usr/sbin", "usr/lib", CH + "/")
+
+
+def test_refuses_multi_target_symlinks_into_a_directory_outside():
+    denied("ln", "-s", "usr/bin", "usr/lib", str(OUTSIDE),
+           because="escapes the declared roots")
+
+
+def test_refuses_a_target_directory_option_pointing_outside():
+    denied("ln", "-s", "-t", str(OUTSIDE), "usr/bin",
+           because="escapes the declared roots")
+
+
+def test_a_readable_directory_covers_the_files_under_it():
+    """pmbootstrap copies its bundled apk keys out of its own install
+    directory, so a readable entry has to be usable as a directory."""
+    keys = TMP / "keys"
+    keys.mkdir(exist_ok=True)
+    (keys / "x.pub").write_text("key")
+    pol = TMP / "sandbox-readable-dir.conf"
+    pol.write_text(f"root = {WORKDIR}\nreadable = {keys}\nallow_chroot = 1\n")
+    allowed("cp", str(keys / "x.pub"), CH + "/etc/apk/x.pub", policy=pol)
+    denied("cp", str(SECRET), CH + "/etc/apk/x.pub", because="readable",
+           policy=pol)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

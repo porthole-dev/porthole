@@ -133,7 +133,17 @@ class Policy:
         self.readable = list(readable)
 
     def is_readable(self, path: str) -> bool:
-        return _resolve_for_check(path) in self.readable
+        """A readable entry may be a file or a directory to read from.
+
+        Prefix-matched the same way as a root, and for the same reason: a
+        listed directory that only matched itself and none of its contents
+        would be a quiet footgun.
+        """
+        resolved = _resolve_for_check(path)
+        for entry in self.readable:
+            if resolved == entry or resolved.startswith(entry + os.sep):
+                return True
+        return False
 
     @classmethod
     def load(cls, path: str) -> "Policy":
@@ -264,19 +274,42 @@ def check_paths(argv: list[str], policy: Policy, skip: int = 1) -> None:
 
 
 def handle_ln(argv, policy):
-    """`ln -s TARGET LINKNAME`: only LINKNAME is written.
+    """Only what ln WRITES is confined; the targets are strings.
 
-    TARGET is just a string stored inside the link -- pmbootstrap legitimately
-    does `ln -s /proc/self/fd/0 <chroot>/dev/stdin`. Confining it would break a
-    real operation and buy nothing, because any later use of the link resolves
+    Two shapes, both real pmbootstrap operations:
+
+        ln -s /proc/self/fd/0 <chroot>/dev/stdin     TARGET LINKNAME
+        ln -s usr/bin usr/sbin usr/lib <chroot>/     TARGET... DIRECTORY
+
+    A TARGET is only text stored inside the link. Confining it would break the
+    first of those and buy nothing, because any later use of the link resolves
     through _resolve_for_check anyway.
+
+    With more than two operands the last is a directory and the links are
+    created inside it as DIRECTORY/basename(TARGET) -- a basename contains no
+    separator, so confining the directory confines every link made in it.
     """
     operands = [a for a in argv[1:] if not a.startswith("-")]
-    if len(operands) != 2:
-        deny("ln must be `ln [-s] TARGET LINKNAME`", argv)
-    linkname = operands[1]
-    if not policy.contains(linkname):
-        deny(f"link name escapes the declared roots: {linkname}", argv)
+
+    # `-t DIR` names the directory explicitly, and then every operand is a
+    # target rather than the last one being the destination.
+    written = None
+    for i, arg in enumerate(argv[1:]):
+        if arg == "-t" and i + 1 < len(argv) - 1:
+            written = argv[i + 2]
+            break
+        if arg.startswith("--target-directory="):
+            written = arg.split("=", 1)[1]
+            break
+
+    if written is None:
+        if len(operands) < 2:
+            deny("ln must be `ln [-s] TARGET... LINKNAME|DIRECTORY`", argv)
+        written = operands[-1]
+
+    if not policy.contains(written):
+        deny(f"link name escapes the declared roots: {written}\n"
+             f"           resolves to: {_resolve_for_check(written)}", argv)
 
 
 def handle_mount(argv, policy):

@@ -239,6 +239,27 @@ def _install(ctx, args) -> int:
         if workdir:
             roots.append(workdir)
 
+    # pmbootstrap copies its bundled apk signing keys out of its own install
+    # directory into the workdir, which is outside the roots. Only bites on a
+    # fresh workdir, and then it stops the first chroot -- so find it now.
+    # pmbootstrap is often run from a checkout rather than installed as a
+    # library, so ask its own entry point where it lives rather than trying to
+    # import it from here.
+    readable_extra = []
+    entry = shutil.which("pmbootstrap")
+    if entry:
+        pkg = pathlib.Path(entry).resolve().parent / "pmb"
+        keys = pkg / "data" / "keys"
+        if keys.is_dir():
+            readable_extra = [
+                "",
+                "# pmbootstrap copies its bundled apk signing keys out of its",
+                "# own install directory into the workdir. Read-only, and it",
+                "# only bites on a fresh workdir -- where it stops the first",
+                "# chroot.",
+                f"readable = {keys}",
+            ]
+
     policy = ["# porthole sandbox policy. Root-owned; the broker refuses to run",
               "# if this file is writable by anyone else.",
               "#",
@@ -256,6 +277,7 @@ def _install(ctx, args) -> int:
         "# you cannot already read. It can never be a copy DESTINATION, which",
         "# is what stops a listed file being overwritten as root.",
         "readable = /etc/resolv.conf",
+        *readable_extra,
         "",
         "# chroot runs an arbitrary command as root, and root inside a chroot",
         "# can escape a chroot. Set to 0 to refuse it on the host entirely and",
