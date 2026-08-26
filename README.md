@@ -14,6 +14,14 @@ day one.
 98 tools · 62 knowledge notes · 28 commands · zero third-party dependencies in the CLI
 ```
 
+> **Work in progress.** This is under active development against real hardware,
+> and it has rough edges — verbs that do not yet cover every case, tools proven
+> on one device and not the next, bugs still being found in ordinary use. It is
+> used daily for real bring-up work, which is exactly why the sharp bits are
+> documented rather than hidden: `brain/` is largely a record of what went
+> wrong. Expect breaking changes before 1.0, read what a command says it will
+> do before passing `--yes`, and please report anything that bites you.
+
 Every push to `main` publishes the documentation to GitHub Pages; `make
 docs-serve` renders the same site locally.
 
