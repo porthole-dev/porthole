@@ -159,6 +159,8 @@ def check_host(ch: Checks, cfg, family: str) -> None:
             ch.add(f"host: {tool}", "warn", f"not found -- {why}",
                    doc=install_hint(tool, family))
 
+    _check_envkernel(ch, cfg)
+
     # flock backs the device mutex. Without it parallel workers corrupt each
     # other's sessions, which is a subtle failure rather than a loud one.
     if shutil.which("flock"):
@@ -167,6 +169,75 @@ def check_host(ch: Checks, cfg, family: str) -> None:
         ch.add("host: flock", "warn",
                "not found -- the device mutex cannot serialise parallel workers",
                doc="part of util-linux; on macOS: brew install flock")
+
+
+def _envkernel_candidates(cfg):
+    """The same search order tools/ph-build.sh uses, in the same order.
+
+    Duplicated deliberately rather than shelled out to: doctor must work when
+    the build path is broken, and that is exactly when it is asked.
+    """
+    home = pathlib.Path.home()
+    src = cfg.get("PORTHOLE_PMBOOTSTRAP_SRC", "")
+    for label, cand in (
+        ("PORTHOLE_ENVKERNEL", cfg.get("PORTHOLE_ENVKERNEL", "")),
+        ("PORTHOLE_PMBOOTSTRAP_SRC", f"{src}/helpers/envkernel.sh" if src else ""),
+        ("the pmbootstrap data dir", home / ".local/share/pmbootstrap/helpers/envkernel.sh"),
+        ("the system install", "/usr/share/pmbootstrap/helpers/envkernel.sh"),
+    ):
+        if cand and pathlib.Path(cand).is_file():
+            return label, str(cand)
+
+    # pipx and pip installs put it beside the pmb package.
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("pmb")
+        if spec and spec.origin:
+            base = pathlib.Path(spec.origin).parent.parent
+            for cand in (base / "helpers/envkernel.sh",
+                         base / "pmb/helpers/envkernel.sh"):
+                if cand.is_file():
+                    return "the installed pmb package", str(cand)
+    except Exception:  # noqa: BLE001 -- a broken pmb must not break doctor
+        pass
+    return None, None
+
+
+def _check_envkernel(ch: Checks, cfg) -> None:
+    """envkernel.sh is what `porthole build` compiles through.
+
+    Reported because on 2026-08-26 `build kernel` died at step one with "cannot
+    find envkernel.sh" on a completely working setup -- a pmbootstrap checkout
+    was sitting in the developer's home directory, simply unconfigured. Doctor
+    names every other fix; not naming this one sent a session to read build
+    internals to learn it needed one variable set.
+    """
+    label, found = _envkernel_candidates(cfg)
+    if found:
+        ch.add("host: envkernel", "ok", f"{found}  (via {label})")
+        return
+
+    # Not configured -- so look for a checkout before saying it is missing.
+    # "It is right there and you did not tell me" is the whole complaint.
+    seen = []
+    home = pathlib.Path.home()
+    for pattern in ("*/pmbootstrap/helpers/envkernel.sh",
+                    "*/*/pmbootstrap/helpers/envkernel.sh"):
+        try:
+            seen.extend(sorted(home.glob(pattern))[:3])
+        except OSError:
+            pass
+    if seen:
+        checkout = seen[0].parent.parent
+        ch.add("host: envkernel", "warn",
+               f"not configured -- but a checkout is present at {checkout}",
+               f"export PORTHOLE_PMBOOTSTRAP_SRC={checkout}"
+               "    # or add it to ~/.config/porthole/config.env")
+        return
+    ch.add("host: envkernel", "warn",
+           "not found -- `porthole build` cannot compile without it",
+           "clone pmbootstrap and set PORTHOLE_PMBOOTSTRAP_SRC to it, "
+           "or set PORTHOLE_ENVKERNEL to helpers/envkernel.sh directly")
 
 
 def check_profile(ch: Checks, cfg, root: pathlib.Path) -> None:
