@@ -27,6 +27,8 @@ import sys
 from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 
 BROKER_SRC = "sandbox/ph-sudo"
+CLIENT_SRC = "sandbox/ph-sudo-client"
+CLIENT_DST = "/usr/local/bin/ph-sudo-client"
 BROKER_DST = "/usr/local/libexec/porthole/ph-sudo"
 POLICY_DST = "/etc/porthole/sandbox.conf"
 AUDIT = "/var/log/porthole-sandbox.log"
@@ -224,6 +226,7 @@ def _install(ctx, args) -> int:
     they just trusted.
     """
     src = ctx.root / BROKER_SRC
+    client_src = ctx.root / CLIENT_SRC
     if not src.is_file():
         raise Bail(f"{src} is missing from this checkout", EX_FAIL)
 
@@ -246,6 +249,14 @@ def _install(ctx, args) -> int:
         policy.append(f"root = {pathlib.Path(r).expanduser()}")
     policy += [
         "",
+        "# Host files a request may READ but never write. pmbootstrap copies",
+        "# the host resolv.conf into the chroot so the chroot has DNS, and",
+        "# that source is outside the roots by design. Listing it grants",
+        "# nothing: it is world-readable, so root reading it discloses nothing",
+        "# you cannot already read. It can never be a copy DESTINATION, which",
+        "# is what stops a listed file being overwritten as root.",
+        "readable = /etc/resolv.conf",
+        "",
         "# chroot runs an arbitrary command as root, and root inside a chroot",
         "# can escape a chroot. Set to 0 to refuse it on the host entirely and",
         "# do chroot work only in `porthole sandbox shell`.",
@@ -263,16 +274,21 @@ set -eu
 sudo install -d -m 0755 /usr/local/libexec/porthole
 sudo install -m 0755 -o root -g root {src} {BROKER_DST}
 
-# 2. the policy: same reasoning.
+# 2. the client: what PMB_SUDO points at. pmbootstrap invokes it directly and
+#    prefixes nothing, so something has to supply the sudo step; the broker
+#    itself stays strictly root-only.
+sudo install -m 0755 -o root -g root {client_src} {CLIENT_DST}
+
+# 3. the policy: same reasoning.
 sudo install -d -m 0755 /etc/porthole
 sudo install -m 0644 -o root -g root /dev/stdin {POLICY_DST} <<'POLICY'
 {policy_text}POLICY
 
-# 3. the audit log, writable by you so the broker can append to it.
+# 4. the audit log, writable by you so the broker can append to it.
 sudo install -m 0664 -o root -g {user} /dev/null {AUDIT} 2>/dev/null || \\
   sudo touch {AUDIT} && sudo chown root:{user} {AUDIT} && sudo chmod 0664 {AUDIT}
 
-# 4. ONE sudoers entry, for the broker alone. visudo -c validates before
+# 5. ONE sudoers entry, for the broker alone. visudo -c validates before
 #    install, because a malformed sudoers file can lock you out of sudo.
 printf '%s\\n' '{user} ALL=(root) NOPASSWD: {BROKER_DST}' \\
   | sudo tee {SUDOERS_DST} >/dev/null
@@ -284,7 +300,7 @@ echo "Now REMOVE the blanket cache, which is the actual hole:"
 echo "  sudo visudo    # delete any 'Defaults:{user} timestamp_timeout=<large>'"
 echo
 echo "Then add to your shell profile:"
-echo "  export PMB_SUDO={BROKER_DST}"
+echo "  export PMB_SUDO={CLIENT_DST}"
 """
 
     def render():
@@ -318,7 +334,7 @@ echo "  export PMB_SUDO={BROKER_DST}"
         o.blank()
         o.heading("then")
         o.hint("porthole sandbox status")
-        o.hint(f"export PMB_SUDO={BROKER_DST}   # add to your shell profile")
+        o.hint(f"export PMB_SUDO={CLIENT_DST}   # add to your shell profile")
         o.hint("sudo visudo   # and delete the blanket timestamp_timeout")
 
     if args.json:
@@ -342,7 +358,7 @@ def _uninstall(ctx) -> int:
     user = getpass.getuser()
     ctx.out.heading("remove the sandbox")
     ctx.out.blank()
-    for line in [f"sudo rm -f {SUDOERS_DST} {BROKER_DST} {POLICY_DST}",
+    for line in [f"sudo rm -f {SUDOERS_DST} {BROKER_DST} {CLIENT_DST} {POLICY_DST}",
                  f"# your PMB_SUDO export in ~/.bashrc or ~/.zshrc too"]:
         ctx.out(ctx.out.paint("  " + line, "cyan"))
     ctx.out.blank()

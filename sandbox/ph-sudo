@@ -124,9 +124,16 @@ class Policy:
     user can edit is not a policy.
     """
 
-    def __init__(self, roots: list[str], allow_chroot: bool):
+    def __init__(self, roots: list[str], allow_chroot: bool,
+                 readable: list = ()):
         self.roots = roots
         self.allow_chroot = allow_chroot
+        # Host files a request may READ but never write. Kept separate from
+        # roots because a root is writable and these must not be.
+        self.readable = list(readable)
+
+    def is_readable(self, path: str) -> bool:
+        return _resolve_for_check(path) in self.readable
 
     @classmethod
     def load(cls, path: str) -> "Policy":
@@ -149,7 +156,7 @@ class Policy:
             deny(f"policy file {path} is writable by non-root (mode "
                  f"{st.st_mode & 0o777:o})", sys.argv[1:], EX_MISCONFIG)
 
-        roots, allow_chroot = [], True
+        roots, allow_chroot, readable = [], True, []
         with open(path) as fh:
             for raw in fh:
                 line = raw.split("#", 1)[0].strip()
@@ -161,10 +168,13 @@ class Policy:
                     roots.append(os.path.realpath(os.path.expanduser(value)))
                 elif key == "allow_chroot":
                     allow_chroot = value.lower() in ("1", "true", "yes")
+                elif key == "readable":
+                    readable.append(
+                        os.path.realpath(os.path.expanduser(value)))
         if not roots:
             deny(f"policy file {path} declares no roots", sys.argv[1:],
                  EX_MISCONFIG)
-        return cls(roots, allow_chroot)
+        return cls(roots, allow_chroot, readable)
 
     def contains(self, path: str) -> bool:
         """Is this path inside a declared root, after resolving symlinks?
@@ -364,6 +374,44 @@ def handle_env(argv, policy):
           "arbitrary payload inside a confined chroot; see docs/SANDBOX.md")
 
 
+def handle_cp(argv, policy):
+    """`cp SRC... DST`: DST is confined as always, SRC may also be a file the
+    policy lists as readable.
+
+    pmbootstrap copies the host's /etc/resolv.conf into the chroot so that the
+    chroot has DNS, and that source is deliberately outside the roots. Refusing
+    it stops a build dead at the first chroot.
+
+    The two positions are NOT interchangeable, and that asymmetry is the whole
+    security property:
+
+      - as a SOURCE the file is only read. A listed file must be one the
+        invoking user can already read, so root reading it discloses nothing
+        new. Allowing arbitrary sources would not be safe -- `cp /etc/shadow
+        <chroot>/tmp/x` would hand the user a file they cannot otherwise read.
+      - as a DESTINATION it would be written as root. That is never allowed
+        outside the roots, or a listed /etc/resolv.conf could be overwritten to
+        hijack DNS.
+    """
+    operands = [a for a in argv[1:] if not a.startswith("-")]
+    if len(operands) < 2:
+        deny("cp must have at least a source and a destination", argv)
+
+    for src in operands[:-1]:
+        if "\0" in src:
+            deny("argument contains a NUL byte", argv)
+        if policy.contains(src) or policy.is_readable(src):
+            continue
+        deny(f"copy source escapes the declared roots and is not listed as "
+             f"readable: {src}\n"
+             f"           resolves to: {_resolve_for_check(src)}", argv)
+
+    dst = operands[-1]
+    if not policy.contains(dst):
+        deny(f"copy destination escapes the declared roots: {dst}\n"
+             f"           resolves to: {_resolve_for_check(dst)}", argv)
+
+
 def handle_losetup(argv, policy):
     # `losetup --json --list` is read-only enumeration and safe. Attaching or
     # detaching a loop device is not: it can expose any file as a block device.
@@ -379,13 +427,14 @@ HANDLERS = {
     "mknod": handle_mknod,
     "env": handle_env,
     "losetup": handle_losetup,
+    "cp": handle_cp,
 }
 
 # Verbs whose every path argument simply has to be confined. Derived from an
 # empirical capture of a full pmbootstrap chroot + shutdown cycle; see
 # docs/SANDBOX.md for the method and the raw list.
 SIMPLE_VERBS = {
-    "umount", "rm", "mkdir", "chmod", "chown", "touch", "cp", "install",
+    "umount", "rm", "mkdir", "chmod", "chown", "touch", "install",
     "mv", "rmdir", "sed", "tee", "dd", "sync", "truncate", "stat", "readlink",
 }
 

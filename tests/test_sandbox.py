@@ -33,6 +33,14 @@ OUTSIDE.mkdir()
 POLICY = TMP / "sandbox.conf"
 POLICY.write_text(f"root = {WORKDIR}\nallow_chroot = 1\n")
 
+# A host file the policy permits as a COPY SOURCE and nothing else.
+READABLE = TMP / "resolv.conf"
+READABLE.write_text("nameserver 127.0.0.53\n")
+SECRET = OUTSIDE / "secret"
+POLICY_READABLE = TMP / "sandbox-readable.conf"
+POLICY_READABLE.write_text(
+    f"root = {WORKDIR}\nreadable = {READABLE}\nallow_chroot = 1\n")
+
 
 def broker(*argv, policy=None, allow_chroot=True):
     """Run the broker's decision logic. Returns (rc, stdout, stderr).
@@ -282,6 +290,40 @@ def test_every_decision_is_audited():
 
 
 # ------------------------------------------------------------------- runner --
+
+# ------------------------------------------------- the readable allowlist --
+# pmbootstrap copies the host resolv.conf into the chroot for DNS. The source
+# is outside the roots by design, so without this the first chroot fails.
+
+def test_allows_a_listed_host_file_as_a_copy_source():
+    allowed("cp", str(READABLE), CH + "/etc/resolv.conf",
+            policy=POLICY_READABLE)
+
+
+def test_refuses_a_listed_host_file_as_a_copy_DESTINATION():
+    """The asymmetry is the security property. A listed file is readable, not
+    writable -- otherwise resolv.conf could be rewritten as root to hijack
+    DNS."""
+    denied("cp", CH + "/etc/resolv.conf", str(READABLE),
+           because="destination", policy=POLICY_READABLE)
+
+
+def test_refuses_an_unlisted_host_file_as_a_copy_source():
+    """Allowing arbitrary sources would hand the user files they cannot read:
+    `cp /etc/shadow <chroot>/tmp/x` and then read it out of the chroot."""
+    denied("cp", str(SECRET), CH + "/tmp/stolen",
+           because="readable", policy=POLICY_READABLE)
+
+
+def test_a_copy_source_is_not_allowed_when_the_policy_lists_nothing():
+    """Fails closed: the allowlist is opt-in, not a default."""
+    denied("cp", str(READABLE), CH + "/etc/resolv.conf", because="readable")
+
+
+def test_refuses_a_copy_out_of_the_roots_even_from_inside():
+    denied("cp", CH + "/etc/apk/world", str(OUTSIDE / "exfiltrated"),
+           because="destination", policy=POLICY_READABLE)
+
 
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())

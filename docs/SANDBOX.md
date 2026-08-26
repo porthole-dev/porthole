@@ -33,6 +33,13 @@ def sudo(cmd):
     return [sudo, *cmd] if sudo else cmd
 ```
 
+pmbootstrap invokes whatever `PMB_SUDO` names **directly**, prefixing nothing,
+so the broker cannot be that value: it refuses to run unless it is already
+root. `ph-sudo-client` is the unprivileged half that supplies the `sudo` step,
+and it is what `PMB_SUDO` points at. The broker never elevates itself -- a
+boundary that calls sudo on its own behalf is harder to reason about than one
+that simply refuses to run without privilege.
+
 So `PMB_SUDO=<something>` routes every root request pmbootstrap makes through a
 program of your choosing, as argv. That is the whole basis of this design, and
 it is a supported upstream feature rather than a hack.
@@ -183,7 +190,7 @@ you is the correct behaviour rather than a limitation.
 After running it:
 
 ```sh
-export PMB_SUDO=/usr/local/libexec/porthole/ph-sudo   # add to your profile
+export PMB_SUDO=/usr/local/bin/ph-sudo-client   # add to your profile
 sudo visudo    # DELETE the Defaults:you timestamp_timeout=<large> line
 ```
 
@@ -194,7 +201,7 @@ Verify:
 
 ```sh
 porthole sandbox status
-PMB_SUDO=/usr/local/libexec/porthole/ph-sudo pmbootstrap chroot -- uname -a
+PMB_SUDO=/usr/local/bin/ph-sudo-client pmbootstrap chroot -- uname -a
 porthole sandbox audit --denied
 ```
 

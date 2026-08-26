@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# The client half of the porthole privilege broker.
+#
+# pmbootstrap resolves $PMB_SUDO and then invokes it directly, prefixing
+# nothing -- while the broker refuses to run unless it is already root. So
+# PMB_SUDO pointed straight at the broker fails on the first root operation
+# with exit 78, and every build stops there. This supplies the missing sudo
+# step, which is exactly what a human would type by hand.
+#
+# It is unprivileged and grants nothing by itself: sudo still consults the one
+# NOPASSWD entry that exists for the broker path, and the broker still
+# validates every request, as root, against /etc/porthole/sandbox.conf.
+#
+# The broker deliberately does NOT elevate itself. A security boundary that
+# calls sudo on its own behalf is harder to reason about than one that simply
+# refuses to run without privilege, and this file is the cost of keeping that
+# property.
+exec sudo /usr/local/libexec/porthole/ph-sudo "$@"
