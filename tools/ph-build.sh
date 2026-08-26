@@ -44,7 +44,11 @@
 . "$(dirname "${BASH_SOURCE[0]}")/tk-lib.sh"
 
 _PH_REPO=${PORTHOLE_WORKDIR:?set PORTHOLE_WORKDIR to the device working repo (kernel, pmaports, blobs) in ~/.config/porthole/config.env}
-_PH_TREE="$_PH_REPO/linux"
+# Honour PORTHOLE_KERNEL_TREE the way dts, kconfig and verify already do. The
+# series being built is not always on the branch the main checkout happens to
+# be sitting on -- it is often a worktree -- and switching the main checkout to
+# reach it is how a half-finished branch gets built and flashed.
+_PH_TREE=${PORTHOLE_KERNEL_TREE:-$_PH_REPO/linux}
 _PH_PMB=${PORTHOLE_PMB_DIR:-$_PH_PMB}
 # The kernel APORT to build. It MUST name the same kernel series the tree is on:
 # pmaports carries both linux-postmarketos-qcom-msm8998 (6.0) and -6.18, and
