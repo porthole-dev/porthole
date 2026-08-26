@@ -43,6 +43,23 @@ export XDG_CACHE_HOME="$WORK/.cache"
 export PATH=/usr/bin:/bin
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
 
+# ...and nothing porthole reads in its environment. A developer who has run
+# `porthole use` has the whole set exported, and the config layer puts the
+# environment ABOVE the config file -- correctly. So `init --user ci` wrote
+# PORTHOLE_USER=ci to the config while `config PHONE` still answered
+# user@172.16.42.1 from the environment, and the headless-bootstrap check was
+# red on every developer machine and green on the runner. That is the exact
+# drift this script's header says it exists to catch, so clear them rather
+# than teaching people to ignore one permanently red line.
+#
+# The bare legacy knobs (lib/porthole.sh "compatibility surface") carry no
+# prefix, so a PORTHOLE_*/TK_* pattern alone does not reach them -- PHONE is
+# precisely the one that was winning.
+for _v in $(env | sed -n 's/^\(PORTHOLE_[A-Z0-9_]*\|TK_[A-Z0-9_]*\)=.*/\1/p') \
+          PHONE HOST FASTBOOT; do
+	unset "$_v" || :
+done
+
 fail=0
 say() { printf '%s %s\n' "$1" "$2"; }
 
