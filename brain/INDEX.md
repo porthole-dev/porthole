@@ -36,6 +36,7 @@ generic notes as well.
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
 | [a-module-parameter-that-does-not-exist-is-ignored](traps/a-module-parameter-that-does-not-exist-is-ignored.md) | `generic` | A module parameter that does not exist is silently ignored |
+| [a-module-reload-does-not-reset-this-cards-audio-state](traps/a-module-reload-does-not-reset-this-cards-audio-state.md) | `device:google-taimen` | A module reload re-registers the card and leaves capture broken — audio needs a reboot |
 | [a-ram-booted-kernel-cannot-survive-a-long-sleep](traps/a-ram-booted-kernel-cannot-survive-a-long-sleep.md) | `generic` | A RAM-booted kernel cannot survive a long sleep — suspend work needs a flashed slot |
 | [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
@@ -102,7 +103,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 1
+- `device:google-taimen` — 2
 - `generic` — 60
 - `soc:gs201` — 1
 - `soc:msm8998` — 2
