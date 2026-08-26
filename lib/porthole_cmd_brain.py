@@ -19,7 +19,13 @@ import sys
 
 from porthole_cli import Bail
 
-SECTIONS = ("laws", "traps", "playbooks", "workflow", "devices")
+# findings is deliberately first. A trap says "do not do X"; a finding says
+# "X is already answered, here is the answer and here is the theory it kills".
+# Only the first kind was ever indexed, which is how a document that explicitly
+# refuted two theories sat unread while both were re-derived over a day
+# (docs/RETRO-2026-08-26.md item 14). Ordering is not cosmetic here: the whole
+# failure was an answer ranked below the warnings.
+SECTIONS = ("findings", "laws", "traps", "playbooks", "workflow", "devices")
 
 # A deliberately small frontmatter reader. The alternative is a YAML dependency,
 # and the frontmatter here is flat key: value by convention -- enforced by
@@ -105,6 +111,16 @@ def scope_matches(note_scope: str, want: str) -> bool:
 ACTIONS = ("search", "new", "lint", "submit", "reindex")
 
 
+def _rank(note) -> int:
+    """Findings sort above everything else at equal relevance.
+
+    Not a preference: an answer that already exists outranks a warning about
+    the territory, and burying it under the warnings is the exact failure this
+    section was added for.
+    """
+    return 0 if note.section == "findings" else 1
+
+
 def cmd_brain(args, ctx) -> int:
     root = pathlib.Path(ctx.root)
 
@@ -149,15 +165,21 @@ def cmd_brain(args, ctx) -> int:
             continue
         if args.severity and note.meta.get("severity") != args.severity:
             continue
-        haystack = (note.title + " " + note.id + " " + note.body).lower()
+        # `refutes` is searched too: you look for the theory you are about to
+        # re-derive, and the note that kills it is what you should find.
+        haystack = (note.title + " " + note.id + " " + note.body + " "
+                    + note.meta.get("refutes", "")).lower()
         # All terms must appear. Ranking by title hits first: a note whose
         # title matches is nearly always the one you meant.
         if terms and not all(t in haystack for t in terms):
             continue
         score = sum(2 for t in terms if t in (note.title + note.id).lower())
-        hits.append((-score, note.section, note.id, note))
+        # A hit in `refutes` is the strongest signal there is: it means this
+        # note exists specifically to stop the idea you just typed.
+        score += sum(3 for t in terms if t in note.meta.get("refutes", "").lower())
+        hits.append((_rank(note), -score, note.section, note.id, note))
 
-    hits.sort(key=lambda h: h[:3])
+    hits.sort(key=lambda h: h[:4])
 
     if args.json:
         print(json.dumps([n.as_dict(root) for *_, n in hits], indent=2))
@@ -181,9 +203,20 @@ def cmd_brain(args, ctx) -> int:
     # section goes in a column rather than a heading that would repeat.
     width = max(len(n.id) for *_, n in hits)
     swidth = max(len(n.section) for *_, n in hits)
+    findings = [n for *_, n in hits if n.section == "findings"]
     for *_, note in hits:
         print(f"  {note.section:<{swidth}}  {note.id:<{width}}  {note.title}")
     print(f"\n{len(hits)} notes. `porthole brain <id>` to read one.")
+    if findings:
+        # Said out loud rather than left to the section column. The point of a
+        # finding is that it ends an investigation before it starts.
+        n = len(findings)
+        noun = "is a FINDING" if n == 1 else "are FINDINGS"
+        it = "it" if n == 1 else "them"
+        print(f"\n{n} of these {noun} -- a question already answered on this "
+              f"port." if n == 1 else
+              f"\n{n} of these {noun} -- questions already answered on this port.")
+        print(f"Read {it} before forming a theory; that is what findings are for.")
     return 0
 
 
@@ -236,7 +269,7 @@ def write_index(root: pathlib.Path, notes: list[Note]) -> int:
 REQUIRED_FIELDS = ("id", "title", "scope", "subsystem", "severity",
                    "confidence", "evidence")
 VALID_SCOPE = re.compile(r"^(generic|soc:[a-z0-9_-]+|device:[a-z0-9-]+)$")
-VALID_SEVERITY = {"law", "trap", "technique", "fact"}
+VALID_SEVERITY = {"law", "trap", "technique", "fact", "finding"}
 VALID_CONFIDENCE = {"proven", "probable", "suspected"}
 
 TEMPLATE = """---
@@ -300,6 +333,15 @@ def _lint_note(note, index, root) -> list[str]:
                         f"device:<codename>")
 
     sev = note.meta.get("severity", "")
+    if sev == "finding":
+        refutes = note.meta.get("refutes", "").strip()
+        if not refutes or refutes.startswith("TODO"):
+            problems.append(
+                "a finding needs a `refutes:` line naming the theories it "
+                "kills -- that is how someone about to re-derive one finds it")
+    elif note.meta.get("refutes"):
+        problems.append("`refutes:` belongs on a finding; this is a "
+                        f"{sev or 'note'}")
     if sev and sev not in VALID_SEVERITY:
         problems.append(f"severity {sev!r} is not one of "
                         f"{', '.join(sorted(VALID_SEVERITY))}")
@@ -372,6 +414,36 @@ def cmd_lint(args, ctx, root) -> int:
     return 1 if fatal else 0
 
 
+# A finding is shaped differently from a trap and must not borrow its template.
+# A trap warns about territory: symptom, cause, what to do instead. A finding
+# closes a question: here is what was asked, here is the answer, and here are
+# the theories that are now dead. The `refutes:` line is the load-bearing part
+# -- it is what makes the note findable by someone about to re-derive the very
+# idea it killed.
+FINDING_TEMPLATE = """---
+id: {id}
+title: {title}
+scope: {scope}
+subsystem: {subsystem}
+severity: finding
+confidence: {confidence}
+evidence: {evidence}
+refutes: {refutes}
+first-learned: {date}
+---
+
+**The question** — what was actually being asked, in the words someone would
+search for before they knew the answer.
+
+**The answer** —
+
+**What this rules out** — the theories that are dead, named plainly. Someone
+about to spend a day on one of them should recognise it here and stop.
+
+**How it was established** — the measurement, and what would overturn it.
+"""
+
+
 def cmd_new(args, ctx, root) -> int:
     import datetime
 
@@ -385,6 +457,7 @@ def cmd_new(args, ctx, root) -> int:
 
     section = args.section or {"law": "laws", "trap": "traps",
                                "technique": "playbooks",
+                               "finding": "findings",
                                "fact": "traps"}.get(args.severity or "trap",
                                                     "traps")
     target = pathlib.Path(root) / "brain" / section / f"{note_id}.md"
@@ -393,6 +466,25 @@ def cmd_new(args, ctx, root) -> int:
                    f"porthole brain {note_id}   to read it")
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    if (args.severity or "") == "finding" or section == "findings":
+        target.write_text(FINDING_TEMPLATE.format(
+            id=note_id,
+            title=args.title or note_id.replace("-", " ").capitalize(),
+            scope=args.scope or "generic",
+            subsystem=args.subsystem or "TODO",
+            confidence=args.confidence or "proven",
+            evidence=args.evidence or "TODO: the measurement, that a stranger can re-check",
+            refutes=args.refutes or "TODO: the theories this kills, comma separated",
+            date=datetime.date.today().isoformat()))
+        ctx.out(f"{ctx.out.paint(ctx.out.sym('✓', 'ok'), 'green')} "
+                f"{target.relative_to(root)}")
+        ctx.out.blank()
+        ctx.out.hint(f"$EDITOR {target.relative_to(root)}")
+        ctx.out.hint("fill in `refutes:` -- it is how someone finds this "
+                     "before re-deriving it")
+        ctx.out.hint("porthole brain lint            does it meet the bar")
+        return 0
+
     target.write_text(TEMPLATE.format(
         id=note_id,
         title=args.title or note_id.replace("-", " ").capitalize(),
@@ -512,6 +604,8 @@ SPEC = {
                        "help": "generic | soc:<soc> | device:<codename>"}),
         (["--subsystem"], {"metavar": "NAME",
                            "help": "filter by, or set on a new note"}),
+        (["--refutes"], {"metavar": "TEXT",
+                         "help": "new: for a finding -- the theories it kills"}),
         (["--severity"], {"metavar": "LEVEL",
                           "help": "law | trap | technique | fact -- filter by, "
                                   "or set on a new note"}),
