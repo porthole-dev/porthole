@@ -318,6 +318,7 @@ echo "  export PMB_SUDO={CLIENT_DST}"
         o.blank()
         o.heading("what it installs")
         o("  the broker    " + BROKER_DST + "  (root-owned, 0755)")
+        o("  the client    " + CLIENT_DST + "  (what PMB_SUDO points at)")
         o("  the policy    " + POLICY_DST + "  (root-owned, 0644)")
         o("  one sudoers   " + SUDOERS_DST + "  (for the broker alone)")
         o("  an audit log  " + AUDIT)
