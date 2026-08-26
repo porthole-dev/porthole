@@ -251,7 +251,11 @@ SPEC = {
         "the command, snapshots after, and diffs. Probes and confound checks\n"
         "come from profiles/<codename>/probes.conf, because what counts as\n"
         "contamination is a device fact."),
-    "escapes_scope": True,
+    # NOT escapes_scope: that flag marks verbs which WRITE outside their own
+    # profile -- build into the chroot, flash onto the device, aports into
+    # pmaports -- and it requires --yes. This writes only gitignored run state
+    # and executes a command the caller typed, which is what `porthole run`
+    # does, and run does not set it either.
     "args": [
         (["--tag"], {"metavar": "NAME", "help": "name this run's record"}),
         (["--allow-dirty"], {"action": "store_true",
@@ -264,7 +268,7 @@ SPEC = {
     "run": cmd_experiment,
     "examples": [
         "porthole experiment probes",
-        "porthole experiment --tag mic-gain -- tools/tk-capture.sh 20",
-        "porthole experiment -- porthole build mod drivers/foo.ko foo --yes",
+        "porthole experiment --tag mic-gain tools/tk-capture.sh 20",
+        "porthole experiment tools/tk-suspend-cycle.sh 5",
     ],
 }

@@ -309,6 +309,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `devices` | list device profiles | yes | no |
 | `aports` | work on pmaports: status, feature branches, diffs, patches | yes | needs --yes |
 | `channel` | see and switch the postmarketOS release channel | yes | no |
+| `experiment` | run something with the device state captured either side | yes | no |
 | `ui` | see and switch the compositor / desktop | yes | no |
 | `brain` | search the second brain | yes | no |
 | `run` | run a tool with the config applied | no | no |
