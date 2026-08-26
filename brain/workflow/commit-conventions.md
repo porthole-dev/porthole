@@ -34,7 +34,24 @@ Destination is mainline, or at minimum a maintained SoC tree. See
 ## Distribution packaging commits
 
 Follow the distribution's style, which is usually not the kernel's. For pmaports
-that means Alpine conventions.
+that means Alpine conventions — **`pmaports/COMMITSTYLE.md` is authoritative**,
+and it follows Alpine's aports COMMITSTYLE with these pmOS additions:
+
+- Packages under `device/` **omit the directory prefix**:
+  `device-google-taimen: description` — not `device/testing/…`. The SoC form
+  (`soc-qcom-msm8998: …`) and the short form (`google-taimen: …`) are both valid.
+- Packages under `extra-repos/systemd/`: `systemd: …` or `systemd/$pkgname: …`.
+- Moving a device between categories:
+  `manufacturer-codename: move from testing to community`.
+- Forking from Alpine: `pmbootstrap aportgen --fork-alpine <pkg>`, then
+  `temp/<pkg>: fork from Alpine`. **One commit per forked package.**
+- A new device: `manufacturer-codename: new device`, **one device per commit**,
+  with its device-specific kernel and firmware packages in that same commit.
+- Do not put `pkgrel` bumps in the subject. Describe the change; the bump is an
+  implementation detail of the same commit.
+
+For what a kernel aport should be *based on*, see
+[[base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork]].
 
 ## On AI attribution
 

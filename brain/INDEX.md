@@ -30,11 +30,13 @@ generic notes as well.
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
 | [a-module-parameter-that-does-not-exist-is-ignored](traps/a-module-parameter-that-does-not-exist-is-ignored.md) | `generic` | A module parameter that does not exist is silently ignored |
+| [a-ram-booted-kernel-cannot-survive-a-long-sleep](traps/a-ram-booted-kernel-cannot-survive-a-long-sleep.md) | `generic` | A RAM-booted kernel cannot survive a long sleep — suspend work needs a flashed slot |
 | [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
 | [apr-service-inherits-a-protection-domain-the-board-deletes](traps/apr-service-inherits-a-protection-domain-the-board-deletes.md) | `soc:qcom` | A new APR service inherits a protection domain the board deletes |
+| [base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork](traps/base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork.md) | `generic` | Base a kernel aport on pristine kernel.org or a pinned tag — never an untagged vendor fork |
 | [busybox-reboot-eats-the-mode-string](traps/busybox-reboot-eats-the-mode-string.md) | `generic` | busybox `reboot bootloader` silently discards the word "bootloader |
 | [critical-chain-shows-the-longest-path-not-the-floor](traps/critical-chain-shows-the-longest-path-not-the-floor.md) | `generic` | systemd-analyze critical-chain shows the longest path, not the floor |
 | [dmesg-can-be-empty-about-boot](traps/dmesg-can-be-empty-about-boot.md) | `generic` | dmesg can be empty about boot while the journal still has everything |
@@ -51,7 +53,9 @@ generic notes as well.
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
 | [stale-dev-package-outranks-your-build](traps/stale-dev-package-outranks-your-build.md) | `generic` | A _p<timestamp> dev snapshot outranks a release, so apk installs a kernel from days ago |
+| [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
+| [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [unmasked-suspend-during-an-automated-wait-is-a-death-loop](traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md) | `generic` | Unmasking suspend before an automated wait can loop a device out of reach |
 | [usb-ids-cannot-tell-booted-from-bootloader](traps/usb-ids-cannot-tell-booted-from-bootloader.md) | `generic` | lsusb can label a running pmOS USB gadget as "fastboot |
 | [wait-long-enough-before-calling-a-boot-failed](traps/wait-long-enough-before-calling-a-boot-failed.md) | `generic` | Wait long enough before calling a boot failed |
@@ -91,7 +95,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 54
+- `generic` — 58
 - `soc:gs201` — 1
 - `soc:msm8998` — 1
 - `soc:qcom` — 1
