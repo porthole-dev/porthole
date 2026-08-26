@@ -11,11 +11,11 @@ Pixel 2 XL, made generic — so the next device starts from month three instead 
 day one.
 
 ```
-98 tools · 55 knowledge notes · 25 commands · zero third-party dependencies in the CLI
+98 tools · 62 knowledge notes · 28 commands · zero third-party dependencies in the CLI
 ```
 
-Docs: `make docs-serve`, or set the `PUBLISH_DOCS` repository
-variable to publish them to GitHub Pages.
+Every push to `main` publishes the documentation to GitHub Pages; `make
+docs-serve` renders the same site locally.
 
 ---
 
@@ -552,12 +552,31 @@ tests enforce the contracts so that stays true.
 
 ## Status
 
-Proven against one device (`google-taimen`, MSM8998). That is stated as a
-coverage limit rather than papered over: tools are scoped honestly, and a probe
-encoding a vendor protocol lives in that device's profile rather than pretending
-to be portable.
+Proven against one device (`google-taimen`, MSM8998), with a second
+(`google-cheetah`, GS201) in progress. That is stated as a coverage limit rather
+than papered over: every tool declares its scope, and a probe encoding a vendor
+protocol lives in that device's profile rather than pretending to be portable.
 
-Second devices very welcome.
+**The most useful thing you can do is bring a second device.** Not because the
+tools need testing — because the line between "this is how phones work" and
+"this is how *this* phone works" is only visible from two devices, and every
+note in `brain/` that is wrongly marked `scope: generic` is a trap waiting for
+the next person. `porthole new-device <codename>` scaffolds a profile in one
+command.
+
+## Acknowledgements
+
+The original Pixel 2 XL mainline work this port builds on is by **Caleb
+Connolly**, **Yassine Oudjana**, **Joel Selvaraj**, **Jami Kettunen**,
+**AngeloGioacchino Del Regno** and **Konrad Dybcio**. postmarketOS and
+pmbootstrap are the ground everything here stands on.
+
+Much of this codebase was written with **Claude** (Anthropic) as a pair
+programmer, over sessions that also produced most of `brain/` — the traps in
+there are the record of what went wrong while doing it. The commit log is kept
+free of assistant trailers deliberately: the work is the author's, the mistakes
+are the author's, and a log full of tool attribution helps nobody reading it in
+two years.
 
 ## Licence
 
