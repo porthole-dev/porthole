@@ -77,6 +77,24 @@ if ! ssh "${TK_SSH_OPTS[@]}" "$PHONE" true 2>/dev/null; then
 	exit 1
 fi
 
+# Every arm step below is `sudo -n ... >/dev/null 2>&1`, because a channel this
+# device does not have must not be an error. The cost of that: with no
+# passwordless sudo, EVERY step fails silently, the script arms nothing, and the
+# only symptom is an empty log noticed hours later -- after the run it was meant
+# to capture is over and the device has moved on.
+#
+# So check the one precondition all of them share, once, loudly, before arming.
+# brain/traps/no-passwordless-sudo-disables-the-whole-toolbox.md
+if ! ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n true' 2>/dev/null; then
+	echo "tk-capture: no passwordless sudo on $PHONE -- it would arm NOTHING" >&2
+	echo "  and you would find out from an empty log, after the run." >&2
+	echo "  Fix it on the DEVICE, then re-run:" >&2
+	echo "    echo '<user> ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/99-porthole-dev" >&2
+	echo "    sudo chmod 0440 /etc/sudoers.d/99-porthole-dev" >&2
+	echo "  porthole doctor checks this too." >&2
+	exit 1
+fi
+
 BOOT_BEFORE=$(tk_boot_id)
 HOST_USB_MAC=$(cat /sys/class/net/enp5s0f3u2/address 2>/dev/null)
 HOST_WLAN_MAC=$(cat /sys/class/net/wlp3s0/address 2>/dev/null)

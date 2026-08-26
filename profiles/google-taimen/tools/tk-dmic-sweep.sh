@@ -1,8 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: device:google-taimen
-# needs: BOOTED
-# env: PHONE
+# needs: on-device (run it on the device: `porthole run tk-dmic-sweep.sh`)
+# env: -
 # exits: 0 ok · non-zero on failure
 # tk-dmic-sweep.sh [seconds] -- runs ON THE PHONE.
 #
@@ -15,14 +15,35 @@
 # pin-pair shares one clock and one data line, with the two channels sampled on
 # opposite clock edges, so a mono mic wired to the "odd" slot returns nothing
 # when the "even" one is selected -- worth sweeping rather than assuming.
+#
+# IT STOPS YOUR SESSION. greetd goes down and the sound server is killed, because
+# both hold the capture path and a held backend records silence. That is
+# announced below rather than discovered: it used to happen with no warning, in
+# the middle of a session, to someone who had run it to read a mixer value.
+# greetd is brought back on exit, however the script ends.
+#
+# This sourced ../../../tools/tk-lib.sh -- a path on the HOST -- while its header
+# said it runs on the phone, so it ran in neither place. It uses nothing from
+# tk-lib, so the source is simply gone and `needs: on-device` now routes it
+# correctly through `porthole run`.
 set -e
 
-# shellcheck source=../../../lib/porthole.sh
-. "$(dirname "$0")/../../../tools/tk-lib.sh"
 DUR=${1:-12}
 
+echo "tk-dmic-sweep: stopping greetd and the sound server for ~$(( (DUR + 2) * 6 ))s."
+echo "  Your session goes down. greetd is restarted when this exits."
+sleep 2
+
+# Restore on ANY exit -- including the Ctrl-C of someone who just realised.
+cleanup() { sudo rc-service greetd start >/dev/null 2>&1 || true; }
+trap cleanup EXIT INT TERM
+
 sudo rc-service greetd stop >/dev/null 2>&1 || true
-sudo pkill -9 pulseaudio >/dev/null 2>&1 || true
+# By recorded name, never `pkill -f` with a pattern that appears in this
+# script's own command line: brain/traps/a-journal-grep-matches-your-own-
+# command-line.md, which killed an ssh session exactly that way.
+sudo pkill -9 -x pulseaudio >/dev/null 2>&1 || true
+sudo pkill -9 -x pipewire   >/dev/null 2>&1 || true
 sleep 1
 
 for d in 0 1 2 3 4 5; do
