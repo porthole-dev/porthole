@@ -118,6 +118,41 @@ def test_the_reference_profile_ships_probes():
     assert "[a]play" in text, "pgrep pattern would match its own command line"
 
 
+# ------------------------------------------------- doctor: declared deps --
+
+def test_depends_parsing_ignores_prose_and_comments():
+    """`depends=` appears inside a prose comment in the reference APKBUILD, and
+    an unanchored search parsed that sentence as a package list -- it returned
+    ['(see', ',', 'a', 'not', 'separate', 'subpackage']."""
+    import porthole_cmd_doctor as D
+    d = pathlib.Path(tempfile.mkdtemp(prefix="apkb-"))
+    ab = d / "pmaports" / "device" / "testing" / "device-x" / "APKBUILD"
+    ab.parent.mkdir(parents=True)
+    ab.write_text(
+        "pkgname=device-x\n"
+        "# this kernel depends= on a separate subpackage (see below), not here\n"
+        'depends="\n'
+        "\talsa-ucm-conf\n"
+        "\t# a comment naming why, with words like pipewire in it\n"
+        "\tpostmarketos-base-ui-audio-backend-pipewire\n"
+        "\t$_somevar\n"
+        '"\n'
+        'subpackages="device-x-openrc"\n')
+    deps, found = D._declared_depends(
+        {"PORTHOLE_DEVICE_PKG": "device-x", "PORTHOLE_WORKDIR": str(d)}, d)
+    assert deps == ["alsa-ucm-conf",
+                    "postmarketos-base-ui-audio-backend-pipewire"], deps
+    assert found == ab
+
+
+def test_depends_parsing_degrades_without_pmaports():
+    import porthole_cmd_doctor as D
+    deps, found = D._declared_depends({"PORTHOLE_DEVICE_PKG": "device-x",
+                                       "PORTHOLE_WORKDIR": "/nonexistent"},
+                                      pathlib.Path("/nonexistent"))
+    assert deps is None and found is None
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

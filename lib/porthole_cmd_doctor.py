@@ -13,6 +13,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -345,6 +346,87 @@ def check_device(ch: Checks, ctx, cfg) -> None:
 HEADER_FIELDS = ("scope", "needs", "env", "exits")
 
 
+def _declared_depends(cfg, root: pathlib.Path):
+    """What the device package says the device needs.
+
+    Parsed from the APKBUILD rather than asked of apk, because the question is
+    "does the running device match what we ship", and asking the device both
+    halves of that answers nothing.
+    """
+    pkg = cfg.get("PORTHOLE_DEVICE_PKG", "")
+    workdir = cfg.get("PORTHOLE_WORKDIR", "")
+    if not pkg or not workdir:
+        return None, None
+    for candidate in sorted(pathlib.Path(workdir).glob(
+            f"pmaports/device/*/{pkg}/APKBUILD")):
+        text = candidate.read_text(errors="replace")
+        # Anchored to line start: a bare "depends=" search matched the word
+        # inside a prose comment further up the file and parsed the sentence
+        # as a package list.
+        m = re.search(r'^depends=(["\'])(.*?)\1', text, re.M | re.S)
+        if not m:
+            continue
+        deps = []
+        for line in m.group(2).splitlines():
+            line = line.split("#", 1)[0].strip()      # the APKBUILD comments
+            for token in line.split():
+                # A shell variable in a depends list cannot be resolved here,
+                # and guessing is worse than skipping it.
+                if token and not token.startswith("$"):
+                    deps.append(token)
+        return sorted(set(deps)), candidate
+    return None, None
+
+
+def check_device_packages(ch: Checks, ctx, cfg) -> None:
+    """Declared dependencies versus what is actually installed.
+
+    A rootfs reinstall silently replaced the pipewire audio backend with
+    pulseaudio, whose capture reads silence on this board. The microphone was
+    dead, a call carried no uplink, and a day went into debugging a driver that
+    was not at fault. Nothing anywhere would have reported it: the working
+    configuration existed only as manual state on a filesystem that got
+    replaced.
+
+    The device package now names what it needs. This is the half that checks the
+    device agrees.
+    """
+    deps, apkbuild = _declared_depends(cfg, ctx.root)
+    if not deps:
+        ch.add("device: packages", "skip",
+               "no device APKBUILD found (needs PORTHOLE_WORKDIR/pmaports)")
+        return
+    # Ask apk whether each dependency is SATISFIED, one round trip, and let it
+    # answer -- rather than comparing the names it prints.
+    #
+    # Comparing names was wrong: `apk info -e mkbootimg` prints
+    # `mkbootimg-osm0sis`, because the dependency is met by a provider under a
+    # different name. That read as "declared but not installed" about a package
+    # that was correctly there, which is the same class of wrong answer this
+    # check exists to catch. apk knows about provides; a string compare does not.
+    script = ("for p in " + " ".join(shlex.quote(d) for d in deps) +
+              "; do apk info -e \"$p\" >/dev/null 2>&1 || echo \"$p\"; done")
+    rc, out, err = ctx.device().run_full(script, timeout=25)
+    if rc != 0:
+        ch.add("device: packages", "warn",
+               "could not query apk on the device",
+               doc=(err or "").strip()[:120] or str(apkbuild))
+        return
+    missing = [d for d in out.split() if d in deps]
+    if not missing:
+        ch.add("device: packages", "ok",
+               f"all {len(deps)} declared dependencies are satisfied")
+        return
+    ch.add("device: packages", "fail",
+           f"{len(missing)} declared dependenc(ies) NOT installed: "
+           + ", ".join(missing),
+           "the running rootfs does not match what the device package "
+           "declares.\n"
+           "          Reinstall the device package, or reflash:\n"
+           f"          pmbootstrap chroot -r -- apk add {' '.join(missing)}",
+           f"declared in {apkbuild}")
+
+
 def check_tools(ch: Checks, root: pathlib.Path) -> None:
     """Every tool must be self-describing in its first 30 lines."""
     tools = [p for p in sorted((root / "tools").iterdir())
@@ -407,6 +489,7 @@ def cmd_doctor(args, ctx) -> int:
         ch.add("device: state", "skip", "--no-device")
     else:
         check_device(ch, ctx, cfg)
+        check_device_packages(ch, ctx, cfg)
     if args.tools or args.all:
         check_tools(ch, ctx.root)
     if args.bench and not args.no_device:
