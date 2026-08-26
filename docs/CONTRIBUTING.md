@@ -46,6 +46,13 @@ project can get.** It has only ever been proven against one device.
 
 ## Adding to the brain
 
+**A finding is not a trap.** A trap warns about territory ("do not do X"); a finding closes a question ("X is already answered"). Findings live in `brain/findings/`, carry a `refutes:` line naming the theories they kill, and rank above everything else in search -- because an answer that exists outranks a warning about the ground around it.
+
+```sh
+porthole brain new <id> --severity finding --refutes "the theory it kills"
+```
+
+
 A note earns its place if it would have saved someone a session.
 
 - One idea per note. If the title needs an "and", it is two notes.

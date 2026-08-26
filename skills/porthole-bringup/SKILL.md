@@ -19,6 +19,28 @@ porthole config                    # which device, and where each value came fro
 fresh install has no passwordless sudo, nearly every tool calls `sudo -n`, and
 `-n` does not prompt — it just fails.
 
+## Before you form a theory, check it is not already answered
+
+```sh
+porthole brain <the thing you are about to investigate>
+```
+
+`brain/findings/` holds questions this port has already closed. A **trap** says
+"do not do X"; a **finding** says "X is already answered, and here are the
+theories that are now dead". Findings rank first in search results and are
+listed in `porthole brief` for exactly this reason.
+
+This is not a nicety. A finding document that explicitly refuted two theories
+sat unread while both were re-derived over a day. Each finding carries a
+`refutes:` line naming the ideas it kills, so **searching for the theory you are
+about to pursue finds the note that already killed it.**
+
+When you close a question yourself, write one:
+
+```sh
+porthole brain new <kebab-id> --severity finding --refutes "the theory it kills"
+```
+
 ## Read before acting
 
 - `brain/laws/` — ten notes. Not about phones. Read them once, properly.
@@ -108,5 +130,9 @@ observations cannot be re-audited later.
 - A fact about this device → `profiles/<codename>/device.env`
 - A lesson that generalises → a note in `brain/traps/` with a `scope:` line and
   its evidence, then `porthole brain reindex`
+- **A question you have now closed** → `brain/findings/`, with a `refutes:`
+  line naming the theories it kills. This is the one most often skipped and the
+  one that saves the most: the next person searches for the theory, not for
+  your conclusion.
 - A tool you had to write → `tools/` (generic) or the profile's `tools/`
   (vendor-specific), with the standard header
