@@ -224,6 +224,7 @@ _ph_make() {
 		echo ">> dtb older than its DTS -- it did not rebuild (check dtc output)"; return 1
 	fi
 	echo ">> kernel + dtb current -- packaging"
+	_ph_stamp_write
 
 	# Exit codes below lie (benign umount-32). Keep them chained; see header.
 	# They lie in one direction only, so verify the artifact instead: a build
@@ -432,7 +433,83 @@ _ph_wait_up() {
 #
 # tkflash-boot skips the rootfs. ONLY safe when install has not re-run since the
 # last flash_rootfs -- verify with tools/rootfs-uuid.py first.
+# What the last build actually used, recorded rather than re-derived.
+#
+# Why this file exists, and it is the worst failure of 2026-08-26: flash
+# resolved its DTB reference from the CURRENT environment, while the build had
+# run against a different tree (PORTHOLE_KERNEL_TREE was exported for `build`
+# and not for `flash`). So flash compared a correct export against the stale
+# .output of the main checkout, printed `DTB MISMATCH -- DO NOT FLASH`, and had
+# ALREADY WRITTEN THE ROOTFS. A scary, wrong error on a half-flashed device.
+#
+# Two separate mistakes were involved and both are fixed here: flash must use
+# what build used (this stamp), and it must refuse BEFORE it writes anything
+# (see tkflash).
+_PH_STAMP="$_PH_REPO/.last-build"
+
+_ph_stamp_write() {
+	{
+		printf 'tree=%s\n' "$_PH_TREE"
+		printf 'dtb=%s\n'  "$_PH_DTB_BUILT"
+		printf 'kpkg=%s\n' "$_PH_KPKG"
+		printf 'when=%s\n' "$(date -Is)"
+	} >"$_PH_STAMP" 2>/dev/null || {
+		echo ">> WARNING: could not record the build stamp at $_PH_STAMP" >&2
+		return 0
+	}
+	echo ">> recorded build stamp: tree=$_PH_TREE"
+}
+
+# Resolve the .dtb that boot.img is verified AGAINST, and say where it came
+# from. Silence here is what made the original failure unreadable.
+_ph_ref_dtb() {
+	if [ -n "${TK_REF_DTB:-}" ]; then
+		echo ">> reference dtb: TK_REF_DTB (explicit)" >&2
+		printf '%s\n' "$TK_REF_DTB"; return 0
+	fi
+	if [ -s "$_PH_STAMP" ]; then
+		local s_tree s_dtb
+		s_tree=$(sed -n 's/^tree=//p' "$_PH_STAMP")
+		s_dtb=$(sed -n 's/^dtb=//p' "$_PH_STAMP")
+		if [ -n "$s_dtb" ] && [ -e "$s_dtb" ]; then
+			# The whole point: if the tree configured NOW is not the tree that
+			# built this image, say so instead of silently comparing against
+			# the wrong .output.
+			if [ "$s_tree" != "$_PH_TREE" ]; then
+				echo ">> NOTE: this image was built from $s_tree" >&2
+				echo ">>       the environment now names $_PH_TREE" >&2
+				echo ">>       verifying against the tree that BUILT it, which is the" >&2
+				echo ">>       one that can answer. Unset PORTHOLE_KERNEL_TREE or rebuild" >&2
+				echo ">>       if that is not what you meant." >&2
+			fi
+			printf '%s\n' "$s_dtb"; return 0
+		fi
+	fi
+	echo ">> no build stamp -- deriving the reference dtb from the current tree." >&2
+	echo ">>   If this image was built elsewhere the comparison is meaningless;" >&2
+	echo ">>   rebuild, or set TK_REF_DTB to the .dtb inside the kernel apk." >&2
+	printf '%s\n' "$_PH_DTB_BUILT"
+}
+
+# Verify the export before ANYTHING is written to the device.
+_ph_verify_export() {
+	local img dtb
+	img=$(readlink -f /tmp/postmarketOS-export/boot.img 2>/dev/null)
+	[ -s "$img" ] || { echo ">> no exported boot.img -- run a build first" >&2; return 1; }
+	dtb=$(_ph_ref_dtb) || return 1
+	echo ">> pre-flight: verifying the export before writing anything"
+	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
+		echo ">> refusing to flash a stale image -- NOTHING has been written" >&2
+		return 1; }
+}
+
 tkflash() {
+	# Verify FIRST. flash_rootfs writes ~640 MB and is not undoable, so a
+	# refusal after it has run leaves a half-flashed device and an error that
+	# reads like a build problem. The UUID patch below only rewrites the
+	# cmdline, never the dtb, so checking the unpatched export here is the same
+	# check tkflash-boot repeats on the final image.
+	_ph_verify_export || return 1
 	pmbootstrap flasher flash_rootfs || return 1
 	tkflash-boot
 }
@@ -469,7 +546,7 @@ tkflash-boot() {
 	# was packed from, which would always agree with itself:
 	#
 	#   TK_REF_DTB=/path/to/unpacked-apk/boot/dtbs/qcom/msm8998-google-taimen.dtb
-	local dtb="${TK_REF_DTB:-$_PH_DTB_BUILT}"
+	local dtb; dtb=$(_ph_ref_dtb) || return 1
 
 	# The exported boot.img carries the UUIDs of whatever rootfs the CHROOT was
 	# last installed with. If `pmbootstrap install` has re-run since the device's
