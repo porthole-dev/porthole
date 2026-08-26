@@ -29,6 +29,39 @@ fresh install has no passwordless sudo, nearly every tool calls `sudo -n`, and
 `porthole brain <keyword>` searches. `--scope soc:<yours>` filters to what
 applies to your device (and always includes the generic notes).
 
+## The iteration ladder — pick the cheapest rung that covers your change
+
+This is where bring-up sessions lose the most wall-clock. Four rungs, and the
+top one costs fifteen times the bottom one:
+
+| rung | use it when | cost |
+|---|---|---|
+| `porthole build mod FOO.ko foo --yes` | a driver that is a **module** | ~40 s, no reboot |
+| `porthole build boot --yes` | **DTS**, or built-in code you can RAM-boot | ~40 s, one `fastboot boot` |
+| `porthole build fast --yes` | a **CONFIG** change (module CRCs move) | ~6 min, flashes boot |
+| `porthole build kernel --yes` | **rootfs** contents changed, or boot/rootfs desynced | ~10 min, reflash both |
+
+Run any rung without `--yes` and it previews rather than builds, printing this
+table so you can check you are on the right one — `porthole build fast`, say.
+Add `--kernel` to `boot` to rebuild `Image.gz` as well as the dtb.
+
+Going up a rung when you did not have to is the single most common way to turn
+a twenty-minute investigation into an afternoon. Going *down* one when the
+change needed the higher rung is worse: a CONFIG edit moves every module's
+`module_layout` CRC, so `mod` pushes a module the running kernel will refuse.
+
+## Never sleep after a build verb
+
+**Every rung returns when the device is back, not when it was asked to move.**
+`mod` verifies via `srcversion` that the module now running is the one you just
+built; `boot`, `fast` and `kernel` poll with `tk_wait_ssh` and print the
+`/proc/version` that answered.
+
+So there is nothing left to wait for. If you catch yourself writing `sleep`
+after a build, the verb already did that work — and did it better, because a
+fixed sleep is wrong in both directions (`brain/laws/poll-never-sleep.md`).
+`TK_BOOT_DEADLINE` sets the give-up point; it is not a poll interval.
+
 ## Non-negotiable
 
 **Never hand-roll what a tool does.** Writing `ssh ... reboot` or `sleep 60`

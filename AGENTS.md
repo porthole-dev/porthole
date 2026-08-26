@@ -66,6 +66,32 @@ If you are writing an `ssh ... reboot` one-liner or a `sleep 60`, stop. There is
 a tool and you have not found it yet. Both of those specific mistakes have cost
 whole sessions.
 
+### Build on the cheapest rung that covers the change
+
+| rung | covers | cost |
+|---|---|---|
+| `porthole build mod FOO.ko foo --yes` | a driver that is a module | ~40 s, no reboot |
+| `porthole build boot --yes` | DTS, or built-in code you can RAM-boot | ~40 s, one `fastboot boot` |
+| `porthole build fast --yes` | a CONFIG change (module CRCs move) | ~6 min, flashes boot |
+| `porthole build kernel --yes` | rootfs changed, or boot/rootfs desynced | ~10 min, reflash both |
+
+Run any of them without `--yes` to preview and print the table. `--kernel` on
+`boot` rebuilds `Image.gz` too.
+
+`mod` and `boot` are ~15x cheaper than the top rung and were unreachable until
+they were added to the verb table — they existed only as shell functions in
+`tools/ph-build.sh`. If you have been iterating on `kernel`, you are paying ten
+minutes for a forty-second change.
+
+### Do not sleep after a build verb
+
+Every rung returns **when the device is back**, not when it was asked to move.
+`mod` proves by `srcversion` that the module now running is the one just built;
+`boot`, `fast` and `kernel` poll via `tk_wait_ssh` and print the `/proc/version`
+that answered. A `sleep` after one of these is redundant and wrong in both
+directions — see `brain/laws/poll-never-sleep.md`. `TK_BOOT_DEADLINE` is the
+give-up point, not a poll interval.
+
 ### Every command that touches the device goes through the mutex
 
 ```sh
