@@ -9,6 +9,7 @@
 #
 #   tools/tk-capture.sh [outdir] [seconds]
 #   tools/tk-capture.sh /tmp/cap 900
+#   tools/tk-capture.sh logs/netconsole 0   # 0 = forever, re-arms across reboots
 #
 # Ctrl-C stops it early and still prints the verdict.
 #
@@ -65,7 +66,9 @@ _TK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_TK_DIR/tk-lib.sh"
 
 OUT=${1:-/tmp/tk-capture-$(date +%H%M%S)}
-DUR=${2:-900}
+DUR=${2:-900}                      # 0 = stay up forever, re-arming across reboots
+# The UDP sink takes a deadline, not a mode. Ten years is forever enough.
+SINK_DUR=$DUR; [ "$DUR" = 0 ] && SINK_DUR=315360000
 TK_CAP_WLAN=${TK_CAP_WLAN:-0}      # 1 = also arm wlan0 (suspend tests; see TRAP 1)
 TK_CAP_PORT=${TK_CAP_PORT:-6666}
 
@@ -121,7 +124,11 @@ arm_target() {  # name dev local_ip remote_ip remote_mac port
 		cat \$p/enabled" 2>/dev/null
 }
 
+# A reboot takes the configfs target with it, so this has to be re-runnable:
+# in forever mode (DUR=0) watch_forever calls it again on every new boot_id.
+arm_device() {
 {
+	echo "--- armed $(date -Iseconds) boot=$(tk_boot_id)"
 	ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n modprobe netconsole 2>/dev/null; true'
 	echo "usb0  enabled=$(arm_target usb usb0 "$HOST" 172.16.42.2 "$HOST_USB_MAC" "$TK_CAP_PORT")"
 	if [ "$TK_CAP_WLAN" = 1 ]; then
@@ -142,7 +149,10 @@ arm_target() {  # name dev local_ip remote_ip remote_mac port
 		     "timeout=$(cat /sys/class/watchdog/watchdog0/timeout 2>/dev/null)" \
 		     "panic=$(cat /proc/sys/kernel/panic 2>/dev/null)" \
 		     "hung_task=$(cat /proc/sys/kernel/hung_task_timeout_secs 2>/dev/null)"'
-} 2>&1 | tee "$OUT/arm.log"
+} 2>&1 | tee -a "$OUT/arm.log"
+}
+
+arm_device
 
 # ------------------------------------------------------------------- baseline
 # Counters, so the verdict can report a DELTA. "17 GPU faults" means nothing
@@ -182,14 +192,19 @@ while time.time() < end:
         seen.add(t)
         if len(seen) > 20000: seen.clear()
         print(f"{datetime.datetime.now():%H:%M:%S.%f} [nc:{p}] {t}", flush=True)
-' "$TK_CAP_PORT" "$TK_CAP_WLAN" "$DUR" > "$OUT/netconsole.log" 2>&1 &
+' "$TK_CAP_PORT" "$TK_CAP_WLAN" "$SINK_DUR" > "$OUT/netconsole.log" 2>&1 &
 NC_PID=$!
 sleep 0.5
 
-ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n dmesg -w'                        > "$OUT/dmesg.log"   2>&1 & DM_PID=$!
-ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n journalctl -f -o short-iso -n0'  > "$OUT/journal.log" 2>&1 & JR_PID=$!
-
-echo "$NC_PID $DM_PID $JR_PID" > "$OUT/pids"
+# The sink is a UDP socket and survives a reboot; these two are ssh sessions and
+# do not, so they are started through a function the re-arm can call again.
+# Append, never truncate -- a restart must not eat what the last boot logged.
+start_followers() {
+	ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n dmesg -w'                       >> "$OUT/dmesg.log"   2>&1 & DM_PID=$!
+	ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n journalctl -f -o short-iso -n0' >> "$OUT/journal.log" 2>&1 & JR_PID=$!
+	echo "$NC_PID $DM_PID $JR_PID" > "$OUT/pids"
+}
+start_followers
 
 cleanup() {
 	# By PID, never by pattern -- see TRAP 2.
@@ -253,8 +268,36 @@ verdict() {
 	echo "==============="
 }
 
-echo ">> capturing to $OUT for ${DUR}s (Ctrl-C to stop early)"
+# --------------------------------------------------------------- forever mode
+# DUR=0 means "leave it armed". A crash on this device is opportunistic -- the
+# GPU display-wake SError of 2026-08-26 bit during audio work, six times, and
+# every one of those was investigated blind because the capture was not up.
+# Poll boot_id; a new one means the configfs target and both ssh followers died
+# with the old kernel and have to be put back.
+watch_forever() {
+	local last=$BOOT_BEFORE now
+	while :; do
+		sleep "${TK_POLL:-5}"
+		now=$(tk_boot_id) || now=""
+		[ -z "$now" ] && continue          # down or rebooting; nothing to arm yet
+		[ "$now" = "$last" ] && continue
+		# The old master points at a dead sshd (tk-lib.sh).
+		ph_ssh_mux_reset
+		echo ">> NEW BOOT $now -- re-arming"
+		kill "$DM_PID" "$JR_PID" 2>/dev/null
+		arm_device
+		start_followers
+		last=$now
+	done
+}
+
 echo ">> baseline: gpu_faults=${gpu_faults:-?} hangchecks=${hangchecks:-?} coredumps=${coredumps:-?}"
-sleep "$DUR"
+if [ "$DUR" = 0 ]; then
+	echo ">> capturing to $OUT until Ctrl-C, re-arming across reboots"
+	watch_forever
+else
+	echo ">> capturing to $OUT for ${DUR}s (Ctrl-C to stop early)"
+	sleep "$DUR"
+fi
 verdict
 cleanup
