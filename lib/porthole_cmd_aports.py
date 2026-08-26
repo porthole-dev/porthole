@@ -624,8 +624,58 @@ def cmd_new(args, ctx, pmaports) -> int:
 
 # ------------------------------------------------- checksum / build / lint --
 
+def _series_problems(pkg_dir: pathlib.Path) -> list:
+    """Patch files on disk that the APKBUILD does not list, and duplicate
+    numbers among the ones it does.
+
+    Both are silent by construction: `pmbootstrap checksum` validates every
+    LISTED source and says nothing about a file sitting next to them, so a
+    regenerated series whose names changed leaves the old patch orphaned and
+    the new one unbuilt. Paid for on taimen 2026-08-26 -- two kernels were
+    built, flashed and tested without the change they were supposed to carry.
+    """
+    apkbuild = pkg_dir / "APKBUILD"
+    if not apkbuild.is_file():
+        return []
+
+    text = apkbuild.read_text()
+    listed = set(re.findall(r"^\s*(\d{4}-\S+?\.patch)\s*$", text, re.M))
+    on_disk = {p.name for p in pkg_dir.glob("[0-9][0-9][0-9][0-9]-*.patch")}
+
+    problems = []
+    for orphan in sorted(on_disk - listed):
+        problems.append(("orphan", f"{orphan} is not listed in the APKBUILD"))
+    for missing in sorted(listed - on_disk):
+        problems.append(("missing", f"{missing} is listed but not on disk"))
+
+    seen = {}
+    for name in sorted(listed):
+        seen.setdefault(name[:4], []).append(name)
+    for num, names in sorted(seen.items()):
+        if len(names) > 1:
+            problems.append(("duplicate",
+                             f"{num} is used by {len(names)} patches: "
+                             + ", ".join(names)))
+
+    return problems
+
+
 def cmd_checksum(args, ctx, pmaports) -> int:
     """`pmbootstrap checksum` -- mandatory after touching any listed source."""
+    for pkg in _resolve_pkgs(args, ctx, pmaports) if not args.changed else []:
+        problems = _series_problems(_pkg_dir(pmaports, pkg))
+        # A duplicate number is untidy; an orphan or a missing file changes
+        # what gets BUILT, which is the thing that has to stop a build.
+        fatal = [x for x in problems if x[0] != "duplicate"]
+        for kind, msg in problems:
+            ctx.out(ctx.out.paint(f"  {kind:<9} {msg}",
+                                  "red" if kind != "duplicate" else "yellow"))
+        if fatal:
+            raise Bail(f"{pkg}: the patch series and the APKBUILD disagree",
+                       EX_FAIL,
+                       "checksum only validates what is LISTED, so this would "
+                       "otherwise build without the patch you just wrote")
+
     if args.changed:
         rc, _, _ = pmb(ctx, "checksum", "--changed", timeout=900)
     else:
