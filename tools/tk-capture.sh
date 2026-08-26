@@ -69,14 +69,60 @@ OUT=${1:-/tmp/tk-capture-$(date +%H%M%S)}
 DUR=${2:-900}                      # 0 = stay up forever, re-arming across reboots
 # The UDP sink takes a deadline, not a mode. Ten years is forever enough.
 SINK_DUR=$DUR; [ "$DUR" = 0 ] && SINK_DUR=315360000
-TK_CAP_WLAN=${TK_CAP_WLAN:-0}      # 1 = also arm wlan0 (suspend tests; see TRAP 1)
+# Two transports by default in forever mode, one otherwise. TRAP 1 is a real
+# cost -- a hardirq printk over wlan0 taints the kernel once per boot -- but it
+# is the cost of a polluted trace against the cost of no trace at all, and on
+# 2026-08-26 a watchdog reset on display wake produced NOTHING over usb0: no
+# pretimeout panic, no hard-lockup report, and an empty pstore afterwards. When
+# the failure can take the USB path down with it, one transport is one point of
+# failure. Set TK_CAP_WLAN=0 to go back to usb0 alone.
+[ "$DUR" = 0 ] && TK_CAP_WLAN=${TK_CAP_WLAN:-1}
+TK_CAP_WLAN=${TK_CAP_WLAN:-0}
 TK_CAP_PORT=${TK_CAP_PORT:-6666}
+TK_RESCUE_PORT=${TK_RESCUE_PORT:-2323}
 
 mkdir -p "$OUT" || exit 1
 
+# Run ONE shell command on the device, over whichever channel is answering.
+#
+# ssh is not a dependable way to reach a phone you are trying to instrument:
+# the boot after a watchdog reset on 2026-08-26 came up with sshd not yet
+# accepting sessions, this loop read that as "device down, nothing to arm", and
+# the whole boot went uninstrumented -- the one boot most likely to crash
+# again. The PAM-free rescue channel answers in exactly that window, and in the
+# PID-1 freeze that it was written for, so fall back to it rather than wait.
+#
+# One command per line is the rescue channel's whole protocol, so everything
+# sent through here must be a single line -- no shell state survives between
+# lines, because each one is its own /bin/sh -c. Its banner is line 1.
+# Fall back on TRANSPORT failure only -- ssh's own 255, or 124 from the timeout
+# that killed it -- never on the command's exit status and never on empty
+# output. Treating "printed nothing" as failure re-runs the command over the
+# rescue channel, which is how the verify probe wrote its token to /dev/kmsg
+# twice and every silent arming step ran twice.
+dev_run() {
+	local out rc
+	out=$(timeout 12 ssh "${TK_SSH_OPTS[@]}" "$PHONE" "$1" 2>/dev/null); rc=$?
+	if [ "$rc" != 255 ] && [ "$rc" != 124 ]; then
+		printf '%s\n' "$out"
+		return "$rc"
+	fi
+	out=$(printf '%s\nexit\n' "$1" | timeout 25 nc "$HOST" "$TK_RESCUE_PORT" 2>/dev/null | tail -n +2)
+	[ -n "$out" ] || return 1
+	printf '%s\n' "$out"
+}
+
+# tk_boot_id is ssh-only, and the boot that needs arming most is the one where
+# ssh is not up yet.
+cap_boot_id() { dev_run 'cat /proc/sys/kernel/random/boot_id' | tr -d '\r'; }
+
+
 # The device needs to be up to be armed. Fail in a second rather than hang.
-if ! ssh "${TK_SSH_OPTS[@]}" "$PHONE" true 2>/dev/null; then
-	echo "tk-capture: $PHONE does not answer -- is the phone up?" >&2
+# Asked through dev_run rather than ssh: a phone whose sshd is not accepting
+# sessions is still worth arming, and is in fact the one most worth arming.
+if ! dev_run 'echo up' >/dev/null; then
+	echo "tk-capture: $PHONE answers on neither ssh nor the rescue channel" >&2
+	echo "  -- is the phone up, and is the cable in?" >&2
 	exit 1
 fi
 
@@ -88,7 +134,7 @@ fi
 #
 # So check the one precondition all of them share, once, loudly, before arming.
 # brain/traps/no-passwordless-sudo-disables-the-whole-toolbox.md
-if ! ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n true' 2>/dev/null; then
+if [ "$(dev_run 'sudo -n true && echo yes')" != yes ]; then
 	echo "tk-capture: no passwordless sudo on $PHONE -- it would arm NOTHING" >&2
 	echo "  and you would find out from an empty log, after the run." >&2
 	echo "  Fix it on the DEVICE, then re-run:" >&2
@@ -98,7 +144,7 @@ if ! ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n true' 2>/dev/null; then
 	exit 1
 fi
 
-BOOT_BEFORE=$(tk_boot_id)
+BOOT_BEFORE=$(cap_boot_id)
 
 # Sampled per arming, NOT once at startup. u_ether hands the host a freshly
 # randomised MAC every time the gadget re-enumerates, so the address is only
@@ -118,32 +164,48 @@ host_ifaces() {
 # configured through configfs at runtime, which is what NETCONSOLE_DYNAMIC is for
 # -- do NOT put a target on the cmdline, it cannot follow a DHCP address.
 arm_target() {  # name dev local_ip remote_ip remote_mac port
-	local n=$1 d=$2 li=$3 ri=$4 rm=$5 rp=$6
-	[ -n "$rm" ] || return 0
-	ssh "${TK_SSH_OPTS[@]}" "$PHONE" "
-		p=/sys/kernel/config/netconsole/$n
-		[ -d \$p ] && { echo 0 | sudo -n tee \$p/enabled >/dev/null 2>&1; sudo -n rmdir \$p 2>/dev/null; }
-		sudo -n mkdir -p \$p 2>/dev/null || exit 1
-		echo $li | sudo -n tee \$p/local_ip   >/dev/null
-		echo $ri | sudo -n tee \$p/remote_ip  >/dev/null
-		echo $rm | sudo -n tee \$p/remote_mac >/dev/null
-		echo $rp | sudo -n tee \$p/remote_port>/dev/null
-		echo $d  | sudo -n tee \$p/dev_name   >/dev/null
-		echo 1   | sudo -n tee \$p/enabled    >/dev/null
-		cat \$p/enabled" 2>/dev/null
+	local n=$1 d=$2 li=$3 ri=$4 rm=$5 rp=$6 p=/sys/kernel/config/netconsole/$1
+	# An empty local_ip or remote_mac writes garbage into configfs and the
+	# target then reports enabled=1 while going nowhere. wlan0 hits this on
+	# every re-arm, because it is still associating when usb0 is already up.
+	[ -n "$rm" ] && [ -n "$li" ] || return 0
+	dev_run "[ -d $p ] && { echo 0 | sudo -n tee $p/enabled >/dev/null 2>&1; sudo -n rmdir $p 2>/dev/null; }; \
+		 sudo -n mkdir -p $p 2>/dev/null || exit 1; \
+		 echo $li | sudo -n tee $p/local_ip >/dev/null; \
+		 echo $ri | sudo -n tee $p/remote_ip >/dev/null; \
+		 echo $rm | sudo -n tee $p/remote_mac >/dev/null; \
+		 echo $rp | sudo -n tee $p/remote_port >/dev/null; \
+		 echo $d  | sudo -n tee $p/dev_name >/dev/null; \
+		 echo 1   | sudo -n tee $p/enabled >/dev/null; \
+		 cat $p/enabled"
 }
 
 # A reboot takes the configfs target with it, so this has to be re-runnable:
 # in forever mode (DUR=0) watch_forever calls it again on every new boot_id.
+# WLAN_ARMED is cleared on every new boot and set once wlan0 takes, so the poll
+# loop can keep retrying the second transport while the interface associates.
+WLAN_ARMED=0
+
+# Try to bring the second transport up. Returns 0 only on the attempt that
+# actually arms it, so callers can announce the transition without repeating
+# themselves on every poll. Callers decide whether it is wanted at all.
+arm_wlan() {
+	local wip
+	wip=$(dev_run "ip -4 -br addr show wlan0 2>/dev/null | awk '{print \$3}' | cut -d/ -f1" | tr -d '\r')
+	[ -n "$wip" ] || return 1
+	[ "$(arm_target wifi wlan0 "$wip" "$HOST_WLAN_IP" "$HOST_WLAN_MAC" $((TK_CAP_PORT+1)))" = 1 ] || return 1
+	WLAN_ARMED=1
+}
+
 arm_device() {
 host_ifaces
 {
-	echo "--- armed $(date -Iseconds) boot=$(tk_boot_id) host_mac=$HOST_USB_MAC"
-	ssh "${TK_SSH_OPTS[@]}" "$PHONE" 'sudo -n modprobe netconsole 2>/dev/null; true'
+	echo "--- armed $(date -Iseconds) boot=$(cap_boot_id) host_mac=$HOST_USB_MAC"
+	dev_run 'sudo -n modprobe netconsole 2>/dev/null; true' >/dev/null
 	echo "usb0  enabled=$(arm_target usb usb0 "$HOST" 172.16.42.2 "$HOST_USB_MAC" "$TK_CAP_PORT")"
 	if [ "$TK_CAP_WLAN" = 1 ]; then
-		WIP=$(ssh "${TK_SSH_OPTS[@]}" "$PHONE" "ip -4 -br addr show wlan0 2>/dev/null | awk '{print \$3}' | cut -d/ -f1")
-		echo "wlan0 enabled=$(arm_target wifi wlan0 "$WIP" "$HOST_WLAN_IP" "$HOST_WLAN_MAC" $((TK_CAP_PORT+1)))"
+		arm_wlan && echo "wlan0 enabled=1" \
+		         || echo "wlan0 not up yet -- retrying every poll until it is"
 	fi
 
 	# A watchdog bark is silence unless the pretimeout governor turns it into a
@@ -152,13 +214,17 @@ host_ifaces
 	# was noop (fixed in the shipped config from r28, set here too for older
 	# images). sysrq is wanted so `echo c > /proc/sysrq-trigger` can prove the
 	# channel end to end before trusting it.
-	ssh "${TK_SSH_OPTS[@]}" "$PHONE" '
-		echo panic | sudo -n tee /sys/class/watchdog/watchdog0/pretimeout_governor >/dev/null 2>&1
-		echo 1     | sudo -n tee /proc/sys/kernel/sysrq >/dev/null 2>&1
-		echo "watchdog gov=$(cat /sys/class/watchdog/watchdog0/pretimeout_governor 2>/dev/null)" \
-		     "timeout=$(cat /sys/class/watchdog/watchdog0/timeout 2>/dev/null)" \
-		     "panic=$(cat /proc/sys/kernel/panic 2>/dev/null)" \
-		     "hung_task=$(cat /proc/sys/kernel/hung_task_timeout_secs 2>/dev/null)"'
+	#
+	# Report the pretimeout too, not just the governor: the governor only ever
+	# runs if a pretimeout is set, so gov=panic with pretimeout=0 is a line that
+	# reads armed and is not.
+	dev_run 'echo panic | sudo -n tee /sys/class/watchdog/watchdog0/pretimeout_governor >/dev/null 2>&1; \
+		 echo 1 | sudo -n tee /proc/sys/kernel/sysrq >/dev/null 2>&1; \
+		 echo "watchdog gov=$(cat /sys/class/watchdog/watchdog0/pretimeout_governor 2>/dev/null)" \
+		      "pretimeout=$(cat /sys/class/watchdog/watchdog0/pretimeout 2>/dev/null)" \
+		      "timeout=$(cat /sys/class/watchdog/watchdog0/timeout 2>/dev/null)" \
+		      "panic=$(cat /proc/sys/kernel/panic 2>/dev/null)" \
+		      "hung_task=$(cat /proc/sys/kernel/hung_task_timeout_secs 2>/dev/null)"'
 } 2>&1 | tee -a "$OUT/arm.log"
 }
 
@@ -183,25 +249,50 @@ ssh "${TK_SSH_OPTS[@]}" "$PHONE" '
 # produced an empty capture on 2026-08-20 -- an instrument that fails quietly is
 # worse than no instrument. Both netconsole paths carry the same lines, so
 # identical payloads are printed once, tagged with the port that won the race.
+#
+# select(), NOT a per-socket timeout. Polling each socket in turn with
+# settimeout(0.2) costs 200 ms on every socket that has nothing -- so arming a
+# second transport that never comes up throttled the whole sink to five lines a
+# second and silently dropped the rest. That is precisely backwards: the burst
+# this tool exists to catch is a panic dumping forty lines in a millisecond, and
+# it was being metered away by the socket that was supposed to make capture more
+# reliable. Measured on 2026-08-26: consecutive lines with kernel timestamps
+# microseconds apart arriving 200.4 ms apart on the host, until wlan0 was armed.
+#
+# The receive buffer is enlarged for the same reason. A panic outruns any
+# userspace reader, and the default rmem is a few hundred kB.
 python3 -c '
-import socket, sys, time, datetime
+import socket, select, sys, time, datetime
 ports = [int(sys.argv[1])] + ([int(sys.argv[1]) + 1] if sys.argv[2] == "1" else [])
 dur = float(sys.argv[3])
-socks = []
+socks, byfd = [], {}
 for p in ports:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("0.0.0.0", p)); s.settimeout(0.2); socks.append((p, s))
-end, seen = time.time() + dur, set()
+    try: s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
+    except OSError: pass
+    s.bind(("0.0.0.0", p)); s.setblocking(False)
+    socks.append(s); byfd[s] = p
+end, seen, live = time.time() + dur, set(), set()
 while time.time() < end:
-    for p, s in socks:
-        try: d, _ = s.recvfrom(65535)
-        except socket.timeout: continue
-        t = d.decode("utf-8", "replace").rstrip("\n")
-        if t in seen: continue          # same line on both paths
-        seen.add(t)
-        if len(seen) > 20000: seen.clear()
-        print(f"{datetime.datetime.now():%H:%M:%S.%f} [nc:{p}] {t}", flush=True)
+    ready, _, _ = select.select(socks, [], [], 0.5)
+    for s in ready:
+        p = byfd[s]
+        while True:                     # drain, do not meter
+            try: d, _ = s.recvfrom(65535)
+            except BlockingIOError: break
+            except OSError: break
+            # Announce each port the first time it delivers anything. Dedup
+            # below drops whichever copy loses the race, so without this a
+            # dead second transport looks the same as a merely slow one.
+            if p not in live:
+                live.add(p)
+                print(f"{datetime.datetime.now():%H:%M:%S.%f} [nc:{p}] *** transport live ***", flush=True)
+            t = d.decode("utf-8", "replace").rstrip("\n")
+            if t in seen: continue      # same line on both paths
+            seen.add(t)
+            if len(seen) > 20000: seen.clear()
+            print(f"{datetime.datetime.now():%H:%M:%S.%f} [nc:{p}] {t}", flush=True)
 ' "$TK_CAP_PORT" "$TK_CAP_WLAN" "$SINK_DUR" > "$OUT/netconsole.log" 2>&1 &
 NC_PID=$!
 sleep 0.5
@@ -225,10 +316,16 @@ verify_channel() {
 	local tok i
 	_probe_n=$((_probe_n + 1))
 	tok="tk-capture-probe-$$-$_probe_n"
-	ssh "${TK_SSH_OPTS[@]}" "$PHONE" "echo '$tok' | sudo -n tee /dev/kmsg >/dev/null" 2>/dev/null
+	dev_run "echo '$tok' | sudo -n tee /dev/kmsg >/dev/null" >/dev/null
 	for i in 1 2 3 4 5 6 7 8 9 10; do
 		if grep -q "$tok" "$OUT/netconsole.log" 2>/dev/null; then
-			echo ">> netconsole VERIFIED end to end" | tee -a "$OUT/arm.log"
+			# Name the transports, not just "it works": in forever mode
+			# there are meant to be two, and one is the whole point.
+			echo ">> netconsole VERIFIED end to end, transports live:$(
+				grep -o '\[nc:[0-9]*\] \*\*\* transport live' "$OUT/netconsole.log" 2>/dev/null |
+				grep -o '[0-9]\+' | sort -u | tr '\n' ' ' | sed 's/^/ /')" | tee -a "$OUT/arm.log"
+			[ "$TK_CAP_WLAN" = 1 ] && [ "$WLAN_ARMED" = 0 ] && \
+				echo ">> (wlan0 still to come -- usb0 only for now)" | tee -a "$OUT/arm.log"
 			return 0
 		fi
 		sleep 1
@@ -307,17 +404,32 @@ verdict() {
 # every one of those was investigated blind because the capture was not up.
 # Poll boot_id; a new one means the configfs target and both ssh followers died
 # with the old kernel and have to be put back.
+#
+# The boot_id comes through dev_run, so this notices a reboot whose sshd is not
+# accepting sessions yet -- or never will. Asking over ssh alone is how the boot
+# after the 2026-08-26 watchdog reset went entirely uninstrumented: the loop saw
+# no answer, read it as "still down", and waited while the device sat there
+# fully booted and unarmed for the better part of a minute.
 watch_forever() {
 	local last=$BOOT_BEFORE now
 	while :; do
 		sleep "${TK_POLL:-5}"
-		now=$(tk_boot_id) || now=""
-		[ -z "$now" ] && continue          # down or rebooting; nothing to arm yet
-		[ "$now" = "$last" ] && continue
+		now=$(cap_boot_id) || now=""
+		[ -z "$now" ] && continue          # genuinely down; nothing to arm yet
+		if [ "$now" = "$last" ]; then
+			# wlan0 associates long after usb0 answers, so the second
+			# transport is normally still missing at re-arm time. Keep
+			# trying until it lands.
+			if [ "$TK_CAP_WLAN" = 1 ] && [ "$WLAN_ARMED" = 0 ] && arm_wlan; then
+				echo ">> wlan0 armed (second transport up)" | tee -a "$OUT/arm.log"
+			fi
+			continue
+		fi
 		# The old master points at a dead sshd (tk-lib.sh).
 		ph_ssh_mux_reset
 		echo ">> NEW BOOT $now -- re-arming"
 		kill "$DM_PID" "$JR_PID" 2>/dev/null
+		WLAN_ARMED=0
 		arm_device
 		start_followers
 		verify_channel
