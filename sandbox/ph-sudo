@@ -469,6 +469,14 @@ HANDLERS = {
 SIMPLE_VERBS = {
     "umount", "rm", "mkdir", "chmod", "chown", "touch", "install",
     "mv", "rmdir", "sed", "tee", "dd", "sync", "truncate", "stat", "readlink",
+    # apk makes a FIFO to report progress through, and pmbootstrap reads it
+    # back. Unlike mknod, mkfifo cannot create a device node -- a FIFO is just
+    # a rendezvous point -- so confining where it may be created is the whole
+    # of what this needs. `cat` is its other half and comes as a pair with it.
+    "mkfifo", "cat",
+    # Read-only and confined, so they disclose nothing that the already
+    # permitted stat and readlink do not.
+    "du",
 }
 
 

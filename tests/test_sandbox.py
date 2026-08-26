@@ -354,6 +354,25 @@ def test_a_readable_directory_covers_the_files_under_it():
            policy=pol)
 
 
+def test_allows_the_apk_progress_fifo():
+    allowed("mkfifo", str(WORKDIR / "tmp" / "apk_progress_fifo"))
+
+
+def test_allows_reading_the_progress_fifo_back():
+    """mkfifo and cat are a pair: apk writes progress, pmbootstrap reads it."""
+    allowed("cat", str(WORKDIR / "tmp" / "apk_progress_fifo"))
+
+
+def test_refuses_reading_a_host_file_out_loud():
+    """cat prints to pmbootstrap's stdout, so an unconfined path would be a
+    disclosure channel."""
+    denied("cat", "/etc/shadow", because="escapes the declared roots")
+
+
+def test_refuses_a_fifo_outside_the_roots():
+    denied("mkfifo", str(OUTSIDE / "fifo"), because="escapes the declared roots")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
