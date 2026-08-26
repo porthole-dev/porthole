@@ -1,16 +1,13 @@
 name: Docs
 
-# Publishing is opt-in, gated on the PUBLISH_DOCS repository variable.
+# Pushes to main publish the site to GitHub Pages. Pull requests and other
+# branches still generate it and run `mkdocs build --strict`, so a broken link
+# or a bad nav entry fails here rather than shipping -- they just do not deploy.
 #
-#   Settings -> Secrets and variables -> Actions -> Variables
-#   PUBLISH_DOCS = true
-#
-# Unset, this workflow still generates the site and runs `mkdocs build
-# --strict` on every push and pull request -- a broken link or a bad nav entry
-# fails here rather than shipping. It simply does not touch GitHub Pages, which
-# is what you want while the repository is private: Pages needs a plan that
-# includes it, so attempting to deploy would put a permanent red cross on a
-# workflow that is otherwise doing its job.
+# This was gated on a PUBLISH_DOCS repository variable while the repository was
+# private, because Pages needs a plan that includes it and deploying without one
+# leaves a permanent red cross on a workflow that is otherwise doing its job.
+# The repository is public, so the gate is gone.
 
 on:
   push:
@@ -61,11 +58,12 @@ jobs:
 
       - name: enable GitHub Pages if it is not already
         # enablement: true flips Settings -> Pages -> Source to "GitHub
-        # Actions" over the API, so setting PUBLISH_DOCS is all that is needed.
+        # Actions" over the API, so a fresh clone of this repo publishes with
+        # no setting to find in the web UI.
         #
-        # No continue-on-error: this only runs when you have asked for
-        # publishing, and a failure then is real information rather than noise.
-        if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
+        # No continue-on-error: a failure here is real information rather than
+        # noise.
+        if: github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
         with:
           enablement: true
@@ -76,25 +74,14 @@ jobs:
       - name: build (strict -- a broken link fails the build)
         run: mkdocs build --strict
 
-      - name: say whether this will publish
-        run: |
-          if [ "${{ vars.PUBLISH_DOCS }}" = "true" ]; then
-            echo "PUBLISH_DOCS=true — deploying to GitHub Pages."
-          else
-            echo "Docs built and link-checked, but NOT published."
-            echo "PUBLISH_DOCS is not set, so GitHub Pages is left alone."
-            echo "To publish: Settings -> Secrets and variables -> Actions"
-            echo "            -> Variables -> PUBLISH_DOCS = true"
-          fi
-
       - name: upload
-        if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   deploy:
-    if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
