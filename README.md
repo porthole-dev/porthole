@@ -144,7 +144,7 @@ the bootloader will show it.
 There is nothing to build. Clone it and put `bin/` on your `PATH`:
 
 ```sh
-git clone https://github.com/<you>/porthole.git
+git clone https://github.com/porthole-dev/porthole.git
 cd porthole
 export PATH="$PWD/bin:$PATH"          # add to ~/.bashrc or ~/.zshrc to persist
 ```

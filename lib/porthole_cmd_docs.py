@@ -397,7 +397,7 @@ def cmd_build(args, ctx) -> int:
         nav.append(("Knowledge base", brain_nav))
 
     (root / "mkdocs.yml").write_text(MKDOCS_YML.format(
-        org=args.org or "Pixel-pmOS", repo=args.repo or "porthole",
+        org=args.org or "porthole-dev", repo=args.repo or "porthole",
         src=SITE_SRC, nav=_nav(nav)))
 
     pages = sum(1 for _ in src.rglob("*.md"))
@@ -406,7 +406,7 @@ def cmd_build(args, ctx) -> int:
         o = ctx.out
         o(f"{o.paint(o.sym('✓', 'ok'), 'green')} generated {pages} pages "
           f"into {SITE_SRC}/")
-        o(f"  mkdocs.yml written for {args.org or 'Pixel-pmOS'}/"
+        o(f"  mkdocs.yml written for {args.org or 'porthole-dev'}/"
           f"{args.repo or 'porthole'}")
         o.blank()
         o(o.paint("  Nothing here is hand-maintained: the CLI reference comes "
@@ -433,8 +433,8 @@ README_LINK_MAP = {
     "docs/CONTRIBUTING.md": "contributing.md",
     "docs/TOOLS.md": "tools.md",
     "AGENTS.md": "agents.md",
-    "skills/porthole-bringup/": "https://github.com/Pixel-pmOS/porthole/tree/main/skills/porthole-bringup",
-    "LICENSE": "https://github.com/Pixel-pmOS/porthole/blob/main/LICENSE",
+    "skills/porthole-bringup/": "https://github.com/porthole-dev/porthole/tree/main/skills/porthole-bringup",
+    "LICENSE": "https://github.com/porthole-dev/porthole/blob/main/LICENSE",
 }
 
 
@@ -757,7 +757,7 @@ SPEC = {
         (["topic"], {"nargs": "?", "help": "new: what the document is about"}),
         (["--subsystem"], {"help": "new: display, suspend, ..."}),
         (["--force"], {"action": "store_true", "help": "new: overwrite"}),
-        (["--org"], {"help": "GitHub org/user for links (default Pixel-pmOS)"}),
+        (["--org"], {"help": "GitHub org/user for links (default porthole-dev)"}),
         (["--repo"], {"help": "repository name (default porthole)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
