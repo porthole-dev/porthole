@@ -34,6 +34,16 @@ git -C "$ROOT" diff --cached --name-only | while read -r f; do
 	mkdir -p "$WORK/$(dirname "$f")"
 	cp -a "$ROOT/$f" "$WORK/$f"
 done
+# ...and files that are not in the index AT ALL. A brand new verb and its tests
+# are untracked until `git add`, so this script reported PASS for a tree that
+# did not contain them -- and the failures appeared only after the commit. A
+# simulation that lies costs more than no simulation, which is what the header
+# above says about the cp-based copy it replaced.
+git -C "$ROOT" ls-files --others --exclude-standard | while read -r f; do
+	[ -e "$ROOT/$f" ] || continue
+	mkdir -p "$WORK/$(dirname "$f")"
+	cp -a "$ROOT/$f" "$WORK/$f"
+done
 
 cd "$WORK"
 # A runner has no pmbootstrap, no pmaports, and an empty HOME.

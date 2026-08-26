@@ -181,7 +181,12 @@ def test_free_text_action_verbs_flag_a_near_miss():
 def test_soc_and_brain_take_positional_actions():
     needs_pmaports()
     for argv, needle in ((["soc", "list"], "device"),
-                         (["brain", "lint"], "notes"),
+                         # "note", not "notes": lint prints "0 note(s) with
+                         # problems ... out of 64". The plural needle never
+                         # matched, and needs_pmaports() skips this test on a
+                         # runner -- so it passed in CI and failed on every
+                         # machine that could actually run it.
+                         (["brain", "lint"], "note"),
                          (["brain", "search", "--severity", "law"], "laws")):
         rc, out, err = run(*argv)
         assert rc == 0, f"{argv} -> rc={rc} {err}"
