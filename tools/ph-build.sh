@@ -720,17 +720,55 @@ tkmod() {
 		# Only the RUNNING kernel's tree -- /lib/modules also holds stale
 		# .old/.broken copies from earlier flashes, and depmod would be
 		# run against a version that is not booted.
-		inst=\$(find /lib/modules/\$(uname -r) -name '$name.ko.xz' -o -name '${name//_/-}.ko.xz' 2>/dev/null)
+		#
+		# Match whatever form the rootfs actually ships. This looked only for
+		# .ko.xz, so on a rootfs with UNCOMPRESSED modules it found nothing and
+		# announced 'modprobe will not see this build' about a module it was
+		# perfectly able to install -- a warning that reads like a broken build.
+		# kmod decides by extension, so the replacement must keep the extension
+		# the installed file already has.
+		inst=\$(find /lib/modules/\$(uname -r) -type f \\
+			\\( -name '$name.ko'    -o -name '${name//_/-}.ko' \\
+			-o -name '$name.ko.xz' -o -name '${name//_/-}.ko.xz' \\
+			-o -name '$name.ko.gz' -o -name '${name//_/-}.ko.gz' \\) 2>/dev/null)
 		if [ -n \"\$inst\" ]; then
-			for f in \$inst; do sudo cp /tmp/$name.ko.xz \$f; done
+			for f in \$inst; do
+				case \"\$f\" in
+				*.ko)    sudo cp /tmp/$name.ko \"\$f\" ;;
+				*.ko.xz) sudo cp /tmp/$name.ko.xz \"\$f\" ;;
+				*.ko.gz) gzip -c /tmp/$name.ko | sudo tee \"\$f\" >/dev/null ||
+					{ echo \">> could not gzip for \$f\"; exit 1; } ;;
+				esac
+			done
 			sudo depmod -a
 			echo \">> installed: \$inst\"
 		else
-			echo '>> WARNING: no installed .ko.xz found; modprobe will not see this build'
+			echo '>> WARNING: $name is not installed under /lib/modules in any form'
+			echo '>>   (.ko, .ko.xz, .ko.gz all absent) -- modprobe will not see this'
+			echo '>>   build. insmod below still loads it for this boot.'
 		fi
 
-		sudo insmod /tmp/$name.ko
-		echo '>> loaded $name'" || return 1
+		# insmod's failure modes are not interchangeable, and conflating them
+		# is what makes a busy module read as a build error.
+		if ! out=\$(sudo insmod /tmp/$name.ko 2>&1); then
+			case \"\$out\" in
+			*'File exists'*|*'Device or resource busy'*)
+				echo \">> $name is loaded and still held, so it could not be unloaded.\"
+				echo \">> The copy on disk IS updated -- reboot to run it, or unbind\"
+				echo \">> whatever holds it and re-run.\"
+				exit 3 ;;
+			*)
+				echo \">> insmod failed: \$out\"; exit 1 ;;
+			esac
+		fi
+		echo '>> loaded $name'"
+	case $? in
+		0) ;;
+		3) echo ">> not reloaded this boot -- skipping the srcversion check,"
+		   echo ">>   which would report the OLD module and read as a bad build."
+		   return 3 ;;
+		*) return 1 ;;
+	esac
 
 	# Prove the module that is RUNNING is the one just built.
 	#
