@@ -17,6 +17,7 @@ generic notes as well.
 | [instrument-guilty-until-proven-innocent](laws/instrument-guilty-until-proven-innocent.md) | `generic` | The instrument is guilty until proven innocent |
 | [never-judge-a-boot-by-the-screen](laws/never-judge-a-boot-by-the-screen.md) | `generic` | Never judge a boot by the screen |
 | [poll-never-sleep](laws/poll-never-sleep.md) | `generic` | Poll, never sleep |
+| [read-the-vendor-before-inventing-a-mechanism](laws/read-the-vendor-before-inventing-a-mechanism.md) | `generic` | Read the vendor implementation before inventing a mechanism |
 | [shipped-configuration-is-not-running-configuration](laws/shipped-configuration-is-not-running-configuration.md) | `generic` | The shipped configuration is not the running configuration — read the value back |
 | [the-lock-says-who-not-what](laws/the-lock-says-who-not-what.md) | `generic` | The lock says who has the device, never what the device is doing |
 
@@ -90,7 +91,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 1
-- `generic` — 53
+- `generic` — 54
 - `soc:gs201` — 1
 - `soc:msm8998` — 1
 - `soc:qcom` — 1
