@@ -77,6 +77,13 @@ it is not a witness either.
 
 ## The answer: VDD_MX, not devfreq
 
+> **SUPERSEDED, 2026-08-27.** Everything above this line stands. The VDD_MX
+> conclusion below does NOT: holding MX enabled, and then holding it at 384 --
+> the display-on level -- with the display off was measured and neither is
+> immune (died at cycle 22 and 14 against a baseline of 45). See
+> [[holding-vdd-mx-does-not-stop-the-wake-crash]] before acting on any of it,
+> and in particular before doing the multi-domain rework it proposes.
+
 devfreq was a symptom of the real variable. Three conditions are immune, and
 they have exactly one thing in common -- **VDD_MX stays voted**:
 
