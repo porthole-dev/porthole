@@ -24,16 +24,39 @@ Needs tk-touch.py beside it.
 
 NAME is one of the gestures in SCENES below.
 """
+import pathlib
 import statistics
 import sys
 import threading
 import glob
 import time
 
-sys.path.insert(0, "/tmp")
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from tk_touch import Touch, drag  # noqa: E402
-from tk_ui import screen_hash, settle, toplevels  # noqa: E402
+
+
+def _sibling(stem):
+    """Load tk-touch.py / tk-ui.py by PATH.
+
+    `from tk_touch import ...` cannot work: the file is tk-touch.py and a
+    hyphen is not a module name, so this tool has never once imported. Nothing
+    in the tree renames the file either, on the host or when pushing to /tmp.
+    Importing by path is the fix that does not depend on how it was deployed.
+    """
+    import importlib.util
+    here = pathlib.Path(__file__).resolve().parent
+    for cand in (here / f"{stem}.py", pathlib.Path("/tmp") / f"{stem}.py"):
+        if not cand.is_file():
+            continue
+        spec = importlib.util.spec_from_file_location(stem.replace("-", "_"), cand)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    raise SystemExit(f"{stem}.py must sit beside this tool, or in /tmp")
+
+
+_touch = _sibling("tk-touch")
+Touch, drag = _touch.Touch, _touch.drag
+_ui = _sibling("tk-ui")
+screen_hash, settle, toplevels = _ui.screen_hash, _ui.settle, _ui.toplevels
 
 # 6.0 named it encoder31, 6.18 names it encoder-0. Glob, don't guess.
 ENCODER = next(iter(glob.glob("/sys/kernel/debug/dri/0/encoder*/status")),

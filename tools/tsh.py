@@ -14,6 +14,7 @@ Usage: tsh.py "dmesg"            # prints to stdout
        tsh.py "dmesg" -o out.txt
 """
 import argparse
+import os
 import socket
 import sys
 import time
