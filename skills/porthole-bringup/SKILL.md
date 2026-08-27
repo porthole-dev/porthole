@@ -58,7 +58,7 @@ top one costs fifteen times the bottom one:
 
 | rung | use it when | cost |
 |---|---|---|
-| `porthole build mod FOO.ko foo --yes` | a driver that is a **module** | ~40 s, no reboot |
+| `porthole build mod FOO.ko foo --yes` | a driver that is a **module** — try this FIRST | ~40 s, no reboot |
 | `porthole build boot --yes` | a **DTS** change | ~40 s, one `fastboot boot` |
 | `porthole build boot --kernel --yes` | built-in code, **only if this device RAM-boots without modules** -- a rebuilt kernel refuses every module already on it | ~40 s, one `fastboot boot` |
 | `porthole build fast --yes` | a **CONFIG** change, or anything else that moves module CRCs -- builds and flashes the **aport release**, so the change must be in the series | ~6 min, flashes boot |
@@ -67,6 +67,15 @@ top one costs fifteen times the bottom one:
 Run any rung without `--yes` and it previews rather than builds, printing this
 table so you can check you are on the right one — `porthole build fast`, say.
 Add `--kernel` to `boot` to rebuild `Image.gz` as well as the dtb.
+
+**A device that ships from an aport does not close the `mod` rung.** The kernel
+on the phone may come from the aport series while your change is in the tree,
+and those diverge — but with `CONFIG_MODVERSIONS=y` a mismatched module is
+*refused* by the loader, loudly, not silently accepted. So try `mod` and read
+the answer; it costs forty seconds. Reserve the flashing rungs for changes that
+are genuinely not in a module. A module that is held (msm.ko is pinned by
+fbcon) still takes the cheap path: the on-disk copy is replaced and one reboot
+runs it, which is minutes rather than a full package build.
 
 Going up a rung when you did not have to is the single most common way to turn
 a twenty-minute investigation into an afternoon. Going *down* one when the

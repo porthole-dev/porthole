@@ -68,7 +68,9 @@ BUILD_ACTIONS = ("mod", "boot", "fast", "kernel")
 # its subpartition, so it needs loop.ko) the RAM boot cannot reach userspace at
 # all: it lands in the initramfs debug shell looking like a bad kernel.
 LADDER = [
-    ("mod", "a driver that is a module", "no reboot at all"),
+    ("mod", "a driver that is a module -- try this FIRST, even when the device "
+     "ships from an aport: MODVERSIONS makes an ABI mismatch a loud refusal",
+     "no reboot at all"),
     ("boot", "a DTS change", "one fastboot boot"),
     ("boot --kernel", "built-in code, IF this device RAM-boots without modules",
      "one fastboot boot"),
