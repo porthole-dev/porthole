@@ -23,6 +23,15 @@ def main():
     start = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0
     length = int(sys.argv[3], 0) if len(sys.argv) > 3 else 0x100
 
+    # mmap's offset must be page-aligned, and a base that is not (0x17914800,
+    # an ACD block) fails as a bare "OSError: [Errno 22] Invalid argument"
+    # that reads like a dead peripheral rather than a bad argument. Fold the
+    # misalignment into the offsets so any base works and the printed +off
+    # still counts from the base the caller asked about.
+    skew = base & 0xFFF
+    base -= skew
+    start += skew
+
     page = (start + length + 0xFFF) & ~0xFFF
     fd = os.open("/dev/mem", os.O_RDONLY | os.O_SYNC)
     m = mmap.mmap(fd, page, mmap.MAP_SHARED, mmap.PROT_READ, offset=base)
@@ -32,7 +41,7 @@ def main():
         for k in range(0, 16, 4):
             vals.append("%08x" % struct.unpack_from("<I", m, off + k)[0])
         if any(v != "00000000" for v in vals):
-            print("  +%04x: %s" % (off, " ".join(vals)))
+            print("  +%04x: %s" % (off - skew, " ".join(vals)))
     m.close()
     os.close(fd)
     return 0
