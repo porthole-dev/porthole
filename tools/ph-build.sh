@@ -345,6 +345,13 @@ _ph_install_kernel_release() {
 	if [ ! -f "$repo/$_PH_KPKG-$ver.apk" ]; then
 		echo ">> $_PH_KPKG-$ver.apk is not in the local repo -- building the aport"
 		echo ">>   (the newest there is: $(ls -t "$repo/$_PH_KPKG"-*.apk 2>/dev/null | head -1 | xargs -r basename))"
+		# _ph_make has just run `pmbootstrap build --envkernel`, so the repo now
+		# holds a 6.18_p<timestamp>-r0 apk -- and apk sorts _p<timestamp> ABOVE
+		# -rNN. pmbootstrap compares against that, decides the package is "up to
+		# date" and builds nothing, so the release never appears and this check
+		# fires twice. The fast cycle poisons its own repo on every run; purge
+		# before building, which is exactly what tkpurge-devpkgs is for.
+		tkpurge-devpkgs || return 1
 		pmbootstrap build "$_PH_KPKG" || return 1
 	fi
 	[ -f "$repo/$_PH_KPKG-$ver.apk" ] || {
