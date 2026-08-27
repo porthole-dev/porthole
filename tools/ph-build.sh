@@ -361,6 +361,7 @@ _ph_install_kernel_release() {
 		return 1; }
 
 	echo ">> installing $_PH_KPKG=$ver into the rootfs chroot"
+	_PH_INSTALLED_APK="$repo/$_PH_KPKG-$ver.apk"
 	pmbootstrap chroot -r -- apk add -U --allow-untrusted "$_PH_KPKG=$ver" || return 1
 	pmbootstrap chroot -r -- apk info -W /boot/vmlinuz 2>/dev/null | sed -n 's/.*owned by //p' |
 		grep -q -- "-r${ver##*-r}$" || {
@@ -504,6 +505,34 @@ _ph_stamp_write() {
 
 # Resolve the .dtb that boot.img is verified AGAINST, and say where it came
 # from. Silence here is what made the original failure unreadable.
+# The .dtb inside the kernel apk that was just installed.
+#
+# This is the reference the fast rung needs and did not have. It verified
+# boot.img against $_PH_DTB_BUILT -- the ENVKERNEL TREE build -- while the
+# image is packed from the APORT release, and the two are allowed to diverge
+# (43 files on 2026-08-27). So a correct image was refused:
+#
+#   FAIL  DTB MISMATCH -- the boot.img does not contain the DTB you built
+#           in boot.img : 93401 bytes  c33924f43fe53cc8
+#           just built  : 89970 bytes  43950108572f173a
+#
+# where 93401/c339 was the right answer and 89970/4395 was the tree's. The
+# comment in tkflash-boot already prescribed this fix; nothing implemented it.
+#
+# The apk, not the rootfs chroot: boot.img is packed FROM that chroot, so
+# comparing the two would always agree and would catch nothing. The apk is the
+# artifact the build produced, which is what the guard is actually asking about
+# -- did install pick the package we just built, or an older indexed one.
+_ph_dtb_from_apk() {
+	local apk=${1:?} out
+	[ -f "$apk" ] || { echo ">> no apk at $apk" >&2; return 1; }
+	out=$(mktemp -d)/dtb
+	mkdir -p "$out"
+	tar -xzf "$apk" -C "$out" "boot/dtbs/${PORTHOLE_DTB%/*}/$_PH_DTB" 2>/dev/null || {
+		echo ">> $apk has no boot/dtbs/${PORTHOLE_DTB%/*}/$_PH_DTB" >&2; return 1; }
+	printf "%s\n" "$out/boot/dtbs/${PORTHOLE_DTB%/*}/$_PH_DTB"
+}
+
 _ph_ref_dtb() {
 	if [ -n "${TK_REF_DTB:-}" ]; then
 		echo ">> reference dtb: TK_REF_DTB (explicit)" >&2
@@ -686,7 +715,9 @@ tkbuild-kernel() {
 	_ph_install_kernel_release || return 1
 	pmbootstrap export || return 1
 
-	local dtb="$_PH_DTB_BUILT"
+	# Against the apk that was installed, NOT the tree: this rung flashes the
+	# aport release, and the tree is a different kernel.
+	local dtb; dtb=$(_ph_dtb_from_apk "$_PH_INSTALLED_APK") || return 1
 	"$_PH_REPO/tools/bootimg-verify.py" \
 		"$(readlink -f /tmp/postmarketOS-export/boot.img)" --dtb "$dtb" || {
 		echo ">> refusing to flash a stale image"; return 1; }
