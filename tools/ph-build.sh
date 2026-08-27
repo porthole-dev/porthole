@@ -243,14 +243,6 @@ _ph_make() {
 		echo ">>   apk:   $kapk_after"
 		return 1
 	fi
-	# Record what was ACTUALLY built, for whoever installs it next.
-	# `pmbootstrap build --envkernel` does not package as the aport's
-	# <pkgver>-r<pkgrel>; it stamps a dev version, 6.18_p<timestamp>-r0. Anything
-	# downstream that assumes the aport version installs a DIFFERENT kernel --
-	# see _ph_install_built_kernel.
-	_PH_KAPK_VER=${kapk_after##*/}
-	_PH_KAPK_VER=${_PH_KAPK_VER#"$_PH_KPKG"-}
-	_PH_KAPK_VER=${_PH_KAPK_VER%.apk}
 	# Firmware BEFORE the device package: device-google-taimen-nonfree-firmware
 	# depends on it, and install fails with "no such package" if it is not built
 	# and indexed first.
@@ -320,21 +312,47 @@ _ph_assert_no_devpkgs() {
 # Install the kernel aport into the rootfs chroot PINNED to its release version.
 # `apk add -U -u <pkg>` is not safe here: it is an upgrade, and an installed
 # envkernel _p outranks every release, so the upgrade silently does nothing.
-# Install the kernel that _ph_make just built into the rootfs chroot.
+# Install the RELEASE kernel -- the aport's <pkgver>-r<pkgrel> -- into the
+# rootfs chroot.
 #
-# It MUST be the version _ph_make produced, not the aport's <pkgver>-r<pkgrel>.
-# `pmbootstrap build --envkernel` packages the TREE and stamps a dev version --
-# 6.18_p<timestamp>-r0 -- while the aport sits at, say, 6.18-r91. Pinning the
-# aport version here did two wrong things at once on 2026-08-27: it asked for a
-# release that had never been built (apk: "breaks: world[...=6.18-r91]", the
-# local repo stopped at r89), and had that release existed it would have
-# installed a kernel built from the aport's tarball plus patch series -- i.e.
-# NOT the tree, silently discarding the change the fast cycle had just compiled.
+# It must be the aport build, not the tree. This device's /boot/vmlinuz is owned
+# by linux-...-6.18-r89, an aport package, and the tree is allowed to diverge
+# from the series: tools/tk-reconcile.sh reported 43 differing files on
+# 2026-08-27. Installing a tree build here would flash a materially different
+# kernel -- see brain/traps/never-flash-a-tree-built-kernel-when-the-device-
+# ships-from-an-aport.md, which cost a session on 2026-08-25.
 #
-# The fast rung exists for tree iteration. It installs the tree.
-_ph_install_built_kernel() {
-	local ver=${_PH_KAPK_VER:-}
-	[ -n "$ver" ] || { echo ">> _ph_make did not record a built kernel version" >&2; return 1; }
+# The aport has to have been BUILT, though, and nothing upstream of here builds
+# it: _ph_make only runs `pmbootstrap build --envkernel`, which packages the
+# tree under a dev version (6.18_p<timestamp>-r0) and never the release. So a
+# pkgrel bump with no build -- exactly the state on 2026-08-27, aport at r91,
+# local repo stopping at r89 -- reached apk as:
+#
+#   ERROR: unable to select packages:
+#     linux-postmarketos-qcom-msm8998-6.18-6.18-r89:
+#       breaks: world[linux-postmarketos-qcom-msm8998-6.18=6.18-r91]
+#
+# which names neither the missing version nor what to do about it. Build it if
+# it is not there, and say so plainly if it still is not.
+_ph_install_kernel_release() {
+	local ver
+	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
+	ver=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	      echo "$pkgver-r$pkgrel")
+	[ -n "$ver" ] && [ "$ver" != "-r" ] || { echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
+
+	local repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
+	if [ ! -f "$repo/$_PH_KPKG-$ver.apk" ]; then
+		echo ">> $_PH_KPKG-$ver.apk is not in the local repo -- building the aport"
+		echo ">>   (the newest there is: $(ls -t "$repo/$_PH_KPKG"-*.apk 2>/dev/null | head -1 | xargs -r basename))"
+		pmbootstrap build "$_PH_KPKG" || return 1
+	fi
+	[ -f "$repo/$_PH_KPKG-$ver.apk" ] || {
+		echo ">> still no $_PH_KPKG-$ver.apk after building." >&2
+		echo ">> The APKBUILD says pkgrel=${ver##*-r}; check the series applies" >&2
+		echo ">> (tools/tk-reconcile.sh) and that the build actually succeeded." >&2
+		return 1; }
+
 	echo ">> installing $_PH_KPKG=$ver into the rootfs chroot"
 	pmbootstrap chroot -r -- apk add -U --allow-untrusted "$_PH_KPKG=$ver" || return 1
 	pmbootstrap chroot -r -- apk info -W /boot/vmlinuz 2>/dev/null | sed -n 's/.*owned by //p' |
@@ -658,7 +676,7 @@ tkbuild-kernel() {
 
 	# -r: the rootfs chroot, not the build chroot. -U -u: refresh the index and
 	# upgrade, so it picks up the apk just built rather than a cached older one.
-	_ph_install_built_kernel || return 1
+	_ph_install_kernel_release || return 1
 	pmbootstrap export || return 1
 
 	local dtb="$_PH_DTB_BUILT"

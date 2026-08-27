@@ -72,7 +72,8 @@ LADDER = [
     ("boot", "a DTS change", "one fastboot boot"),
     ("boot --kernel", "built-in code, IF this device RAM-boots without modules",
      "one fastboot boot"),
-    ("fast", "built-in code, a CONFIG change, anything that moves module CRCs",
+    ("fast", "a CONFIG change, or anything that moves module CRCs -- builds and "
+     "flashes the APORT release, so the change must be in the series",
      "flashes boot only"),
     ("kernel", "rootfs contents changed, or boot/rootfs desynced",
      "then `porthole flash --yes`"),
