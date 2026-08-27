@@ -38,6 +38,7 @@ generic notes as well.
 | id | scope | title |
 |---|---|---|
 | [a-board-name-is-not-a-soc-name](traps/a-board-name-is-not-a-soc-name.md) | `generic` | A vendor's reference board is not the SoC, and tools will accept it silently |
+| [a-fresh-kernel-cannot-ram-boot-against-installed-modules](traps/a-fresh-kernel-cannot-ram-boot-against-installed-modules.md) | `generic` | A freshly built kernel cannot RAM-boot against the modules already on the device |
 | [a-hard-hang-writes-nothing-to-disk](traps/a-hard-hang-writes-nothing-to-disk.md) | `generic` | A hard hang writes nothing to disk — capture on the host, before you trigger |
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
@@ -58,6 +59,7 @@ generic notes as well.
 | [dtbo-must-match-the-kernel](traps/dtbo-must-match-the-kernel.md) | `generic` | The dtbo must match the kernel, and the bootloader reads it from the active slot |
 | [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
 | [frozen-is-not-hung](traps/frozen-is-not-hung.md) | `generic` | FROZEN (kernel alive, userspace gone) is a distinct state and the watchdog will not save you |
+| [initramfs-is-not-frozen](traps/initramfs-is-not-frozen.md) | `generic` | A device stopped in the initramfs looks exactly like a frozen one, and is nothing like it |
 | [installing-firmware-can-flash-the-boot-partition](traps/installing-firmware-can-flash-the-boot-partition.md) | `generic` | apk add <firmware-pkg> (and apk fix) can FLASH the boot partition |
 | [never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport](traps/never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport.md) | `generic` | Never flash a kernel built from the source tree when the device ships from an aport series |
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
@@ -111,7 +113,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 3
-- `generic` — 62
+- `generic` — 64
 - `soc:gs201` — 1
 - `soc:msm8998` — 6
 - `soc:qcom` — 1
