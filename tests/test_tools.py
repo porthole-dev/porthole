@@ -12,6 +12,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -20,7 +21,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 REQUIRED_FIELDS = ("scope", "needs", "env", "exits")
 VALID_SCOPE = re.compile(r"^(generic|soc:[a-z0-9_-]+|device:[a-z0-9-]+)$")
 VALID_NEEDS = re.compile(
-    r"^(-(\s|$)|BOOTED\b|FASTBOOT\b|FROZEN\b|any\b|on-device\b)")
+    r"^(-(\s|$)|BOOTED\b|FASTBOOT\b|FROZEN\b|INITRAMFS\b|any\b|on-device\b)")
 
 # Anything that would make a tool work only for its original author.
 PERSONAL = re.compile(
@@ -76,6 +77,7 @@ def test_needs_values_are_valid():
     bad = [f"{p.name}: {field(p, 'needs')!r}" for p in tools()
            if not VALID_NEEDS.match(field(p, "needs") or "")]
     assert not bad, ("needs must start with - | BOOTED | FASTBOOT | FROZEN | "
+                     "INITRAMFS | "
                      "any | on-device:\n  " + "\n  ".join(bad))
 
 
@@ -137,6 +139,54 @@ def test_python_tools_compile():
         if proc.returncode != 0:
             bad.append(f"{path.name}: {proc.stderr.strip().splitlines()[-1:]}")
     assert not bad, "python syntax errors:\n  " + "\n  ".join(bad)
+
+
+def test_host_python_tools_can_start():
+    """Compiling is not running.
+
+    tools/tsh.py shipped with `os.environ.get(...)` as an argparse default and
+    no `import os`. py_compile passed it -- the NameError is at runtime -- and
+    the tool was dead. It is the ONLY channel to the initramfs debug shell, so
+    it was broken precisely for the case it exists for, and nothing noticed
+    until a device would not boot on 2026-08-27.
+
+    `--help` is the cheapest thing that actually executes module scope and
+    builds the parser, which is where that class of bug lives. Restricted to
+    host-only tools: anything with `needs:` naming a device state or on-device
+    may legitimately touch hardware just by importing.
+    """
+    bad = []
+    scratch = tempfile.mkdtemp(prefix="porthole-smoke-")
+    for path in tools():
+        if path.suffix != ".py":
+            continue
+        # Everything except on-device tools: a tool declaring BOOTED or
+        # INITRAMFS still RUNS on the host, and is exactly as safe to --help.
+        # Keying on "host only" instead would have excluded tsh.py, the tool
+        # this test was written for, the moment its needs: was made accurate.
+        if (field(path, "needs") or "").strip().startswith("on-device"):
+            continue
+        # stdin=DEVNULL, or a tool that prompts (tk-mount-cal.py walks you
+        # through four physical poses) blocks forever on input() instead of
+        # failing. The timeout stays as a backstop, not as the mechanism.
+        # In a throwaway cwd, because a tool that takes an output path as
+        # argv[1] treats "--help" as one: tk-tone.py wrote a WAV named
+        # `--help` into the repo root the first time this ran.
+        proc = subprocess.run([sys.executable, str(path), "--help"],
+                              capture_output=True, text=True, cwd=scratch,
+                              stdin=subprocess.DEVNULL, timeout=30)
+        # Only the "this line has never been executed" class counts. A tool
+        # without argparse may well die on `--help` with a ValueError from
+        # int(sys.argv[1]) -- that is the tool working. NameError and
+        # ImportError are different: they mean the code cannot run at all, for
+        # any argument, and no amount of testing on the device would have been
+        # reached to find out.
+        for fatal in ("NameError", "ImportError", "ModuleNotFoundError"):
+            if f"{fatal}:" in proc.stderr:
+                last = proc.stderr.strip().splitlines()[-1:]
+                bad.append(f"{path.name}: {last}")
+                break
+    assert not bad, "python tools that cannot run at all:\n  " + "\n  ".join(bad)
 
 
 def test_executable_tools_have_a_shebang():

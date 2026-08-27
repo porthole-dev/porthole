@@ -313,11 +313,11 @@ start_followers
 # catches the stale-MAC case, a firewall, and a sink that never bound its port.
 _probe_n=0
 verify_channel() {
-	local tok i
+	local tok
 	_probe_n=$((_probe_n + 1))
 	tok="tk-capture-probe-$$-$_probe_n"
 	dev_run "echo '$tok' | sudo -n tee /dev/kmsg >/dev/null" >/dev/null
-	for i in 1 2 3 4 5 6 7 8 9 10; do
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		if grep -q "$tok" "$OUT/netconsole.log" 2>/dev/null; then
 			# Name the transports, not just "it works": in forever mode
 			# there are meant to be two, and one is the whole point.
