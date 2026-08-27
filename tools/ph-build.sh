@@ -538,6 +538,17 @@ _ph_ref_dtb() {
 		echo ">> reference dtb: TK_REF_DTB (explicit)" >&2
 		printf '%s\n' "$TK_REF_DTB"; return 0
 	fi
+	# An aport build answers for itself. When a kernel package has just been
+	# installed, the .dtb it carries is the reference -- the build stamp below
+	# points at the envkernel TREE build, which is a different kernel entirely
+	# on any port where the series and the tree have diverged.
+	if [ -n "${_PH_INSTALLED_APK:-}" ] && [ -f "${_PH_INSTALLED_APK:-}" ]; then
+		local apk_dtb
+		if apk_dtb=$(_ph_dtb_from_apk "$_PH_INSTALLED_APK"); then
+			echo ">> reference dtb: the $(basename "$_PH_INSTALLED_APK") just installed" >&2
+			printf '%s\n' "$apk_dtb"; return 0
+		fi
+	fi
 	if [ -s "$_PH_STAMP" ]; then
 		local s_tree s_dtb
 		s_tree=$(sed -n 's/^tree=//p' "$_PH_STAMP")
