@@ -120,7 +120,8 @@ def test_a_refreshed_snapshot_reports_a_real_device_state():
     assert snap.state.lower() != "unprobed", \
         "the model refused to probe: {!r}".format(snap.state)
     assert snap.state.upper() in (
-        "BOOTED", "SSH", "FROZEN", "FASTBOOT", "RECOVERY", "ABSENT", "UNKNOWN"), \
+        "BOOTED", "SSH", "FROZEN", "INITRAMFS", "FASTBOOT", "RECOVERY",
+        "ABSENT", "UNKNOWN"), \
         "unrecognised device state {!r}".format(snap.state)
 
 

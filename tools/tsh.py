@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: - (host only, no device)
+# needs: INITRAMFS (runs on the host; the device must be in the debug shell)
 # env: HOST, PORTHOLE_HOST
 # exits: 0 ok · non-zero on failure
 """Run a command on the pmOS initramfs debug shell (busybox telnetd, $HOST:23).

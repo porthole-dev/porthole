@@ -129,7 +129,8 @@ def cmd_brief(args, ctx) -> int:
         ctx.out.kv("soc", cfg.get("PORTHOLE_SOC", "") or "-", w)
         ctx.out.kv("ssh", cfg.get("PHONE", ""), w)
         colour = {"BOOTED": "green", "FASTBOOT": "yellow",
-                  "FROZEN": "yellow", "ABSENT": "grey"}.get(state, "grey")
+                  "FROZEN": "yellow", "INITRAMFS": "yellow",
+                  "ABSENT": "grey"}.get(state, "grey")
         ctx.out.kv("state", ctx.out.paint(state, colour), w)
         ctx.out.kv("tools", str(len(tools)), w)
         if payload["device"]["traps"]:
@@ -290,6 +291,8 @@ def _next_steps(cfg, device: str, state: str, gaps: list[str]) -> list[str]:
         steps.append("attach and power the device, then `porthole doctor`")
     elif state == "FASTBOOT":
         steps.append("tools/tk-reboot.sh   # leave the bootloader, re-arming the slot")
+    elif state == "INITRAMFS":
+        steps.append("tools/tsh.py 'dmesg | grep pmOS-rd'   # why root did not mount")
     elif state == "FROZEN":
         steps.append("tools/tk-recover.sh   # kernel alive, userspace gone")
     elif state == "BOOTED":

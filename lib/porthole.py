@@ -492,7 +492,7 @@ class Device:
         return ""
 
     def state(self, max_age: float = 0.0) -> str:
-        """BOOTED | FROZEN | FASTBOOT | ABSENT.
+        """BOOTED | INITRAMFS | FROZEN | FASTBOOT | ABSENT.
 
         The device lock says WHO is using the device, never WHAT it is doing.
         This is the probe that answers the second question.
@@ -501,6 +501,14 @@ class Device:
         network at all, so fastboot is authoritative; ssh distinguishes BOOTED;
         ping alone distinguishes FROZEN (kernel alive, userspace gone) from
         ABSENT (needs a human).
+
+        INITRAMFS sits between BOOTED and FROZEN: the boot stopped in the pmOS
+        initramfs debug shell, which is a busybox telnetd nobody has to guess
+        at -- tools/tsh.py talks to it, and it will hand over dmesg and the
+        initramfs log that say WHY the root did not mount. Reporting that as
+        FROZEN is true but useless: FROZEN reads as "needs a human with a
+        cable", and it cost a session probing ports by hand to discover the
+        device was sitting there, fully interrogable, all along.
 
         The three probes now run CONCURRENTLY and the verdict is resolved by
         that same precedence rather than by which answered first. Serially they
@@ -538,6 +546,7 @@ class Device:
                              # retry unless the device is actually stalling.
                              ("boot_id",
                               lambda: self._boot_id(retry="stall-only")),
+                             ("initramfs", self._in_initramfs),
                              ("ping", self._pings))]
         for th in threads:
             th.start()
@@ -548,6 +557,8 @@ class Device:
             verdict = "FASTBOOT"
         elif results.get("boot_id"):
             verdict = "BOOTED"
+        elif results.get("initramfs"):
+            verdict = "INITRAMFS"
         elif results.get("ping"):
             verdict = "FROZEN"
         else:
@@ -579,6 +590,25 @@ class Device:
                                         "host": self.host}))
         except OSError:
             pass
+
+    def _in_initramfs(self) -> bool:
+        """Is the pmOS initramfs debug shell answering?
+
+        It is a busybox telnetd on port 23. A plain TCP connect is enough and
+        is the only probe that separates "stopped in the initramfs" from
+        "userspace died" -- both ping, neither answers ssh.
+
+        Bounded, because this runs against possibly-absent hardware: a closed
+        port on a live host RSTs instantly, and an absent host must not hold
+        the verdict open. Any failure is a "no".
+        """
+        import socket
+        port = int(self.cfg.get("PORTHOLE_INITRAMFS_PORT") or 23)
+        try:
+            with socket.create_connection((self.host, port), timeout=2):
+                return True
+        except OSError:
+            return False
 
     def _pings(self) -> bool:
         """Does the device answer ICMP?

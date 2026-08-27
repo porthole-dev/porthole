@@ -333,6 +333,10 @@ def check_device(ch: Checks, ctx, cfg) -> None:
         ch.add("device: state", "warn",
                f"{detail} -- in the bootloader; nothing over ssh will work",
                doc="tools/tk-reboot.sh, or fastboot set_active + reboot")
+    elif state == "INITRAMFS":
+        ch.add("device: state", "warn",
+               f"{detail} -- stopped in the pmOS initramfs debug shell",
+               doc="tools/tsh.py 'dmesg | grep pmOS-rd'   # it will say why root did not mount")
     elif state == "FROZEN":
         ch.add("device: state", "warn",
                f"{detail} -- kernel alive, userspace gone",

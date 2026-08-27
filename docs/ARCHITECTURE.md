@@ -92,7 +92,7 @@ Every tool opens with a block an agent can read with `head -20`:
 ```
 #!/bin/bash
 # scope: generic          | soc:<soc> | device:<codename>
-# needs: BOOTED           | FASTBOOT | FROZEN | on-device | any | -
+# needs: BOOTED           | FASTBOOT | FROZEN | INITRAMFS | on-device | any | -
 # env:   TK_CYCLES (default 20), PHONE, TK_AGENT
 # exits: 0 all clean · 1 a cycle failed · 75 lock · 76 wrong state
 # N suspend/resume cycles with per-cycle evidence.
@@ -109,6 +109,7 @@ valid scope and needs values. `porthole tools lint` lists any gaps.
 | `BOOTED` | needs a booted device answering ssh |
 | `FASTBOOT` | needs the bootloader |
 | `FROZEN` | a recovery tool for the kernel-alive/userspace-gone state |
+| `INITRAMFS` | the boot stopped in the pmOS initramfs debug shell (`tsh.py`) |
 | `any` | probes state and handles more than one |
 | `on-device` | runs *on* the device, pushed or installed there |
 

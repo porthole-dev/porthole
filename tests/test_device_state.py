@@ -32,6 +32,7 @@ def device(**probes):
     dev._boot_id = lambda retry="always": probes.get("boot_id", "")
     dev.boot_id = lambda: probes.get("boot_id", "")
     dev._pings = lambda: probes.get("ping", False)
+    dev._in_initramfs = lambda: probes.get("initramfs", False)
     dev._remember_state = lambda verdict: None
     return dev
 
@@ -55,6 +56,19 @@ def test_ping_without_ssh_is_frozen():
     assert device(ping=True).state() == "FROZEN"
 
 
+def test_the_initramfs_shell_is_not_frozen():
+    """Both ping and neither answers ssh, but one of them has a shell on :23
+    that will say why the root did not mount. Collapsing them sends whoever
+    reads the verdict looking for a cable instead of for tools/tsh.py."""
+    assert device(ping=True, initramfs=True).state() == "INITRAMFS"
+
+
+def test_booted_still_wins_over_the_initramfs_shell():
+    """A booted device may run its own telnetd; ssh answering is the stronger
+    statement and must not be overridden by a port probe."""
+    assert device(boot_id="abc", ping=True, initramfs=True).state() == "BOOTED"
+
+
 def test_nothing_answering_is_absent():
     assert device().state() == "ABSENT"
 
@@ -64,12 +78,16 @@ def test_every_combination_resolves_the_same_as_the_serial_order():
     the serial one resolved by order of asking. Those must agree everywhere."""
     for fb in (False, True):
         for bid in ("", "abc"):
-            for png in (False, True):
-                got = device(fastboot=fb, boot_id=bid, ping=png).state()
-                want = ("FASTBOOT" if fb else
-                        "BOOTED" if bid else
-                        "FROZEN" if png else "ABSENT")
-                assert got == want, f"fb={fb} boot_id={bid!r} ping={png}: {got}"
+            for ird in (False, True):
+                for png in (False, True):
+                    got = device(fastboot=fb, boot_id=bid,
+                                 initramfs=ird, ping=png).state()
+                    want = ("FASTBOOT" if fb else
+                            "BOOTED" if bid else
+                            "INITRAMFS" if ird else
+                            "FROZEN" if png else "ABSENT")
+                    assert got == want, (
+                        f"fb={fb} boot_id={bid!r} initramfs={ird} ping={png}: {got}")
 
 
 def test_a_forced_state_still_short_circuits_everything():

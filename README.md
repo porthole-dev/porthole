@@ -535,7 +535,7 @@ is how you flash the wrong DTB.
 
 **The device is unreachable but powered.**
 It has four states, not two. `porthole brief` tells you which:
-`BOOTED` · `FROZEN` (kernel alive, userspace gone) · `FASTBOOT` · `ABSENT`.
+`BOOTED` · `INITRAMFS` (stopped in the pmOS debug shell -- `tools/tsh.py` will say why) · `FROZEN` (kernel alive, userspace gone) · `FASTBOOT` · `ABSENT`.
 See `porthole brain frozen-is-not-hung`.
 
 **Boot verdicts seem wrong.**

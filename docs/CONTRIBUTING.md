@@ -11,7 +11,7 @@
    #!/bin/bash
    # SPDX-License-Identifier: MIT
    # scope: generic          | soc:<soc> | device:<codename>
-   # needs: BOOTED           | FASTBOOT | FROZEN | on-device | any | -
+   # needs: BOOTED           | FASTBOOT | FROZEN | INITRAMFS | on-device | any | -
    # env:   PHONE, TK_AGENT, ...          (or `-`)
    # exits: 0 ok · 1 failed · 75 lock · 76 wrong state
    # One line saying what it does.

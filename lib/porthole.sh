@@ -345,7 +345,16 @@ tk_run() {
         ssh "${TK_SSH_OPTS[@]}" "${PHONE:-$PORTHOLE_USER@$HOST}" "$*" </dev/null
 }
 
-# tk_device_state -> FASTBOOT | BOOTED | FROZEN | ABSENT
+# Is the pmOS initramfs debug shell answering? (busybox telnetd, port 23)
+#
+# bash's /dev/tcp is used rather than nc, which is not installed everywhere and
+# whose flags differ between the openbsd and nmap builds. Any failure is a "no".
+tk_in_initramfs() {
+    local port=${PORTHOLE_INITRAMFS_PORT:-23}
+    timeout 2 bash -c "exec 3<>/dev/tcp/$HOST/$port" 2>/dev/null
+}
+
+# tk_device_state -> FASTBOOT | BOOTED | INITRAMFS | FROZEN | ABSENT
 #
 # The device lock says WHO is using the device, never WHAT the device is doing.
 # On taimen 2026-08-19 an agent queued ten minutes against a phone another
@@ -357,12 +366,19 @@ tk_run() {
 # alone distinguishes FROZEN (kernel alive, userspace gone) from ABSENT (needs
 # a human). Do NOT parallelise these -- the order IS the semantics.
 #
+# INITRAMFS goes between BOOTED and FROZEN: the boot stopped in the pmOS
+# initramfs debug shell (busybox telnetd, port 23) and tools/tsh.py will hand
+# over the dmesg that says why the root did not mount. Calling that FROZEN is
+# true and useless -- FROZEN reads as "needs a human with a cable", and it cost
+# a session probing ports by hand to find the device sitting there answering.
+#
 # ~0.4s on a healthy booted device cold, under 0.1s with a warm ssh master.
 # Set TK_DEVICE_STATE to skip the probe when you already know the answer.
 tk_device_state() {
     [ -n "${TK_DEVICE_STATE:-}" ] && { echo "$TK_DEVICE_STATE"; return 0; }
     tk_in_fastboot && { echo FASTBOOT; return 0; }
     [ -n "$(tk_boot_id)" ] && { echo BOOTED; return 0; }
+    tk_in_initramfs && { echo INITRAMFS; return 0; }
     ping -c1 -W2 "$HOST" >/dev/null 2>&1 && { echo FROZEN; return 0; }
     echo ABSENT
 }
