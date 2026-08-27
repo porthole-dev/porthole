@@ -59,8 +59,9 @@ top one costs fifteen times the bottom one:
 | rung | use it when | cost |
 |---|---|---|
 | `porthole build mod FOO.ko foo --yes` | a driver that is a **module** | ~40 s, no reboot |
-| `porthole build boot --yes` | **DTS**, or built-in code you can RAM-boot | ~40 s, one `fastboot boot` |
-| `porthole build fast --yes` | a **CONFIG** change (module CRCs move) | ~6 min, flashes boot |
+| `porthole build boot --yes` | a **DTS** change | ~40 s, one `fastboot boot` |
+| `porthole build boot --kernel --yes` | built-in code, **only if this device RAM-boots without modules** -- a rebuilt kernel refuses every module already on it | ~40 s, one `fastboot boot` |
+| `porthole build fast --yes` | a **CONFIG** change, or anything else that moves module CRCs -- builds and flashes the **aport release**, so the change must be in the series | ~6 min, flashes boot |
 | `porthole build kernel --yes` | **rootfs** contents changed, or boot/rootfs desynced | ~10 min, reflash both |
 
 Run any rung without `--yes` and it previews rather than builds, printing this
