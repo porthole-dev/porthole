@@ -319,6 +319,32 @@ tk_pkill() {
     return 0
 }
 
+# tk_run <command...> -- run ONE command on the device, over ssh.
+#
+# The shell half of porthole.py's Device.run(). It did not exist until
+# 2026-08-27, and its absence is why "never hand-roll what a tool does" kept
+# getting broken: with no primitive for the single most common operation in the
+# toolbox, every caller -- and every agent -- wrote its own
+# `ssh "${TK_SSH_OPTS[@]}" "$PHONE" ...`, or worse, misread tools/tk-device.sh
+# (which wraps a HOST command) as the way to reach the phone.
+#
+# Deliberately NOT taking the mutex: the lock is declared explicitly, by
+# tools/tk-device.sh, because only the caller knows which device state it
+# needs. A primitive that silently locked would make nesting the two deadlock.
+#
+# Arguments are joined with spaces and run by the device's shell, so quote as
+# you would for `sh -c`. </dev/null so a command that reads stdin cannot eat
+# the caller's; the timeout is a ceiling, overridable per call.
+#
+#   tk_run cat /proc/version
+#   tk_run sudo -n cat /sys/kernel/debug/pm_genpd/pm_genpd_summary
+#   TK_RUN_TIMEOUT=120 tk_run 'dmesg -w'
+tk_run() {
+    [ $# -gt 0 ] || { echo "usage: tk_run <command...>" >&2; return 64; }
+    timeout "${TK_RUN_TIMEOUT:-30}" \
+        ssh "${TK_SSH_OPTS[@]}" "${PHONE:-$PORTHOLE_USER@$HOST}" "$*" </dev/null
+}
+
 # tk_device_state -> FASTBOOT | BOOTED | FROZEN | ABSENT
 #
 # The device lock says WHO is using the device, never WHAT the device is doing.
