@@ -12,7 +12,11 @@ reads as fine. So this samples the DPU's own vsync counter fast enough to
 recover *individual frame intervals* and reports their distribution: p50 is
 what the session normally does, p95/max is what the user actually notices.
 
-Needs tk-touch.py beside it.
+Needs tk-touch.py and tk-ui.py beside it, and `grim` and `lswt` installed
+ON THE DEVICE -- tk-ui.py shells out to both to identify the focused
+surface. Neither is in the pmOS image by default, and without them this
+exits with a FileNotFoundError traceback rather than saying what is
+missing: `apk add grim lswt`.
 
   tk-gesture-bench.py NAME [REPEATS]
   tk-gesture-bench.py drag X1 Y1 X2 Y2 MS [REPEATS] [--fling]
