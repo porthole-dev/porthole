@@ -17,7 +17,7 @@ what?
 **The answer** — two conditions are each necessary, measured with a
 reproducer that presses the power key every 2 s and logs the count to
 `/dev/kmsg` so netconsole has it even when the machine stops silently
-(`slowcycle.sh`, from an injected `KEY_POWER` -- no hands needed):
+(an injected `KEY_POWER` -- no hands needed):
 
     GPU runtime PM   devfreq polling   result
     auto             50 ms             died at cycle 21, and at 8, and at 28
@@ -64,9 +64,12 @@ correct on their own terms, neither sufficient:
 2. `msm_devfreq_target()`'s non-GMU path called `dev_pm_opp_set_rate()` with no
    suspended check, unlike the GMU path beside it.
 
-**How it was established** — `slowcycle.sh` and `mash.sh` (bursts from one
-uinput device; a device created per press is not what the hardware key looks
-like, and only the burst shape reproduced what a thumb does). netconsole armed
+**How it was established** — a power-key cycler and a mash script (bursts from
+one uinput device; a device created per press is not what the hardware key looks
+like, and only the burst shape reproduced what a thumb does). NEITHER WAS COMMITTED and
+both are lost; `tools/tk-wake-cycle.py` is the rebuilt cycler and is the
+instrument to use now. It counts only real panel transitions and puts every
+count on /dev/kmsg. Its baseline on r89 was death at cycle 45. netconsole armed
 throughout -- and note that its silence only counts when the listener is
 verified up, which cost one wrong conclusion here. ramoops is registered as a
 console on this device but `/sys/fs/pstore` is EMPTY after a watchdog reset, so

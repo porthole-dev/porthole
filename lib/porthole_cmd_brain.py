@@ -358,6 +358,27 @@ def _lint_note(note, index, root) -> list[str]:
         problems.append(f"confidence is `proven` but evidence is only "
                         f"{evidence!r} -- cite something a stranger can check")
 
+    # A finding reports a measurement, and a measurement is only re-checkable
+    # if the thing that produced it still exists. On 2026-08-27 a finding cited
+    # cycler.py, slowcycle.sh and mash.sh for its numbers; none of the three had
+    # ever been committed, so the next session had the conclusion, the counts,
+    # and no way to reproduce any of it. Rebuilding the instrument took longer
+    # than the fix did.
+    #
+    # Only findings, and only names that resolve NOWHERE in the repo: a note may
+    # legitimately mention envkernel.sh or some upstream script it does not own.
+    if sev == "finding":
+        named = set(re.findall(r"\b([\w-]+\.(?:py|sh))\b",
+                               evidence + " " + note.body))
+        missing = sorted(n for n in named
+                         if not any(root.rglob(n)) and not n.startswith("_"))
+        if missing:
+            problems.append(
+                "names %s for its evidence, and %s not in the repo -- commit "
+                "the instrument with the finding, or the numbers cannot be "
+                "re-checked" % (", ".join(missing),
+                                "it is" if len(missing) == 1 else "they are"))
+
     # An HTML comment is guidance to the author, not content. The scaffold
     # explains [[wikilinks]] inside one, and scanning it reports the example as
     # a dead link on every freshly created note.

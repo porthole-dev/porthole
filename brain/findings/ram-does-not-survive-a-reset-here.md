@@ -54,7 +54,7 @@ misreadings of the empty directory:
   downstream kernels anyway; taimen's vendor kernel is 4.4 and mainline is
   6.18, so there is nothing to backport in either direction.
 
-**How it was established** — `rampoke.py`: `mmap` on `/dev/mem` at each
+**How it was established** — `a small /dev/mem poke script (not committed, since lost)`: `mmap` on `/dev/mem` at each
 candidate physical address, write a 16-byte magic, verify in-boot, reboot,
 verify again. What would overturn it: a boot path that leaves DDR trained --
 this is a bootloader question (XBL/ABL), not a kernel one, and it is the only
