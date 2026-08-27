@@ -771,6 +771,16 @@ tkpush-modules() {
 	# tk-* script uses; source it rather than growing a second set.
 	# shellcheck source=tk-lib.sh
 	. "$_PH_REPO/tools/tk-lib.sh"
+	# The phone has to be UP: this is an scp. A previous failed run may well
+	# have parked it in the bootloader -- tkflash-boot puts it there -- and the
+	# bare failure is `scp: Connection closed`, which reads as a network fault
+	# and says nothing about the state the device is actually in.
+	local st; st=$(tk_device_state)
+	[ "$st" = BOOTED ] || {
+		echo ">> the device is $st, and pushing modules needs it BOOTED." >&2
+		echo ">> tools/tk-reboot.sh will bring it back, then re-run." >&2
+		return 76; }
+
 	local src="$_PH_PMB/chroot_rootfs_${PORTHOLE_CODENAME}/lib/modules"
 	local kver; kver=$(basename "$(ls -d "$src"/* | head -1)")
 	[ -d "$src/$kver" ] || { echo ">> no modules at $src"; return 1; }
