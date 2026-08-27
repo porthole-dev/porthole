@@ -243,6 +243,14 @@ _ph_make() {
 		echo ">>   apk:   $kapk_after"
 		return 1
 	fi
+	# Record what was ACTUALLY built, for whoever installs it next.
+	# `pmbootstrap build --envkernel` does not package as the aport's
+	# <pkgver>-r<pkgrel>; it stamps a dev version, 6.18_p<timestamp>-r0. Anything
+	# downstream that assumes the aport version installs a DIFFERENT kernel --
+	# see _ph_install_built_kernel.
+	_PH_KAPK_VER=${kapk_after##*/}
+	_PH_KAPK_VER=${_PH_KAPK_VER#"$_PH_KPKG"-}
+	_PH_KAPK_VER=${_PH_KAPK_VER%.apk}
 	# Firmware BEFORE the device package: device-google-taimen-nonfree-firmware
 	# depends on it, and install fails with "no such package" if it is not built
 	# and indexed first.
@@ -312,12 +320,21 @@ _ph_assert_no_devpkgs() {
 # Install the kernel aport into the rootfs chroot PINNED to its release version.
 # `apk add -U -u <pkg>` is not safe here: it is an upgrade, and an installed
 # envkernel _p outranks every release, so the upgrade silently does nothing.
-_ph_install_kernel_release() {
-	local ver
-	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
-	ver=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
-	      echo "$pkgver-r$pkgrel")
-	[ -n "$ver" ] && [ "$ver" != "-r" ] || { echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
+# Install the kernel that _ph_make just built into the rootfs chroot.
+#
+# It MUST be the version _ph_make produced, not the aport's <pkgver>-r<pkgrel>.
+# `pmbootstrap build --envkernel` packages the TREE and stamps a dev version --
+# 6.18_p<timestamp>-r0 -- while the aport sits at, say, 6.18-r91. Pinning the
+# aport version here did two wrong things at once on 2026-08-27: it asked for a
+# release that had never been built (apk: "breaks: world[...=6.18-r91]", the
+# local repo stopped at r89), and had that release existed it would have
+# installed a kernel built from the aport's tarball plus patch series -- i.e.
+# NOT the tree, silently discarding the change the fast cycle had just compiled.
+#
+# The fast rung exists for tree iteration. It installs the tree.
+_ph_install_built_kernel() {
+	local ver=${_PH_KAPK_VER:-}
+	[ -n "$ver" ] || { echo ">> _ph_make did not record a built kernel version" >&2; return 1; }
 	echo ">> installing $_PH_KPKG=$ver into the rootfs chroot"
 	pmbootstrap chroot -r -- apk add -U --allow-untrusted "$_PH_KPKG=$ver" || return 1
 	pmbootstrap chroot -r -- apk info -W /boot/vmlinuz 2>/dev/null | sed -n 's/.*owned by //p' |
@@ -641,7 +658,7 @@ tkbuild-kernel() {
 
 	# -r: the rootfs chroot, not the build chroot. -U -u: refresh the index and
 	# upgrade, so it picks up the apk just built rather than a cached older one.
-	_ph_install_kernel_release || return 1
+	_ph_install_built_kernel || return 1
 	pmbootstrap export || return 1
 
 	local dtb="$_PH_DTB_BUILT"
@@ -894,6 +911,31 @@ _PH_BASEIMG=${TK_BASEIMG:-/tmp/tk-base-boot.img}
 tkboot() {
 	local with_kernel=""
 	[ "${1:-}" = "--kernel" ] && with_kernel=1
+
+	# --kernel RAM-boots a freshly built Image against the initramfs and the
+	# /lib/modules ALREADY on the device. Those modules will not load: a rebuild
+	# moves the build id and the BTF, and modprobe refuses every .ko with
+	# "failed to validate module BTF: -22". A DTS-only boot is unaffected, which
+	# is why the plain rung is safe and this one is not.
+	#
+	# On a device whose initramfs needs a module to mount root, that is fatal
+	# rather than merely degraded: taimen loop-mounts its pmOS subpartition, so
+	# without loop.ko the initramfs never finds root and drops to the debug
+	# shell -- which reads exactly like a bad kernel and cost a boot on
+	# 2026-08-27 before anyone looked at /proc/version and saw a different build.
+	if [ -n "$with_kernel" ]; then
+		if [ -n "${PORTHOLE_RAMBOOT_NEEDS_MODULES:-}" ]; then
+			echo ">> REFUSING: this device needs ${PORTHOLE_RAMBOOT_NEEDS_MODULES} to mount root," >&2
+			echo ">> and a freshly built kernel cannot load the modules on the device." >&2
+			echo ">> The RAM boot would land in the initramfs debug shell." >&2
+			echo ">> Use \`porthole build fast --yes\` -- it rebuilds the initramfs and" >&2
+			echo ">> pushes matching modules. Set PORTHOLE_RAMBOOT_NEEDS_MODULES= to override." >&2
+			return 1
+		fi
+		echo ">> note: --kernel rebuilds Image.gz, so the modules on the device"
+		echo ">>       will NOT load against it. Fine if this device reaches"
+		echo ">>       userspace without them; use \`fast\` if it does not."
+	fi
 
 	[ -f "$_PH_BASEIMG" ] || {
 		echo ">> no base image at $_PH_BASEIMG"

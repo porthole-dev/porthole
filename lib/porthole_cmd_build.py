@@ -60,10 +60,20 @@ BUILD_ACTIONS = ("mod", "boot", "fast", "kernel")
 
 # What each rung covers, so the preview can say why you would pick another.
 # This is the table an agent needs and had no way to get.
+# `boot` is DTS-ONLY by default for a reason. Adding --kernel rebuilds Image.gz,
+# and a rebuilt kernel will not load the modules already on the device: the
+# build id and the BTF move, so every .ko is refused. That is not a CONFIG-change
+# hazard as this table said until 2026-08-27 -- it is EVERY --kernel rebuild.
+# On a device whose initramfs needs a module to mount root (taimen loop-mounts
+# its subpartition, so it needs loop.ko) the RAM boot cannot reach userspace at
+# all: it lands in the initramfs debug shell looking like a bad kernel.
 LADDER = [
     ("mod", "a driver that is a module", "no reboot at all"),
-    ("boot", "DTS, or built-in code you can RAM-boot", "one fastboot boot"),
-    ("fast", "a CONFIG change (module CRCs move)", "flashes boot only"),
+    ("boot", "a DTS change", "one fastboot boot"),
+    ("boot --kernel", "built-in code, IF this device RAM-boots without modules",
+     "one fastboot boot"),
+    ("fast", "built-in code, a CONFIG change, anything that moves module CRCs",
+     "flashes boot only"),
     ("kernel", "rootfs contents changed, or boot/rootfs desynced",
      "then `porthole flash --yes`"),
 ]
