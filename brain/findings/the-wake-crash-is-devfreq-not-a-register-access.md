@@ -28,6 +28,14 @@ Surviving 100 cycles at a ~1-in-20 rate is a 0.6% coincidence, so **devfreq's
 polling is required, and so is the GPU actually power-collapsing**. Roughly one
 wake in twenty kills the phone, which is what daily use feels like.
 
+> **SUPERSEDED, 2026-08-27 (evening).** The paragraph below is wrong, and the
+> reason it is wrong is instructive: the instrument it rests on flags callers
+> that touch the GPU while `runtime_status != active`, and the crash lives in
+> `a5xx_hw_init()`, which runs *after* `pm_runtime_get_sync()` has returned --
+> so the status reads **active** and the check can never fire there. Four
+> captured panics put the fault on GPU MMIO. See
+> [[the-wake-crash-dies-inside-a5xx-hw-init]].
+
 **It is not a GPU register access.** `gpu_read()`/`gpu_write()` were
 instrumented to name any caller touching the GPU while it is not runtime
 active, excluding the PM callback itself (which legitimately does, while the

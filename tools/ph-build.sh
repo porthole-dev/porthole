@@ -161,7 +161,50 @@ tkclean() {
 	return 0
 }
 
+# Say which tree is about to be built, before building it.
+#
+# Every verb honours PORTHOLE_KERNEL_TREE and defaults to $repo/linux, and on
+# a mature port the main checkout is very often sitting on some unrelated
+# branch while the work lives in a worktree. Forgetting the variable does not
+# fail -- it quietly builds the wrong source and pushes it to the phone. That
+# happened on 2026-08-27: a `porthole build mod` without it built msm.ko from
+# the main checkout's branch, installed it to /lib/modules, and reported
+# success. envkernel does print the path, but buried in its own banner among
+# twenty other lines.
+#
+# One line, at the top, naming the branch as well as the path -- the branch is
+# what makes "that is not the tree I meant" obvious at a glance.
+# `pmbootstrap build` zaps the buildroot before every package, which is most of
+# the wall clock in the flashing rungs. --lax skips it.
+#
+# NOT the default. This repo has been bitten repeatedly by stale build state --
+# the _p apk that outranks a release, the stale APKINDEX that makes install pick
+# an older package -- and each one presented as a mysterious wrong-kernel bug
+# rather than as a caching problem. A clean chroot is what makes "I built it, so
+# that is what flashed" true.
+#
+# Set PORTHOLE_LAX_BUILD=1 when iterating and you will take that trade knowingly.
+# The much bigger speed win for driver work is not here at all: it is using the
+# `mod` rung, which skips packaging entirely.
+# An array, not a command substitution: unquoted $(...) is a word-splitting
+# bug waiting to happen, and quoting it would pass an empty argument through
+# when the variable is unset.
+_PH_LAX=()
+[ -n "${PORTHOLE_LAX_BUILD:-}" ] && _PH_LAX=(--lax)
+
+_ph_announce_tree() {
+	local branch=""
+	if [ -d "$_PH_TREE/.git" ] || [ -f "$_PH_TREE/.git" ]; then
+		branch=$(git -C "$_PH_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null)
+		branch=" [${branch:-detached} $(git -C "$_PH_TREE" rev-parse --short HEAD 2>/dev/null)]"
+	fi
+	echo ">> tree: $_PH_TREE$branch"
+	[ -n "${PORTHOLE_KERNEL_TREE:-}" ] ||
+		echo ">>       (default; set PORTHOLE_KERNEL_TREE to build a worktree)"
+}
+
 _ph_make() {
+	_ph_announce_tree
 	local out="$_PH_TREE/.output"
 	local img="$out/arch/${PORTHOLE_ARCH_DIR}/boot/Image.gz"
 	local dtb="$out/arch/${PORTHOLE_ARCH_DIR}/boot/dts/${PORTHOLE_DTB%/*}/$_PH_DTB"
@@ -232,7 +275,7 @@ _ph_make() {
 	# a stale build, and everything downstream would carry the old kernel.
 	local kapk_before kapk_after
 	kapk_before=$(ls -t "$_PH_PMB"/packages/edge/${PORTHOLE_ARCH}/"$_PH_KPKG"-*.apk 2>/dev/null | head -1)
-	pmbootstrap build --envkernel "$_PH_KPKG"
+	pmbootstrap build "${_PH_LAX[@]}" --envkernel "$_PH_KPKG"
 	kapk_after=$(ls -t "$_PH_PMB"/packages/edge/${PORTHOLE_ARCH}/"$_PH_KPKG"-*.apk 2>/dev/null | head -1)
 	if [ -z "$kapk_after" ]; then
 		echo ">> no $_PH_KPKG apk was produced -- the kernel package did not build"
@@ -246,8 +289,8 @@ _ph_make() {
 	# Firmware BEFORE the device package: device-google-taimen-nonfree-firmware
 	# depends on it, and install fails with "no such package" if it is not built
 	# and indexed first.
-	pmbootstrap build "$_PH_FWPKG"
-	pmbootstrap build "$_PH_DEVPKG"
+	pmbootstrap build "${_PH_LAX[@]}" "$_PH_FWPKG"
+	pmbootstrap build "${_PH_LAX[@]}" "$_PH_DEVPKG"
 	pmbootstrap index
 }
 
@@ -352,7 +395,7 @@ _ph_install_kernel_release() {
 		# fires twice. The fast cycle poisons its own repo on every run; purge
 		# before building, which is exactly what tkpurge-devpkgs is for.
 		tkpurge-devpkgs || return 1
-		pmbootstrap build "$_PH_KPKG" || return 1
+		pmbootstrap build "${_PH_LAX[@]}" "$_PH_KPKG" || return 1
 	fi
 	[ -f "$repo/$_PH_KPKG-$ver.apk" ] || {
 		echo ">> still no $_PH_KPKG-$ver.apk after building." >&2
@@ -845,6 +888,8 @@ tkmod() {
 	local rel=$1 name=$2 phone=${PHONE:-$PORTHOLE_USER@$HOST}
 	[ -n "$rel" ] && [ -n "$name" ] || { echo ">> usage: tkmod <path/to/mod.ko> <modname>"; return 1; }
 
+	_ph_announce_tree
+
 	tkclean || return 1
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
@@ -988,6 +1033,8 @@ _PH_BASEIMG=${TK_BASEIMG:-/tmp/tk-base-boot.img}
 tkboot() {
 	local with_kernel=""
 	[ "${1:-}" = "--kernel" ] && with_kernel=1
+
+	_ph_announce_tree
 
 	# --kernel RAM-boots a freshly built Image against the initramfs and the
 	# /lib/modules ALREADY on the device. Those modules will not load: a rebuild
