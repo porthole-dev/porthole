@@ -174,6 +174,24 @@ tkclean() {
 #
 # One line, at the top, naming the branch as well as the path -- the branch is
 # what makes "that is not the tree I meant" obvious at a glance.
+# `pmbootstrap build` zaps the buildroot before every package, which is most of
+# the wall clock in the flashing rungs. --lax skips it.
+#
+# NOT the default. This repo has been bitten repeatedly by stale build state --
+# the _p apk that outranks a release, the stale APKINDEX that makes install pick
+# an older package -- and each one presented as a mysterious wrong-kernel bug
+# rather than as a caching problem. A clean chroot is what makes "I built it, so
+# that is what flashed" true.
+#
+# Set PORTHOLE_LAX_BUILD=1 when iterating and you will take that trade knowingly.
+# The much bigger speed win for driver work is not here at all: it is using the
+# `mod` rung, which skips packaging entirely.
+# An array, not a command substitution: unquoted $(...) is a word-splitting
+# bug waiting to happen, and quoting it would pass an empty argument through
+# when the variable is unset.
+_PH_LAX=()
+[ -n "${PORTHOLE_LAX_BUILD:-}" ] && _PH_LAX=(--lax)
+
 _ph_announce_tree() {
 	local branch=""
 	if [ -d "$_PH_TREE/.git" ] || [ -f "$_PH_TREE/.git" ]; then
@@ -257,7 +275,7 @@ _ph_make() {
 	# a stale build, and everything downstream would carry the old kernel.
 	local kapk_before kapk_after
 	kapk_before=$(ls -t "$_PH_PMB"/packages/edge/${PORTHOLE_ARCH}/"$_PH_KPKG"-*.apk 2>/dev/null | head -1)
-	pmbootstrap build --envkernel "$_PH_KPKG"
+	pmbootstrap build "${_PH_LAX[@]}" --envkernel "$_PH_KPKG"
 	kapk_after=$(ls -t "$_PH_PMB"/packages/edge/${PORTHOLE_ARCH}/"$_PH_KPKG"-*.apk 2>/dev/null | head -1)
 	if [ -z "$kapk_after" ]; then
 		echo ">> no $_PH_KPKG apk was produced -- the kernel package did not build"
@@ -271,8 +289,8 @@ _ph_make() {
 	# Firmware BEFORE the device package: device-google-taimen-nonfree-firmware
 	# depends on it, and install fails with "no such package" if it is not built
 	# and indexed first.
-	pmbootstrap build "$_PH_FWPKG"
-	pmbootstrap build "$_PH_DEVPKG"
+	pmbootstrap build "${_PH_LAX[@]}" "$_PH_FWPKG"
+	pmbootstrap build "${_PH_LAX[@]}" "$_PH_DEVPKG"
 	pmbootstrap index
 }
 
@@ -377,7 +395,7 @@ _ph_install_kernel_release() {
 		# fires twice. The fast cycle poisons its own repo on every run; purge
 		# before building, which is exactly what tkpurge-devpkgs is for.
 		tkpurge-devpkgs || return 1
-		pmbootstrap build "$_PH_KPKG" || return 1
+		pmbootstrap build "${_PH_LAX[@]}" "$_PH_KPKG" || return 1
 	fi
 	[ -f "$repo/$_PH_KPKG-$ver.apk" ] || {
 		echo ">> still no $_PH_KPKG-$ver.apk after building." >&2
