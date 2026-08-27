@@ -18,6 +18,7 @@ generic notes as well.
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [the-vocproc-refuses-a-volume-step-without-cal](findings/the-vocproc-refuses-a-volume-step-without-cal.md) | `soc:msm8998` | In-call volume: the vocproc refuses VSS_IVOLUME_CMD_SET_STEP without a registered volume calibration table |
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
+| [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
 
 ## laws
 
@@ -116,5 +117,5 @@ generic notes as well.
 - `device:google-taimen` — 3
 - `generic` — 64
 - `soc:gs201` — 1
-- `soc:msm8998` — 7
+- `soc:msm8998` — 8
 - `soc:qcom` — 1

@@ -59,3 +59,45 @@ candidate physical address, write a 16-byte magic, verify in-boot, reboot,
 verify again. What would overturn it: a boot path that leaves DDR trained --
 this is a bootloader question (XBL/ABL), not a kernel one, and it is the only
 thing that would make pstore viable here.
+
+## 2026-08-27: what the vendor does, and what is actually closed
+
+Re-examined against the vendor DT and the stock capture in `logs/`. The
+headline above holds for the mainline configuration, but the reasoning needs
+narrowing -- and one door is closed harder than before while another is not
+closed at all.
+
+**Closed, measured.** The kernel cannot enable download/ramdump mode on this
+device. `qcom_scm` exposes `download_mode` as a writable module parameter, and
+writing `full` to it produces:
+
+    qcom_scm firmware:scm: No available mechanism for setting download mode
+
+Both paths are unavailable: msm8998's DT has no IMEM dload child so
+`dload_mode_addr` is NULL, and TZ does not offer `QCOM_SCM_BOOT_SET_DLOAD_MODE`.
+The bootloader exposes no ramdump variable either -- `fastboot getvar all` has
+`unlocked:yes` but `secure:yes` and nothing about dumps. So the preservation
+flag really is in signed firmware, as predicted.
+
+**Not closed, and worth knowing.** mainline's ramoops is registered correctly
+and at the vendor's own address -- `ramoops: using 0x200000@0xb0000000`, which
+is exactly `/reserved-memory/ramoops_region@b0000000` in the vendor DT -- and
+it is an active console. Yet `/sys/fs/pstore` is empty after every reset,
+meaning the `DBGC` zone signature was not valid at boot.
+
+Meanwhile `logs/stock-console-ramoops.txt` is 350 KB of downstream 4.4 console
+that **ends mid-shutdown** (`init: Untracked pid ... received signal 15`), which
+cannot be captured live. The vendor kernel therefore did recover a previous
+boot's console on this hardware.
+
+The difference is not the address. The vendor uses a scheme mainline does not
+implement: a **two-region ping-pong** -- `/soc/ramoops` has both
+`memory-region` (`ramoops_region@b0000000`) and `alt-memory-region`
+(`alt_ramoops_region@b0e00000`) -- plus a 4 KiB `ramoops_meta_region@affff000`
+and a custom `access_ramoops` driver bound to each. That metadata page is the
+only mechanism here that mainline has no equivalent of.
+
+So the honest position: ramdump/download mode is dead behind signed firmware,
+but "no RAM survives a reset" is a statement about mainline's plain single
+region, not a property of the hardware. Whether the ping-pong is recoverable
+without the bootloader's cooperation is untested. Timebox it the same way.
