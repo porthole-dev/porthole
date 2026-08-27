@@ -96,8 +96,21 @@ CI.
 All of these run with no device attached:
 
 ```sh
-make ci                             # what CI runs, INCLUDING the python floor
+make ci                             # every job GitHub runs, plus the python floor
 make check                          # lint + tests on your interpreter
+```
+
+`make ci` *is* CI: every job in `.github/workflows/ci.yml` runs one of these
+targets and nothing else, and `tests/test_tools.py` fails if a job ever grows
+its own copy of the steps or names a target `make ci` does not reach. Green here
+is green on GitHub. The individual jobs, if you want one on its own:
+
+```sh
+make test       # suites, brain lint, shell lib, device mutex
+make console    # the TUI suites, with textual installed (they skip without it)
+make lint       # shellcheck + python syntax
+make smoke      # fresh clone, bare PATH, empty HOME -- tests/ci-local.sh
+make floor      # the suite on python 3.8 in a container (needs podman)
 ```
 
 **Run `make ci` before you claim something passes.** `make check` compiles with

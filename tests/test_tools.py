@@ -316,6 +316,75 @@ def test_the_python_floor_is_declared_consistently():
         f"CI matrix {versions} does not test the declared floor {floor}")
 
 
+def _ci_run_commands(text):
+    """Every shell line a `run:` step in ci.yml executes, block scalars included.
+
+    Hand-rolled rather than pyyaml: the tests run on a bare runner with nothing
+    installed, which is the whole point of them."""
+    lines, out = text.splitlines(), []
+    for i, line in enumerate(lines):
+        m = re.match(r"^(\s*)run:\s*(\S.*)?$", line)
+        if not m:
+            continue
+        indent, inline = m.group(1), (m.group(2) or "").strip()
+        if inline and inline not in ("|", ">", "|-", ">-"):
+            out.append(inline)
+            continue
+        for nxt in lines[i + 1:]:
+            if nxt.strip() and not nxt.startswith(indent + " "):
+                break
+            if nxt.strip() and not nxt.strip().startswith("#"):
+                out.append(nxt.strip())
+    return out
+
+
+def _make_prerequisites(text):
+    """target -> its prerequisites, close enough for a Makefile with no
+    pattern rules. Recipe lines start with a tab, so they cannot match."""
+    return {m.group(1): m.group(2).split()
+            for m in re.finditer(r"^([a-z][a-z0-9-]*):([^=#\n]*)", text, re.M)}
+
+
+# Only a dependency install may live in the workflow. Everything else is a step,
+# and steps belong to the Makefile.
+CI_SETUP = re.compile(r"^(sudo )?(apt-get|python3? -m pip|pip3?) ")
+
+
+def test_ci_runs_nothing_but_make_targets_that_make_ci_also_runs():
+    """The one rule that stops "it passed locally" from drifting from CI.
+
+    The workflow, the Makefile and tests/ci-local.sh each held their own copy of
+    the step list, and each copy was missing something the others had -- brain
+    lint locally, the console job locally, the doctor assertions in the
+    simulation. So a contributor ran `make check`, saw green, pushed, and CI
+    went red on a step their laptop had never run.
+
+    Two assertions close it: ci.yml may run nothing but `make <target>` (bar
+    installing a dependency), and every target it names must be reachable from
+    `make ci`. Adding a CI step now means adding it to a make target, which is
+    the same thing as adding it to what a developer runs."""
+    cmds = _ci_run_commands((ROOT / ".github/workflows/ci.yml").read_text())
+    assert cmds, "no run: steps found -- suspect this parser, not the workflow"
+
+    stray = [c for c in cmds if not c.startswith("make ") and not CI_SETUP.match(c)]
+    assert not stray, (
+        "CI must run make targets, not its own copy of the steps -- move these\n"
+        "into a target so `make ci` runs them too:\n  " + "\n  ".join(stray))
+
+    named = {c.split()[1] for c in cmds if c.startswith("make ")}
+    prereqs = _make_prerequisites((ROOT / "Makefile").read_text())
+    reachable, queue = set(), ["ci"]
+    while queue:
+        t = queue.pop()
+        if t not in reachable:
+            reachable.add(t)
+            queue += prereqs.get(t, [])
+    missing = sorted(named - reachable)
+    assert not missing, (
+        f"CI runs {missing}, but `make ci` does not reach {'it' if len(missing) == 1 else 'them'}."
+        f"\nAdd to the prerequisites of the ci: target in the Makefile.")
+
+
 def _is_shell(path):
     return path.read_bytes()[:2] == b"#!" and b"sh" in path.read_bytes()[:40]
 

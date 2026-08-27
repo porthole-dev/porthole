@@ -6,7 +6,7 @@
 
 ## Checklist
 
-- [ ] `make check` passes
+- [ ] `make ci` passes (not just `make check` -- CI runs more)
 - [ ] new/changed tools declare `scope:`, `needs:`, `env:`, `exits:`
 - [ ] no personal paths, usernames or IPs (the tests enforce this)
 - [ ] device-specific probes live in `profiles/<codename>/tools/`, not `tools/`

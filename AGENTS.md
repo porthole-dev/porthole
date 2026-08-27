@@ -231,8 +231,10 @@ portability is worse than scoping narrowly.
 | a lesson that generalises | `brain/traps/<id>.md` with `scope:` and evidence | `porthole brain reindex` |
 | a device fact | `profiles/<codename>/device.env` | — |
 
-`make check` before you claim it works. The tool contract is enforced by
-`tests/test_tools.py`, not by review diligence.
+`make ci` before you claim it works -- not `make check`, which skips the
+console, smoke and python-floor jobs that CI will still run. Every CI job is a
+make target, so green locally is green on GitHub. The tool contract is enforced
+by `tests/test_tools.py`, not by review diligence.
 
 ---
 

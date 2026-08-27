@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Every job below runs one make target and nothing else. The step list lives in
+# the Makefile, so `make ci` on a laptop and this workflow cannot disagree --
+# and tests/test_tools.py fails if a job here ever grows its own copy of the
+# steps, or names a target `make ci` does not reach. Three hand-kept copies of
+# this list is how a green `make check` kept shipping a red pipeline.
+
 jobs:
   test:
     name: tests (python ${{ matrix.python }})
@@ -17,33 +23,17 @@ jobs:
       matrix:
         # 3.8 is the floor bin/porthole enforces. Testing it is what stops a
         # walrus operator or a 3.10 match statement quietly raising the bar for
-        # someone on an older distro.
+        # someone on an older distro. `make floor` is the laptop equivalent.
         python: ["3.8", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      # Every tests/test_*.py, discovered rather than listed. CI hand-listing
-      # test files is how five suites written in one day ran nowhere: a new
-      # test is invisible until somebody remembers to add it here, and nobody
-      # remembers. Same reasoning as the command registry, applied to CI.
-      - name: test suite
-        run: |
-          fail=0
-          for t in tests/test_*.py; do
-            echo "=== $t"
-            python3 "$t" || fail=1
-          done
-          exit $fail
-      - name: knowledge base meets the bar
-        # A note with no evidence, a scaffold nobody filled in, or a scope that
-        # is not one of the three valid shapes fails here rather than landing.
-        run: ./bin/porthole brain lint
-      - name: shell lib (and shell/python agreement)
-        run: bash tests/test_shell_lib.sh
-      - name: device mutex
-        run: bash tools/tk-device-test.sh
+      # Suites (globbed, never listed), brain lint, the shell lib, the device
+      # mutex. A new tests/test_*.py is picked up with nothing to remember.
+      - name: make test
+        run: make test
 
   console:
     name: console (textual, python 3.12)
@@ -55,18 +45,10 @@ jobs:
           python-version: "3.12"
       - name: install the console extra
         run: python3 -m pip install 'textual>=8,<9'
-      # The matrix job runs these same files WITHOUT textual, where they skip.
-      # A skip that nothing verifies is a hole, so this job fails if any
-      # console test skips here -- where it has no excuse to.
-      - name: console tests must run, not skip
-        run: |
-          fail=0
-          for t in tests/test_tui_*.py; do
-            out="$(python3 "$t")" || fail=1
-            echo "$out"
-            case "$out" in *SKIP*) echo "::error::$t skipped where textual IS installed"; fail=1;; esac
-          done
-          exit $fail
+      # The matrix job above runs these same files WITHOUT textual, where they
+      # skip. `make console` fails on a skip here, where it has no excuse.
+      - name: make console
+        run: make console
 
   lint:
     runs-on: ubuntu-latest
@@ -77,18 +59,8 @@ jobs:
           python-version: "3.11"
       - name: install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: shellcheck
-        # SC1091: sourcing tk-lib.sh is resolved at runtime, not statically.
-        run: |
-          shellcheck -S warning -e SC1091,SC2086,SC2181 \
-            lib/porthole.sh $(find tools profiles/*/tools -name '*.sh' -not -type l)
-      - name: python syntax
-        run: python3 -m compileall -q lib bin tools tests
-      - name: the local CI simulation agrees with CI
-        # tests/ci-local.sh is what a developer runs before pushing. If it can
-        # disagree with this workflow it is worse than useless, so it runs here
-        # too -- on the same bare runner it is meant to imitate.
-        run: bash tests/ci-local.sh
+      - name: make lint
+        run: make lint
 
   smoke:
     name: fresh-clone smoke test
@@ -98,60 +70,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: the CLI works with nothing configured
-        run: |
-          ./bin/porthole
-          ./bin/porthole --help
-          ./bin/porthole version
-          ./bin/porthole devices
-      - name: bootstrap headlessly, as an agent would
-        run: |
-          export XDG_CONFIG_HOME="$PWD/.xdg"
-          ./bin/porthole init google-taimen --user ci --host 172.16.42.1
-          ./bin/porthole config PHONE | grep -q '^ci@172.16.42.1$'
-      - name: doctor reports honestly on a host with nothing installed
-        run: |
-          export XDG_CONFIG_HOME="$PWD/.xdg"
-          # This runner has no fastboot, so doctor SHOULD exit non-zero. That
-          # is the behaviour under test, not a failure -- `|| true` keeps the
-          # step alive so the assertions below can check the shape of the
-          # report rather than merely its exit code.
-          ./bin/porthole doctor --no-device --all --json > doctor.json || true
-          python3 - <<'PY'
-          import json
-          d = json.load(open("doctor.json"))
-          assert d["checks"], "no checks ran"
-
-          # The contract: a failure must always name a fix. A check that says
-          # something is wrong without saying what to do is the thing doctor
-          # exists to replace.
-          for c in d["checks"]:
-              assert c["status"] != "fail" or c["fix"], f"no fix offered for {c['name']}"
-
-          # And it must actually notice a missing prerequisite rather than
-          # reporting a clean bill of health on a bare runner.
-          fastboot = next(c for c in d["checks"] if c["name"] == "host: fastboot")
-          assert fastboot["status"] == "fail", (
-              "doctor did not notice fastboot is missing on a bare runner")
-          assert "install" in fastboot["fix"], (
-              f"the fix should be an install command, got {fastboot['fix']!r}")
-
-          print(f"{len(d['checks'])} checks, verdict {d['verdict']}, "
-                f"{sum(1 for c in d['checks'] if c['status'] == 'fail')} fail "
-                f"(expected: fastboot is absent here)")
-          PY
-      - name: agent surfaces are valid JSON
-        run: |
-          export XDG_CONFIG_HOME="$PWD/.xdg"
-          ./bin/porthole brief --no-device --json | python3 -m json.tool > /dev/null
-          ./bin/porthole tools --json            | python3 -m json.tool > /dev/null
-          ./bin/porthole brain --json            | python3 -m json.tool > /dev/null
-          ./bin/porthole next --json             | python3 -m json.tool > /dev/null
-      - name: completions generate for every shell
-        run: |
-          for s in bash zsh fish; do ./bin/porthole completion $s > /dev/null; done
-      - name: scaffolding a new device works
-        run: |
-          ./bin/porthole new-device test-device
-          test -f profiles/test-device/device.env
-          test -f profiles/test-device/checklist.md
+      # tests/ci-local.sh: a fresh `git archive` of HEAD plus your uncommitted
+      # work, on a bare PATH with an empty HOME. It is what a developer runs
+      # before pushing, so it runs here too -- on the bare runner it imitates.
+      - name: make smoke
+        run: make smoke

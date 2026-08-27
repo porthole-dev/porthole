@@ -116,6 +116,32 @@ say ok "completions"
 	&& say ok "new-device" || { say FAIL "new-device"; fail=1; }
 
 echo
+echo "== doctor is honest on a host with nothing installed =="
+# There is no fastboot on this bare PATH, so doctor SHOULD exit non-zero. That
+# is the behaviour under test, not a failure -- `|| :` keeps the run alive so
+# the assertions below check the SHAPE of the report, not its exit code.
+./bin/porthole doctor --no-device --all --json > doctor.json 2>/dev/null || :
+if python3 - <<'PYEOF' >/dev/null 2>&1
+import json
+d = json.load(open("doctor.json"))
+assert d["checks"], "no checks ran"
+
+# The contract: a failure must always name a fix. A check that says something
+# is wrong without saying what to do is the thing doctor exists to replace.
+for c in d["checks"]:
+    assert c["status"] != "fail" or c["fix"], f"no fix offered for {c['name']}"
+
+# And it must actually notice a missing prerequisite rather than reporting a
+# clean bill of health on a bare PATH.
+fastboot = next(c for c in d["checks"] if c["name"] == "host: fastboot")
+assert fastboot["status"] == "fail", (
+    "doctor did not notice fastboot is missing on a bare PATH")
+assert "install" in fastboot["fix"], (
+    f"the fix should be an install command, got {fastboot['fix']!r}")
+PYEOF
+then say ok "doctor"; else say FAIL "doctor"; fail=1; fi
+
+echo
 echo "== python syntax (compileall) =="
 python3 -m compileall -q lib bin tools tests >/dev/null 2>&1 \
 	&& say ok "compileall" || { say FAIL "compileall"; fail=1; }

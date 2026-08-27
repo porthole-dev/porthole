@@ -125,6 +125,12 @@ def report(tag, r):
 
 
 def main():
+    # No argparse here, so `--help` would otherwise be taken as a run tag and
+    # this would start rebooting a phone that is not attached -- which is how it
+    # hung tests/test_tools.py for the full 30s timeout and turned CI red.
+    if set(sys.argv[1:]) & {"-h", "--help"}:
+        print(__doc__.strip())
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "sweep":
         mod, param, *values = sys.argv[2:]
         print(f"== sweeping {mod}.{param} (a reboot per value -- 2.5a)")

@@ -550,9 +550,10 @@ never-judge-a-boot-by-the-screen`.
 See **[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)**.
 
 ```sh
-make test        # everything, no device needed
+make test        # the test suite, no device needed
 make lint        # shellcheck + python syntax
 make check       # both
+make ci          # every job GitHub runs -- green here is green there
 ```
 
 Adding a tool, a device, a CLI verb or a brain note each takes one file. The
