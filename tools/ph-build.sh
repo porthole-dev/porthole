@@ -780,6 +780,142 @@ tkbuild-kernel() {
 	tkflash-boot
 }
 
+# Move the device to a DIFFERENT kernel flavor -- a major version bump.
+#
+# Why `fast` (tkbuild-kernel) cannot do this. _ph_install_kernel_release does a
+# plain `apk add`, which silently assumes the flavor never changes. Two kernel
+# aports own the same paths -- /boot/vmlinuz and every .dtb under /boot/dtbs --
+# so adding the new flavor while the old one is installed produces a wall of
+#
+#   ERROR: ...-7.2-7.2.2-r0: trying to overwrite boot/vmlinuz
+#          owned by ...-6.18-6.18-r101
+#
+# and then the failure mode that actually costs a session: apk registers the new
+# package ANYWAY. `apk info` afterwards lists BOTH flavors while /boot/vmlinuz
+# still belongs to the old one, so `pmbootstrap export` packs the OLD kernel
+# into boot.img, the flash "succeeds", and the device comes back on the kernel
+# you were trying to leave. Nothing in that sequence prints a warning.
+#
+# The swap therefore has to be ONE apk transaction. apk reads a leading `!` as
+# "remove this in the same operation", so the old flavor leaves exactly as the
+# new one arrives and no moment exists where both own the same file. `-u` comes
+# along because the device kernel subpackage pins a flavor in its depends=: with
+# the old kernel going away it must move in the same transaction or apk refuses
+# on a broken dependency.
+#
+# Modules are the other half, and the reason this rung exists at all rather than
+# being a note in the runbook. kernel.release changes across a major bump, so
+# /usr/lib/modules/<new release> does not exist on the phone in any form -- this
+# is not the stale-module case that tkpush-modules usually guards, it is a total
+# absence. A boot.img-only flash then lands a kernel that finds no modules: it
+# boots, ssh answers, and there is no display, no wifi and no audio. So the push
+# is not optional here, and it runs BEFORE the flash while the phone is still up
+# on the old kernel -- there is no way to push modules to a device that cannot
+# bring up its network because the modules are missing.
+#
+# The old module tree is left where it is. tkpush-modules moves the previous set
+# aside as <release>.old rather than deleting it, and the outgoing kernel's tree
+# lives under its own release directory anyway, so rolling back is re-flashing
+# the previous boot.img and nothing else.
+tkupgrade-kernel() {
+	local ver incumbent repo
+	repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
+
+	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
+	ver=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	      echo "$pkgver-r$pkgrel")
+	[ -n "$ver" ] && [ "$ver" != "-r" ] || {
+		echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
+
+	[ -f "$repo/$_PH_KPKG-$ver.apk" ] || {
+		echo ">> $_PH_KPKG-$ver.apk is not in the local repo -- build it first:" >&2
+		echo ">>   pmbootstrap build $_PH_KPKG" >&2
+		return 1; }
+
+	# Ask apk who owns /boot/vmlinuz rather than guessing from the package
+	# name. A flavor is an arbitrary string and two of them share no prefix in
+	# general, so deriving "the other kernel" by pattern would be a guess about
+	# somebody else's naming; the file ownership is the fact.
+	incumbent=$(pmbootstrap chroot -r -- apk info -W /boot/vmlinuz 2>/dev/null |
+		sed -n 's/.*owned by //p' | sed 's/-[^-]*-r[0-9]*$//')
+	[ -n "$incumbent" ] || {
+		echo ">> nothing owns /boot/vmlinuz in the rootfs chroot -- is it installed?" >&2
+		return 1; }
+
+	# What the DEVICE runs is what decides whether this is an upgrade -- not
+	# what the rootfs chroot holds. The chroot is host-side staging, and it can
+	# legitimately be on the target already: a previous run got that far before
+	# failing, or a repair put it there. Refusing on the chroot's state refuses
+	# the exact case this rung exists for, with a message telling you to use a
+	# rung that cannot do the job. Measured 2026-08-29.
+	local dev_release target_release
+	# shellcheck source=tk-lib.sh
+	. "$_PH_REPO/tools/tk-lib.sh"
+	target_release=$(tar -xzOf "$repo/$_PH_KPKG-$ver.apk" \
+		"usr/share/kernel/${_PH_KPKG#linux-}/kernel.release" 2>/dev/null | tr -d '\r\n')
+	[ -n "$target_release" ] || {
+		echo ">> $_PH_KPKG-$ver.apk carries no kernel.release -- refusing" >&2; return 1; }
+	dev_release=$(tk_run 'uname -r' 2>/dev/null | tr -d '\r\n')
+
+	if [ -n "$dev_release" ] && [ "$dev_release" = "$target_release" ]; then
+		echo ">> the device already runs $target_release -- not a flavor change."
+		echo ">> Use \`porthole build fast\` for a same-flavor rebuild."
+		return 1
+	fi
+	echo ">> device runs ${dev_release:-<unknown>}, target is $target_release"
+
+	if [ "$incumbent" = "$_PH_KPKG" ]; then
+		echo ">> the rootfs chroot is already staged on $_PH_KPKG -- no swap needed"
+	else
+
+		# A failed `apk add` of the target leaves it REGISTERED with none of its
+		# files unpacked -- that is how the conflict wall ends, and it is silent.
+		# The swap below would then purge the incumbent while apk, believing the
+		# target is already present, installs nothing: /boot/vmlinuz simply ceases
+		# to exist and the export packs an image with no kernel in it. Repair that
+		# state before touching anything, rather than after. Measured 2026-08-29.
+		if pmbootstrap chroot -r -- apk info 2>/dev/null | grep -qx "$_PH_KPKG"; then
+			echo ">> $_PH_KPKG is registered but $incumbent owns /boot/vmlinuz --"
+			echo ">> a previous add half-applied; reinstalling its files first"
+			pmbootstrap chroot -r -- apk fix --allow-untrusted "$_PH_KPKG" || return 1
+	fi
+
+	echo ">> swapping $incumbent -> $_PH_KPKG=$ver in one transaction"
+	pmbootstrap chroot -r -- apk add -U -u --allow-untrusted \
+		"$_PH_KPKG=$ver" "!$incumbent" || return 1
+
+	# Verify the swap by ownership, not by apk's exit code: the whole reason
+	# this function exists is that apk can exit non-zero having half-applied a
+	# kernel change, and can exit zero having applied it to the wrong package.
+	local owner
+	owner=$(pmbootstrap chroot -r -- apk info -W /boot/vmlinuz 2>/dev/null |
+		sed -n 's/.*owned by //p')
+	case "$owner" in
+		"$_PH_KPKG-$ver") : ;;
+		*) echo ">> /boot/vmlinuz is owned by '$owner', not $_PH_KPKG-$ver -- refusing" >&2
+		   return 1 ;;
+	esac
+	pmbootstrap chroot -r -- apk info 2>/dev/null | grep -qx "$incumbent" && {
+		echo ">> $incumbent is STILL installed alongside $_PH_KPKG -- refusing" >&2
+		return 1; }
+	fi
+	_PH_INSTALLED_APK="$repo/$_PH_KPKG-$ver.apk"
+
+	pmbootstrap export || return 1
+
+	# Against the apk that was installed, NOT the tree: this rung ships the
+	# aport release, and on a version bump the tree is a different kernel
+	# entirely rather than merely a diverged one.
+	local dtb; dtb=$(_ph_dtb_from_apk "$_PH_INSTALLED_APK") || return 1
+	"$_PH_REPO/tools/bootimg-verify.py" \
+		"$(readlink -f /tmp/postmarketOS-export/boot.img)" --dtb "$dtb" || {
+		echo ">> refusing to flash a stale image"; return 1; }
+
+	# Modules first, while the phone is still up on the outgoing kernel.
+	tkpush-modules || return 1
+	tkflash-boot
+}
+
 # Put the freshly built modules on the phone.
 #
 # tkbuild-kernel only flashes boot.img, so /lib/modules on the phone keeps
@@ -853,7 +989,13 @@ tkpush-modules() {
 			echo \">> staged set is bad (\$n modules, \$z empty) -- live set untouched\"; exit 1; }
 
 		sudo rm -rf /lib/modules/$kver.old
-		sudo mv /lib/modules/$kver /lib/modules/$kver.old
+		# Only rotate a set that is actually there. On a major kernel bump
+		# kernel.release changes, so /lib/modules/\$kver does not exist on the
+		# phone at all and the unconditional mv failed with \"can't rename
+		# '/lib/modules/$kver': No such file or directory\" -- which reads as a
+		# push failure when in fact there was simply nothing to displace.
+		# Measured 2026-08-29 moving taimen from 6.18.0 to 7.2.2.
+		[ -d /lib/modules/$kver ] && sudo mv /lib/modules/$kver /lib/modules/$kver.old
 		sudo mv /lib/modules/.stage/$kver /lib/modules/$kver
 		sudo rmdir /lib/modules/.stage
 		sudo depmod -a $kver

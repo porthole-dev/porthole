@@ -51,12 +51,14 @@ ACTIONS = {
              "build the kernel and flash boot only, UUIDs untouched (~6m)"),
     "kernel": ("tkbuild",
                "build the kernel, package it, install and verify, but NOT flash (~10m)"),
+    "upgrade": ("tkupgrade-kernel",
+                "swap to a DIFFERENT kernel flavor: push modules, flash boot (~7m)"),
     "clean": ("tkclean", "unstack /mnt/linux binds"),
     "purge": ("tkpurge-devpkgs", "remove envkernel apks that outrank a release"),
 }
 
 # The rungs that compile and move the device. `clean` and `purge` are neither.
-BUILD_ACTIONS = ("mod", "boot", "fast", "kernel")
+BUILD_ACTIONS = ("mod", "boot", "fast", "kernel", "upgrade")
 
 # What each rung covers, so the preview can say why you would pick another.
 # This is the table an agent needs and had no way to get.
@@ -79,6 +81,10 @@ LADDER = [
      "flashes boot only"),
     ("kernel", "rootfs contents changed, or boot/rootfs desynced",
      "then `porthole flash --yes`"),
+    ("upgrade", "the device moves to a DIFFERENT kernel flavor (a major version "
+     "bump): PORTHOLE_KERNEL_PKG now names another aport, so kernel.release "
+     "changes and the modules on the phone are absent rather than stale",
+     "pushes modules, then flashes boot"),
 ]
 
 

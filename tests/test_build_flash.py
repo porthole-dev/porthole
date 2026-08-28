@@ -294,3 +294,76 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_upgrade_swaps_the_kernel_flavor_in_one_apk_transaction():
+    """The half-applied state is the whole reason `upgrade` exists.
+
+    Two kernel aports own /boot/vmlinuz and every dtb, so `apk add` of the new
+    flavor while the old one is installed fails on file conflicts -- and
+    registers the new package anyway, leaving both installed with the OLD one
+    still owning /boot/vmlinuz. The export that follows then packs the old
+    kernel and says nothing. A del-then-add pair reintroduces exactly that
+    window, so the removal has to ride along in the add as `!<pkg>`.
+    """
+    body = _ph_function("tkupgrade-kernel")
+    assert '"!$incumbent"' in body, (
+        "tkupgrade-kernel no longer removes the incumbent inside the add -- a "
+        "separate `apk del` reopens the half-applied window")
+    assert "apk del" not in body, (
+        "tkupgrade-kernel uses a separate `apk del`; the swap must be one "
+        "transaction")
+
+
+def test_upgrade_verifies_ownership_rather_than_apk_exit_code():
+    """apk can exit non-zero having half-applied, and zero having applied to
+    the wrong package. Ownership of /boot/vmlinuz is the fact that matters."""
+    body = _ph_function("tkupgrade-kernel")
+    assert "apk info -W /boot/vmlinuz" in body, (
+        "tkupgrade-kernel does not check who owns /boot/vmlinuz after the swap")
+
+
+def test_upgrade_pushes_modules_before_it_flashes():
+    """kernel.release changes on a major bump, so /usr/lib/modules/<new> is
+    ABSENT on the phone, not stale. Flashing first strands the device with a
+    kernel that has no modules and no way to receive any."""
+    body = _ph_function("tkupgrade-kernel")
+    push, flash = body.find("tkpush-modules"), body.find("tkflash-boot")
+    assert push != -1, "tkupgrade-kernel never pushes modules"
+    assert flash != -1, "tkupgrade-kernel never flashes"
+    assert push < flash, "tkupgrade-kernel flashes before pushing modules"
+
+
+def test_upgrade_is_reachable_from_the_ladder():
+    """A rung an agent cannot find is a rung that does not exist."""
+    import porthole_cmd_build as B
+    assert "upgrade" in B.ACTIONS
+    assert "upgrade" in B.BUILD_ACTIONS
+    assert any(rung[0] == "upgrade" for rung in B.LADDER), (
+        "upgrade is not in LADDER, so the preview never offers it")
+
+
+def _ph_function(name):
+    """The body of one shell function in ph-build.sh."""
+    text = (ROOT / "tools" / "ph-build.sh").read_text()
+    start = text.index(f"\n{name}() {{")
+    return text[start:text.index("\n}\n", start)]
+
+
+def test_upgrade_repairs_a_half_applied_target_before_swapping():
+    """A failed `apk add` registers the target with no files unpacked. Purging
+    the incumbent on top of that deletes /boot/vmlinuz outright, because apk
+    believes the target is already installed and unpacks nothing."""
+    body = _ph_function("tkupgrade-kernel")
+    fix, swap = body.find("apk fix"), body.find("apk add -U -u")
+    assert fix != -1, "tkupgrade-kernel never repairs a half-applied target"
+    assert fix < swap, "the repair must run BEFORE the swap, not after"
+
+
+def test_pushing_modules_tolerates_a_release_that_is_not_on_the_phone_yet():
+    """On a major bump kernel.release changes, so /lib/modules/<release> does
+    not exist on the device. The rotate-aside must not assume it does."""
+    body = _ph_function("tkpush-modules")
+    assert "[ -d /lib/modules/$kver ] && sudo mv" in body, (
+        "tkpush-modules rotates /lib/modules/$kver unconditionally; a major "
+        "kernel bump has nothing there to rotate")
