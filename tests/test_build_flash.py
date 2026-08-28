@@ -367,3 +367,34 @@ def test_pushing_modules_tolerates_a_release_that_is_not_on_the_phone_yet():
     assert "[ -d /lib/modules/$kver ] && sudo mv" in body, (
         "tkpush-modules rotates /lib/modules/$kver unconditionally; a major "
         "kernel bump has nothing there to rotate")
+
+
+def test_mod_refuses_a_tree_that_has_never_been_built():
+    """`mod` is incremental and cannot prepare a tree. Without .output/.config
+    kbuild advises running menuconfig, which is the wrong fix and hides the
+    real precondition."""
+    body = _ph_function("tkmod")
+    assert '"$_PH_OUT/.config"' in body, (
+        "tkmod does not preflight .output/.config; kbuild's menuconfig advice "
+        "leaks through instead")
+    build, envk = body.find("$_PH_OUT/.config"), body.find("_ph_find_envkernel")
+    assert build < envk, "the preflight must run before envkernel is sourced"
+
+
+def test_the_tree_announcement_compares_against_the_device():
+    """Tree base and device kernel were both printed and never compared. A
+    module built from a two-releases-behind tree is refused by MODVERSIONS
+    with a message about a symbol, not about the tree."""
+    body = _ph_function("_ph_announce_tree")
+    assert "uname -r" in body, "the tree announcement never asks what the device runs"
+    assert "WARNING" in body, "a mismatched tree is not called out"
+
+
+def test_pushing_modules_names_the_siblings_left_behind():
+    """MODVERSIONS cannot catch a struct-layout split between two modules
+    built from one changed header: the struct has no exported symbol, so no
+    CRC disagrees. The push is the only place this can be noticed."""
+    text = (ROOT / "tools" / "tk-push-module.sh").read_text()
+    assert "NOT being pushed" in text, (
+        "tk-push-module.sh does not warn about modules built alongside the "
+        "ones being pushed")

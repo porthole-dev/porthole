@@ -40,6 +40,41 @@ KVER=${KVER:-$(ssh "${TK_SSH_OPTS[@]}" "$PHONE" uname -r)}
 [ -n "$KVER" ] || { echo "could not read the phone's kernel version"; exit 1; }
 echo "### /lib/modules/$KVER"
 
+# Warn about siblings left behind.
+#
+# MODVERSIONS does NOT protect you here, which is the whole point: it checks
+# exported *symbol* CRCs, and a struct that appears in no exported signature
+# has no CRC to disagree about. Two modules built from one changed header will
+# therefore load happily while disagreeing about where that struct's fields
+# live -- one writing at the new offsets, the other reading at the old.
+#
+# Cost on taimen 2026-08-29: a header under drivers/iio/common/qcom_smgr/qmi/
+# is compiled into both qcom_smgr.ko and qmi/qmi_sns_smgr.ko. Only the first
+# was pushed. Every boot then took a watchdog reset with an empty journal --
+# no oops, no panic, nothing to read but androidboot.bootreason=watchdog on
+# the boot after. A mixed set is worse than a stale one: a stale set is at
+# least self-consistent.
+#
+# So: name every other .ko built alongside the ones being pushed. This is a
+# warning and not a refusal, because pushing a genuine subset is legitimate
+# when the change really is confined to one module -- but it should be a
+# decision rather than an oversight.
+_siblings=""
+for ko in "$@"; do
+    d=$(dirname "$ko")
+    for other in $(find "$d" -name '*.ko' 2>/dev/null); do
+        case " $* " in *" $other "*) continue ;; esac
+        _siblings="$_siblings $other"
+    done
+done
+if [ -n "$_siblings" ]; then
+    echo "### WARNING: built alongside, but NOT being pushed:"
+    for s in $_siblings; do echo "###   $s"; done
+    echo "### If your change touched a header these share, pushing a subset"
+    echo "### corrupts the struct layout between them -- see"
+    echo "### brain/traps/pushing-one-module-of-a-pair-corrupts-the-other.md"
+fi
+
 for ko in "$@"; do
     [ -f "$ko" ] || { echo "no such module: $ko"; exit 1; }
     base=$(basename "$ko")

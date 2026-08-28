@@ -77,6 +77,7 @@ generic notes as well.
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
+| [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
 | [running-a-device-script-on-the-host](traps/running-a-device-script-on-the-host.md) | `generic` | A device-side script run on the host produces plausible, entirely wrong output |
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
@@ -124,7 +125,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 7
-- `generic` — 64
+- `generic` — 65
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1

@@ -201,6 +201,22 @@ _ph_announce_tree() {
 	echo ">> tree: $_PH_TREE$branch"
 	[ -n "${PORTHOLE_KERNEL_TREE:-}" ] ||
 		echo ">>       (default; set PORTHOLE_KERNEL_TREE to build a worktree)"
+
+	# Say it out loud when the tree and the phone are different kernels.
+	# Both facts were already printed by other commands and nobody put them
+	# together: on 2026-08-29 the tree sat on v6.18 while the device ran
+	# 7.2.2, and the only thing that would have caught a `mod` push from it
+	# is MODVERSIONS refusing the result with "disagrees about version of
+	# symbol module_layout" -- a message about a symbol, not about the tree
+	# being two releases behind the phone.
+	local tv dv
+	tv=$(awk -F' = ' '/^VERSION/{v=$2} /^PATCHLEVEL/{p=$2}
+	                  END{if (v != "") print v "." p}' "$_PH_TREE/Makefile" 2>/dev/null)
+	dv=$(TK_RUN_TIMEOUT=8 tk_run 'uname -r' 2>/dev/null | tr -d '\r\n')
+	if [ -n "$tv" ] && [ -n "$dv" ] && [ "${dv%.*}" != "$tv" ]; then
+		echo ">> WARNING: this tree is Linux $tv, the device runs $dv"
+		echo ">>          a module built here will not load there"
+	fi
 }
 
 _ph_make() {
@@ -1031,6 +1047,20 @@ tkmod() {
 	[ -n "$rel" ] && [ -n "$name" ] || { echo ">> usage: tkmod <path/to/mod.ko> <modname>"; return 1; }
 
 	_ph_announce_tree
+
+	# `mod` builds incrementally and needs a tree that has already had one
+	# full envkernel build: .output/.config and the symbol tables live there.
+	# Without them kbuild fails with its own advice -- "Configuration file
+	# .config not found! Please run some configurator (e.g. make menuconfig)"
+	# -- which is useless here, names the wrong fix, and cost a cycle on
+	# 2026-08-29 against a freshly created worktree.
+	[ -f "$_PH_OUT/.config" ] || {
+		echo ">> $_PH_TREE has never had a full build ($_PH_OUT/.config is missing)." >&2
+		echo ">> \`mod\` is an incremental rung and cannot prepare a tree." >&2
+		echo ">> Run a full rung once in this tree first:" >&2
+		echo ">>   porthole build fast --yes        # or: kernel" >&2
+		echo ">> Ignore any kbuild advice about menuconfig; the tree is the issue." >&2
+		return 1; }
 
 	tkclean || return 1
 	type deactivate >/dev/null 2>&1 && deactivate
