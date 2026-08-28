@@ -11,14 +11,22 @@ generic notes as well.
 | id | scope | title |
 |---|---|---|
 | [a-created-mvm-carries-call-audio](findings/a-created-mvm-carries-call-audio.md) | `soc:msm8998` | A (created) MVM carries call audio: what matters is whether the modem had a call, not the joined flag |
+| [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
+| [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
 | [holding-vdd-mx-does-not-stop-the-wake-crash](findings/holding-vdd-mx-does-not-stop-the-wake-crash.md) | `soc:msm8998` | Holding VDD_MX does not stop the display-wake crash -- neither enabled nor at TURBO |
+| [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
+| [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
+| [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-vocproc-refuses-a-volume-step-without-cal](findings/the-vocproc-refuses-a-volume-step-without-cal.md) | `soc:msm8998` | In-call volume: the vocproc refuses VSS_IVOLUME_CMD_SET_STEP without a registered volume calibration table |
+| [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
+| [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
+| [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
 
 ## laws
 
@@ -114,8 +122,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 3
+- `device:google-taimen` — 7
 - `generic` — 64
 - `soc:gs201` — 1
-- `soc:msm8998` — 8
+- `soc:msm8998` — 12
 - `soc:qcom` — 1
