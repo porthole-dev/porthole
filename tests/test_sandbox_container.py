@@ -202,6 +202,27 @@ def test_up_argv_sets_xdg_config_home_and_matching_device_lock():
         "bind-mounted lock file protects nothing: " + repr(argv))
 
 
+def test_exec_argv_omits_tty_when_a_command_is_given():
+    argv = sb._exec_argv(["pmbootstrap", "status"], tty=False)
+    assert "-it" not in argv, (
+        "an agent has no TTY; -it here is why the container tier was "
+        "unreachable from an agent")
+    assert "-t" not in argv, argv
+    assert argv[:2] == ["podman", "exec"], argv
+    assert argv[-2:] == ["pmbootstrap", "status"], argv
+
+
+def test_exec_argv_is_interactive_for_a_human_shell():
+    argv = sb._exec_argv(None, tty=True)
+    assert "-it" in argv, argv
+    assert argv[-1] == "/bin/bash", argv
+
+
+def test_exec_argv_targets_the_named_container():
+    argv = sb._exec_argv(["true"], tty=False)
+    assert sb.CONTAINER in argv, argv
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

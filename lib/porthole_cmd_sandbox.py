@@ -622,51 +622,35 @@ def _build(ctx, args) -> int:
 
 # ------------------------------------------------------------------- shell --
 
-def _shell(ctx, args) -> int:
-    """A rootless container where root maps to your uid.
+def _exec_argv(command, tty: bool) -> list[str]:
+    """`-it` ONLY for an interactive human.
 
-    `--userns=keep-id:uid=0` is the whole trick: inside, you are root and
-    pmbootstrap therefore uses no sudo at all (it checks `os.getuid() == 0`);
-    outside, every file it creates is owned by you and it holds none of your
-    privileges. An escape gets your uid, not the machine.
+    podman refuses `-t` when stdin is not a terminal, so an unconditional `-it`
+    fails for every agent -- which is exactly what made the container tier
+    unreachable from the thing it was built for.
     """
+    argv = ["podman", "exec"]
+    if tty:
+        argv.append("-it")
+    argv.append(CONTAINER)
+    argv += list(command) if command else ["/bin/bash"]
+    return argv
+
+
+def _shell(ctx, args) -> int:
+    """A shell (or one command) inside the persistent workspace."""
     if not shutil.which("podman"):
         raise Bail("podman is not installed", EX_FAIL,
-                   "the container tier needs it; the broker tier does not")
+                   "the workspace needs it; the broker tier does not")
+    if not _container_running():
+        raise Bail(f"{CONTAINER} is not running", EX_FAIL,
+                   "run `porthole sandbox up` first")
 
-    pmb = ctx.cfg.get("PORTHOLE_PMB_DIR") or str(
-        pathlib.Path.home() / ".local/var/pmbootstrap")
-    mounts = [(pmb, "/pmb"), (str(ctx.root), "/porthole")]
-    workdir = ctx.cfg.get("PORTHOLE_WORKDIR")
-    if workdir:
-        mounts.append((workdir, "/work"))
-    for extra in args.mount or []:
-        mounts.append((extra, "/mnt/" + pathlib.Path(extra).name))
-
-    argv = ["podman", "run", "--rm", "-it",
-            "--userns=keep-id:uid=0,gid=0",
-            # SYS_ADMIN is needed for bind mounts; inside a rootless userns it
-            # confers nothing outside the container's own mount namespace.
-            "--cap-add", "SYS_ADMIN,SYS_CHROOT,MKNOD",
-            "--security-opt", "label=disable",
-            "--hostname", "porthole-sandbox"]
-    for src, dst in mounts:
-        src = str(pathlib.Path(src).expanduser())
-        if not pathlib.Path(src).exists():
-            ctx.out.warn(f"skipping {src}: does not exist")
-            continue
-        argv += ["-v", f"{src}:{dst}:rw"]
-    argv += ["-w", "/work" if workdir else "/pmb", args.image or _image_tag(ctx.root)]
-    argv += args.command or ["/bin/sh"]
-
+    tty = sys.stdin.isatty() and not args.command
+    argv = _exec_argv(args.command, tty)
     if args.dry_run:
         print(" ".join(argv))
         return EX_OK
-
-    ctx.out(ctx.out.paint(
-        f"  rootless container: root inside maps to uid {os.getuid()} outside.\n"
-        f"  mounted: {', '.join(d for _, d in mounts)}\n"
-        f"  nothing else on this host is reachable from in here.", "grey"))
     return subprocess.run(argv).returncode
 
 
@@ -690,7 +674,6 @@ SPEC = {
                       "help": "install: a path the broker may touch (repeatable)"}),
         (["--mount"], {"action": "append", "metavar": "PATH",
                        "help": "shell: extra path to mount in"}),
-        (["--image"], {"metavar": "REF", "help": "shell: container image"}),
         (["--command"], {"nargs": "...", "help": "shell: command instead of a shell"}),
         (["--dry-run"], {"action": "store_true",
                          "help": "shell: print the podman command and stop"}),
