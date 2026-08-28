@@ -5,9 +5,10 @@ scope: soc:msm8998
 subsystem: kernel
 severity: finding
 confidence: proven
-evidence: "git am -3 of the 188 aport patches onto pristine v7.2: 150 apply, 38 fail, of which only 16 are root conflicts and none exceeds 6 hunks in 3 files. Branch tk72/probe-am in linux/ is the result (144 commits). Raw census: git am each patch, --skip on conflict, count files/markers."
+evidence: "BOOTED on the device 2026-08-29: `Linux version 7.2.2 #1-postmarketos-qcom-msm8998-7.2`, 130 modules loaded, 0 failed units, display and wlan0 up. git am -3 of the 188 aport patches onto pristine v7.2: 150 apply, 38 fail, of which only 16 are root conflicts and none exceeds 6 hunks in 3 files. Branch tk72/probe-am in linux/ is the result (144 commits). Raw census: git am each patch, --skip on conflict, count files/markers."
 refutes: "moving off 6.18 means rewriting the series; the patch stack is too far from mainline to rebase; the defconfig will not survive four releases"
 first-learned: 2026-08-28
+confirmed: 2026-08-29 (booted)
 ---
 
 **The question** — can this port move off v6.18 onto current mainline (v7.2,
@@ -75,3 +76,60 @@ Aport-side changes the move needs, none of them large: `pkgver`, the tarball
 path `v6.x/` → `v7.x/` (7.2 and 7.2.2 tarballs both exist at
 `cdn.kernel.org/pub/linux/kernel/v7.x/`), `_flavor` rename, and the one
 `depends=` line in `device-google-taimen/APKBUILD`.
+
+
+## Outcome, 2026-08-29 — it boots
+
+Rebased onto **v7.2.2**, 178 commits, and the device runs it:
+
+```
+Linux version 7.2.2 (pmos@fedora) (Alpine clang version 22.1.8, LLD 22.1.8)
+  #1-postmarketos-qcom-msm8998-7.2
+130 modules loaded · 21 of msm/ath10k/q6/snd_soc/qrtr · 2 DRM cards · wlan0 up
+0 failed systemd units
+```
+
+The `dmesg` error classes are the same familiar ones (qcom_smgr QMI buffering,
+wcd934x mbhc impedance with nothing plugged, ASoC "mux ... has no paths",
+q6v5 "Handover signaled"). No panic, no SMMU fault, no GPU fault.
+
+### The conflicts were the easy half
+
+Sixteen resolved conflicts got the series to apply. **Seven API changes that no
+conflict revealed** then broke the build, and only a compile found them:
+
+| gone in 7.2 | replacement |
+|---|---|
+| `snd_soc_kcontrol_component()` | `snd_kcontrol_chip()` |
+| `snd_soc_dapm_kcontrol_dapm()` | `snd_soc_dapm_kcontrol_to_dapm()` |
+| `.pcm_construct` | `.pcm_new` |
+| `apr_resp_pkt *` in apr callbacks | `const apr_resp_pkt *` |
+| `drm_panel_init()` (now static) | `devm_drm_panel_alloc()` |
+| `qcom_ep_reset_{assert,deassert}()` | `qcom_pcie_perst_{assert,deassert}()` |
+| camss `regulators[]` as `char *` | `struct regulator_bulk_data` |
+
+Each was folded into the commit that introduces the code, so the series stays
+bisectable. **A clean `git am` says nothing about whether the result compiles**
+— budget a build-and-fix loop, not just a conflict-resolution pass.
+
+### Two config traps, both silent
+
+- `BOOTPARAM_SOFTLOCKUP_PANIC` and `BOOTPARAM_HUNG_TASK_PANIC` became `int`
+  (default 0). `olddefconfig` on the old config therefore turns both
+  panic-on-hang nets **off** without a word. Set them to 1 explicitly.
+- `DEBUG_INFO_BTF` silently drops if `pahole` is absent when the config is
+  regenerated, because its `depends on` is a `$(success,...)` probe.
+
+### The move needed a new rung
+
+`fast` cannot change kernel flavor: `_ph_install_kernel_release` does a plain
+`apk add`, and two kernel aports own `/boot/vmlinuz` and every dtb. The add
+fails on file conflicts *and registers the new package anyway*, so a later swap
+purges the incumbent while apk unpacks nothing — `/boot/vmlinuz` ceases to
+exist and the export packs an image with no kernel. See
+[[porthole-build-upgrade-rung]]. `porthole build upgrade` now does the swap as
+one apk transaction (`!oldpkg`), verifies by file ownership rather than exit
+code, repairs a half-applied target first, and pushes modules **before** it
+flashes — because on a major bump `/usr/lib/modules/<release>` is *absent* on
+the phone, not stale, and a boot-only flash strands it with no network to fix
+it over.
