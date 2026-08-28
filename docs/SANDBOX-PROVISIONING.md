@@ -168,8 +168,8 @@ No new mechanism — the config knob already exists and is simply unused.
 
 ### 3. `sandbox/Containerfile`
 
-Alpine, **pinned tag** (not `latest` — a sandbox that changes under you is not
-a sandbox), plus: `pmbootstrap`, `android-tools`, `e2fsprogs`,
+Alpine **3.24**, **pinned** (not `latest` — a sandbox that changes under you is
+not a sandbox), plus: `pmbootstrap`, `android-tools`, `e2fsprogs`,
 `fuse2fs` (its own aport — **not** part of `e2fsprogs-extra`, verified
 2026-08-29), `fuse`, `git`, `python3`,
 `openssh-client`, `rsync`, `openssl`, `xz`, `tar`, `util-linux`, and the
@@ -376,7 +376,13 @@ grep from §9 before calling it.
 
 ## Open
 
-- Which Alpine tag, and how the image is rebuilt when `VERSION` moves.
+- ~~Which Alpine tag~~ — **answered 2026-08-29: 3.24**, the newest release, and
+  it carries `pmbootstrap-3.11.1-r0`, which is the newest upstream release
+  tag. Verified in a container that it has `--no-image` and the
+  `if no_image: return` early return. Alpine **3.22** would have given 3.9.0,
+  and PyPI tops out at 2.1.0 — so the packaged tool is only the latest on a
+  current base, and bumping the base is how the tools stay current.
+- How the image is rebuilt when `VERSION` moves.
 - Whether the fuse2fs shim is a patch carried in `sandbox/`, or a
   `PMB_*`-style hook proposed upstream. Upstream is better; carrying it is
   faster.
