@@ -51,6 +51,53 @@ def test_build_argv_force_bypasses_the_layer_cache():
     assert "--no-cache" in forced, forced
 
 
+def test_device_key_is_created_private_and_is_idempotent():
+    home = pathlib.Path(tempfile.mkdtemp(prefix="porthole-key-test-"))
+    key = sb._ensure_device_key(home)
+    assert key.exists(), key
+    assert key.with_suffix(".pub").exists(), "public half missing"
+    assert oct(key.stat().st_mode & 0o777) == "0o600", oct(key.stat().st_mode)
+    first = key.read_bytes()
+    again = sb._ensure_device_key(home)
+    assert again == key and again.read_bytes() == first, "not idempotent"
+
+
+def test_mounts_never_expose_the_users_ssh_directory():
+    mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                        "testdev", [])
+    for src, dst, _opts in mounts:
+        assert not src.rstrip("/").endswith("/.ssh"), (src, dst)
+        assert src != str(pathlib.Path.home()), (src, dst)
+
+
+def test_mounts_carry_the_device_key_read_only():
+    mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                        "testdev", [])
+    key = [m for m in mounts if m[1] == sb.DEVICE_KEY_IN]
+    assert len(key) == 1, mounts
+    assert key[0][0] == "/k/device_key", key
+    assert key[0][2] == "ro", "the key must be mounted read-only"
+
+
+def test_mounts_include_the_device_mutex_lock():
+    mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                        "testdev", [])
+    lock = sb._lock_path("testdev")
+    assert lock == "/tmp/porthole-testdev.lock", lock
+    assert any(src == lock for src, _dst, _o in mounts), (
+        "without this a containerised agent and a host agent get DIFFERENT "
+        "locks and drive the one phone at the same time")
+
+
+def test_mounts_include_usb_and_the_workdir():
+    mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                        "testdev", [])
+    dsts = [dst for _src, dst, _o in mounts]
+    assert "/dev/bus/usb" in dsts, dsts
+    assert "/pmb" in dsts, dsts
+    assert "/porthole" in dsts, dsts
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -51,6 +51,52 @@ def _image_tag(root: pathlib.Path) -> str:
     return f"localhost/{CONTAINER}:{version}"
 
 
+def _ensure_device_key(home: pathlib.Path) -> pathlib.Path:
+    """A dedicated ssh key for the device, so the workspace never needs ~/.ssh.
+
+    docs/SANDBOX.md promises that your ssh keys are not present in the
+    container. `PORTHOLE_SSH_KEY` is unset by default, so the device tooling
+    falls back to ~/.ssh/id_ed25519 -- a personal key. Generating one key that
+    only ever reaches the phone is what lets both statements be true.
+    """
+    key = home / ".porthole" / "device_key"
+    if key.exists():
+        return key
+    key.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-N", "", "-q",
+         "-C", "porthole-sandbox", "-f", str(key)],
+        check=True)
+    os.chmod(key, 0o600)
+    return key
+
+
+def _lock_path(device: str) -> str:
+    """Must match tools/tk-device.sh:32 exactly, or the mutex is not shared."""
+    return f"/tmp/porthole-{device or 'device'}.lock"
+
+
+def _mounts(root, pmb_dir, workdir, key, device, extra):
+    """(host_src, container_dst, options) for everything the workspace sees.
+
+    This list IS the isolation boundary. Nothing reaches the container that is
+    not named here, so adding to it is a security decision.
+    """
+    mounts = [
+        (str(pathlib.Path(pmb_dir).expanduser()), "/pmb", "rw"),
+        (str(root), "/porthole", "rw"),
+        ("/dev/bus/usb", "/dev/bus/usb", "rw"),
+        (_lock_path(device), _lock_path(device), "rw"),
+        (str(key), DEVICE_KEY_IN, "ro"),
+    ]
+    if workdir:
+        mounts.append((str(pathlib.Path(workdir).expanduser()), "/work", "rw"))
+    for path in extra or []:
+        src = str(pathlib.Path(path).expanduser())
+        mounts.append((src, "/mnt/" + pathlib.Path(src).name, "rw"))
+    return mounts
+
+
 def _build_argv(root: pathlib.Path, force: bool) -> list[str]:
     argv = ["podman", "build", "-t", _image_tag(root),
             "-f", str(root / "sandbox" / "Containerfile")]
