@@ -19,6 +19,7 @@ generic notes as well.
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
 | [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
+| [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-vocproc-refuses-a-volume-step-without-cal](findings/the-vocproc-refuses-a-volume-step-without-cal.md) | `soc:msm8998` | In-call volume: the vocproc refuses VSS_IVOLUME_CMD_SET_STEP without a registered volume calibration table |
@@ -125,5 +126,5 @@ generic notes as well.
 - `device:google-taimen` — 7
 - `generic` — 64
 - `soc:gs201` — 1
-- `soc:msm8998` — 12
+- `soc:msm8998` — 13
 - `soc:qcom` — 1
