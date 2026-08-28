@@ -7,6 +7,7 @@ Nothing invokes podman. That is deliberate: CI has no podman and no device,
 and a lifecycle test that needs either would simply be skipped there, which is
 the same as not having it (see the Makefile's note on silent skips).
 """
+import os
 import pathlib
 import sys
 import tempfile
@@ -96,6 +97,36 @@ def test_mounts_include_usb_and_the_workdir():
     assert "/dev/bus/usb" in dsts, dsts
     assert "/pmb" in dsts, dsts
     assert "/porthole" in dsts, dsts
+
+
+def test_lock_path_honours_tk_device_lock_override():
+    old = os.environ.pop("TK_DEVICE_LOCK", None)
+    try:
+        assert sb._lock_path("testdev") == "/tmp/porthole-testdev.lock"
+        os.environ["TK_DEVICE_LOCK"] = "/custom/lock"
+        assert sb._lock_path("testdev") == "/custom/lock"
+    finally:
+        if old is None:
+            os.environ.pop("TK_DEVICE_LOCK", None)
+        else:
+            os.environ["TK_DEVICE_LOCK"] = old
+
+
+def test_ensure_device_key_raises_bail_when_ssh_keygen_missing():
+    home = pathlib.Path(tempfile.mkdtemp(prefix="porthole-key-test-"))
+    old_path = os.environ.get("PATH")
+    os.environ["PATH"] = ""
+    try:
+        try:
+            sb._ensure_device_key(home)
+            assert False, "expected Bail when ssh-keygen is missing"
+        except sb.Bail as exc:
+            assert "ssh-keygen" in str(exc), exc
+    finally:
+        if old_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = old_path
 
 
 def main():

@@ -62,6 +62,10 @@ def _ensure_device_key(home: pathlib.Path) -> pathlib.Path:
     key = home / ".porthole" / "device_key"
     if key.exists():
         return key
+    if not shutil.which("ssh-keygen"):
+        raise Bail("ssh-keygen is not installed", EX_FAIL,
+                   "the workspace needs a dedicated device key; install "
+                   "openssh-client")
     key.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-N", "", "-q",
@@ -72,8 +76,13 @@ def _ensure_device_key(home: pathlib.Path) -> pathlib.Path:
 
 
 def _lock_path(device: str) -> str:
-    """Must match tools/tk-device.sh:32 exactly, or the mutex is not shared."""
-    return f"/tmp/porthole-{device or 'device'}.lock"
+    """Must match tools/tk-device.sh:32 exactly, or the mutex is not shared.
+
+    TK_DEVICE_LOCK overrides the default there, same as here -- an operator
+    who sets it on the host and not for the container would otherwise get two
+    different locks guarding the one physical phone.
+    """
+    return os.environ.get("TK_DEVICE_LOCK") or f"/tmp/porthole-{device or 'device'}.lock"
 
 
 def _mounts(root, pmb_dir, workdir, key, device, extra):
