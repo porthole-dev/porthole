@@ -34,7 +34,30 @@ POLICY_DST = "/etc/porthole/sandbox.conf"
 AUDIT = "/var/log/porthole-sandbox.log"
 SUDOERS_DST = "/etc/sudoers.d/60-porthole-sandbox"
 
-IMAGE = "docker.io/library/alpine:latest"
+BASE_IMAGE = "docker.io/library/alpine:3.24"
+CONTAINER = "porthole-sandbox"
+
+# Where the dedicated device ssh key lives on the host, and where it is mounted
+# inside the container. Deliberately NOT under the /porthole repo mount: a key
+# shadowing a path in the user's checkout is a confusing surprise.
+DEVICE_KEY = "~/.porthole/device_key"
+DEVICE_KEY_IN = "/run/porthole/device_key"
+
+
+def _image_tag(root: pathlib.Path) -> str:
+    """The image is tagged with the toolbox VERSION, so an image is always
+    traceable to the revision that built it."""
+    version = (root / "VERSION").read_text().strip()
+    return f"localhost/{CONTAINER}:{version}"
+
+
+def _build_argv(root: pathlib.Path, force: bool) -> list[str]:
+    argv = ["podman", "build", "-t", _image_tag(root),
+            "-f", str(root / "sandbox" / "Containerfile")]
+    if force:
+        argv.append("--no-cache")
+    argv.append(str(root / "sandbox"))
+    return argv
 
 
 # ------------------------------------------------------------------ status --
@@ -152,6 +175,8 @@ def cmd_sandbox(args, ctx) -> int:
         return _shell(ctx, args)
     if action == "uninstall":
         return _uninstall(ctx)
+    if action == "build":
+        return _build(ctx, args)
     raise Bail(f"unknown action {action!r}", EX_USAGE,
                "actions: status, install, shell, audit, uninstall")
 
@@ -430,6 +455,23 @@ def _audit(ctx, args) -> int:
     return ctx.emit(entries, render)
 
 
+# ------------------------------------------------------------------- build --
+
+def _build(ctx, args) -> int:
+    if not shutil.which("podman"):
+        raise Bail("podman is not installed", EX_FAIL,
+                   "the workspace needs it; see `porthole doctor`")
+    tag = _image_tag(ctx.root)
+    force = getattr(args, "force", False)
+    if not force:
+        have = subprocess.run(["podman", "image", "exists", tag]).returncode == 0
+        if have:
+            ctx.out(f"  {tag} already built -- `--force` to rebuild")
+            return EX_OK
+    ctx.out(f"  building {tag}")
+    return subprocess.run(_build_argv(ctx.root, force)).returncode
+
+
 # ------------------------------------------------------------------- shell --
 
 def _shell(ctx, args) -> int:
@@ -466,7 +508,7 @@ def _shell(ctx, args) -> int:
             ctx.out.warn(f"skipping {src}: does not exist")
             continue
         argv += ["-v", f"{src}:{dst}:rw"]
-    argv += ["-w", "/work" if workdir else "/pmb", args.image or IMAGE]
+    argv += ["-w", "/work" if workdir else "/pmb", args.image or _image_tag(ctx.root)]
     argv += args.command or ["/bin/sh"]
 
     if args.dry_run:
@@ -494,7 +536,7 @@ SPEC = {
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": ["status", "install", "shell", "audit",
-                                  "uninstall"],
+                                  "uninstall", "build"],
                       "help": "status | install | shell | audit | uninstall"}),
         (["--root"], {"action": "append", "metavar": "PATH",
                       "help": "install: a path the broker may touch (repeatable)"}),
@@ -504,6 +546,8 @@ SPEC = {
         (["--command"], {"nargs": "...", "help": "shell: command instead of a shell"}),
         (["--dry-run"], {"action": "store_true",
                          "help": "shell: print the podman command and stop"}),
+        (["--force"], {"action": "store_true",
+                       "help": "build: rebuild even if the tag exists"}),
         (["--denied"], {"action": "store_true", "help": "audit: only denials"}),
         (["--limit"], {"type": int, "default": 40, "help": "audit: how many"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
