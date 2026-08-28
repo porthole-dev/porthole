@@ -129,6 +129,79 @@ def test_ensure_device_key_raises_bail_when_ssh_keygen_missing():
             os.environ["PATH"] = old_path
 
 
+def _argv_for_test():
+    mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                        "testdev", [])
+    return sb._up_argv(ROOT, "localhost/porthole-sandbox:0.1.0", mounts, "testdev")
+
+
+def test_up_argv_is_detached_and_named_and_not_ephemeral():
+    argv = _argv_for_test()
+    assert argv[:3] == ["podman", "run", "-d"], argv
+    assert "--rm" not in argv, (
+        "the workspace is persistent; --rm is what made the old shell useless")
+    assert "--name" in argv and sb.CONTAINER in argv, argv
+
+
+def test_up_argv_maps_container_root_to_our_uid():
+    argv = _argv_for_test()
+    assert "--userns=keep-id:uid=0,gid=0" in argv, argv
+
+
+def test_up_argv_grants_fuse_but_not_host_networking():
+    argv = _argv_for_test()
+    assert "/dev/fuse" in argv, "fuse2fs is how the image is built without loop"
+    assert "--network=host" not in argv, (
+        "pasta reaches the device on the default netns; host networking "
+        "gives up isolation for nothing")
+    assert "--privileged" not in argv, argv
+
+
+def test_up_argv_renders_every_mount():
+    mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                        "testdev", [])
+    argv = sb._up_argv(ROOT, "img:1", mounts, "testdev")
+    for src, dst, opts in mounts:
+        assert f"{src}:{dst}:{opts}" in argv, (src, dst, opts)
+
+
+def test_up_argv_keeps_the_container_alive():
+    argv = _argv_for_test()
+    assert argv[-1] in ("sleep", "infinity") or "infinity" in argv, argv
+
+
+def test_mounts_include_the_porthole_user_config_dir_when_it_exists():
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="porthole-xdg-test-"))
+    (tmp / "porthole").mkdir()
+    old = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(tmp)
+    try:
+        mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                            "testdev", [])
+        match = [m for m in mounts if m[1] == "/run/porthole/config/porthole"]
+        assert len(match) == 1, (
+            "without this the container resolves a DIFFERENT device and the "
+            "lock mount above becomes decorative: " + repr(mounts))
+        assert match[0][0] == str(tmp / "porthole"), match
+        assert match[0][2] == "rw", match
+    finally:
+        if old is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = old
+
+
+def test_up_argv_sets_xdg_config_home_and_matching_device_lock():
+    argv = _argv_for_test()
+    assert "-e" in argv and "XDG_CONFIG_HOME=/run/porthole/config" in argv, (
+        "without this the in-container load_config never finds the mounted "
+        "config, and PORTHOLE_DEVICE resolves differently inside: " + repr(argv))
+    lock = sb._lock_path("testdev")
+    assert f"TK_DEVICE_LOCK={lock}" in argv, (
+        "the container must compute the SAME lock path as the host, or the "
+        "bind-mounted lock file protects nothing: " + repr(argv))
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

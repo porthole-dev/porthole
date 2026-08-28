@@ -100,6 +100,16 @@ def _mounts(root, pmb_dir, workdir, key, device, extra):
     ]
     if workdir:
         mounts.append((str(pathlib.Path(workdir).expanduser()), "/work", "rw"))
+    # porthole's own user config layer (lib/porthole.py load_config), where
+    # `porthole use` writes the active device. Without this the container
+    # resolves a DIFFERENT PORTHOLE_DEVICE than the host, tk-device.sh
+    # computes a different lock path from that, and the device-mutex mount
+    # above ends up guarding nothing while looking correct.
+    xdg_config = pathlib.Path(
+        os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+    porthole_config = xdg_config / "porthole"
+    if porthole_config.is_dir():
+        mounts.append((str(porthole_config), "/run/porthole/config/porthole", "rw"))
     for path in extra or []:
         src = str(pathlib.Path(path).expanduser())
         mounts.append((src, "/mnt/" + pathlib.Path(src).name, "rw"))
@@ -113,6 +123,87 @@ def _build_argv(root: pathlib.Path, force: bool) -> list[str]:
         argv.append("--no-cache")
     argv.append(str(root / "sandbox"))
     return argv
+
+
+def _up_argv(root, image, mounts, device) -> list[str]:
+    """The persistent workspace.
+
+    Not `--rm`: all state lives in the mounts above, so the container itself is
+    disposable and keeping it costs nothing -- while recreating it per command
+    would cost a second every time and lose the running adb server.
+
+    Deliberately NOT here: `--network=host` (pasta already reaches the device
+    on the default netns) and `--privileged` (the entire point).
+    """
+    argv = ["podman", "run", "-d", "--name", CONTAINER,
+            "--userns=keep-id:uid=0,gid=0",
+            # SYS_ADMIN for bind mounts, SYS_CHROOT for chroots, MKNOD for the
+            # chroot's device nodes. Inside a rootless userns none of these
+            # confer anything beyond that namespace.
+            "--cap-add", "SYS_ADMIN,SYS_CHROOT,MKNOD",
+            # fuse2fs mounts ext4 from a plain file, which is how the rootfs
+            # image is built with no loop device and no privilege.
+            "--device", "/dev/fuse",
+            "--security-opt", "label=disable",
+            "--hostname", CONTAINER,
+            # So the in-container load_config finds the config mounted at
+            # /run/porthole/config/porthole above, and tk-device.sh computes
+            # the SAME lock path the host mounted rather than a different one
+            # for the same device -- the whole point of that mount.
+            "-e", "XDG_CONFIG_HOME=/run/porthole/config",
+            "-e", f"TK_DEVICE_LOCK={_lock_path(device)}"]
+    for src, dst, opts in mounts:
+        argv += ["-v", f"{src}:{dst}:{opts}"]
+    argv += [image, "sleep", "infinity"]
+    return argv
+
+
+def _container_running() -> bool:
+    out = subprocess.run(
+        ["podman", "ps", "-q", "-f", f"name=^{CONTAINER}$"],
+        capture_output=True, text=True).stdout
+    return bool(out.strip())
+
+
+def _up(ctx, args) -> int:
+    if not shutil.which("podman"):
+        raise Bail("podman is not installed", EX_FAIL,
+                   "the workspace needs it; see `porthole doctor`")
+    if _container_running():
+        ctx.out(f"  {CONTAINER} is already up")
+        return EX_OK
+
+    tag = _image_tag(ctx.root)
+    if subprocess.run(["podman", "image", "exists", tag]).returncode != 0:
+        rc = _build(ctx, args)
+        if rc != EX_OK:
+            return rc
+
+    # A stopped container of the same name blocks `run --name`. Removing it is
+    # safe precisely because no state lives in it.
+    subprocess.run(["podman", "rm", "-f", CONTAINER],
+                   capture_output=True)
+
+    key = _ensure_device_key(pathlib.Path.home())
+    device = ctx.cfg.get("PORTHOLE_DEVICE", "")
+    lock = _lock_path(device)
+    pathlib.Path(lock).touch(exist_ok=True)
+
+    pmb = ctx.cfg.get("PORTHOLE_PMB_DIR") or str(
+        pathlib.Path.home() / ".local/var/pmbootstrap")
+    pathlib.Path(pmb).expanduser().mkdir(parents=True, exist_ok=True)
+
+    mounts = _mounts(ctx.root, pmb, ctx.cfg.get("PORTHOLE_WORKDIR"), key,
+                     device, args.mount)
+    rc = subprocess.run(_up_argv(ctx.root, tag, mounts, device)).returncode
+    if rc == 0:
+        ctx.out(ctx.out.paint(
+            f"  {CONTAINER} up. root inside maps to uid {os.getuid()} outside.\n"
+            f"  mounted: {', '.join(d for _s, d, _o in mounts)}\n"
+            f"  nothing else on this host is reachable from in here.\n"
+            f"  device key: {key} -- add its .pub to the phone, then set\n"
+            f"    PORTHOLE_SSH_KEY={key}", "grey"))
+    return rc
 
 
 # ------------------------------------------------------------------ status --
@@ -232,8 +323,10 @@ def cmd_sandbox(args, ctx) -> int:
         return _uninstall(ctx)
     if action == "build":
         return _build(ctx, args)
+    if action == "up":
+        return _up(ctx, args)
     raise Bail(f"unknown action {action!r}", EX_USAGE,
-               "actions: status, install, shell, audit, uninstall")
+               "actions: status, install, shell, audit, uninstall, build, up")
 
 
 def _status(ctx) -> int:
@@ -591,8 +684,8 @@ SPEC = {
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": ["status", "install", "shell", "audit",
-                                  "uninstall", "build"],
-                      "help": "status | install | shell | audit | uninstall"}),
+                                  "uninstall", "build", "up"],
+                      "help": "status | install | shell | audit | uninstall | build | up"}),
         (["--root"], {"action": "append", "metavar": "PATH",
                       "help": "install: a path the broker may touch (repeatable)"}),
         (["--mount"], {"action": "append", "metavar": "PATH",
