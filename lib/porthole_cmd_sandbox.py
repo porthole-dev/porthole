@@ -133,8 +133,42 @@ def _mounts(root, pmb_dir, workdir, key, device, extra):
     return mounts
 
 
+SPEC_LABEL = "io.porthole.containerfile-sha"
+
+
+def _containerfile_sha(root: pathlib.Path) -> str:
+    """Hash of the Containerfile the image should have been built from.
+
+    Recorded as a label so a CHANGED Containerfile does not silently never
+    reach anyone: the tag is keyed on VERSION, so `build` would skip an
+    existing tag forever and the workspace would quietly stay on the old
+    recipe. A stale thing winning silently is the failure this repo keeps
+    paying for.
+    """
+    import hashlib
+
+    try:
+        data = (root / "sandbox" / "Containerfile").read_bytes()
+    except OSError:
+        return ""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def _image_sha(tag: str) -> str:
+    """The Containerfile hash the existing image records, "" if it has none."""
+    proc = subprocess.run(
+        ["podman", "image", "inspect", "-f",
+         "{{index .Config.Labels " + json.dumps(SPEC_LABEL) + "}}", tag],
+        capture_output=True, text=True)
+    if proc.returncode != 0:
+        return ""
+    out = proc.stdout.strip()
+    return "" if out in ("<no value>", "") else out
+
+
 def _build_argv(root: pathlib.Path, force: bool) -> list[str]:
     argv = ["podman", "build", "-t", _image_tag(root),
+            "--label", f"{SPEC_LABEL}={_containerfile_sha(root)}",
             "-f", str(root / "sandbox" / "Containerfile")]
     if force:
         argv.append("--no-cache")
@@ -804,8 +838,25 @@ def _build(ctx, args) -> int:
     if not force:
         have = subprocess.run(["podman", "image", "exists", tag]).returncode == 0
         if have:
-            ctx.out(f"  {tag} already built -- `--force` to rebuild")
-            return EX_OK
+            want = _containerfile_sha(ctx.root)
+            got = _image_sha(tag)
+            if want and got and want != got:
+                ctx.out(ctx.out.paint(
+                    "  the Containerfile changed since this image was built "
+                    "-- rebuilding", "yellow"))
+            elif want and not got:
+                # Built before the label existed, so what recipe it came from
+                # is unknowable. Say so rather than skipping silently -- a
+                # rebuild is minutes, and a workspace quietly missing a change
+                # is what sent a real session down three wrong paths.
+                ctx.out(ctx.out.paint(
+                    f"  {tag} predates the Containerfile hash label, so it may "
+                    f"be stale.\n  `porthole sandbox build --force` to be sure.",
+                    "yellow"))
+                return EX_OK
+            else:
+                ctx.out(f"  {tag} already built -- `--force` to rebuild")
+                return EX_OK
     ctx.out(f"  building {tag}")
     return subprocess.run(_build_argv(ctx.root, force)).returncode
 

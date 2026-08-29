@@ -11,11 +11,18 @@ FROM docker.io/library/alpine:3.24
 # release. (It is not on PyPI above 2.1.0, and Alpine 3.22 was still on 3.9.0 --
 # both were reasons an earlier draft cloned from git. Neither applies here.)
 #
+# ccache and sccache are here because they were ABSENT, so nothing in the
+# workspace could have used them even where a build path wanted to. Note this
+# does not by itself speed up kernel builds: envkernel bakes CCACHE_DISABLE=1
+# into its own make command, so the compile is uncached whatever is installed.
+# brain/findings/envkernel-disables-ccache.md.
+#
 # android-tools is 35.0.2: Google's newer platform-tools are glibc-only and
 # cannot run on musl, so this is the ceiling in an Alpine image. It is well
 # beyond what the supported devices need -- do not "fix" it with the zip.
 RUN apk add --no-cache \
       pmbootstrap \
+      ccache sccache \
       android-tools \
       e2fsprogs fuse2fs fuse \
       util-linux parted multipath-tools \

@@ -159,6 +159,28 @@ porthole build status --json    # rung, phase, progress, elapsed, eta, last line
 this rung took last time on this machine, so the first run of a rung says
 `eta --` rather than inventing a number.
 
+### When a rung is still slow
+
+`pmbootstrap build` zaps the buildroot before every package, and that is most
+of the wall clock in the flashing rungs. `PORTHOLE_LAX_BUILD=1` skips it:
+
+```sh
+PORTHOLE_LAX_BUILD=1 porthole build fast --yes     # iterating
+```
+
+**Take that trade knowingly.** It is not the default because this repo has been
+bitten repeatedly by stale build state -- a `_p` apk outranking a release, a
+stale APKINDEX making install pick an older package -- and every one of them
+presented as a mysterious wrong-kernel bug rather than as a caching problem.
+Use it while iterating on the same change; drop it for the build you intend to
+flash and trust, and run `porthole build purge` if a stale dev package is
+suspected.
+
+It does NOT speed up the compile. envkernel bakes `CCACHE_DISABLE=1` into its
+own make command, so every kernel compile is uncached no matter what is
+installed -- see `brain/findings/envkernel-disables-ccache.md`. Do not go
+looking for a ccache setting to fix that; there isn't one on this path.
+
 ## Non-negotiable
 
 **Never hand-roll what a tool does.** Writing `ssh ... reboot` or `sleep 60`

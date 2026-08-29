@@ -406,6 +406,41 @@ def test_the_workdir_is_the_mount_not_the_host_path():
         + str([a for a in argv if "WORKDIR" in a]))
 
 
+def test_the_image_records_which_containerfile_built_it():
+    """The tag is keyed on VERSION, so `build` skips an existing tag forever.
+    Without a recipe hash a changed Containerfile would silently never reach
+    anyone, and the workspace would quietly stay on the old one."""
+    argv = sb._build_argv(ROOT, force=False)
+    labels = [argv[i + 1] for i, a in enumerate(argv) if a == "--label"]
+    assert any(x.startswith(sb.SPEC_LABEL + "=") for x in labels), labels
+    sha = sb._containerfile_sha(ROOT)
+    assert len(sha) == 16, sha
+    assert f"{sb.SPEC_LABEL}={sha}" in labels, labels
+
+
+def test_the_recipe_hash_changes_when_the_recipe_does(tmp=None):
+    import hashlib
+    import tempfile
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix="porthole-cf-"))
+    (scratch / "sandbox").mkdir()
+    cf = scratch / "sandbox" / "Containerfile"
+    cf.write_text("FROM alpine\n")
+    first = sb._containerfile_sha(scratch)
+    cf.write_text("FROM alpine\nRUN apk add ccache\n")
+    assert sb._containerfile_sha(scratch) != first, "a changed recipe hashed the same"
+
+
+def test_a_missing_containerfile_hashes_to_nothing_rather_than_raising():
+    assert sb._containerfile_sha(pathlib.Path("/nonexistent/porthole")) == ""
+
+
+def test_the_image_installs_a_compiler_cache():
+    """It was absent entirely, so nothing in the workspace could use one even
+    where a build path wanted to."""
+    text = (ROOT / "sandbox" / "Containerfile").read_text()
+    assert "ccache" in text, "no compiler cache in the workspace image"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
