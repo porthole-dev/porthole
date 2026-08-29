@@ -105,11 +105,19 @@ def _mounts(root, pmb_dir, workdir, key, device, extra):
     # resolves a DIFFERENT PORTHOLE_DEVICE than the host, tk-device.sh
     # computes a different lock path from that, and the device-mutex mount
     # above ends up guarding nothing while looking correct.
+    #
+    # READ-ONLY, and it must stay that way. config.env sets FASTBOOT and ADB
+    # (lib/porthole.py), and the HOST executes those values as commands --
+    # tools/tk-flash-boot.sh, tools/ph-build.sh, lib/porthole.py's Device.
+    # Writable, anything in the container could put `FASTBOOT=/tmp/evil.sh`
+    # in that file and get arbitrary execution as you on the host's next
+    # flash. The mount exists so both sides resolve the same device; that
+    # needs reads only. Do not widen it.
     xdg_config = pathlib.Path(
         os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
     porthole_config = xdg_config / "porthole"
     if porthole_config.is_dir():
-        mounts.append((str(porthole_config), "/run/porthole/config/porthole", "rw"))
+        mounts.append((str(porthole_config), "/run/porthole/config/porthole", "ro"))
     for path in extra or []:
         src = str(pathlib.Path(path).expanduser())
         mounts.append((src, "/mnt/" + pathlib.Path(src).name, "rw"))

@@ -183,7 +183,10 @@ def test_mounts_include_the_porthole_user_config_dir_when_it_exists():
             "without this the container resolves a DIFFERENT device and the "
             "lock mount above becomes decorative: " + repr(mounts))
         assert match[0][0] == str(tmp / "porthole"), match
-        assert match[0][2] == "rw", match
+        assert match[0][2] == "ro", (
+            "config.env sets FASTBOOT/ADB and the HOST executes those "
+            "values; a writable mount is container-to-host code "
+            "execution: " + repr(match))
     finally:
         if old is None:
             os.environ.pop("XDG_CONFIG_HOME", None)
