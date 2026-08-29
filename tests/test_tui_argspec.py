@@ -257,6 +257,45 @@ def test_is_interactive_reads_the_registry():
     assert not jobs.is_interactive(ROOT, "sh -c true")
 
 
+def test_a_flag_survives_a_variadic_positional():
+    """The device mutex was being silently dropped by the form offering it.
+
+    `porthole run` declares `args` with nargs="...", so argparse hands it
+    EVERYTHING after the positionals. Building positionals-first produced
+    `porthole run tk-suspend-cycle.sh 20 --lock`, argparse swallowed --lock
+    into args, and lock came back False -- a tool told to take the lock ran
+    without it. Flags go first whenever a positional is variadic.
+    """
+    import argparse
+    import shlex
+    import porthole_cmd_run as run
+
+    fields = argspec.fields(run.SPEC)
+    example = "porthole run --lock tk-suspend-cycle.sh 20"
+    built = argspec.build("run", fields,
+                          argspec.parse_example(example, "run", fields))
+
+    parser = argparse.ArgumentParser(prog="porthole run")
+    for names, kw in run.SPEC["args"]:
+        parser.add_argument(*names, **kw)
+    ns = parser.parse_args(shlex.split(built)[2:])
+
+    assert ns.lock is True, (
+        "the built command lost --lock, so the device mutex is dropped: " + built)
+    assert ns.args == ["20"], ns.args
+
+
+def test_flags_stay_after_positionals_when_nothing_is_variadic():
+    """The reordering is scoped to the case that needs it, so every other
+    verb's command reads the way its examples do."""
+    import porthole_cmd_sandbox as sandbox
+
+    fields = argspec.fields(sandbox.SPEC)
+    built = argspec.build("sandbox", fields,
+                          {"action": "shell", "dry_run": True})
+    assert built.startswith("porthole sandbox shell"), built
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

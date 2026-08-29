@@ -192,19 +192,50 @@ def _lock_drift(baked: str, want: str) -> str:
     return (f"{CONTAINER} locks {baked} but this device locks {want}")
 
 
+def _lock_from_inspect(returncode: int, stdout: str, stderr: str) -> str:
+    """Turn a `podman inspect` result into a label, or refuse.
+
+    Pure, so the fail-closed decision is testable without podman -- which
+    matters more here than anywhere else in this file, because this is the
+    branch that decides whether the device-mutex guard speaks up at all.
+
+    A FAILED inspect is not the same as an absent label. `podman inspect`
+    exits 125 with empty stdout when the template names a field that no longer
+    exists, so a future podman renaming one would otherwise disable drift
+    detection for every container -- silently, which reads exactly like
+    agreement.
+    """
+    if returncode != 0:
+        detail = (stderr.strip().splitlines() or
+                  ["podman inspect exited {}".format(returncode)])[-1]
+        raise Bail("cannot read {}'s device-lock label".format(CONTAINER),
+                   EX_FAIL,
+                   detail + " -- refusing rather than assuming the locks agree")
+    out = stdout.strip()
+    return "" if out in ("<no value>", "") else out
+
+
 def _container_lock() -> str:
-    """The lock path recorded on the running container, "" if it has none."""
-    out = subprocess.run(
+    """The lock path recorded on the running container, "" if it carries none."""
+    proc = subprocess.run(
         ["podman", "inspect", "-f",
          "{{index .Config.Labels " + json.dumps(LOCK_LABEL) + "}}", CONTAINER],
-        capture_output=True, text=True).stdout.strip()
-    return "" if out in ("<no value>", "") else out
+        capture_output=True, text=True)
+    return _lock_from_inspect(proc.returncode, proc.stdout, proc.stderr)
 
 
 def _assert_lock_matches(ctx) -> None:
     """Refuse to use a container that guards a different phone than we do."""
-    drift = _lock_drift(_container_lock(),
-                        _lock_path(ctx.cfg.get("PORTHOLE_DEVICE", "")))
+    baked = _container_lock()
+    if not baked:
+        # A container from before the label existed. Not drift, but not
+        # protection either -- and an unprotected container that says nothing
+        # is indistinguishable from a checked one. Say so.
+        ctx.out.warn("{} carries no device-lock label, so drift cannot be "
+                     "checked. `porthole sandbox down` then `up` to get the "
+                     "guard.".format(CONTAINER))
+        return
+    drift = _lock_drift(baked, _lock_path(ctx.cfg.get("PORTHOLE_DEVICE", "")))
     if drift:
         raise Bail(drift, EX_FAIL,
                    "the device changed under the workspace; two agents would "

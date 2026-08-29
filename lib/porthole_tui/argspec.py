@@ -49,16 +49,21 @@ class Field:
     """One row of a generated form."""
 
     __slots__ = ("dest", "label", "kind", "flag", "choices", "help",
-                 "required", "browse", "dangerous", "default", "variadic")
+                 "required", "browse", "dangerous", "default", "variadic",
+                 "remainder")
 
     def __init__(self, dest, label, kind, flag="", choices=None, help="",
                  required=False, browse=False, dangerous=False, default=None,
-                 variadic=False):
+                 variadic=False, remainder=False):
         self.dest, self.label, self.kind = dest, label, kind
         self.flag, self.choices, self.help = flag, list(choices or []), help
         self.required, self.browse = required, browse
         self.dangerous, self.default = dangerous, default
         self.variadic = variadic
+        # nargs="..." only. `*` and `+` are variadic too, but argparse still
+        # recognises an optional among their tokens; REMAINDER does not -- it
+        # takes everything after it literally, flags included.
+        self.remainder = remainder
 
     def __repr__(self):
         return "Field({!r}, {!r})".format(self.dest, self.kind)
@@ -120,6 +125,7 @@ def fields(spec):
             dangerous=any(w in dest for w in DANGEROUS_FIELDS),
             default=kw.get("default"),
             variadic=kw.get("nargs") in ("*", "+", "..."),
+            remainder=kw.get("nargs") == "...",
         ))
     return out
 
@@ -150,24 +156,19 @@ def _render_value(field, value):
     return _render(value)
 
 
-def build(verb, fields_, values):
-    """Assemble the command. Positionals in declared order, then flags.
-
-    Empty strings, None and False are omitted rather than passed along: a form
-    with eight optional fields would otherwise build a command of eight empty
-    arguments, and argparse would take them literally.
-    """
-    parts = ["porthole", verb]
+def _positional_parts(fields_, values):
+    parts = []
     for f in fields_:
-        if f.flag:
-            continue
         value = values.get(f.dest)
         if value in (None, "", False):
             continue
         parts.append(_render_value(f, value))
+    return parts
+
+
+def _flag_parts(fields_, values):
+    parts = []
     for f in fields_:
-        if not f.flag:
-            continue
         value = values.get(f.dest)
         if value in (None, "", False):
             continue
@@ -175,7 +176,35 @@ def build(verb, fields_, values):
             parts.append(f.flag)
         else:
             parts.extend([f.flag, _render_value(f, value)])
-    return " ".join(parts)
+    return parts
+
+
+def build(verb, fields_, values):
+    """Assemble the command.
+
+    Flags come FIRST when a positional is argparse.REMAINDER, and that
+    ordering is load-bearing rather than cosmetic. `porthole run` declares
+    `args` with nargs="...", which hands argparse EVERYTHING after it -- so the
+    old positionals-then-flags order built `porthole run tk-suspend-cycle.sh 20
+    --lock`, argparse swallowed `--lock` into args, and lock came back False.
+    The form offering the device mutex was building a command that dropped it.
+    Flags first is also how those verbs' own examples are written.
+
+    ONLY for REMAINDER. `nargs="*"` and `"+"` are variadic too, but argparse
+    still recognises an optional among their tokens, so reordering those would
+    churn every other verb's command for nothing.
+
+    Empty strings, None and False are omitted rather than passed along: a form
+    with eight optional fields would otherwise build a command of eight empty
+    arguments, and argparse would take them literally.
+    """
+    positional = [f for f in fields_ if not f.flag]
+    flags = [f for f in fields_ if f.flag]
+    pos = _positional_parts(positional, values)
+    flg = _flag_parts(flags, values)
+    if any(f.remainder for f in positional):
+        return " ".join(["porthole", verb] + flg + pos)
+    return " ".join(["porthole", verb] + pos + flg)
 
 
 def tokenise(example):
