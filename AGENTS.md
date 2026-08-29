@@ -90,6 +90,20 @@ Run any of them without `--yes` to preview and print the table. `--kernel` on
 The old default for a bare `porthole build` was `kernel` -- the most expensive
 of the five. It is `auto` now.
 
+**And a build is no longer a black box.** It prints a live bar with a phase and
+an ETA, writes the full log to `.run/build-<rung>-<stamp>.log`, and publishes
+where it is to `.run/build-status.json` the whole time. If you run a build in
+the background, **poll it instead of sleeping**:
+
+```sh
+porthole build --yes &            # or in your harness's background runner
+porthole build status --json    # rung, phase, progress, elapsed, eta, last line
+```
+
+`--verbose` streams the raw output instead of the bar. The ETA comes from what
+this rung took last time on this machine, so the first run of a rung says
+`eta --` rather than inventing a number.
+
 `mod` and `boot` are ~15x cheaper than the top rung and were unreachable until
 they were added to the verb table — they existed only as shell functions in
 `tools/ph-build.sh`. If you have been iterating on `kernel`, you are paying ten

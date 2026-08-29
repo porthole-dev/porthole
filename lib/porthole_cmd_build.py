@@ -19,11 +19,14 @@ confirmation boundary as everything else: `--yes` or nothing happens.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shlex
 import shutil
 import subprocess
+import time
+import sys
 
 from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 
@@ -284,17 +287,41 @@ def _changed_artifacts(tree: pathlib.Path, since) -> list:
     return sorted(found)
 
 
-def _workspace_available(ctx) -> bool:
-    """Is there a running workspace to build in?
+def _workspace_usable(ctx):
+    """(usable, why_not) -- is the workspace wired for THIS device?
 
-    Never raises: this decides where a build runs, and a probe that throws
-    would turn "podman is being restarted" into "the build verb is broken".
+    A merely RUNNING container is not enough, and assuming it was cost a real
+    session three confused build attempts: the container had been created for a
+    different device, so the build routed into it and died with "could not read
+    pkgver/pkgrel / aport is ." -- an error with no relationship to the actual
+    problem. The only clue was a grey line saying "in the workspace".
+
+    So the container has to agree with us about which phone this is. It already
+    records that as a label at creation time, for the device-mutex guard; this
+    reads the same label. Never raises: deciding WHERE to build must not be a
+    way for the build verb to break.
     """
     try:
         import porthole_cmd_sandbox as sandbox
-        return bool(shutil.which("podman")) and sandbox._container_running()
     except Exception:  # noqa: BLE001
-        return False
+        return False, "the sandbox module is unavailable"
+    if not shutil.which("podman"):
+        return False, "podman is not installed"
+    try:
+        if not sandbox._container_running():
+            return False, "no workspace is running"
+        want = sandbox._lock_path(ctx.cfg.get("PORTHOLE_DEVICE", ""))
+        got = sandbox._container_lock()
+        if got and got != want:
+            return False, (f"the running workspace is wired for {got}, not "
+                           f"{want} -- `porthole sandbox down` then `up`")
+        if not got:
+            return False, ("the running workspace predates the device label, "
+                           "so it cannot be matched to this device -- "
+                           "`porthole sandbox down` then `up`")
+    except Exception:  # noqa: BLE001
+        return False, "could not query the workspace"
+    return True, ""
 
 
 def _container_cmd(func: str, extra: list[str] | None,
@@ -340,7 +367,7 @@ def _host_cmd(script: pathlib.Path, func: str,
 
 
 def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
-         host: bool = False) -> int:
+         host: bool = False, rung: str = "") -> int:
     """Run one of ph-build.sh's functions, in the workspace or on the host."""
     script = _script(ctx)
     env = dict(os.environ)
@@ -352,24 +379,88 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     # module name that reach a shell, and a path with a space in it would
     # otherwise arrive as two arguments.
     call = " ".join([func, *(shlex.quote(a) for a in extra or [])])
-    if not host and _workspace_available(ctx):
+    usable, why_not = (False, "--host") if host else _workspace_usable(ctx)
+    if usable:
         secrets = {k: v for k, v in env.items()
                    if k.startswith("TK_") and isinstance(v, str)}
         cmd = _container_cmd(func, extra, secrets)
-        ctx.out(ctx.out.paint(
-            f"  in the workspace: source ph-build.sh && {call}", "grey"))
+        # Not grey. WHERE a build ran is the first thing you need when it fails
+        # in a way that makes no sense, and burying it cost someone three
+        # attempts before they noticed the tail.
+        ctx.out(ctx.out.paint("  building IN THE WORKSPACE (container)", "cyan"))
     else:
         cmd = _host_cmd(script, func, extra)
-        why = "--host" if host else "no workspace running"
-        ctx.out(ctx.out.paint(
-            f"  on the host ({why}): source ph-build.sh && {call}", "grey"))
+        ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
+    return _stream(ctx, cmd, env, timeout, rung or func)
+
+
+def _stream(ctx, cmd, env, timeout: int, rung: str) -> int:
+    """Run the build, publishing where it is the whole time.
+
+    Every line goes to a log file unconditionally, so "quiet by default" never
+    costs anyone the output they needed. The terminal gets a live bar when it
+    is a terminal, a periodic line when it is not (an agent's pipe), and the
+    raw stream under --verbose.
+    """
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    rundir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    logpath = rundir / f"build-{rung}-{stamp}.log"
+    verbose = getattr(getattr(ctx, "args", None), "verbose", False)
+    tty = sys.stdout.isatty()
+
+    tracker = progress.Tracker(rundir, rung)
+    tracker.publish(force=True)
+    ctx.out(ctx.out.paint(f"  log: {logpath}", "grey"))
+
     try:
-        return subprocess.run(cmd, env=env, cwd=str(ctx.root),
-                              timeout=timeout).returncode
+        proc = subprocess.Popen(cmd, env=env, cwd=str(ctx.root),
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True, bufsize=1)
     except FileNotFoundError:
         raise Bail("bash is not installed", EX_FAIL) from None
-    except subprocess.TimeoutExpired:
-        raise Bail(f"{func} timed out after {timeout}s", EX_FAIL) from None
+
+    last_note = 0.0
+    killed = False
+    try:
+        with open(logpath, "w") as log:
+            for line in proc.stdout:
+                log.write(line)
+                tracker.feed(line)
+                tracker.publish()
+                if verbose:
+                    sys.stdout.write(line)
+                elif tty:
+                    sys.stdout.write("\r\033[2K  " + tracker.line())
+                    sys.stdout.flush()
+                elif time.time() - last_note > 15:
+                    # Not a terminal: an agent's pipe, or CI. A repainting bar
+                    # would be thousands of useless lines, and silence is the
+                    # black box this exists to end. One line every 15s is both
+                    # readable and enough to see it is alive.
+                    last_note = time.time()
+                    print("  " + tracker.line(), flush=True)
+                if tracker.elapsed > timeout:
+                    killed = True
+                    proc.kill()
+                    break
+    finally:
+        if tty and not verbose:
+            sys.stdout.write("\r\033[2K")
+            sys.stdout.flush()
+        rc = proc.wait()
+        tracker.finish(rc == 0 and not killed)
+
+    if killed:
+        raise Bail(f"{rung} timed out after {timeout}s", EX_FAIL,
+                   f"the partial log is at {logpath}")
+    ctx.out(ctx.out.paint(
+        f"  {rung}: {progress.fmt_dur(tracker.elapsed)}"
+        f"  ({tracker.compile_seen} compile steps)", "grey"))
+    return rc
 
 
 def _rung_args(args, action: str) -> list[str]:
@@ -421,7 +512,7 @@ def _auto(ctx, args) -> int:
     ctx.out(ctx.out.paint("  measuring: incremental make, then routing on what "
                           "it actually rebuilt", "grey"))
     rc = _run(ctx, "_ph_make", args.timeout, None,
-              host=getattr(args, "host", False))
+              host=getattr(args, "host", False), rung="auto")
     if rc != 0:
         return rc
 
@@ -456,14 +547,46 @@ def _auto(ctx, args) -> int:
             "grey"))
         return EX_OK
     return _run(ctx, func, args.timeout, extra,
-                host=getattr(args, "host", False))
+                host=getattr(args, "host", False), rung=rung)
+
+
+def _status(ctx) -> int:
+    """Where the running build is. This is what an agent polls INSTEAD of
+    sleeping -- brain/laws/poll-never-sleep.md said not to sleep, and until
+    now could not say what to read."""
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    path = rundir / "build-status.json"
+    try:
+        snap = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return ctx.emit({"state": "none"},
+                        lambda: ctx.out("no build has run in this checkout"))
+
+    def render():
+        ctx.out(f"  {progress.bar(snap.get('progress'))} "
+                f"{snap.get('phase', '?')}")
+        ctx.out.kv("rung", snap.get("rung", "?"), 10)
+        ctx.out.kv("state", snap.get("state", "?"), 10)
+        ctx.out.kv("elapsed", progress.fmt_dur(snap.get("elapsed")), 10)
+        ctx.out.kv("eta", progress.fmt_dur(snap.get("eta")), 10)
+        if snap.get("last"):
+            ctx.out.kv("last", snap["last"][:100], 10)
+
+    return ctx.emit(snap, render)
 
 
 def cmd_build(args, ctx) -> int:
     action = args.action or "auto"
+    # `status` and `auto` are actions, not flags. A store_true `--status` would
+    # be a MODE encoded as a boolean, which permits nonsense combinations and
+    # is what tests/test_cli_rules.py forbids repo-wide.
+    if action == "status":
+        return _status(ctx)
     if action != "auto" and action not in ACTIONS:
         raise Bail(f"unknown action {action!r}", EX_USAGE,
-                   f"actions: auto, {', '.join(ACTIONS)}")
+                   f"actions: auto, status, {', '.join(ACTIONS)}")
 
     _assert_no_drift(ctx, args)
 
@@ -538,7 +661,7 @@ def cmd_build(args, ctx) -> int:
                    f"PORTHOLE_KERNEL_TREE, or name an explicit rung")
 
     rc = _run(ctx, func, args.timeout, extra,
-              host=getattr(args, "host", False))
+              host=getattr(args, "host", False), rung=action)
     if rc != 0:
         raise Bail(f"{func} failed", EX_FAIL,
                    "the output above is the build's; `pmbootstrap log` has more")
@@ -560,8 +683,8 @@ SPEC = {
         "release build. Artifacts are verified rather than exit codes trusted."),
     "escapes_scope": True,
     "args": [
-        (["action"], {"nargs": "?", "metavar": "ACTION", "choices": list(ACTIONS),
-                      "help": "auto | " + " | ".join(ACTIONS) + "  (default: auto)"}),
+        (["action"], {"nargs": "?", "metavar": "ACTION", "choices": ["auto", "status"] + list(ACTIONS),
+                      "help": "auto | status | " + " | ".join(ACTIONS) + "  (default: auto)"}),
         (["rest"], {"nargs": "*", "metavar": "ARG",
                     "help": "mod: MODULE.ko NAME"}),
         (["--kernel"], {"action": "store_true",
@@ -571,6 +694,9 @@ SPEC = {
         (["--allow-env-override"], {"action": "store_true",
                                     "help": "build what the environment says, "
                                             "not what the profile says"}),
+        (["--verbose"], {"action": "store_true",
+                         "help": "stream the raw build output instead of a "
+                                 "progress line"}),
         (["--host"], {"action": "store_true",
                       "help": "build on the host, not in the workspace"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),
