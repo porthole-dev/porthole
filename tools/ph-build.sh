@@ -50,6 +50,15 @@ _PH_REPO=${PORTHOLE_WORKDIR:?set PORTHOLE_WORKDIR to the device working repo (ke
 # reach it is how a half-finished branch gets built and flashed.
 _PH_TREE=${PORTHOLE_KERNEL_TREE:-$_PH_REPO/linux}
 _PH_PMB=${PORTHOLE_PMB_DIR:-$_PH_PMB}
+# pmaports. The device repo normally symlinks it, but that symlink names an
+# ABSOLUTE host path, and inside the workspace container the pmbootstrap work
+# dir is mounted at /pmb instead -- so the symlink dangles and every workspace
+# build died on the config cp below. Fall back to the work dir's own checkout,
+# which is the same tree on both sides of the boundary.
+# This checkout, for .run -- distinct from _PH_REPO, which is the DEVICE repo.
+_PH_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+_PH_APORTS=$_PH_REPO/pmaports
+[ -d "$_PH_APORTS/device" ] || _PH_APORTS=$_PH_PMB/cache_git/pmaports
 # The kernel APORT to build. It MUST name the same kernel series the tree is on:
 # pmaports carries both linux-postmarketos-qcom-msm8998 (6.0) and -6.18, and
 # this said the 6.0 one while syncing its defconfig FROM the 6.18 aport and
@@ -116,6 +125,24 @@ _ph_find_envkernel() {
 	return 1
 }
 
+# sudo, unless we already are root.
+#
+# In the workspace container uid 0 is the user's own unprivileged uid outside,
+# and the image ships no sudo at all -- so `sudo -v` there is not a permission
+# question, it is `command not found`, and it took out unstacking on the second
+# build in a container. On the host nothing changes: a normal user still goes
+# through sudo exactly as before.
+#
+# Only for commands run HERE. The blocks that ssh into the phone keep their own
+# sudo: that is the phone's root, not this machine's.
+_ph_sudo() {
+	if [ "$(id -u)" = 0 ]; then
+		"$@"
+	else
+		sudo "$@"
+	fi
+}
+
 tkclean() {
 	local mk="$_ph_mnt/.output/Makefile"
 	local d prev
@@ -125,19 +152,19 @@ tkclean() {
 		return 0
 	fi
 	echo ">> /mnt/linux is stacked ${d} deep; peeling"
-	sudo -v || { echo ">> need sudo to unmount"; return 1; }
+	[ "$(id -u)" = 0 ] || sudo -v || { echo ">> need sudo to unmount"; return 1; }
 
 	for _ in $(seq 1 80); do   # bounded: never spin forever on a stuck mount
 		prev=$(_ph_depth)
 		[ "$prev" -eq 0 ] && break
 		# Try the shadowed Makefile every round; it only succeeds once we reach
 		# the bottom layer it is attached to.
-		sudo umount "$mk" 2>/dev/null
+		_ph_sudo umount "$mk" 2>/dev/null
 		# Do NOT hide this error -- suppressing it is what made the first version
 		# of this function report "no progress" with no explanation.
-		if ! sudo umount "$_ph_mnt"; then
+		if ! _ph_sudo umount "$_ph_mnt"; then
 			echo ">> plain umount failed; retrying lazily (safe for bind mounts)"
-			sudo umount -l "$_ph_mnt" || { echo ">> lazy umount failed too"; break; }
+			_ph_sudo umount -l "$_ph_mnt" || { echo ">> lazy umount failed too"; break; }
 		fi
 		if [ "$(_ph_depth)" -eq "$prev" ]; then
 			echo ">> depth stuck at ${prev} -- not making progress"
@@ -145,7 +172,7 @@ tkclean() {
 		fi
 	done
 
-	sudo umount "$mk" 2>/dev/null
+	_ph_sudo umount "$mk" 2>/dev/null
 	d=$(_ph_depth)
 	echo ">> /mnt/linux now mounted ${d}x"
 	if [ "$d" -ne 0 ]; then
@@ -174,18 +201,22 @@ tkclean() {
 #
 # One line, at the top, naming the branch as well as the path -- the branch is
 # what makes "that is not the tree I meant" obvious at a glance.
-# `pmbootstrap build` zaps the buildroot before every package, which is most of
-# the wall clock in the flashing rungs. --lax skips it.
+# `pmbootstrap build` zaps the buildroot before every package and --lax skips
+# that. This block used to claim the zap was most of the wall clock in the
+# flashing rungs. MEASURED 2026-08-29 and it is not, on a warm buildroot:
+# the kernel package took 14.96 / 15.34 / 15.25 / 14.68 s with --lax and
+# without alternating, and the device package 1.66-1.72 s either way.
 #
-# NOT the default. This repo has been bitten repeatedly by stale build state --
-# the _p apk that outranks a release, the stale APKINDEX that makes install pick
-# an older package -- and each one presented as a mysterious wrong-kernel bug
-# rather than as a caching problem. A clean chroot is what makes "I built it, so
-# that is what flashed" true.
+# So the knob buys nothing measurable while it accepts something real. This
+# repo has been bitten repeatedly by stale build state -- the _p apk that
+# outranks a release, the stale APKINDEX that makes install pick an older
+# package -- and each one presented as a mysterious wrong-kernel bug rather
+# than as a caching problem.
 #
-# Set PORTHOLE_LAX_BUILD=1 when iterating and you will take that trade knowingly.
-# The much bigger speed win for driver work is not here at all: it is using the
-# `mod` rung, which skips packaging entirely.
+# Left in place because it is one line and may still pay on a genuinely cold
+# buildroot, which is the one case not measured. Do not reach for it while
+# iterating; reach for the right rung, which is worth minutes rather than
+# seconds. See brain/findings/lax-build-buys-nothing-measurable.md.
 # An array, not a command substitution: unquoted $(...) is a word-splitting
 # bug waiting to happen, and quoting it would pass an empty argument through
 # when the variable is unset.
@@ -219,33 +250,148 @@ _ph_announce_tree() {
 	fi
 }
 
-_ph_make() {
+# Does the tree defconfig already match the aport, with a build newer than it?
+#
+# The resync in _ph_measure costs 4.92 s of chroot round trip on EVERY build
+# (measured 2026-08-29) and most builds have not touched the config at all.
+#
+# Skipping is only safe because the test is byte equality: if the file the `cp`
+# would write is ALREADY identical to its destination, not copying it cannot
+# change what gets built. That is what keeps the 2026-08-08 failure out of
+# reach -- there the config came from the WRONG aport, which `cmp` catches.
+#
+# Every uncertain case returns false and resyncs. A missing file, a tree that
+# has never been built, no `.config` at all: all resync. Failing open costs
+# 4.92 s; failing closed costs a silently mis-configured kernel.
+_ph_defconfig_current() {
+	local aport dc
+	aport="$_PH_APORTS/device/testing/$_PH_KPKG/${PORTHOLE_KCONFIG_FILE:-config-postmarketos-${PORTHOLE_SOC}.${PORTHOLE_ARCH}}"
+	dc="$_PH_TREE/arch/${PORTHOLE_ARCH_DIR}/configs/${PORTHOLE_DEFCONFIG}"
+	[ -f "$aport" ] && [ -f "$dc" ] && cmp -s "$aport" "$dc" &&
+		[ -f "$_PH_OUT/.config" ] && [ "$_PH_OUT/.config" -nt "$dc" ]
+}
+
+# Bring envkernel up and LEAVE THE CALLER IN $_PH_TREE. The caller must popd.
+#
+# The asymmetry is deliberate: `make` is an alias envkernel defines, aliases
+# expand at parse time, and the caller has to `eval make` in the tree. One
+# function that both pushed and popped could not host the build.
+#
+# This block was copy-pasted in three places and every line of it is
+# load-bearing, which is the worst combination. The `deactivate` before the
+# re-source is there because a stale POSTMARKETOS_ENVKERNEL_ENABLED makes a
+# guarded re-source skip the remount, and `make` then finds no Makefile -- a
+# harness written while measuring this file reproduced exactly that by leaving
+# it out, and read it as a pmbootstrap bug for three runs.
+_ph_activate() {
+	# Clear any stacked /mnt/linux binds BEFORE adding another one, or
+	# pmbootstrap will abort on the shadowed .output/Makefile overmount.
+	tkclean || { echo ">> could not unstack /mnt/linux -- run 'pmbootstrap shutdown' and retry"; return 1; }
+	type deactivate >/dev/null 2>&1 && deactivate
+	pushd "$_PH_TREE" >/dev/null || return 1
+	set --   # `source` would pass our args to envkernel, which rejects them
+	_ph_envkernel="$(_ph_find_envkernel)" || { popd >/dev/null || return 1; return 1; }
+	source "$_ph_envkernel" || { popd >/dev/null || return 1; return 1; }
+	_ph_claim_output || { popd >/dev/null || return 1; return 1; }
+}
+
+# Make .output writable by the chroot user that is about to build in it.
+#
+# `make` runs INSIDE the chroot as pmos, while .output lives in the kernel tree
+# on the host. envkernel chowns it to pmos -- but only in create_output_folder,
+# which returns early when .output already exists. So a tree that has been
+# built in one environment cannot be built in another: the uids do not line up.
+#
+# That bites the moment the workspace container is used on a tree the host
+# built, because a rootless userns maps your uid and nothing else -- the host's
+# pmos (12345) is not the container's pmos. It shows up as pages of
+# `mkdir: can't create directory '.tmp_174': Permission denied` from kbuild,
+# which names neither .output nor ownership.
+#
+# One chown per (tree, environment), remembered in .run so the cost is paid
+# once rather than per build. Deliberately NOT stored under .output itself:
+# that is the directory we may not be able to write yet.
+_ph_claim_output() {
+	[ -d "$_PH_OUT" ] || return 0      # envkernel creates AND chowns it itself
+	local rundir stamp
+	rundir=${PORTHOLE_RUNDIR:-$_PH_REPO_ROOT/.run}
+	stamp="$rundir/output-owner-$(printf '%s|%s' "$_PH_TREE" "$_PH_PMB" | cksum | cut -d' ' -f1)"
+	[ -f "$stamp" ] && return 0
+	echo ">> claiming $_PH_OUT for this build environment (one time)"
+	if command pmbootstrap -q chroot -- chown -R pmos:pmos /mnt/linux/.output; then
+		mkdir -p "$rundir" && : > "$stamp"
+		return 0
+	fi
+	# Not a fixable permission problem. A rootless container maps YOUR uid and
+	# nothing else, so a .output built on the host is full of files owned by a
+	# uid that does not exist in here -- they read as `nobody`, and chown needs
+	# a uid it can see. The same is true in reverse.
+	#
+	# .output is a build cache and nothing else: no source, no config you
+	# cannot regenerate. Deleting it costs one full build and is the only
+	# thing that actually works. Say so; do not do it silently, because that
+	# full build is ten minutes nobody asked for.
+	echo ">> REFUSING: $_PH_OUT was built in a different environment" >&2
+	echo ">>   and cannot be re-owned here -- the uids inside a rootless" >&2
+	echo ">>   container do not line up with the host's." >&2
+	echo ">>   It is a build cache -- no sources, no config you cannot" >&2
+	echo ">>   regenerate. Three ways out, in order of least surprise:" >&2
+	echo ">>     porthole build --host        build where it came from" >&2
+	echo ">>     PORTHOLE_KERNEL_TREE=<a fresh worktree> porthole build" >&2
+	echo ">>     sudo rm -rf $_PH_OUT   then rebuild here (one full build)" >&2
+	echo ">>   The last one needs YOUR root: the files belong to a uid this" >&2
+	echo ">>   container cannot see, so nothing in here can remove them." >&2
+	return 1
+}
+
+# Build the TREE and verify what came out. No packaging -- see _ph_make.
+#
+# `porthole build auto` calls this to answer one question: which files did make
+# touch. The router reads .ko, .dtb and Image.gz out of .output and never opens
+# an apk, so packaging on that path was 14.66 s of pure cost -- and it wrote a
+# `_p` apk every time, which is precisely what _ph_assert_no_devpkgs exists to
+# refuse. The preview was manufacturing the hazard the rungs guard against.
+_ph_measure() {
 	_ph_announce_tree
 	local out="$_PH_TREE/.output"
 	local img="$out/arch/${PORTHOLE_ARCH_DIR}/boot/Image.gz"
 	local dtb="$out/arch/${PORTHOLE_ARCH_DIR}/boot/dts/${PORTHOLE_DTB%/*}/$_PH_DTB"
 	local dtsdir="$_PH_TREE/arch/${PORTHOLE_ARCH_DIR}/boot/dts/${PORTHOLE_DTB%/*}"
 
+	# Every rung compiles through here, and the cp below overwrites the tree's
+	# defconfig with the APORT's. Different kernel series means that is a silent
+	# clobber which dies later somewhere unrelated: on 2026-08-29 the 7.2 config
+	# went into the 6.18 tree and the build failed in drivers/gpu/drm with
+	# "unable to open output file". tkbuild-kernel already checked this; every
+	# other rung did not, and a fresh session with no PORTHOLE_KERNEL_PKG in its
+	# environment is exactly the one that gets the profile's mismatched default.
+	if ! _ph_tree_matches_aport; then
+		echo ">> REFUSING: tree is Linux $_PH_TREE_V but $_PH_KPKG is $_PH_APORT_V" >&2
+		echo ">>   set PORTHOLE_KERNEL_PKG to the aport for this tree, or rebase the tree." >&2
+		return 1
+	fi
+
 	# Re-sync the in-tree defconfig from pmaports so both can't drift.
-	# MUST be the -6.18 aport config: the tree is v6.18 now. Syncing from the
+	# MUST be the aport config for the series the tree is on. Syncing from the
 	# 6.0 aport config (as this line did until 2026-08-09) clobbers 6.18-only
 	# symbols with their pre-rename 6.0 names, which olddefconfig then drops
 	# SILENTLY: CONFIG_QCOM_QFPROM=y instead of CONFIG_NVMEM_QCOM_QFPROM=y
 	# killed the qusb2 fuse cell and with it ALL USB. Cost the night of 2026-08-08.
-	cp "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/${PORTHOLE_KCONFIG_FILE:-config-postmarketos-${PORTHOLE_SOC}.${PORTHOLE_ARCH}}" \
-	   "$_PH_TREE/arch/${PORTHOLE_ARCH_DIR}/configs/${PORTHOLE_DEFCONFIG}" || return 1
+	#
+	# The two halves are not adjacent -- the copy happens here, the
+	# `make <defconfig>` after envkernel is up -- so the decision is made once
+	# and consulted twice. NOT copying is also what keeps the skip stable: the
+	# defconfig's mtime stays put, so .config stays newer than it.
+	local skip_defconfig=
+	if _ph_defconfig_current; then
+		skip_defconfig=1
+		echo ">> defconfig unchanged -- skipping the resync"
+	else
+		cp "$_PH_APORTS/device/testing/$_PH_KPKG/${PORTHOLE_KCONFIG_FILE:-config-postmarketos-${PORTHOLE_SOC}.${PORTHOLE_ARCH}}" \
+		   "$_PH_TREE/arch/${PORTHOLE_ARCH_DIR}/configs/${PORTHOLE_DEFCONFIG}" || return 1
+	fi
 
-	# Clear any stacked /mnt/linux binds BEFORE adding another one, or pmbootstrap
-	# will abort on the shadowed .output/Makefile overmount. See tkclean.
-	tkclean || { echo ">> could not unstack /mnt/linux -- run 'pmbootstrap shutdown' and retry"; return 1; }
-
-	# Activate envkernel FRESH. A stale "active" flag with /mnt/linux not mounted
-	# makes a guarded re-source skip the remount, and make then finds no Makefile.
-	type deactivate >/dev/null 2>&1 && deactivate
-	pushd "$_PH_TREE" >/dev/null || return 1
-	set --   # `source` would pass our args to envkernel, which rejects them
-	_ph_envkernel="$(_ph_find_envkernel)" || { popd >/dev/null || return 1; return 1; }
-	source "$_ph_envkernel" || { popd >/dev/null || return 1; return 1; }
+	_ph_activate || return 1
 
 	# envkernel provides `make` as an ALIAS carrying ARCH=arm64 and the chroot
 	# invocation. Bash expands aliases at PARSE time, and this function was parsed
@@ -254,8 +400,10 @@ _ph_make() {
 	# `Can't find default configuration "arch/x86/configs/$PORTHOLE_DEFCONFIG"`.
 	# eval re-parses at runtime, once the alias exists.
 	shopt -s expand_aliases
-	eval make "$PORTHOLE_DEFCONFIG" || { popd >/dev/null || return 1
-		echo ">> defconfig FAILED"; return 1; }
+	if [ -z "$skip_defconfig" ]; then
+		eval make "$PORTHOLE_DEFCONFIG" || { popd >/dev/null || return 1
+			echo ">> defconfig FAILED"; return 1; }
+	fi
 	# make's exit code can lie once the tree is already built (BTF prep re-runs and
 	# returns non-zero with nothing wrong), so verify artifacts instead of trusting it.
 	eval make -j"$(nproc)"
@@ -282,8 +430,16 @@ _ph_make() {
 		echo ">> $_stale is newer than the dtb"
 		echo ">> dtb older than its DTS -- it did not rebuild (check dtc output)"; return 1
 	fi
-	echo ">> kernel + dtb current -- packaging"
 	_ph_stamp_write
+}
+
+# _ph_measure, then package what it built. Everything downstream of a flashing
+# rung needs the apk; `auto` does not, and calls _ph_measure directly.
+_ph_make() {
+	_ph_measure || return 1
+	local out="$_PH_TREE/.output"
+	local img="$out/arch/${PORTHOLE_ARCH_DIR}/boot/Image.gz"
+	echo ">> kernel + dtb current -- packaging"
 
 	# Exit codes below lie (benign umount-32). Keep them chained; see header.
 	# They lie in one direction only, so verify the artifact instead: a build
@@ -325,8 +481,8 @@ tkpurge-devpkgs() {
 	stale=$(ls "$repo"/${_PH_KPKG}*_p*.apk 2>/dev/null | wc -l)
 	[ "$stale" -eq 0 ] && return 0
 	echo ">> purging $stale envkernel (_p) kernel apks that would outrank the release build"
-	sudo mkdir -p "$repo/.stale-devpkgs" || return 1
-	sudo sh -c "mv '$repo'/${_PH_KPKG}*_p*.apk '$repo/.stale-devpkgs'/" || return 1
+	_ph_sudo mkdir -p "$repo/.stale-devpkgs" || return 1
+	_ph_sudo sh -c "mv '$repo'/${_PH_KPKG}*_p*.apk '$repo/.stale-devpkgs'/" || return 1
 	pmbootstrap index || return 1
 }
 
@@ -396,7 +552,7 @@ _ph_assert_no_devpkgs() {
 _ph_install_kernel_release() {
 	local ver
 	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
-	ver=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	ver=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
 	      echo "$pkgver-r$pkgrel")
 	[ -n "$ver" ] && [ "$ver" != "-r" ] || { echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
 
@@ -787,7 +943,7 @@ _ph_tree_matches_aport() {
 	_PH_TREE_V=$(awk -F' = ' '/^VERSION/{v=$2} /^PATCHLEVEL/{p=$2}
 	                          END{if (v != "") print v "." p}' "$_PH_TREE/Makefile" 2>/dev/null)
 	# shellcheck disable=SC2154  # pkgver is set by the sourced APKBUILD
-	_PH_APORT_V=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	_PH_APORT_V=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
 	              echo "$pkgver" | awk -F. '{print $1 "." $2}')
 	[ -n "$_PH_TREE_V" ] && [ -n "$_PH_APORT_V" ] || return 0   # unknown: build it
 	[ "$_PH_TREE_V" = "$_PH_APORT_V" ]
@@ -869,7 +1025,7 @@ tkupgrade-kernel() {
 	repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
 
 	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
-	ver=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	ver=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
 	      echo "$pkgver-r$pkgrel")
 	[ -n "$ver" ] && [ "$ver" != "-r" ] || {
 		echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
@@ -1093,12 +1249,7 @@ tkmod() {
 		echo ">> Ignore any kbuild advice about menuconfig; the tree is the issue." >&2
 		return 1; }
 
-	tkclean || return 1
-	type deactivate >/dev/null 2>&1 && deactivate
-	pushd "$_PH_TREE" >/dev/null || return 1
-	set --
-	_ph_envkernel="$(_ph_find_envkernel)" || { popd >/dev/null || return 1; return 1; }
-	source "$_ph_envkernel" || { popd >/dev/null || return 1; return 1; }
+	_ph_activate || return 1
 	shopt -s expand_aliases
 	eval make -j"$(nproc)" modules || { popd >/dev/null || return 1; echo ">> build failed"; return 1; }
 	popd >/dev/null || return 1
@@ -1271,12 +1422,7 @@ tkboot() {
 		return 1
 	}
 
-	tkclean || return 1
-	type deactivate >/dev/null 2>&1 && deactivate
-	pushd "$_PH_TREE" >/dev/null || return 1
-	set --
-	_ph_envkernel="$(_ph_find_envkernel)" || { popd >/dev/null || return 1; return 1; }
-	source "$_ph_envkernel" || { popd >/dev/null || return 1; return 1; }
+	_ph_activate || return 1
 	shopt -s expand_aliases
 	if [ -n "$with_kernel" ]; then
 		eval make -j"$(nproc)" Image.gz dtbs || { popd >/dev/null || return 1; return 1; }

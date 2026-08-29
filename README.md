@@ -423,10 +423,19 @@ entry and no standing privilege**, so there is nothing for a mistake, a
 dependency or an injection to spend. Only what it mounts is reachable; your
 `~/.ssh`, `/etc` and home directory are not there.
 
-`sandbox install --broker` still offers the older validating privilege broker
-for a host that cannot run podman — 26 allowed verbs, every path confined, every
-decision audited — but it grants a real sudoers entry and cannot contain a
-determined chroot payload, so it is a fallback rather than the path.
+The workspace keeps its **own pmbootstrap work directory**
+(`~/.local/var/porthole-sandbox`), which it creates and owns — a rootless
+container maps your uid and nothing else, so it cannot use one that host root
+built, and cannot be given one either. `porthole sandbox up` configures it and
+the chroots bootstrap on first build. Your host work dir is left alone;
+`porthole build --host` still uses it.
+
+There is no second, weaker path. A validating privilege broker (`ph-sudo`)
+used to exist for a host without podman; it is gone. It granted a real sudoers
+entry, its own documentation admitted it could not contain a determined chroot
+payload, and keeping it meant every reader had to work out which tier they were
+on. Podman is the one host prerequisite, and `porthole doctor` says how to
+install it.
 
 The threat model — including what this honestly does *not* stop — is in
 **[`docs/SANDBOX.md`](docs/SANDBOX.md)**. Read it before trusting it.

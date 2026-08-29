@@ -152,33 +152,53 @@ porthole sandbox shell --command <command>   # one command, works with no TTY
 Inside it pmbootstrap uses no sudo at all — it checks `os.getuid()`, and you
 are root there. Outside, that root is just the user.
 
+pmbootstrap itself refuses uid 0 outright, before it looks at anything else --
+`--as-root` is the only way past, and the image wraps it so nothing has to know
+that. Three more things a rootless namespace cannot do are shimmed the same
+way: `mknod` (the kernel refuses device-node creation in a userns, so the
+chroots get a recursive bind of the container's own `/dev`), `chmod` on a node
+it does not own, and `sudo`, which has nothing to escalate to in here.
+`brain/findings/what-a-rootless-workspace-cannot-do.md` has the measurements.
+
+**The workspace has its OWN pmbootstrap work directory**
+(`~/.local/var/porthole-sandbox`), created and owned by it; `porthole sandbox
+up` writes the config and the chroots bootstrap on first use. The host's work
+dir is untouched and `--host` still uses it. A kernel tree's `.output` belongs
+to ONE of the two -- the uids do not line up -- and a build in the wrong one
+refuses rather than failing inside kbuild.
+
 **If the workspace is not set up, stop and ask.** Installing podman needs a
 password you cannot type, and that is deliberate rather than a limitation.
 Do not work around it, and never propose a sudo credential cache:
 `brain/traps/a-long-sudo-cache-is-unlimited-root.md`.
 
-`sandbox/ph-sudo` is a **legacy fallback** for a host without podman. It is not
-installed by default, it grants a real sudoers entry, and its own documentation
-admits it cannot contain a determined chroot payload. Prefer the workspace. If
-a command is refused with exit 77 that is the broker; report what you needed
-rather than widening the policy — that is how a policy stops meaning anything.
-`docs/SANDBOX.md`.
+There is **no fallback tier**. A validating privilege broker (`ph-sudo`,
+`PMB_SUDO`) used to exist for a host without podman and has been removed: it
+granted a real sudoers entry and could not contain a determined chroot payload,
+and a weaker path that still exists is the one a stuck agent reaches for. If
+you find yourself wanting host root, that is a bug in the plan.
+
+`PMB_SUDO` is dead too. `porthole doctor` **fails** if it is still exported —
+pmbootstrap invokes it directly, so a leftover kills a build with exit 78 from
+deep inside pmbootstrap, naming nothing. `docs/SANDBOX.md`.
 
 ### When a rung is still slow
 
-`pmbootstrap build` zaps the buildroot before every package, and that is most
-of the wall clock in the flashing rungs. `PORTHOLE_LAX_BUILD=1` skips it:
+`PORTHOLE_LAX_BUILD=1` skips the buildroot zap, and this section used to call
+that zap most of the wall clock in the flashing rungs. **Measured 2026-08-29:
+it is not, and the flag buys nothing.** Interleaved runs on a warm buildroot --
+kernel package 14.96 / 15.34 / 15.25 / 14.68 s, device package 1.66-1.72 s --
+show no difference either way. The minutes in those rungs are `install`,
+`export`, the flash and the boot wait, none of which the flag touches.
 
-```sh
-PORTHOLE_LAX_BUILD=1 porthole build fast --yes     # iterating
-```
+So do not reach for it. It accepts something real -- this repo has been bitten
+repeatedly by stale build state, a `_p` apk outranking a release, a stale
+APKINDEX making install pick an older package, each one presenting as a
+mysterious wrong-kernel bug -- for no measured gain.
+`brain/findings/lax-build-buys-nothing-measurable.md`.
 
-**Take that trade knowingly.** It is not the default because this repo has been
-bitten repeatedly by stale build state -- a `_p` apk outranking a release, a
-stale APKINDEX making install pick an older package -- and every one of them
-presented as a mysterious wrong-kernel bug rather than as a caching problem.
-Use it while iterating on the same change; drop it for the build you intend to
-flash and trust, and run `porthole build purge` if a stale dev package is
+**What actually cuts a rung** is picking the right one, which `porthole build`
+does by measuring. Run `porthole build purge` if a stale dev package is
 suspected.
 
 It does NOT speed up the compile. envkernel bakes `CCACHE_DISABLE=1` into its

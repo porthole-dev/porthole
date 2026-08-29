@@ -58,6 +58,27 @@ Fedora Silverblue 44 (ostree, read-only `/`), podman 5.8.4 rootless, kernel
 | reaching the phone at `172.16.42.1` on the **default** netns | **works** — rootless podman 5.8.4 uses `pasta`, which forwards outbound via the host |
 | binfmt `qemu-aarch64` | registered host-side, inherited |
 
+### 4c. What the workspace turned out to need, measured 2026-08-29
+
+The image ships four shims, and each one exists because a rootless user
+namespace cannot do something pmbootstrap assumes. None of them grants
+privilege; each removes an assumption that only holds for real root.
+`brain/findings/what-a-rootless-workspace-cannot-do.md` carries the probes.
+
+| shim | why |
+|---|---|
+| `pmbootstrap` | refuses uid 0 outright, before reading its config. `--as-root` is the only way past, and the source checkout's entry point needs the same treatment because envkernel calls it by absolute path |
+| `mknod` | device-node creation is denied in a userns whatever CapEff says. Gives the chroot a **recursive** bind of the container's `/dev` instead -- per-node binds pass every check and then fail `open(O_CREAT)`, which is every shell redirect |
+| `chmod` | pmbootstrap chmods each node it makes; a bound node belongs to the host's `/dev` and cannot be chmodded even to the mode it already has |
+| `sudo` | absent, and envkernel calls it for its bind mount. Runs the command as who we already are, and refuses if that is not root |
+
+**The workspace also gets its own pmbootstrap work directory.** A work dir
+built by host root is unusable and unconvertible in a rootless namespace, and
+so is a kernel tree's `.output`. That is not a shortcoming of the mounts; it is
+what `--userns=keep-id:uid=0,gid=0` means. `porthole sandbox up` creates and
+configures the work dir; a tree's `.output` belongs to one environment and the
+build says so rather than failing inside kbuild.
+
 ### The `mknod` denial does not matter
 
 Unprivileged FUSE mounts are forced `nodev`, so no device node can be created
@@ -303,86 +324,53 @@ are assumed. Everything else is automated in, or lives in the image.
 
 The package manager stays a *hint*. It is never a dependency.
 
-### 8. `ph-sudo` is demoted
+### 8. `ph-sudo` is removed
 
-With the container covering chroot and package work, the broker's most
-dangerous permission — `allow_chroot`, which its own documentation admits does
-not contain a determined payload — has no remaining caller.
+**Superseded 2026-08-29: demotion became deletion.** This section originally
+demoted the broker to an opt-in fallback for a host without podman. That is no
+longer the design -- `sandbox/ph-sudo`, `sandbox/ph-sudo-client`,
+`tests/test_sandbox.py`, the `install`/`audit`/`uninstall` verbs and every
+mention of `PMB_SUDO` as a knob are gone.
 
-It stays in the tree, tested, and **stops being installed by default**. It
-becomes a documented opt-in fallback for a host without podman, with its weaker
-guarantee stated plainly. The default install writes **no sudoers entry at
-all**.
+The reasoning that made it a fallback is the reasoning that removed it. A
+broker confines the directory, not the payload, and pmbootstrap legitimately
+needs to write executables into a chroot and then run them -- so an allowlist
+permissive enough for pmbootstrap is permissive enough for anything already
+inside that chroot. It bought a real sudoers entry and false confidence.
 
-### 9. Propagation — the demotion must land everywhere
+The operational argument was the decisive one: a weaker path that still exists
+is the one a stuck agent reaches for, and every reader had to work out which
+tier they were on before they could trust anything. Podman is now the single
+host prerequisite.
 
-A demotion that lives only in this file is not a demotion. `ph-sudo` is
-currently presented as a co-equal tier in the places an agent and a newcomer
-actually read, and every one of them has to move. Inventoried, not guessed:
+`PMB_SUDO` is a hard failure in `porthole doctor` rather than a knob:
+pmbootstrap invokes it directly, so a leftover export kills a build with exit
+78 deep inside pmbootstrap, naming nothing.
 
-| where | what is there now | must become |
-|---|---|---|
-| `AGENTS.md:113-117` | "Never ask for host root outside the sandbox" offers `sandbox shell` **or** the brokered `PMB_SUDO` as equals | the container is the answer; the broker is a named fallback with its limit stated |
-| `AGENTS.md:300` | verb table row for `sandbox` | new verbs (`up`, `down`, `build`) |
-| `README.md:408-416` | leads with the broker, `sandbox install` | leads with `sandbox up`; the broker moves below the fold |
-| `docs/SANDBOX.md` | the two-tier threat model, tiers presented as complementary | rewritten: one tier, zero standing privilege, broker as opt-in legacy |
-| `brain/traps/a-long-sudo-cache-is-unlimited-root.md` | the warning is still correct; the **remedy** points at the broker | remedy points at the container; keep the trap, change the fix |
-| `skills/porthole-bringup/SKILL.md` | **no mention of the sandbox at all** | see §10 — this is the onboarding hole |
-| `lib/porthole_cmd_sandbox.py` | `install` writes a sudoers entry by default | default install writes none |
-| `lib/porthole_cmd_docs.py:375,429` | docs-site nav for `SANDBOX.md` | add the provisioning page |
-| `tests/test_sandbox.py` | escape attempts against the broker | keep every one; add the §Tests list |
+### 9. Propagation — done, 2026-08-29
 
-`lib/porthole_cmd_next.py:202` and `lib/porthole_milestones.py:80` mention the
-boundary only in passing comments and need re-reading, not necessarily editing.
+This section was a table of places that still presented `ph-sudo` as a co-equal
+tier and had to be edited. It is kept as a record of the method, not as work
+outstanding: **the broker was removed rather than demoted, and every entry
+below has landed.**
+
+`AGENTS.md`, `README.md`, `docs/SANDBOX.md`, `skills/porthole-bringup/SKILL.md`
+and `brain/traps/a-long-sudo-cache-is-unlimited-root.md` now describe one
+boundary and no fallback. `sandbox/ph-sudo`, `sandbox/ph-sudo-client` and
+`tests/test_sandbox.py` are deleted; the `install`, `audit` and `uninstall`
+verbs are gone from `lib/porthole_cmd_sandbox.py`.
+`tests/test_sandbox_container.py` and `tests/test_doctor.py` now assert the
+ABSENCE -- files, symbols and verbs -- so a re-introduction fails the suite
+rather than passing quietly.
+
 `tests/test_config.py` and `tests/test_tui_safety.py` match on the word
-"sandbox" for unrelated reasons and are **not** targets — recorded here so the
-next person does not re-derive that.
+"sandbox" for unrelated reasons and were **not** targets. Recorded so the next
+person does not re-derive it.
 
-The rule for this pass: **grep, do not remember.** The list above was built by
-`grep -rln 'ph-sudo\|PMB_SUDO\|timestamp_timeout\|sandbox'` and should be
-rebuilt the same way before phase 4 is called done, because this file will be
-out of date the moment someone adds a reference.
-
-### 10. An agent must be able to onboard onto an unprepared host
-
-The toolbox is useless if the agent cannot tell that the host is not set up, or
-tries to fix it by reaching for sudo. Three requirements, and the third is the
-one that is missing today.
-
-**Detect.** `porthole doctor` reports the workspace the same way it reports
-every other prerequisite: podman present, image built, container running,
-device key installed, free space against the budget.
-
-**Surface it unprompted.** `porthole brief` — the verb `AGENTS.md` tells every
-agent to run first — gains a line when the workspace is absent or stale.
-`brief` already carries "anything ticked that a probe says is not true"; an
-unprepared sandbox belongs in exactly that block, not behind a verb the agent
-would have to know to run.
-
-**Ask, never escalate.** The agent's correct move on an unprepared host is to
-**stop and ask the human to run `porthole doctor --fix`**, because the one
-remaining privileged step (installing podman, and the one-time binfmt
-registration) needs a password an agent cannot and must not type. This has to
-be written into `skills/porthole-bringup/SKILL.md`, which today says nothing
-about the sandbox at all — so an agent loading the skill for a bring-up would
-never learn any of this exists.
-
-The message the agent gives the human should be one copy-pasteable block:
-
-```
-This host has no porthole workspace yet. Please run:
-
-    porthole doctor --fix
-
-It will install podman if missing, build the sandbox image, and name the
-one-time binfmt step. It will ask for your password for those, and only those.
-I cannot run it for you, by design.
-```
-
-`doctor --fix` prints every command before running it and never runs a
-privileged one without consent — the same posture `sandbox install` already
-takes, and for the same reason: installing a boundary should be a decision the
-developer makes.
+The rule that made this work is worth keeping: **grep, do not remember.** The
+list was built with `grep -rln 'ph-sudo\|PMB_SUDO\|timestamp_timeout'` and
+should be rebuilt the same way, because this file is out of date the moment
+someone adds a reference.
 
 ## What this does not do
 
@@ -418,11 +406,10 @@ Alongside `tests/test_sandbox.py`, whose escape attempts stay as they are:
   than asserted
 - `brief` on a host with no workspace emits the onboarding line (§10), because
   a prompt nobody sees is the same as no prompt
-- `sandbox install` writes **no** sudoers entry unless the legacy broker is
-  explicitly requested
-- a grep guard: no shipped doc or skill presents the broker as the primary
-  path. `tests/test_tools.py` already fails when the CI step lists drift out of
-  sync with the Makefile; this is the same idea applied to the demotion, and it
+- nothing writes a sudoers entry at all: the broker that used to is deleted
+- a grep guard: no shipped doc, skill or verb offers the broker. `tests/
+  test_sandbox_container.py` and `tests/test_doctor.py` assert the absence of
+  the files, symbols and verbs, so a re-introduction fails the suite, and it
   is what stops §9 from silently rotting
 
 ## Phases

@@ -200,6 +200,86 @@ def test_mounts_include_the_porthole_user_config_dir_when_it_exists():
             os.environ["XDG_CONFIG_HOME"] = old
 
 
+def test_a_long_sudo_timeout_is_reported_even_when_joined_by_commas(tmp=None):
+    """sudoers joins Defaults options with commas, and this host really has
+    `timestamp_timeout=9999,timestamp_type=global`. Splitting on whitespace
+    alone captured "9999,timestamp_type=global", float() raised, and the
+    except swallowed it -- so the check for a 167-hour root cache had never
+    fired on the machine it was written for. A security check that silently
+    does nothing is worse than no check: it reads as a clean bill of health."""
+    import re as _re
+    for line in ("Defaults:you timestamp_timeout=9999,timestamp_type=global",
+                 "Defaults:you timestamp_timeout=9999"):
+        value = _re.split(r"[\s,]", line.partition("timestamp_timeout")[2]
+                          .lstrip("= "))[0]
+        assert value == "9999", line
+        assert float(value) > 60
+    src = (ROOT / "lib" / "porthole_cmd_sandbox.py").read_text()
+    assert 're.split(r"[\\s,]"' in src, "the comma split must stay"
+
+
+def test_the_workspace_gets_its_own_work_dir_not_the_hosts():
+    """A work dir built by the old host-root path is owned by uid 0 outside,
+    and `--userns=keep-id:uid=0,gid=0` maps YOUR uid and nothing else -- so
+    inside it reads as `nobody` and root-in-there cannot write a byte. It
+    cannot be converted either: chown would flatten the uids INSIDE the
+    chroots, and the userns has no mapping for them. The only version that
+    works is a work dir the container creates itself."""
+    host = str(pathlib.Path.home() / ".local/var/pmbootstrap")
+    assert str(sb._sandbox_pmb({})) != host
+    assert str(sb._sandbox_pmb({"PORTHOLE_SANDBOX_PMB_DIR": "/tmp/ws"})) == "/tmp/ws"
+
+
+def test_the_generated_pmbootstrap_config_sets_work_and_aports():
+    """`aports` defaults to `work / "cache_git" / "pmaports"` evaluated against
+    the DEFAULT work dir at class-definition time, so setting `work` alone
+    still sends pmbootstrap looking under /root. That surfaces as "pmaports
+    dir not found: /root/..." and reads as a missing clone rather than a
+    config that half applied."""
+    text = sb.pmb_config_text("google-taimen")
+    assert "work = /pmb" in text
+    assert "aports = /pmb/cache_git/pmaports" in text
+    assert "device = google-taimen" in text
+
+
+def test_the_generated_config_never_carries_a_host_path():
+    """The host's own pmbootstrap config names host paths. Carrying one into
+    the container is the bug class SANDBOX-PROVISIONING.md §4b is about, so
+    only known-safe keys cross and `work`/`aports` are always rewritten."""
+    text = sb.pmb_config_text("google-taimen",
+                              {"ui": "phosh", "work": "/home/someone/pmb",
+                               "aports": "/home/someone/pmb/cache_git/pmaports"})
+    assert "ui = phosh" in text
+    assert "/home/someone" not in text
+    assert "work = /pmb" in text
+
+
+def test_the_image_installs_every_shim_the_workspace_needs():
+    """mknod, chmod, sudo and pmbootstrap are all shimmed because a rootless
+    userns cannot do what they assume. Two of them were lost to an editing
+    slip once and the failure came back as "Do not run pmbootstrap as root!"
+    three commands later, naming none of them -- hence the image-build
+    assertion this test guards."""
+    text = (ROOT / "sandbox" / "Containerfile").read_text()
+    for shim in ("/usr/local/bin/pmbootstrap", "/usr/local/bin/mknod",
+                 "/usr/local/bin/chmod", "/usr/local/bin/sudo",
+                 "/usr/local/bin/porthole-devnodes",
+                 "/opt/pmbootstrap-src/pmbootstrap.py"):
+        assert f"test -x \"$f\"" in text or shim in text, shim
+    assert "FATAL: $f missing from the image" in text
+
+
+def test_the_device_nodes_are_bound_recursively():
+    """A per-node `mount --bind` gives the right major/minor and reads fine,
+    but open(O_CREAT) on it is EACCES -- and O_CREAT is what every shell
+    redirection uses, so `> /dev/null` inside the chroot fails and apk dies
+    with "can't create /dev/null". --rbind of the whole /dev has none of that;
+    a plain --bind loses the per-node submounts and reports 0:0."""
+    text = (ROOT / "sandbox" / "Containerfile").read_text()
+    assert "mount --rbind /dev" in text
+    assert "mount --bind /dev/null" not in text
+
+
 def test_up_argv_sets_xdg_config_home_and_matching_device_lock():
     argv = _argv_for_test()
     assert "-e" in argv and "XDG_CONFIG_HOME=/run/porthole/config" in argv, (
@@ -339,25 +419,27 @@ def test_agent_facing_docs_name_the_workspace_verbs():
         assert "sandbox up" in text or "sandbox shell" in text, rel
 
 
-def test_wherever_the_broker_is_still_named_it_is_marked_as_the_fallback():
-    """The broker may be mentioned; it may not be offered as an equal."""
-    for rel in ("AGENTS.md", "README.md", "docs/SANDBOX.md"):
-        text = (ROOT / rel).read_text()
-        if "ph-sudo" not in text and "PMB_SUDO" not in text:
-            continue
-        low = text.lower()
-        assert "legacy" in low or "fallback" in low, (
-            f"{rel} names the broker without marking it a fallback")
+def test_the_broker_is_gone_from_the_code_not_just_the_docs():
+    """Deleted, not deprecated. A weaker path that still exists is the one a
+    stuck agent reaches for, and this one granted a real sudoers entry while
+    its own documentation admitted it could not contain a determined chroot
+    payload. The verbs go with the files."""
+    assert not (ROOT / "sandbox" / "ph-sudo").exists()
+    assert not (ROOT / "sandbox" / "ph-sudo-client").exists()
+    assert not (ROOT / "tests" / "test_sandbox.py").exists()
+    src = (ROOT / "lib" / "porthole_cmd_sandbox.py").read_text()
+    for gone in ("BROKER_DST", "_broker_state", "_policy_state",
+                 "def _install", "def _audit", "def _uninstall"):
+        assert gone not in src, f"{gone} survives in porthole_cmd_sandbox.py"
+    choices = [kw.get("choices") for names, kw in sb.SPEC["args"]
+               if names[0] == "action"][0]
+    for gone in ("install", "audit", "uninstall"):
+        assert gone not in choices, f"`sandbox {gone}` is still offered"
 
 
 def test_the_verb_help_does_not_advertise_two_equal_tiers():
     assert "Two tiers" not in sb.SPEC["description"], sb.SPEC["description"]
-
-
-def test_installing_the_broker_requires_an_explicit_flag():
-    flags = [names[0] for names, _kw in sb.SPEC["args"]]
-    assert "--broker" in flags, (
-        "a plain `sandbox install` must not grant a sudoers entry: " + str(flags))
+    assert "broker" not in sb.SPEC["description"].lower(), sb.SPEC["description"]
 
 
 # ---- reported from a real session that could not build in the workspace ----

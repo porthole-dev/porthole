@@ -226,6 +226,47 @@ def test_every_action_names_a_function_that_exists():
             f"action {action!r} calls {func}(), which ph-build.sh does not define"
 
 
+def test_auto_measures_without_packaging():
+    """`auto` calls into ph-build.sh to answer one question -- which files did
+    make touch -- and answers it with _changed_artifacts, which globs .output
+    for .ko/.dtb/Image.gz and never opens an apk. So the packaging step at the
+    end of _ph_make was pure cost there: 14.66 s per preview, measured
+    2026-08-29, and it wrote a `_p` apk every time. `_p` apks outrank release
+    builds, which is what _ph_assert_no_devpkgs exists to refuse -- so the
+    preview was manufacturing the hazard the rungs guard against. One measure
+    pass took the local repo's `_p` count from 1 to 2."""
+    import inspect
+    import porthole_cmd_build as B
+    src = inspect.getsource(B._auto)
+    assert '"_ph_measure"' in src, "auto must measure with the non-packaging path"
+    assert '"_ph_make"' not in src, "auto must not run the packaging path"
+
+
+def test_a_worktree_path_is_translated_for_the_container():
+    """ph-build prints "set PORTHOLE_KERNEL_TREE to build a worktree" on every
+    run, and that knob is a host path -- it stopped at the container boundary
+    like every other one, so the workspace silently built the DEFAULT tree
+    instead of the worktree you named. A worktree kept inside the device repo
+    is mounted at /work and can be translated; one outside is not reachable at
+    all and must be dropped rather than sent as a path that does not exist."""
+    import porthole_cmd_build as B
+    assert B._tree_inside("/repo/linux-ws", "/repo") == "/work/linux-ws"
+    assert B._tree_inside("/repo", "/repo") == "/work"
+    assert B._tree_inside("/elsewhere/linux", "/repo") == ""
+    assert B._tree_inside("", "/repo") == ""
+    assert B._tree_inside("/repo/linux", "") == ""
+
+
+def test_the_container_argv_carries_the_translated_tree_only():
+    """NAME=value, not NAME: the value is the CONTAINER's path. Sending it the
+    other way would take it from our environment, which is the host path."""
+    import porthole_cmd_build as B
+    argv = B._container_cmd("_ph_measure", None, {}, "/work/linux-ws")
+    assert "PORTHOLE_KERNEL_TREE=/work/linux-ws" in argv
+    plain = B._container_cmd("_ph_measure", None, {}, "")
+    assert not any("PORTHOLE_KERNEL_TREE" in a for a in plain)
+
+
 def test_the_cheap_rungs_are_in_the_verb_table():
     """tkmod (~40s) and tkboot (~40s) existed only as shell functions no verb
     named, so an agent reading the table found the ~10 minute rung first."""

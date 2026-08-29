@@ -28,6 +28,21 @@ porthole sandbox up                          # build the image, start the worksp
 porthole sandbox shell --command <command>   # run one command in it
 porthole sandbox shell                       # a shell, for a human
 porthole sandbox status                      # what is up, what is missing
+```
+
+The workspace keeps its **own pmbootstrap work directory**, at
+`~/.local/var/porthole-sandbox` (override with `PORTHOLE_SANDBOX_PMB_DIR`).
+That is forced, not chosen: `--userns=keep-id:uid=0,gid=0` maps your uid and
+nothing else, so a work dir created by host root reads as `nobody` inside and
+cannot be written -- nor chowned, because its files belong to uids the
+namespace cannot see. The container has to create its own. Your host work dir
+is untouched, and `porthole build --host` still uses it.
+
+The same rule applies to a kernel tree's `.output`: it belongs to one
+environment. Building the same tree in the other refuses and names the ways
+out, rather than failing inside kbuild.
+
+```sh
 porthole sandbox down                        # stop it; your files are untouched
 ```
 
@@ -111,91 +126,29 @@ it sounds, because `pmbootstrap install --no-image` never touches a loop device
 ext4 from a plain file inside a user namespace, where ext4-on-loop is illegal.
 See `docs/SANDBOX-PROVISIONING.md`.
 
-## The legacy broker — `sandbox/ph-sudo`
+## There is no second, weaker path
 
-**Not installed by default. Only for a host that cannot run podman.**
+A validating privilege broker (`sandbox/ph-sudo`) used to live here for a host
+that cannot run podman: 26 allowed verbs, every path confined to declared
+roots, every decision audited. **It has been removed.**
 
-```sh
-porthole sandbox install --broker    # writes a script; read it, then run it
-```
+It was a good broker and that was not enough. It granted a real
+`NOPASSWD` sudoers entry, and this document said plainly that it could not
+contain a determined chroot payload — pmbootstrap legitimately needs to write
+executables into a chroot and then run them, so any allowlist that lets
+pmbootstrap work also lets a payload inside that chroot work. The workspace
+needs **no sudoers entry at all**, which is a boundary of a different kind
+rather than a better allowlist.
 
-Before the workspace existed, this was the answer: pmbootstrap escalates
-through exactly one documented hook, `PMB_SUDO`, so pointing that at a
-validating broker routes every root request through a program of your choosing,
-as argv. One sudoers entry, for one root-owned file:
+Keeping both meant every reader — and every agent — had to work out which tier
+they were on, and the weaker one was the one a stuck agent would reach for. A
+fallback that still exists is a fallback something can be talked into using.
+Podman is now the single host prerequisite; `porthole doctor` names how to
+install it.
 
-```
-you ALL=(root) NOPASSWD: /usr/local/libexec/porthole/ph-sudo
-```
-
-It validates the verb against an allowlist, resolves every path argument inside
-declared roots (symlinks followed, `..` normalised), permits `sh -c` only for a
-literal append, restricts `mknod` to standard chroot nodes, rejects `remount`,
-`rbind` and `move`, and appends every decision to an audit log
-(`porthole sandbox audit --denied`).
-
-**Why it is a fallback rather than a tier.** `chroot <dir> <cmd>` runs an
-arbitrary command as root, and root inside a chroot can escape a chroot. The
-directory is confined; the payload is not. So it stops accidents, mistakes,
-blast radius and casual misuse — the overwhelming majority of real risk — and
-leaves an audit trail, but it is not a barrier against an adversary who
-controls what runs inside the chroot. Set `allow_chroot = 0` to refuse chroots
-entirely; the workspace covers that work now, so on a host with podman there is
-nothing left for the broker to do.
-
-It also **cannot build a package**: building runs `$WORKDIR/apk.static` as
-root, and the work directory is writable by the invoking user, so permitting an
-executable out of it would let anyone who can write there be root. The broker
-refuses, and that refusal is the boundary working rather than a gap.
-
-### What pmbootstrap actually asks for
-
-Measured, not guessed — a logging shim in `PMB_SUDO` across a real
-`pmbootstrap chroot -- true` plus `pmbootstrap shutdown`:
-
-```
-72 root requests
- 17  mount        17  umount       12  sh          7  mknod
-  7  chmod         4  ln            3  rm          2  mkdir
-  1  touch         1  env           1  losetup
-```
-
-Eleven verbs, every path argument inside the work directory — with one
-exception found only by testing the finished broker against a *fresh* chroot,
-which immediately hit `mount --bind /proc <workdir>/chroot_native/proc ->
-DENIED`. A chroot cannot function without `/proc`, `/sys` and `/dev`. The fix
-was principled rather than a widening: for a bind mount the *destination* must
-be confined, and the *source* may additionally be one of a short list of kernel
-API filesystems. Host data stays refused.
-
-**The lesson worth keeping: derive the policy from a trace, then test it end to
-end against the real thing.** A denial is information; investigate it rather
-than relaxing the rule that produced it.
-
-## Reading the audit log
-
-```sh
-porthole sandbox audit             # last 40 decisions
-porthole sandbox audit --denied    # only refusals
-porthole sandbox audit --json      # for a machine
-```
-
-A denial is not necessarily an attack — more often it is a pmbootstrap version
-doing something the allowlist has not seen. **Widen the policy deliberately
-when that happens, and never to make an error go away.**
-
-## Testing
-
-`tests/test_sandbox.py` runs unprivileged, executes nothing, and is mostly
-escape attempts against the broker — a path outside the roots, a sibling
-directory sharing a prefix (`/work` vs `/work-evil`), a symlink planted inside
-the root, `..` traversal, a shell command aimed at `/etc/passwd`, a device node
-for a raw disk, `mount --bind /etc`, `mount -o remount`, a chroot target
-outside the roots, a "mount" binary supplied from a writable directory, and a
-policy file the invoking user can write.
-
-Those are the tests that matter. A broker that allows the right things is easy;
-one that refuses the wrong things is the product.
+`PMB_SUDO` went with it. Nothing here reads it, and `porthole doctor` fails if
+it is still exported: pmbootstrap invokes it directly, so a leftover value
+kills a build with exit 78 from deep inside pmbootstrap, naming nothing.
 
 `tests/test_sandbox_container.py` covers the workspace, and its assertions are
 the same idea: that the mount set never exposes `~/.ssh`, that the device key
@@ -205,6 +158,9 @@ is read-only, that the lock path matches `tools/tk-device.sh` exactly, that
 
 ## If you only do one thing
 
-Delete the `timestamp_timeout` line. Even with no workspace and no broker,
-going back to a normal 5-minute sudo cache shrinks a week-long window to a few
-minutes, and every escalation after that is one you were present for.
+Delete the `timestamp_timeout` line. Even with no workspace at all, going back
+to a normal 5-minute sudo cache shrinks a week-long window to a few minutes,
+and every escalation after that is one you were present for. `porthole sandbox
+status` reports it, and on the reference host that check had itself been dead:
+sudoers joins options with commas, the parser split on whitespace, and a
+167-hour cache read as clean.

@@ -324,8 +324,32 @@ def _workspace_usable(ctx):
     return True, ""
 
 
+def _tree_inside(tree, workdir) -> str:
+    """PORTHOLE_KERNEL_TREE as the CONTAINER sees it, or "" if it cannot.
+
+    A worktree is the toolbox's own advice -- ph-build prints "set
+    PORTHOLE_KERNEL_TREE to build a worktree" on every run -- and the knob is a
+    host path, so it stops at the container boundary like every other one
+    (docs/SANDBOX-PROVISIONING.md §4b). The difference is that this one CAN be
+    translated: a worktree kept inside the device repo is mounted, at /work.
+
+    A tree outside the device repo is not reachable inside at all, so this
+    returns "" and the caller leaves the variable unset -- the container then
+    builds its default tree, which is wrong but visibly so, rather than dying
+    on a path that does not exist.
+    """
+    if not tree or not workdir:
+        return ""
+    try:
+        rel = pathlib.Path(tree).expanduser().resolve().relative_to(
+            pathlib.Path(workdir).expanduser().resolve())
+    except (ValueError, OSError):
+        return ""
+    return "/work" if str(rel) == "." else f"/work/{rel}"
+
+
 def _container_cmd(func: str, extra: list[str] | None,
-                   secrets) -> list[str]:
+                   secrets, tree_inside: str = "") -> list[str]:
     """The podman exec line for a build, as argv.
 
     Pure, so where a build runs is testable without podman, a device or a
@@ -353,6 +377,11 @@ def _container_cmd(func: str, extra: list[str] | None,
     # such a value, and tkbuild requires it.
     for key in sorted(k for k in secrets if k.startswith("TK_")):
         argv += ["-e", key]
+    # The one host path that is translated rather than dropped: see
+    # _tree_inside. Sent as NAME=value, not NAME -- the value is the
+    # container's path, not ours, so it cannot come from our environment.
+    if tree_inside:
+        argv += ["-e", f"PORTHOLE_KERNEL_TREE={tree_inside}"]
     argv += [sandbox.CONTAINER, "/bin/bash", "-lc",
              f"cd /porthole && source tools/ph-build.sh && {call}"]
     return argv
@@ -383,7 +412,9 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     if usable:
         secrets = {k: v for k, v in env.items()
                    if k.startswith("TK_") and isinstance(v, str)}
-        cmd = _container_cmd(func, extra, secrets)
+        cmd = _container_cmd(func, extra, secrets,
+                             _tree_inside(env.get("PORTHOLE_KERNEL_TREE"),
+                                          env.get("PORTHOLE_WORKDIR")))
         # Not grey. WHERE a build ran is the first thing you need when it fails
         # in a way that makes no sense, and burying it cost someone three
         # attempts before they noticed the tail.
@@ -460,6 +491,15 @@ def _stream(ctx, cmd, env, timeout: int, rung: str) -> int:
     ctx.out(ctx.out.paint(
         f"  {rung}: {progress.fmt_dur(tracker.elapsed)}"
         f"  ({tracker.compile_seen} compile steps)", "grey"))
+    # A failed build otherwise says only "0 compile steps" and exits 1: the
+    # reason is in the log, and whoever is reading this -- an agent especially
+    # -- has no idea a log is worth opening. The last few lines are where the
+    # shell says why it refused, every time.
+    if rc != 0 and not verbose:
+        tail = [ln.rstrip() for ln in logpath.read_text(
+            errors="replace").splitlines() if ln.strip()][-6:]
+        for line in tail:
+            ctx.out(ctx.out.paint(f"  | {line}", "grey"))
     return rc
 
 
@@ -511,7 +551,11 @@ def _auto(ctx, args) -> int:
     since = time.time() - 1
     ctx.out(ctx.out.paint("  measuring: incremental make, then routing on what "
                           "it actually rebuilt", "grey"))
-    rc = _run(ctx, "_ph_make", args.timeout, None,
+    # _ph_measure, not _ph_make: the only question here is what make touched,
+    # and _changed_artifacts below answers it out of .output. _ph_make would
+    # also package -- 14.66 s, and a `_p` apk left in the local repo that
+    # outranks every release build. A preview must not do that.
+    rc = _run(ctx, "_ph_measure", args.timeout, None,
               host=getattr(args, "host", False), rung="auto")
     if rc != 0:
         return rc

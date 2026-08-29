@@ -68,6 +68,19 @@ porthole sandbox shell                       # a shell, if you are a human
 all. Inside, `pmbootstrap` uses no sudo whatsoever, because it checks
 `os.getuid()` and you are already root there.
 
+The workspace builds on its own terms: it has its **own pmbootstrap work
+directory** (`~/.local/var/porthole-sandbox`), which it creates and owns.
+`porthole sandbox up` writes its pmbootstrap config and it bootstraps the
+chroots on first use. Your host work dir is untouched and `--host` still uses
+it. The two do NOT share a kernel tree's `.output`: the uids inside a rootless
+container do not line up with the host's, so a tree built in one refuses in the
+other and says so, naming the ways out. Pick one environment per tree.
+
+`porthole doctor` reports the work dir as `workspace: work dir`. If it says the
+dir is owned by someone else, the fix it prints is
+`podman unshare rm -rf` -- a plain `rm -rf` cannot remove a populated one,
+because the chroots' files belong to uids in your subuid range.
+
 **If the workspace is not set up, STOP and ask the person you are working
 with.** The one remaining privileged step is installing podman, and it needs a
 password you cannot and must not type:
@@ -161,20 +174,19 @@ this rung took last time on this machine, so the first run of a rung says
 
 ### When a rung is still slow
 
-`pmbootstrap build` zaps the buildroot before every package, and that is most
-of the wall clock in the flashing rungs. `PORTHOLE_LAX_BUILD=1` skips it:
+**Do not reach for `PORTHOLE_LAX_BUILD=1`.** It skips the buildroot zap, and
+this section used to call that zap most of the wall clock in the flashing
+rungs. Measured 2026-08-29, interleaved, on a warm buildroot: kernel package
+14.96 / 15.34 / 15.25 / 14.68 s with the flag and without, device package
+1.66-1.72 s either way. **No difference.** The minutes in those rungs are
+`install`, `export`, the flash and the boot wait.
 
-```sh
-PORTHOLE_LAX_BUILD=1 porthole build fast --yes     # iterating
-```
+The flag still accepts a real hazard -- stale build state, a `_p` apk
+outranking a release, each instance presenting as a mysterious wrong-kernel bug
+-- for no measured gain. `brain/findings/lax-build-buys-nothing-measurable.md`.
 
-**Take that trade knowingly.** It is not the default because this repo has been
-bitten repeatedly by stale build state -- a `_p` apk outranking a release, a
-stale APKINDEX making install pick an older package -- and every one of them
-presented as a mysterious wrong-kernel bug rather than as a caching problem.
-Use it while iterating on the same change; drop it for the build you intend to
-flash and trust, and run `porthole build purge` if a stale dev package is
-suspected.
+**What cuts a rung is picking the right one**, which `porthole build` does by
+measuring. Run `porthole build purge` if a stale dev package is suspected.
 
 It does NOT speed up the compile. envkernel bakes `CCACHE_DISABLE=1` into its
 own make command, so every kernel compile is uncached no matter what is

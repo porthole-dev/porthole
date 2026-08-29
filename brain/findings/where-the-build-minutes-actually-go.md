@@ -10,6 +10,18 @@ refutes: "the compile is what makes builds slow; ccache would make incremental k
 first-learned: 2026-08-29
 ---
 
+> **CORRECTED 2026-08-29, same evening.** The 14.3 s figure below is a COLD
+> reading. envkernel activation is **0.80 s** whenever
+> `chroot_native/tmp/envkernel/<toolchain>_setup_done` exists, which is
+> normally; the 14 s is that flag being absent and envkernel re-running its
+> thirty-package `apk add`. The conclusion drawn here -- that reusing the
+> activation is the next big win -- is therefore wrong, and the bind does not
+> survive a build to be reused anyway. The corrected numbers, and what IS worth
+> cutting, are in [[envkernel-activation-is-cheap-once-the-chroot-is-warm]] and
+> [[the-auto-preview-builds-a-package-nobody-reads]]. The rest of this note --
+> that the compile is not the bottleneck, and that ccache cannot help an
+> incremental build -- still holds.
+
 **The question** — a bring-up session spends its life waiting on `porthole
 build`. Where does the time actually go?
 

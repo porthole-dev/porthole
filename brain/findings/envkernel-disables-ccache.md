@@ -63,6 +63,19 @@ what `PORTHOLE_LAX_BUILD=1` addresses, and what picking the right rung avoids
 entirely -- the same touched file routes to `mod` at ~40 s rather than `kernel`
 at ~10 minutes.
 
+**Re-checked 2026-08-29, evening, against the case that should have hit it.**
+A chroot re-init forced a near-full kernel rebuild -- thousands of objects,
+`net/`, `drivers/`, `fs/`, minutes of compiling -- and during it
+
+```
+find <workdir>/cache_ccache_aarch64 -type f -newermt '-2 hours' | wc -l
+```
+
+returned **0**. A full rebuild is precisely the case where ccache would pay,
+and it was not touched. The `CCACHE_DISABLE=1` line is still at
+`helpers/envkernel.sh:281`, in the host checkout and in the workspace image's
+`/opt/pmbootstrap-src` alike.
+
 **Still not established** Whether re-enabling it actually
 helps here has NOT been measured. Three things have to be true and none were
 checked, because the pmbootstrap work directory was in use by another agent at

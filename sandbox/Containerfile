@@ -51,6 +51,177 @@ RUN v="$(pmbootstrap --version)" \
 RUN pmbootstrap install --help 2>&1 | grep -q -- '--no-image' \
  || (echo "FATAL: this pmbootstrap has no --no-image; the sandbox design needs it" >&2; exit 1)
 
+# pmbootstrap refuses uid 0 outright -- `pmb/__init__.py` raises "Do not run
+# pmbootstrap as root!" before it looks at anything else, including the config.
+# In this workspace uid 0 IS the user's own unprivileged uid on the host, which
+# is the entire design, so this is the one place that refusal is wrong.
+# `--as-root` skips a check that assumes root means HOST root; it grants
+# nothing, and outside the container it would still be refused.
+#
+# The config is pinned to the work dir rather than left to $XDG_CONFIG_HOME:
+# that directory holds the read-only porthole config mount and its writable
+# part does not survive `sandbox down`. `porthole sandbox up` writes the file.
+#
+# /usr/local/bin precedes /usr/bin on PATH, so envkernel gets this too -- it
+# bakes a bare `pmbootstrap` into the `make` alias it builds, and without the
+# wrapper every kernel compile would go straight to the refusal.
+#
+# This comes AFTER the assertions above on purpose: those must exercise the
+# real binary, not a wrapper pointing at a config that does not exist yet.
+RUN printf '%s\n' '#!/bin/sh' \
+      'exec /usr/bin/pmbootstrap --as-root --config /pmb/pmbootstrap_v3.cfg "$@"' \
+      > /usr/local/bin/pmbootstrap \
+ && chmod +x /usr/local/bin/pmbootstrap \
+ && [ "$(command -v pmbootstrap)" = /usr/local/bin/pmbootstrap ] \
+ || (echo "FATAL: the wrapper does not shadow /usr/bin/pmbootstrap" >&2; exit 1)
+
+# mknod does not work in a rootless user namespace. Not a missing capability --
+# CapEff carries CAP_MKNOD in here -- the kernel refuses device-node creation
+# from an unprivileged userns, on container storage and on a bind mount alike.
+# Probed 2026-08-29: `mknod /tmp/n c 1 3` and `mknod /pmb/n c 1 3` are both
+# EPERM.
+#
+# pmbootstrap needs seven nodes in EVERY chroot it creates
+# (pmb/config/__init__.py: chroot_device_nodes) and shells out to the `mknod`
+# BINARY, so one shim on PATH covers every chroot at any point in a build.
+#
+# It does NOT bind the nodes one by one. That was tried and it is a trap: the
+# node comes out with the right major and minor and reads fine, but
+# `open(O_CREAT)` on it returns EACCES -- and O_CREAT is what every shell
+# redirection uses, so `> /dev/null` inside the chroot fails and apk dies with
+# "can't create /dev/null: Permission denied". Only O_CREAT; plain O_WRONLY
+# works, which is why the node looks healthy right up until something uses it.
+#
+# Binding the whole /dev RECURSIVELY has none of that: the nodes are then
+# ordinary entries of the container's own /dev, where O_CREAT works. --rbind
+# rather than --bind because the per-node mounts podman layers into that tmpfs
+# are what carry the real major/minor; a plain --bind gives 0:0 and
+# pmbootstrap's own verification rejects it.
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '# rootless mknod: give the chroot the container own /dev instead.' \
+      '# Stacked ON TOP of the tmpfs pmbootstrap mounts there (mount_dev_tmpfs);' \
+      '# skipping when the dir is already a mountpoint is wrong, it always is.' \
+      'path=$1' \
+      'dir=${path%/*}' \
+      'case "$dir" in' \
+      '  */dev)' \
+      '    [ -c "$path" ] && exit 0' \
+      '    mkdir -p "$dir"' \
+      '    mount --rbind /dev "$dir" || exit 1' \
+      '    [ -e "$path" ] && exit 0' \
+      '    ;;' \
+      'esac' \
+      'exec /bin/mknod "$@"' \
+      > /usr/local/bin/mknod \
+ && chmod +x /usr/local/bin/mknod
+
+# ...and pmbootstrap chmods each node right after creating it, in a separate
+# call, because FreeBSD's mknod has no -m. A bind-mounted node is the HOST's
+# inode -- rootless podman binds /dev/null in rather than creating one, so it
+# shows as `nobody` -- and chmod on an inode you do not own is EPERM even when
+# the mode you are asking for is the mode it already has. Probed: only
+# dev/null appeared, and the chmod after it killed the loop before zero.
+#
+# So: tolerate a failed chmod ONLY when the target is a character device that
+# is ALREADY in the requested mode. Everything else fails exactly as before,
+# including a genuine permission problem on a regular file. This is not a
+# permissive chmod; it is a chmod that knows a no-op when it sees one.
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '/bin/chmod "$@" 2>/dev/null && exit 0' \
+      'rc=$?' \
+      'mode=$1; shift' \
+      'case "$mode" in -*) exit $rc ;; esac' \
+      'for p in "$@"; do' \
+      '  [ -c "$p" ] || exit $rc' \
+      '  cur=$(stat -c %a "$p" 2>/dev/null) || exit $rc' \
+      '  [ "$cur" = "$mode" ] || [ "$cur" = "${mode#0}" ] || exit $rc' \
+      'done' \
+      'exit 0' \
+      > /usr/local/bin/chmod \
+ && chmod +x /usr/local/bin/chmod
+
+# The binds above live in the container's MOUNT NAMESPACE, so `sandbox down`
+# takes them with it and leaves empty regular files behind in the chroots. On
+# the next `up` pmbootstrap would find dev/null existing, skip the shim
+# entirely, and then fail its own verification with "Wrong major in
+# .../dev/null" -- a chroot that worked yesterday, broken by a restart.
+#
+# So `porthole sandbox up` re-arms them. Idempotent: an already-bound node is
+# a character device and is left alone.
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '# Re-give every existing chroot a /dev, and put the pmbootstrap config' \
+      '# where envkernel looks for it.' \
+      '#' \
+      '# The /dev in a chroot is a mount, so `sandbox down` takes it with it' \
+      '# and the next `up` would find an empty dev/ -- pmbootstrap would then' \
+      '# fail its own major/minor check on a chroot that worked yesterday.' \
+      '#' \
+      '# envkernel treats a missing $XDG_CONFIG_HOME/pmbootstrap_v3.cfg as a' \
+      '# first run and calls `pmbootstrap init`, which is interactive and' \
+      '# cannot work here. The link points at the file the wrapper already' \
+      '# passes with --config, so both see one config.' \
+      'cfg=${XDG_CONFIG_HOME:-$HOME/.config}/pmbootstrap_v3.cfg' \
+      'mkdir -p "$(dirname "$cfg")"' \
+      '[ -e "$cfg" ] || ln -sf /pmb/pmbootstrap_v3.cfg "$cfg"' \
+      'for d in /pmb/chroot_*/dev; do' \
+      '  [ -d "$d" ] || continue' \
+      '  [ -c "$d/null" ] && continue' \
+      '  mount --rbind /dev "$d" 2>/dev/null || true' \
+      'done' \
+ > /usr/local/bin/porthole-devnodes \
+ && chmod +x /usr/local/bin/porthole-devnodes
+
+# envkernel does not call `pmbootstrap` off PATH. `set_alias_pmbootstrap()`
+# notices it is sitting in a source tree and calls that tree's
+# `pmbootstrap.py` by absolute path -- straight past /usr/local/bin and into
+# "Do not run pmbootstrap as root!" on the first kernel build. The source tree
+# is here only for helpers/envkernel.sh; the CLI it should run is the packaged
+# one. So the entry point becomes a shim too, and the container ends up with
+# exactly one way to invoke pmbootstrap.
+RUN printf '%s\n' '#!/bin/sh' \
+      'exec /usr/local/bin/pmbootstrap "$@"' \
+      > /opt/pmbootstrap-src/pmbootstrap.py \
+ && chmod +x /opt/pmbootstrap-src/pmbootstrap.py
+
+# There is no sudo in this image and nothing to escalate to: uid 0 in here IS
+# the user's unprivileged uid on the host. But scripts written for a normal
+# machine call sudo anyway -- envkernel.sh does for its bind mount
+# (`sudo mount --bind "$PWD" "$chroot/mnt/linux"`), which is upstream and not
+# ours to change -- and `sudo: command not found` reads as a broken image
+# rather than as a script asking for something it already has.
+#
+# So: run the command as who we already are, and REFUSE if we are somehow not
+# root rather than silently doing nothing. This grants no privilege; it
+# removes a word that means nothing here.
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      '[ "$(id -u)" = 0 ] || { echo "sudo: not available in the workspace" >&2; exit 1; }' \
+      'while [ $# -gt 0 ]; do' \
+      '  case $1 in' \
+      '    -v) exit 0 ;;' \
+      '    -u|-g) shift 2 ;;' \
+      '    --) shift; break ;;' \
+      '    -*) shift ;;' \
+      '    *) break ;;' \
+      '  esac' \
+      'done' \
+      '[ $# -gt 0 ] || exit 0' \
+      'exec "$@"' \
+      > /usr/local/bin/sudo \
+ && chmod +x /usr/local/bin/sudo
+
+# Every shim this image installs must be present. They were lost once to an
+# editing slip and the failure came back as "Do not run pmbootstrap as root!"
+# three commands later, which names none of them.
+RUN for f in /usr/local/bin/pmbootstrap /usr/local/bin/mknod \
+             /usr/local/bin/chmod /usr/local/bin/sudo \
+             /usr/local/bin/porthole-devnodes /opt/pmbootstrap-src/pmbootstrap.py; do \
+      test -x "$f" || (echo "FATAL: $f missing from the image" >&2; exit 1); \
+    done
+
 LABEL org.opencontainers.image.title="porthole-sandbox" \
       org.opencontainers.image.description="postmarketOS bring-up workspace"
 

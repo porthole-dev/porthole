@@ -554,55 +554,28 @@ def bench(ch: Checks, ctx) -> None:
 
 
 def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
-    """A stale PMB_SUDO is the worst failure this subsystem can leave behind.
+    """PMB_SUDO set at all is now a leftover, and a dangerous one.
 
-    Reported from a real session: the broker was no longer installed, but
-    PMB_SUDO still pointed at it, so `porthole build` died with **exit 78 deep
-    inside pmbootstrap** and nothing anywhere said the words "PMB_SUDO". The
+    The privilege broker it used to name is gone -- the workspace needs no
+    sudoers entry, so a weaker path nobody needed was one more thing that could
+    be wrong. But an export survives in a shell long after the file does, and
+    pmbootstrap invokes PMB_SUDO directly, prefixing nothing: a stale one kills
+    a build with **exit 78 deep inside pmbootstrap**, with nothing anywhere
+    saying the words "PMB_SUDO". Reported from a real session, where the
     workaround reached for was `PMB_SUDO=sudo` -- the blanket credential cache
-    this whole subsystem exists to retire. Loud and named beats silent and
-    clever, so this is a FAIL with the unset command spelled out.
+    this whole subsystem exists to retire.
+
+    So: set is a failure, and the fix is spelled out.
     """
     value = (ctx.cfg.get("PMB_SUDO") or os.environ.get("PMB_SUDO") or "").strip()
     if not value:
-        ch.add("host: PMB_SUDO", "ok", "unset -- the workspace needs no broker")
+        ch.add("host: PMB_SUDO", "ok", "unset -- nothing here uses it")
         return
-
-    # Pointing at the BROKER instead of the client is the failure both agent
-    # reports hit, and existence alone does not catch it: the file is there and
-    # executable, so the first check passed it as ok. The broker refuses to run
-    # unless it is already root -- by design, so that a security boundary never
-    # elevates itself -- and pmbootstrap invokes PMB_SUDO directly, prefixing
-    # nothing. So it dies with exit 78 on the first root operation, deep inside
-    # a build, with nothing naming PMB_SUDO.
-    import porthole_cmd_sandbox as _sandbox
-
-    if os.path.realpath(value) == os.path.realpath(_sandbox.BROKER_DST):
-        ch.add("host: PMB_SUDO", "fail",
-               f"points at the BROKER ({value}), which refuses to run unless "
-               f"it is already root",
-               "unset PMB_SUDO"
-               "    # the workspace needs no broker at all; a build otherwise "
-               "dies with exit 78 inside pmbootstrap.\n"
-               f"          for the legacy broker path it must name the CLIENT: "
-               f"{_sandbox.CLIENT_DST}")
-        return
-
-    target = shutil.which(value) or (value if os.path.exists(value) else "")
-    if not target or not os.access(target, os.X_OK):
-        ch.add("host: PMB_SUDO", "fail",
-               f"points at {value}, which is not executable",
-               "unset PMB_SUDO"
-               "    # the workspace needs no broker; a build otherwise dies "
-               "with exit 78 inside pmbootstrap")
-        return
-
-    if state.get("container_running"):
-        ch.add("host: PMB_SUDO", "warn",
-               f"{value} -- unused while the workspace is up",
-               doc="unset PMB_SUDO unless you build on the host")
-    else:
-        ch.add("host: PMB_SUDO", "ok", value)
+    ch.add("host: PMB_SUDO", "fail",
+           f"set to {value} -- a leftover; the privilege broker it named is gone",
+           fix="unset PMB_SUDO"
+               "    # a build otherwise dies with exit 78 deep inside "
+               "pmbootstrap, naming nothing")
 
 
 def check_workspace(ch: Checks, ctx, family: str) -> None:
@@ -632,6 +605,36 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
     else:
         ch.add("workspace: container", "warn", "not running",
                doc="porthole sandbox up")
+    # The workspace is rootless: `--userns=keep-id:uid=0,gid=0` maps YOUR uid
+    # to root inside and nothing else. So it needs a work dir it owns, which is
+    # why it has its own rather than sharing the host's -- one built by the old
+    # host-root path reads as `nobody` in there and cannot be written or
+    # converted. porthole_cmd_sandbox.SANDBOX_PMB_DEFAULT has the full why.
+    #
+    # This check exists because the failure is otherwise unrecognisable: it
+    # surfaces four commands later as `cp /etc/resolv.conf ...` failing.
+    pmb = sandbox._sandbox_pmb(ctx.cfg)
+    cfg_file = pmb / sandbox.PMB_CFG_NAME
+    if not pmb.exists():
+        ch.add("workspace: work dir", "warn",
+               f"{pmb} does not exist yet",
+               doc="porthole sandbox up    creates and configures it")
+    elif pmb.stat().st_uid != os.getuid():
+        ch.add("workspace: work dir", "fail",
+               f"{pmb} is owned by uid {pmb.stat().st_uid}, not you -- "
+               "the workspace cannot write it",
+               # NOT plain rm -rf: a populated work dir holds files owned by
+               # the chroot's own uids, which live in your subuid range and
+               # are not yours outside the userns. `podman unshare` enters it.
+               fix=f"podman unshare rm -rf {pmb} && porthole sandbox up",
+               doc="a rootless container can only write what your uid owns")
+    elif not cfg_file.is_file():
+        ch.add("workspace: work dir", "warn",
+               f"{pmb} has no {sandbox.PMB_CFG_NAME}",
+               doc="porthole sandbox up    writes it")
+    else:
+        ch.add("workspace: work dir", "ok", str(pmb))
+
     # binfmt is host-global and needs root once. Named, never automated: it is
     # a person installing software on their own machine, not a privilege the
     # agent holds.

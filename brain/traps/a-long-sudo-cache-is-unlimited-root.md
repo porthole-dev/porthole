@@ -5,7 +5,7 @@ scope: generic
 subsystem: setup
 severity: trap
 confidence: proven
-evidence: porthole docs/SANDBOX.md; sandbox/ph-sudo; observed on the taimen host 2026-08-23
+evidence: porthole docs/SANDBOX.md; observed on the taimen host 2026-08-23; the broker it originally recommended was removed 2026-08-29
 first-learned: 2026-08-23
 ---
 
@@ -47,16 +47,18 @@ in a persistent rootless container where you are uid 0 inside and your own
 unprivileged uid outside, so pmbootstrap uses no sudo whatsoever and no sudoers
 entry is granted. An escape reaches your uid, not the machine.
 
-A validating broker on `PMB_SUDO` (confining paths, refusing non-pmbootstrap
-verbs, auditing every decision) remains available for a host that cannot run
-podman, and it is far better than a blanket cache — but it is a fallback, not a
-second tier.
+**A validating broker was tried and then deleted, 2026-08-29.** `PMB_SUDO`
+pointed at a program that confined paths to declared roots, refused
+non-pmbootstrap verbs and audited every decision — far better than a blanket
+cache, and still not enough. `chroot <dir> <cmd>` runs an arbitrary command as
+root, and root inside a chroot can escape a chroot; a broker confines the
+directory, not the payload. Since pmbootstrap legitimately needs to write
+executables into a chroot and run them, any allowlist that lets pmbootstrap
+work lets a payload work.
 
-**Be honest about the gap in that fallback.** `chroot <dir> <cmd>` runs an
-arbitrary command as root, and root inside a chroot can escape a chroot. A
-broker confines the directory, not the payload. Claiming otherwise is worse
-than not having the broker, because it buys false confidence. That gap is the
-reason the container is the answer rather than the second half of one.
+So the remaining lesson is sharper than "broker it": a fallback that still
+exists is the one a stuck agent reaches for, and one that buys false confidence
+is worse than none. Removing it left exactly one answer.
 
 **The one thing worth doing even if you do nothing else:** delete the
 `timestamp_timeout` line. A five-minute cache instead of a week-long one turns
@@ -65,7 +67,8 @@ every escalation after the first into one you were present for.
 Generalises past pmbootstrap: the same shape applies to any agentic workflow
 that needs a privileged tool — Docker socket access, `terraform apply`,
 `kubectl` with cluster-admin. Ask what the tool actually needs, discover it
-empirically, and broker exactly that.
+empirically, and give it exactly that -- or, better, an environment where it
+needs no privilege to give.
 
 Related: [[no-passwordless-sudo-disables-the-whole-toolbox]],
 [[running-a-device-script-on-the-host]].

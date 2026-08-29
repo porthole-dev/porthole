@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: MIT
 """`porthole sandbox` -- run pmbootstrap without handing the host to an agent.
 
-Two tiers, because neither is sufficient alone:
+One boundary: a rootless podman container where container-root maps to YOUR
+uid. Nothing in it can exceed your own privileges, so even a full escape
+reaches only the directories you mounted.
 
-  broker    ph-sudo validates every root request pmbootstrap makes, confining
-            paths to declared roots. Always on, cheap, audited. Stops accidents
-            and casual misuse; does not contain a determined chroot payload.
+There was a second tier once -- `ph-sudo`, a validating privilege broker for a
+host without podman. It is gone. It granted a real sudoers entry, its own
+documentation admitted it could not contain a determined chroot payload, and
+keeping a weaker path available meant every reader had to decide which one they
+were on. The workspace needs no sudoers entry at all.
 
-  container rootless podman where container-root maps to YOUR uid. Nothing in
-            it can exceed your own privileges, so even a full escape reaches
-            only the directories you mounted. This is the real boundary.
-
-The threat model, and what each tier does and does not buy, is in
-docs/SANDBOX.md. Read it before trusting either.
+The threat model is in docs/SANDBOX.md. Read it before trusting this.
 """
 from __future__ import annotations
 
@@ -20,6 +19,7 @@ import getpass
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -27,11 +27,6 @@ import sys
 
 from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 
-BROKER_SRC = "sandbox/ph-sudo"
-CLIENT_SRC = "sandbox/ph-sudo-client"
-CLIENT_DST = "/usr/local/bin/ph-sudo-client"
-BROKER_DST = "/usr/local/libexec/porthole/ph-sudo"
-POLICY_DST = "/etc/porthole/sandbox.conf"
 AUDIT = "/var/log/porthole-sandbox.log"
 SUDOERS_DST = "/etc/sudoers.d/60-porthole-sandbox"
 
@@ -54,6 +49,110 @@ DEVICE_KEY_IN = "/run/porthole/device_key"
 # Where the image keeps the pmbootstrap SOURCE checkout. The apk package
 # ships no helpers/, and helpers/envkernel.sh is what every build uses.
 PMBOOTSTRAP_SRC_IN = "/opt/pmbootstrap-src"
+
+# The workspace gets its OWN pmbootstrap work directory, and does not share the
+# host's.
+#
+# Not a preference. A work dir built by the old host-root path is owned by uid
+# 0 on the host, and `--userns=keep-id:uid=0,gid=0` maps your uid and nothing
+# else -- so inside the container it reads as `nobody` and root-in-there cannot
+# write a byte of it. It surfaces as `cp /etc/resolv.conf ...chroot_native/etc/`
+# failing, a message about resolv.conf, on the first chroot a build touches.
+#
+# And it cannot be converted. `chown -R` would flatten the uids INSIDE the
+# chroots -- pmos, the build user that owns .output, collapses into root -- and
+# the userns has no mapping for those host uids anyway (the subuid range starts
+# far above them). A work dir the container creates itself has correct
+# ownership on both sides by construction, which is the only version of this
+# that works.
+#
+# `porthole build --host` still uses PORTHOLE_PMB_DIR, so the old one keeps
+# working for anyone who wants it.
+SANDBOX_PMB_DEFAULT = "~/.local/var/porthole-sandbox"
+
+# Inside the container the work dir is /pmb, and pmbootstrap's config is pinned
+# there by the image's wrapper. Anything naming a HOST path in that file is a
+# path the container cannot resolve -- the bug class docs/SANDBOX-PROVISIONING.md
+# calls out -- so `work` and `aports` are rewritten, never carried over.
+PMB_CFG_NAME = "pmbootstrap_v3.cfg"
+
+# Settings worth carrying from the host's own pmbootstrap config so the
+# workspace builds the same postmarketOS the host would. Anything not listed --
+# `work`, `aports`, any other path -- is deliberately dropped.
+PMB_CFG_CARRY = ("ui", "kernel", "systemd", "service_manager", "user",
+                 "timezone", "is_default_channel", "ssh_keys",
+                 "extra_packages", "locale", "hostname")
+
+
+def _stamp_work_version() -> tuple[bool, str]:
+    """Give the fresh work dir the version marker `pmbootstrap init` would.
+
+    pmbootstrap refuses to touch a work directory whose `version` file does not
+    match, and an ABSENT file reads as version 0 -- so a brand new work dir gets
+    "Your work folder version needs to be migrated (from version  to 8)" and
+    then "we can't migrate that automatically ... delete your current work
+    folder". A first run that tells you to delete the thing it just created.
+
+    `pmbootstrap init` writes it, but init is interactive and this workspace
+    exists to be driven with no TTY. So write the marker, and take the number
+    from pmbootstrap itself rather than pinning it here -- a hardcoded 8 would
+    silently be wrong the next time upstream bumps it.
+    """
+    script = (
+        'test -f /pmb/version && exit 0; '
+        'python3 -c "import pmb.config, pathlib; '
+        'pathlib.Path(\'/pmb/version\').write_text(str(pmb.config.work_version))"'
+    )
+    done = subprocess.run(["podman", "exec", CONTAINER, "sh", "-c", script],
+                          capture_output=True, text=True)
+    return done.returncode == 0, (done.stderr or done.stdout).strip()
+
+
+def _sandbox_pmb(cfg) -> pathlib.Path:
+    """The workspace's own pmbootstrap work dir."""
+    value = (cfg.get("PORTHOLE_SANDBOX_PMB_DIR")
+             or os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
+             or SANDBOX_PMB_DEFAULT)
+    return pathlib.Path(value).expanduser()
+
+
+def _host_pmb_cfg() -> dict:
+    """What the host's pmbootstrap is configured to build, if it is configured.
+
+    Read on the HOST and only for the keys in PMB_CFG_CARRY. The file itself is
+    never mounted: it names host paths, and a container that resolved them
+    would be reaching outside the boundary this whole design exists to keep.
+    """
+    xdg = pathlib.Path(os.environ.get("XDG_CONFIG_HOME")
+                       or pathlib.Path.home() / ".config")
+    out = {}
+    try:
+        for line in (xdg / PMB_CFG_NAME).read_text().splitlines():
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key in PMB_CFG_CARRY:
+                out[key] = value.strip()
+    except OSError:
+        pass
+    return out
+
+
+def pmb_config_text(device: str, carry: dict | None = None) -> str:
+    """The pmbootstrap config the workspace uses, as an INI string.
+
+    `work` AND `aports` both have to be set. `aports` defaults to
+    `work / "cache_git" / "pmaports"` evaluated against the DEFAULT work dir at
+    class-definition time, so setting `work` alone still sends pmbootstrap
+    looking under /root -- which reads as "pmaports dir not found: /root/..."
+    and looks like a missing clone rather than a config that half applied.
+    """
+    rows = {"work": "/pmb", "aports": "/pmb/cache_git/pmaports"}
+    if device:
+        rows["device"] = device
+    for key, value in (carry or {}).items():
+        rows.setdefault(key, value)
+    body = "".join(f"{k} = {v}\n" for k, v in rows.items())
+    return f"[pmbootstrap]\n{body}\n[providers]\n\n[mirrors]\n"
 
 
 def _image_tag(root: pathlib.Path) -> str:
@@ -97,7 +196,7 @@ def _lock_path(device: str) -> str:
     return os.environ.get("TK_DEVICE_LOCK") or f"/tmp/porthole-{device or 'device'}.lock"
 
 
-def _mounts(root, pmb_dir, workdir, key, device, extra):
+def _mounts(root, pmb_dir, workdir, key, device, extra, aports=None):
     """(host_src, container_dst, options) for everything the workspace sees.
 
     This list IS the isolation boundary. Nothing reaches the container that is
@@ -112,6 +211,18 @@ def _mounts(root, pmb_dir, workdir, key, device, extra):
     ]
     if workdir:
         mounts.append((str(pathlib.Path(workdir).expanduser()), "/work", "rw"))
+    # pmaports is SHARED with the host rather than cloned fresh, and that is a
+    # correctness decision before it is a disk one. This checkout is on a
+    # bring-up branch and carries the device's own aports -- the kernel package
+    # every rung builds lives there and nowhere upstream. A fresh clone would
+    # come up on master without them, and the failure would read as a missing
+    # package rather than as the wrong pmaports.
+    #
+    # Mounted INSIDE /pmb, at exactly the path pmbootstrap derives from `work`,
+    # so both pmbootstrap and ph-build.sh's own `_PH_APORTS` fallback find it
+    # with no extra configuration on either side.
+    if aports:
+        mounts.append((str(aports), "/pmb/cache_git/pmaports", "rw"))
     # porthole's own user config layer (lib/porthole.py load_config), where
     # `porthole use` writes the active device. Without this the container
     # resolves a DIFFERENT PORTHOLE_DEVICE than the host, tk-device.sh
@@ -348,16 +459,46 @@ def _up(ctx, args) -> int:
     lock = _lock_path(device)
     pathlib.Path(lock).touch(exist_ok=True)
 
-    pmb = ctx.cfg.get("PORTHOLE_PMB_DIR") or str(
-        pathlib.Path.home() / ".local/var/pmbootstrap")
-    pathlib.Path(pmb).expanduser().mkdir(parents=True, exist_ok=True)
+    # The workspace's own work dir, not the host's -- see SANDBOX_PMB_DEFAULT.
+    pmb = _sandbox_pmb(ctx.cfg)
+    pmb.mkdir(parents=True, exist_ok=True)
+    # Written every `up`, not once: it is cheap, it keeps the device in step
+    # with `porthole use`, and a config that silently went stale is the kind of
+    # thing that surfaces four minutes into a build as the wrong device.
+    (pmb / PMB_CFG_NAME).write_text(
+        pmb_config_text(device, _host_pmb_cfg()))
 
-    mounts = _mounts(ctx.root, pmb, ctx.cfg.get("PORTHOLE_WORKDIR"), key,
-                     device, args.mount)
+    # The host's pmaports checkout, shared rather than re-cloned. It lives in
+    # the HOST work dir, which the workspace otherwise does not touch.
+    host_pmb = pathlib.Path(ctx.cfg.get("PORTHOLE_PMB_DIR") or
+                            pathlib.Path.home() / ".local/var/pmbootstrap"
+                            ).expanduser()
+    aports = host_pmb / "cache_git" / "pmaports"
+    if not (aports / "device").is_dir():
+        ctx.out(ctx.out.paint(
+            f"  note: no pmaports checkout at {aports}\n"
+            f"  the workspace has nothing to build from. Run `pmbootstrap init`\n"
+            f"  on the host once to create it, then `porthole sandbox up` again.",
+            "yellow"))
+        aports = None
+
+    mounts = _mounts(ctx.root, str(pmb), ctx.cfg.get("PORTHOLE_WORKDIR"), key,
+                     device, args.mount, aports)
     rc = subprocess.run(_up_argv(ctx.root, tag, mounts, device)).returncode
     if rc == 0:
+        # Device nodes are bind mounts and live in the container's mount
+        # namespace, so a restart leaves empty files where a chroot's dev/null
+        # was. Re-arm before anything runs; see the image's porthole-devnodes.
+        subprocess.run(["podman", "exec", CONTAINER, "porthole-devnodes"],
+                       capture_output=True)
+        stamped, why = _stamp_work_version()
+        if not stamped:
+            ctx.out(ctx.out.paint(
+                f"  WARNING: could not stamp {pmb}/version -- pmbootstrap will\n"
+                f"  refuse the work dir and advise deleting it. {why}", "yellow"))
         ctx.out(ctx.out.paint(
             f"  {CONTAINER} up. root inside maps to uid {os.getuid()} outside.\n"
+            f"  work dir: {pmb}  (the workspace's own; --host uses yours)\n"
             f"  mounted: {', '.join(d for _s, d, _o in mounts)}\n"
             f"  nothing else on this host is reachable from in here.\n"
             f"  device key: {key}\n"
@@ -398,56 +539,6 @@ def _down(ctx) -> int:
 
 # ------------------------------------------------------------------ status --
 
-def _broker_state(root: pathlib.Path) -> dict:
-    out = {"installed": False, "path": BROKER_DST, "issues": []}
-    try:
-        st = os.stat(BROKER_DST)
-    except OSError:
-        out["issues"].append("not installed")
-        return out
-    out["installed"] = True
-    out["mode"] = f"{st.st_mode & 0o777:o}"
-    out["owner_uid"] = st.st_uid
-    if st.st_uid != 0:
-        out["issues"].append(f"not owned by root (uid {st.st_uid}) -- an agent "
-                             f"could edit the broker itself")
-    if st.st_mode & 0o022:
-        out["issues"].append(f"writable by non-root (mode {st.st_mode & 0o777:o})")
-    # Drift: an installed broker older than the source is a broker missing
-    # whatever the source learned since.
-    src = root / BROKER_SRC
-    if src.is_file() and src.read_bytes() != pathlib.Path(BROKER_DST).read_bytes():
-        out["issues"].append("differs from sandbox/ph-sudo in this checkout -- "
-                             "re-run `porthole sandbox install`")
-    return out
-
-
-def _policy_state() -> dict:
-    out = {"installed": False, "path": POLICY_DST, "roots": [], "issues": []}
-    try:
-        st = os.stat(POLICY_DST)
-    except OSError:
-        out["issues"].append("not installed")
-        return out
-    out["installed"] = True
-    out["mode"] = f"{st.st_mode & 0o777:o}"
-    if st.st_uid != 0:
-        out["issues"].append("not owned by root -- a policy the user can edit "
-                             "is not a policy")
-    if st.st_mode & 0o022:
-        out["issues"].append("writable by non-root")
-    try:
-        for raw in pathlib.Path(POLICY_DST).read_text().splitlines():
-            line = raw.split("#", 1)[0].strip()
-            if line.startswith("root"):
-                out["roots"].append(line.partition("=")[2].strip())
-            elif line.startswith("allow_chroot"):
-                out["allow_chroot"] = line.partition("=")[2].strip()
-    except OSError as exc:
-        out["issues"].append(str(exc))
-    return out
-
-
 def _sudo_state() -> dict:
     """The thing this project exists to replace: a long root credential cache."""
     out = {"timestamp_timeout": None, "nopasswd_all": False, "issues": []}
@@ -464,14 +555,23 @@ def _sudo_state() -> dict:
         if line.startswith("#"):
             continue
         if "timestamp_timeout" in line:
-            value = line.partition("timestamp_timeout")[2].lstrip("= ").split()[0]
+            # Split on comma AS WELL as whitespace. sudoers joins Defaults
+            # options with commas -- `timestamp_timeout=9999,timestamp_type=
+            # global` is what this host actually has -- so splitting on
+            # whitespace alone captured "9999,timestamp_type=global", float()
+            # raised, and the except below swallowed it. The check for a
+            # 167-hour root cache had therefore never fired on the machine it
+            # was written for.
+            value = re.split(r"[\s,]", line.partition("timestamp_timeout")[2]
+                             .lstrip("= "))[0]
             out["timestamp_timeout"] = value
             try:
                 if float(value) > 60:
                     out["issues"].append(
                         f"timestamp_timeout={value} minutes: any process running "
                         f"as you gets silent root for {float(value)/60:.0f} hours. "
-                        f"This is the hole the broker replaces.")
+                        f"Nothing here needs it -- the workspace has no "
+                        f"sudoers entry at all.")
             except ValueError:
                 pass
         if "NOPASSWD: ALL" in line and not line.startswith("#"):
@@ -481,10 +581,23 @@ def _sudo_state() -> dict:
     return out
 
 
-def _container_state(root: pathlib.Path) -> dict:
+def _container_state(root: pathlib.Path, cfg=None) -> dict:
     out = {"podman": shutil.which("podman"), "image": _image_tag(root),
            "image_built": False, "container_running": False,
            "device_key": "", "issues": []}
+    # The workspace's own work dir. It must be OURS: a rootless container maps
+    # your uid and nothing else, so one built by host root is unwritable in
+    # there and cannot be converted.
+    pmb = _sandbox_pmb(cfg or {})
+    out["work_dir"] = str(pmb)
+    try:
+        out["work_dir_ok"] = pmb.stat().st_uid == os.getuid()
+    except OSError:
+        out["work_dir_ok"] = False
+    if pmb.exists() and not out["work_dir_ok"]:
+        out["issues"].append(
+            f"{pmb} is not owned by you -- the workspace cannot write it. "
+            f"`podman unshare rm -rf {pmb}` then `porthole sandbox up`")
     key = pathlib.Path.home() / DEVICE_KEY
     out["device_key"] = str(key) if key.exists() else ""
     if not out["podman"]:
@@ -519,14 +632,8 @@ def cmd_sandbox(args, ctx) -> int:
     action = args.action or "status"
     if action == "status":
         return _status(ctx)
-    if action == "install":
-        return _install(ctx, args)
-    if action == "audit":
-        return _audit(ctx, args)
     if action == "shell":
         return _shell(ctx, args)
-    if action == "uninstall":
-        return _uninstall(ctx)
     if action == "build":
         return _build(ctx, args)
     if action == "up":
@@ -534,19 +641,25 @@ def cmd_sandbox(args, ctx) -> int:
     if action == "down":
         return _down(ctx)
     raise Bail(f"unknown action {action!r}", EX_USAGE,
-               "actions: status, install, shell, audit, uninstall, build, up, down")
+               "actions: status, shell, build, up, down")
 
 
 def _status(ctx) -> int:
     state = {
-        "broker": _broker_state(ctx.root),
-        "policy": _policy_state(),
         "sudo": _sudo_state(),
-        "container": _container_state(ctx.root),
+        "container": _container_state(ctx.root, ctx.cfg),
         "env": {"PMB_SUDO": os.environ.get("PMB_SUDO", "")},
+        "stale_env": (["PMB_SUDO=" + os.environ["PMB_SUDO"]]
+                      if os.environ.get("PMB_SUDO") else []),
     }
-    issues = sum((v.get("issues", []) for v in state.values()
-                  if isinstance(v, dict)), [])
+    # The host's sudo cache is reported even though the workspace does not use
+    # it: a 167-hour credential cache is a hazard on this machine whether or
+    # not anything here needs root, and "we stopped needing it" is not the same
+    # as "it is harmless".
+    workspace_up = (state["container"]["image_built"]
+                    and state["container"]["container_running"])
+    issues = sum((state[k].get("issues", []) for k in ("container", "sudo")), [])
+    state["workspace_up"] = workspace_up
     state["ok"] = not issues
 
     def render():
@@ -557,17 +670,18 @@ def _status(ctx) -> int:
             mark = o.paint(tick, "green") if good else o.paint(cross, "red")
             o(f"  {mark} {label:<22} {detail}")
 
-        o.heading("privilege broker")
-        b = state["broker"]
-        line("ph-sudo", b["installed"] and not b["issues"],
-             BROKER_DST if b["installed"] else o.paint("not installed", "grey"))
-        p = state["policy"]
-        line("policy", p["installed"] and not p["issues"],
-             ", ".join(p["roots"]) if p["roots"]
-             else o.paint("not installed", "grey"))
-        line("PMB_SUDO", bool(state["env"]["PMB_SUDO"]),
-             state["env"]["PMB_SUDO"] or o.paint("unset -- pmbootstrap will "
-                                                 "use plain sudo", "yellow"))
+        o.heading("workspace")
+        c = state["container"]
+        line("podman", bool(c["podman"]), c["podman"] or o.paint("not installed", "grey"))
+        line("image", c["image_built"],
+             c["image"] if c["image_built"] else o.paint("not built", "grey"))
+        line("container", c["container_running"],
+             CONTAINER if c["container_running"] else o.paint("not running", "grey"))
+        line("work dir", c["work_dir_ok"],
+             c["work_dir"] if c["work_dir_ok"]
+             else o.paint(f"{c['work_dir']} -- not yours", "yellow"))
+        line("device key", bool(c["device_key"]),
+             c["device_key"] or o.paint("not created", "grey"))
         o.blank()
 
         o.heading("host sudo")
@@ -577,266 +691,18 @@ def _status(ctx) -> int:
              if s["timestamp_timeout"] else "default")
         o.blank()
 
-        o.heading("workspace")
-        c = state["container"]
-        line("podman", bool(c["podman"]), c["podman"] or o.paint("not installed", "grey"))
-        line("image", c["image_built"],
-             c["image"] if c["image_built"] else o.paint("not built", "grey"))
-        line("container", c["container_running"],
-             CONTAINER if c["container_running"] else o.paint("not running", "grey"))
-        line("device key", bool(c["device_key"]),
-             c["device_key"] or o.paint("not created", "grey"))
-        o.blank()
-
         if issues:
             o.heading("issues")
             for issue in issues:
                 o(f"  {o.paint(o.sym('•', '-'), 'yellow')} {issue}")
             o.blank()
-            o.hint("porthole sandbox install    set up the broker")
+            if not workspace_up:
+                o.hint("porthole sandbox up          start the workspace")
             o.hint("docs/SANDBOX.md             the threat model")
         else:
             o(o.paint("sandbox is configured", "green"))
 
     return ctx.emit(state, render)
-
-
-# ----------------------------------------------------------------- install --
-
-def _install(ctx, args) -> int:
-    """Emit the LEGACY broker install script. Requires --broker, deliberately.
-
-    The workspace container replaced this. It needs no sudoers entry at all, so
-    the default install now grants none: a boundary you do not need is one more
-    thing that can be wrong. The broker remains for a host without podman, and
-    for that host it is genuinely better than a blanket sudo cache -- but it is
-    a fallback, and choosing a weaker boundary should be explicit.
-
-    Still does not run the privileged steps itself. Installing a security
-    boundary is a decision, not a side effect, and an agent cannot type a sudo
-    password anyway -- so it prints exactly what will happen and lets a human
-    run it, which is also how the human learns what they just trusted.
-    """
-    if not getattr(args, "broker", False):
-        ctx.out.heading("the workspace is the supported path")
-        ctx.out("  porthole sandbox up        build the image and start it")
-        ctx.out("  porthole sandbox shell     a shell, or --command for one command")
-        ctx.out.blank()
-        ctx.out("  It needs no sudoers entry, so this command no longer writes one.")
-        ctx.out("  Inside the container you are root and pmbootstrap uses no sudo.")
-        ctx.out.blank()
-        ctx.out(ctx.out.paint(
-            "  Only if this host cannot run podman: `porthole sandbox install "
-            "--broker`\n"
-            "  installs the legacy privilege broker, which DOES grant a real "
-            "sudoers entry\n"
-            "  and cannot contain a determined chroot payload. See "
-            "docs/SANDBOX.md.", "grey"))
-        return EX_OK
-
-    src = ctx.root / BROKER_SRC
-    client_src = ctx.root / CLIENT_SRC
-    if not src.is_file():
-        raise Bail(f"{src} is missing from this checkout", EX_FAIL)
-
-    roots = args.root or []
-    if not roots:
-        pmb = ctx.cfg.get("PORTHOLE_PMB_DIR") or str(
-            pathlib.Path.home() / ".local/var/pmbootstrap")
-        roots = [pmb]
-        workdir = ctx.cfg.get("PORTHOLE_WORKDIR")
-        if workdir:
-            roots.append(workdir)
-
-    # pmbootstrap copies its bundled apk signing keys out of its own install
-    # directory into the workdir, which is outside the roots. Only bites on a
-    # fresh workdir, and then it stops the first chroot -- so find it now.
-    # pmbootstrap is often run from a checkout rather than installed as a
-    # library, so ask its own entry point where it lives rather than trying to
-    # import it from here.
-    readable_extra = []
-    entry = shutil.which("pmbootstrap")
-    if entry:
-        pkg = pathlib.Path(entry).resolve().parent / "pmb"
-        keys = pkg / "data" / "keys"
-        if keys.is_dir():
-            readable_extra = [
-                "",
-                "# pmbootstrap copies its bundled apk signing keys out of its",
-                "# own install directory into the workdir. Read-only, and it",
-                "# only bites on a fresh workdir -- where it stops the first",
-                "# chroot.",
-                f"readable = {keys}",
-            ]
-
-    policy = ["# porthole sandbox policy. Root-owned; the broker refuses to run",
-              "# if this file is writable by anyone else.",
-              "#",
-              "# Every path argument in a brokered root request must resolve",
-              "# inside one of these roots, symlinks followed.",
-              ""]
-    for r in roots:
-        policy.append(f"root = {pathlib.Path(r).expanduser()}")
-    policy += [
-        "",
-        "# Host files a request may READ but never write. pmbootstrap copies",
-        "# the host resolv.conf into the chroot so the chroot has DNS, and",
-        "# that source is outside the roots by design. Listing it grants",
-        "# nothing: it is world-readable, so root reading it discloses nothing",
-        "# you cannot already read. It can never be a copy DESTINATION, which",
-        "# is what stops a listed file being overwritten as root.",
-        "readable = /etc/resolv.conf",
-        *readable_extra,
-        "",
-        "# chroot runs an arbitrary command as root, and root inside a chroot",
-        "# can escape a chroot. Set to 0 to refuse it on the host entirely and",
-        "# do chroot work only in `porthole sandbox shell`.",
-        "allow_chroot = 1",
-        "",
-    ]
-    policy_text = "\n".join(policy)
-
-    user = getpass.getuser()
-    script = f"""\
-set -eu
-
-# 1. the broker: root-owned, not writable by you. If you can edit it, it is
-#    not a boundary -- an agent running as you would simply rewrite it.
-sudo install -d -m 0755 /usr/local/libexec/porthole
-sudo install -m 0755 -o root -g root {src} {BROKER_DST}
-
-# 2. the client: what PMB_SUDO points at. pmbootstrap invokes it directly and
-#    prefixes nothing, so something has to supply the sudo step; the broker
-#    itself stays strictly root-only.
-sudo install -m 0755 -o root -g root {client_src} {CLIENT_DST}
-
-# 3. the policy: same reasoning.
-sudo install -d -m 0755 /etc/porthole
-sudo install -m 0644 -o root -g root /dev/stdin {POLICY_DST} <<'POLICY'
-{policy_text}POLICY
-
-# 4. the audit log, writable by you so the broker can append to it.
-sudo install -m 0664 -o root -g {user} /dev/null {AUDIT} 2>/dev/null || \\
-  sudo touch {AUDIT} && sudo chown root:{user} {AUDIT} && sudo chmod 0664 {AUDIT}
-
-# 5. ONE sudoers entry, for the broker alone. visudo -c validates before
-#    install, because a malformed sudoers file can lock you out of sudo.
-printf '%s\\n' '{user} ALL=(root) NOPASSWD: {BROKER_DST}' \\
-  | sudo tee {SUDOERS_DST} >/dev/null
-sudo chmod 0440 {SUDOERS_DST}
-sudo visudo -c -f {SUDOERS_DST}
-
-echo
-echo "Now REMOVE the blanket cache, which is the actual hole:"
-echo "  sudo visudo    # delete any 'Defaults:{user} timestamp_timeout=<large>'"
-echo
-echo "Then add to your shell profile:"
-echo "  export PMB_SUDO={CLIENT_DST}"
-"""
-
-    def render():
-        o = ctx.out
-        o.heading("porthole sandbox install")
-        o.blank()
-        o("This sets up a privilege broker so pmbootstrap works without giving")
-        o("every process running as you unrestricted root on this host.")
-        o.blank()
-        o.heading("roots the broker will permit")
-        for r in roots:
-            o(f"  {pathlib.Path(r).expanduser()}")
-        o.blank()
-        o("Nothing outside those paths can be touched through the broker.")
-        o.blank()
-        o.heading("what it installs")
-        o("  the broker    " + BROKER_DST + "  (root-owned, 0755)")
-        o("  the client    " + CLIENT_DST + "  (what PMB_SUDO points at)")
-        o("  the policy    " + POLICY_DST + "  (root-owned, 0644)")
-        o("  one sudoers   " + SUDOERS_DST + "  (for the broker alone)")
-        o("  an audit log  " + AUDIT)
-        o.blank()
-        o.heading("review, then run")
-        o(o.paint("It needs sudo, and installing a security boundary should be a "
-                  "decision you\nmake rather than something a tool does to you. "
-                  "The script is written out\nrather than printed so you can "
-                  "read it in an editor first -- and so a\ncopy-paste cannot "
-                  "mangle the heredoc.", "grey"))
-        o.blank()
-        o(o.paint(f"  less {out_path}", "cyan"))
-        o(o.paint(f"  bash {out_path}", "cyan"))
-        o.blank()
-        o.heading("then")
-        o.hint("porthole sandbox status")
-        o.hint(f"export PMB_SUDO={CLIENT_DST}   # add to your shell profile")
-        o.hint("sudo visudo   # and delete the blanket timestamp_timeout")
-
-    if args.json:
-        return ctx.emit({"script": script, "roots": roots,
-                         "policy": policy_text, "broker_src": str(src)})
-
-    # Written, not printed: a 30-line script with a heredoc in it does not
-    # survive copy-paste, and a security boundary deserves to be read in an
-    # editor before it is trusted.
-    out_dir = ctx.root / ".run"
-    out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / "sandbox-install.sh"
-    out_path.write_text("#!/bin/bash\n# Generated by `porthole sandbox install`. Review before running.\n\n" + script)
-    out_path.chmod(0o755)
-
-    render()
-    return EX_OK
-
-
-def _uninstall(ctx) -> int:
-    user = getpass.getuser()
-    ctx.out.heading("remove the sandbox")
-    ctx.out.blank()
-    for line in [f"sudo rm -f {SUDOERS_DST} {BROKER_DST} {CLIENT_DST} {POLICY_DST}",
-                 f"# your PMB_SUDO export in ~/.bashrc or ~/.zshrc too"]:
-        ctx.out(ctx.out.paint("  " + line, "cyan"))
-    ctx.out.blank()
-    ctx.out(f"The audit log at {AUDIT} is left in place deliberately.")
-    return EX_OK
-
-
-# ------------------------------------------------------------------- audit --
-
-def _audit(ctx, args) -> int:
-    path = pathlib.Path(os.environ.get("PH_SUDO_AUDIT", AUDIT))
-    if not path.exists():
-        raise Bail(f"no audit log at {path}", EX_FAIL,
-                   "nothing has gone through the broker yet, or it is not "
-                   "installed -- `porthole sandbox status`")
-    entries = []
-    for line in path.read_text(errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    if args.denied:
-        entries = [e for e in entries if e.get("verdict", "").startswith("DENY")]
-    entries = entries[-args.limit:]
-
-    def render():
-        if not entries:
-            ctx.out("nothing recorded.")
-            return
-        for e in entries:
-            verdict = e.get("verdict", "?")
-            colour = {"ALLOW": "grey", "DENY": "red"}.get(
-                verdict, "yellow" if verdict.startswith("ALLOW-") else "grey")
-            argv = " ".join(e.get("argv", []))
-            ctx.out(f"  {e.get('t', '')}  "
-                    f"{ctx.out.paint(f'{verdict:<13}', colour)} {argv[:100]}")
-            if e.get("reason") and verdict == "DENY":
-                ctx.out(ctx.out.paint(f"      {e['reason'][:110]}", "grey"))
-        ctx.out.blank()
-        denies = sum(1 for e in entries if e.get("verdict") == "DENY")
-        ctx.out(f"{len(entries)} shown, {denies} denied.")
-
-    return ctx.emit(entries, render)
 
 
 # ------------------------------------------------------------------- build --
@@ -912,7 +778,7 @@ def _shell(ctx, args) -> int:
     """A shell (or one command) inside the persistent workspace."""
     if not shutil.which("podman"):
         raise Bail("podman is not installed", EX_FAIL,
-                   "the workspace needs it; the broker tier does not")
+                   "`porthole doctor` names how to install it")
     if not _container_running():
         raise Bail(f"{CONTAINER} is not running", EX_FAIL,
                    "run `porthole sandbox up` first")
@@ -941,15 +807,11 @@ SPEC = {
         "root inside and your own unprivileged uid outside. No sudoers entry,\n"
         "no standing privilege. `up` builds and starts it; `shell --command`\n"
         "works without a TTY, which is what makes it usable by an agent.\n\n"
-        "`install --broker` is a legacy fallback for a host without podman.\n"
         "See docs/SANDBOX.md for the threat model."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["status", "install", "shell", "audit",
-                                  "uninstall", "build", "up", "down"],
-                      "help": "status | install | shell | audit | uninstall | build | up | down"}),
-        (["--root"], {"action": "append", "metavar": "PATH",
-                      "help": "install: a path the broker may touch (repeatable)"}),
+                      "choices": ["status", "shell", "build", "up", "down"],
+                      "help": "status | shell | build | up | down"}),
         (["--mount"], {"action": "append", "metavar": "PATH",
                        "help": "up: extra path to mount into the workspace"}),
         (["--command"], {"nargs": "...", "help": "shell: command instead of a shell"}),

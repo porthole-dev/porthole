@@ -7,6 +7,7 @@ Silverblue, which reports ID=fedora and has no dnf at all. The table was
 folklore -- asserted, never executed. tests/distro-matrix.sh runs the advice
 against four real distros; these are the fast checks that do not need podman.
 """
+import os
 import pathlib
 import sys
 
@@ -86,23 +87,37 @@ def test_an_unset_pmb_sudo_is_fine():
             os.environ["PMB_SUDO"] = saved
 
 
-def test_pmb_sudo_naming_the_broker_is_caught():
-    """The failure BOTH agent reports hit, and existence alone missed it: the
-    broker is present and executable, so the first version of this check said
-    ok. pmbootstrap invokes PMB_SUDO directly and the broker refuses to run
-    unless already root, so the build dies with exit 78 naming nothing."""
-    import sys as _sys
-    _sys.path.insert(0, str(ROOT / "lib"))
-    import porthole_cmd_sandbox as sandbox
-
+def test_any_pmb_sudo_at_all_is_caught():
+    """The privilege broker is gone, so PMB_SUDO can only be a leftover -- but
+    an export outlives the file it named, pmbootstrap invokes it directly, and
+    a stale one kills a build with exit 78 naming nothing. Both agent reports
+    that hit this had the variable set; neither could see why."""
     ch = doctor.Checks()
-    doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": sandbox.BROKER_DST}), {})
+    doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": "/usr/local/libexec/porthole/ph-sudo"}), {})
     row = ch.rows[-1]
     assert row["status"] == "fail", row
-    assert "BROKER" in row["detail"], row["detail"]
-    assert sandbox.CLIENT_DST in row["fix"], (
-        "the fix must name the client, which is the value that works: "
-        + row["fix"])
+    assert "unset PMB_SUDO" in row["fix"], row["fix"]
+
+    saved = os.environ.pop("PMB_SUDO", None)
+    try:
+        ch = doctor.Checks()
+        doctor._check_pmb_sudo(ch, _Ctx({}), {})
+        assert ch.rows[-1]["status"] == "ok", ch.rows[-1]
+    finally:
+        if saved is not None:
+            os.environ["PMB_SUDO"] = saved
+
+
+def test_nothing_still_ships_or_names_the_privilege_broker():
+    """Deleted, not deprecated. A fallback that still exists is one an agent
+    can be talked into using, and this one granted a real sudoers entry while
+    its own docs admitted it could not contain a determined chroot payload."""
+    assert not (ROOT / "sandbox" / "ph-sudo").exists()
+    assert not (ROOT / "sandbox" / "ph-sudo-client").exists()
+    for name in ("AGENTS.md", "README.md", "docs/SANDBOX.md",
+                 "skills/porthole-bringup/SKILL.md"):
+        text = (ROOT / name).read_text()
+        assert "sandbox install" not in text, f"{name} still offers the broker"
 
 
 def main():
