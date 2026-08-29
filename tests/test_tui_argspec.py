@@ -205,6 +205,29 @@ def test_a_variadic_positional_absorbs_its_tokens_and_rebuilds():
         == "porthole brain new my-note-id --section traps"
 
 
+def test_a_variadic_flag_rebuilds_as_separate_argv_tokens():
+    # `--command` takes nargs="..." -- everything after it. Rendered as one
+    # quoted token, jobs.py shlex.splits it into a single argv element and
+    # podman exec gets `'pmbootstrap status'` as one program name: ENOENT.
+    spec = {"verb": "sandbox", "args": [
+        (["action"], {"nargs": "?"}),
+        (["--command"], {"nargs": "..."}),
+    ]}
+    fs = argspec.fields(spec)
+    values = argspec.parse_example(
+        "porthole sandbox shell --command pmbootstrap status", "sandbox", fs)
+    assert values == {"action": "shell", "command": "pmbootstrap status"}, values
+    assert argspec.build("sandbox", fs, values) \
+        == "porthole sandbox shell --command pmbootstrap status"
+
+
+def test_a_non_variadic_flag_value_stays_one_quoted_token():
+    spec = {"verb": "brain", "args": [(["--section"], {})]}
+    fs = argspec.fields(spec)
+    assert argspec.build("brain", fs, {"section": "two words"}) \
+        == "porthole brain --section 'two words'"
+
+
 def test_shell_snippets_are_recognised_and_excluded():
     assert not argspec.is_direct('cd "$(porthole cd)"', "cd")
     assert not argspec.is_direct("porthole completion bash > ~/x", "completion")

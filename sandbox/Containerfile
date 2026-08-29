@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+# The porthole workspace image.
+#
+# Pinned base tag, never `latest`: a sandbox that changes under you is not a
+# sandbox. 3.24 is the newest Alpine release as of 2026-08-29, and it carries
+# pmbootstrap 3.11.1 -- the newest upstream release tag. Bump both together,
+# deliberately; the assertion at the bottom is what guards the bump.
+FROM docker.io/library/alpine:3.24
+
+# pmbootstrap comes from apk because on this base that IS the latest upstream
+# release. (It is not on PyPI above 2.1.0, and Alpine 3.22 was still on 3.9.0 --
+# both were reasons an earlier draft cloned from git. Neither applies here.)
+#
+# android-tools is 35.0.2: Google's newer platform-tools are glibc-only and
+# cannot run on musl, so this is the ceiling in an Alpine image. It is well
+# beyond what the supported devices need -- do not "fix" it with the zip.
+RUN apk add --no-cache \
+      pmbootstrap \
+      android-tools \
+      e2fsprogs fuse2fs fuse \
+      util-linux parted multipath-tools \
+      openssh-client rsync git \
+      python3 openssl xz tar bash coreutils
+
+# The load-bearing assertion. The whole zero-privilege design rests on
+# `pmbootstrap install --no-image` returning before it ever reaches losetup
+# (docs/SANDBOX-PROVISIONING.md). If a future pmbootstrap drops that flag, the
+# IMAGE BUILD must fail here rather than the discovery happening on a device.
+RUN pmbootstrap install --help 2>&1 | grep -q -- '--no-image' \
+ || (echo "FATAL: this pmbootstrap has no --no-image; the sandbox design needs it" >&2; exit 1)
+
+LABEL org.opencontainers.image.title="porthole-sandbox" \
+      org.opencontainers.image.description="postmarketOS bring-up workspace"
+
+WORKDIR /pmb
+CMD ["/bin/bash"]
