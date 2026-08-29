@@ -219,9 +219,13 @@ def _down_argv() -> list[str]:
 def _down(ctx) -> int:
     if not shutil.which("podman"):
         raise Bail("podman is not installed", EX_FAIL, "nothing to stop")
-    rc = subprocess.run(_down_argv(), capture_output=True).returncode
-    ctx.out(f"  {CONTAINER} removed (mounted directories untouched)"
-            if rc == 0 else f"  {CONTAINER} was not running")
+    # `podman rm -f` exits 0 whether or not the container existed, so the
+    # message has to come from a check made BEFORE removing -- not the rc.
+    existed = subprocess.run(
+        ["podman", "container", "exists", CONTAINER]).returncode == 0
+    subprocess.run(_down_argv(), capture_output=True)
+    ctx.out(f"  {CONTAINER} removed (mounted directories untouched)" if existed
+            else f"  {CONTAINER} was not running")
     return EX_OK
 
 
@@ -318,7 +322,7 @@ def _container_state(root: pathlib.Path) -> dict:
     out["device_key"] = str(key) if key.exists() else ""
     if not out["podman"]:
         out["issues"].append("podman not installed -- the workspace is "
-                             "unavailable. `porthole doctor --fix`")
+                             "unavailable. `porthole doctor` has install hints")
         return out
     user = getpass.getuser()
     for path in ("/etc/subuid", "/etc/subgid"):
