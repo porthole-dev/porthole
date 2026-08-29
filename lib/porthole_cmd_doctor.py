@@ -568,6 +568,26 @@ def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
         ch.add("host: PMB_SUDO", "ok", "unset -- the workspace needs no broker")
         return
 
+    # Pointing at the BROKER instead of the client is the failure both agent
+    # reports hit, and existence alone does not catch it: the file is there and
+    # executable, so the first check passed it as ok. The broker refuses to run
+    # unless it is already root -- by design, so that a security boundary never
+    # elevates itself -- and pmbootstrap invokes PMB_SUDO directly, prefixing
+    # nothing. So it dies with exit 78 on the first root operation, deep inside
+    # a build, with nothing naming PMB_SUDO.
+    import porthole_cmd_sandbox as _sandbox
+
+    if os.path.realpath(value) == os.path.realpath(_sandbox.BROKER_DST):
+        ch.add("host: PMB_SUDO", "fail",
+               f"points at the BROKER ({value}), which refuses to run unless "
+               f"it is already root",
+               "unset PMB_SUDO"
+               "    # the workspace needs no broker at all; a build otherwise "
+               "dies with exit 78 inside pmbootstrap.\n"
+               f"          for the legacy broker path it must name the CLIENT: "
+               f"{_sandbox.CLIENT_DST}")
+        return
+
     target = shutil.which(value) or (value if os.path.exists(value) else "")
     if not target or not os.access(target, os.X_OK):
         ch.add("host: PMB_SUDO", "fail",
