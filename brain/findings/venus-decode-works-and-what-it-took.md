@@ -71,6 +71,15 @@ Alpine's gst-plugins-good ships NO stateful v4l2 element, so GStreamer
 consumers (WebKit/Epiphany, GNOME apps) cannot use venus until the temp
 fork (pmaports temp/gst-plugins-good, -Dv4l2=enabled) lands on the device.
 
+**Measured, mechanism unexplained** — decode survives a REAL phone
+suspend: one 45 s RTC s2idle cycle (tk-suspend-cycle.sh, success=1) and the
+next hardware decode is bit-exact. So system sleep does not hit the broken
+warm path that runtime PC hits, even though pm_runtime_force_suspend should
+route through the same callbacks. Plausibly the deeper platform cycle
+(XO shutdown / vMPM) resets whatever the runtime-PC warm path leaves
+wedged. Do not "fix" runtime PC by imitating system sleep without measuring
+which ingredient does it.
+
 **Instrument left in the tree**: `hfi_trace=1` on venus_core logs every HFI
 packet both ways (0193). The knob vector from the wedge campaign remains;
 /etc/modprobe.d/00-venus-bringup.conf now carries all-neutral values.
