@@ -1,14 +1,28 @@
 ---
 id: venus-wedges-on-the-first-vbif-write
-title: The msm8998 venus wedge is the first VBIF register write, and skipping the presets avoids it
+title: msm8998 TZ refuses venus resume with -EINVAL, mainline swallows it, and the whole block stays dark
 scope: device:google-taimen
 subsystem: media
 severity: finding
 confidence: proven
 evidence: 2026-08-29, kernel 7.2.2 #6/#7, node status=okay, netconsole VERIFIED end to end on usb0. Every arm from a fresh boot, with a control proving venus_core absent beforehand AND a readback of /sys/module/venus_core/parameters proving the knob was live. preset_limit=0 survives and probe fails cleanly -110; preset_limit=1 (writel 0x3 to base+0x80124) wedges; preset_limit=7 wedges. boot_stage=2 survives, 3 wedges. stop_at 6/9/10 survive, -1 wedges.
-refutes: the wedge is inside core_power(POWER_ON); the wedge is the CPU_CS_SCIACMDARG0 poll after VIDC_CTRL_INIT; the missing interconnect vote is why; venus_boot/the trustzone PAS reset is what dies; a module parameter set on the modprobe command line overrides one in modprobe.d for the purpose of an experiment
+refutes: the wedge is inside core_power(POWER_ON); the wedge is the CPU_CS_SCIACMDARG0 poll after VIDC_CTRL_INIT; the missing interconnect vote is why; venus_boot/the trustzone PAS reset is what dies; the missing content-protection regions are why TZ refuses; releasing the venus CPU with venus_reset_cpu() is a usable fallback; a module parameter on the modprobe command line overrides one in modprobe.d for the purpose of an experiment
 first-learned: 2026-08-29
 ---
+
+**The root cause, measured** — the trustzone refuses to resume venus, and
+mainline maps that refusal to success:
+
+    qcom-venus cc00000.video-codec: venus: scm_set_remote_state(resume=1) = -22
+    qcom-venus cc00000.video-codec: venus: scm_set_remote_state(resume=0) = 0
+
+-22 is -EINVAL, and `venus_set_hw_state()` does `if (resume && ret == -EINVAL)
+ret = 0;`. So the venus CPU is never released, nothing anywhere says so, and
+**the entire venus register space stays unreachable** -- which is why the first
+write into it takes the NoC down. Note the *suspend* direction returns 0, so SCM
+itself works; TZ specifically rejects the resume.
+
+Everything below was the route to that, and each step is still true.
 
 **The question** — enabling venus on msm8998 kills the SoC below printk. Where?
 
@@ -39,7 +53,27 @@ offsets, plus one at 0xe2010 which is `WRAPPER_BASE + 0x2010` and not VBIF at
 all. Whatever gates VBIF access on this SoC -- a clock, a subcore GDSC, an
 ordering step -- mainline is not doing it before it writes there.
 
-**Still open** — what makes VBIF reachable. Note `core_power_v1()` returns early
+**Two fixes tried and refuted, each with its own control**
+
+- *"Release the CPU ourselves when TZ refuses."* `venus_reset_cpu()`, the
+  no-TZ path's action, **wedges the bus too**. The wrapper registers it writes
+  (FW/CPA/NONPIX windows, A9SS reset) are as unreachable as VBIF. There is no
+  reaching venus from the CPU while TZ holds it.
+- *"The content protection regions are missing, so TZ refuses."* `venus_boot()`
+  only calls `qcom_scm_mem_protect_video_var()` when `res->cp_size` is set, and
+  msm8998 set none of the `cp_*` fields. Filling them in from the downstream
+  context banks -- `cp_size` = `venus_ns/virtual-addr-pool[0]` = 0x70800000,
+  nonpixel = <0x1000000 0x24800000>, the same four values sdm845 carries --
+  changes TZ's answer **not at all**. Still -22. Correct completeness fix, wrong
+  culprit; kept for the same reason the interconnect vote was.
+
+**Still open** — why TZ rejects the resume. Worth trying next: a remote-state
+id other than 0, and forcing `use_tz = false` so venus takes the
+`venus_boot_no_tz()` path entirely rather than PAS -- though that needs the
+firmware carveout to be reachable without PAS, which is the thing to check
+first.
+
+**Also still open** — what makes VBIF reachable. Note `core_power_v1()` returns early
 for msm8998 (`vcodec_pmdomains` is NULL) and so never calls
 `vcodec_clks_enable()`, while `msm8998_res` does declare `vcodec0_clks`; and
 `video_subcore0/1_gdsc` are HW_CTRL children of `video_top_gdsc` that nothing

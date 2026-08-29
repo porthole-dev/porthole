@@ -29,7 +29,7 @@ generic notes as well.
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
-| [venus-wedges-on-the-first-vbif-write](findings/venus-wedges-on-the-first-vbif-write.md) | `device:google-taimen` | The msm8998 venus wedge is the first VBIF register write, and skipping the presets avoids it |
+| [venus-wedges-on-the-first-vbif-write](findings/venus-wedges-on-the-first-vbif-write.md) | `device:google-taimen` | msm8998 TZ refuses venus resume with -EINVAL, mainline swallows it, and the whole block stays dark |
 | [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
 
 ## laws
