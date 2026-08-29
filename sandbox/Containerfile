@@ -29,6 +29,21 @@ RUN apk add --no-cache \
       openssh-client rsync git \
       python3 openssl xz tar bash coreutils
 
+# The apk package installs the `pmb` PYTHON PACKAGE and nothing else -- 164
+# files, no helpers/. But `helpers/envkernel.sh` is what every kernel build
+# goes through, and it exists only in the source repo. Without this the
+# workspace has a working `pmbootstrap` CLI and still cannot build a kernel,
+# which is exactly how it looked to the first agent that tried.
+#
+# Cloned at the tag matching the installed version, so the helper and the CLI
+# cannot drift apart.
+RUN v="$(pmbootstrap --version)" \
+ && git clone --depth 1 --branch "$v" \
+      https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git \
+      /opt/pmbootstrap-src \
+ && test -f /opt/pmbootstrap-src/helpers/envkernel.sh \
+ || (echo "FATAL: no helpers/envkernel.sh for pmbootstrap $v; the workspace cannot build a kernel without it" >&2; exit 1)
+
 # The load-bearing assertion. The whole zero-privilege design rests on
 # `pmbootstrap install --no-image` returning before it ever reaches losetup
 # (docs/SANDBOX-PROVISIONING.md). If a future pmbootstrap drops that flag, the

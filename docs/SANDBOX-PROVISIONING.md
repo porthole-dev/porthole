@@ -222,6 +222,37 @@ the partition layout and the filesystem UUIDs that `boot.img` hard-codes.
 disagreeing. **That trade-off is now the open decision**, and it is a different
 decision than the one this section originally recorded as settled.
 
+### 4b. Where the source lives
+
+**The kernel tree stays on the host and is bind-mounted at `/work`.** It is not
+copied into the image and not moved. A bind mount is native speed, and
+`--userns=keep-id:uid=0,gid=0` means files the build creates come out owned by
+you rather than by a container uid, so there is nothing to migrate and nothing
+to sync back. Editing on the host and building in the workspace is the same
+tree either way.
+
+What that leaves is a class of bug rather than a design question: **config keys
+that name HOST paths do not resolve inside the container.** Three have bitten
+so far, all the same shape.
+
+| key | host value | inside |
+|---|---|---|
+| `PORTHOLE_WORKDIR` | `~/src/.../taimen` | remapped to `/work` |
+| `PORTHOLE_DEVICE` | from the environment, a layer that stops at the boundary | passed in explicitly |
+| `PORTHOLE_PMBOOTSTRAP_SRC` | `~/src/pmbootstrap` | remapped to `/opt/pmbootstrap-src` |
+
+The third one was invisible until the container was asked to build: the Alpine
+`pmbootstrap` package installs the `pmb` python package and **no `helpers/`**,
+while `helpers/envkernel.sh` — which every rung compiles through — exists only
+in the source repo. So the workspace had a working `pmbootstrap` CLI and could
+not build a kernel at all. The image now clones the source at the tag matching
+the installed CLI, and the build fails if that helper is absent.
+
+**The rule this leaves behind:** a new path-valued config key must be mounted,
+remapped, or deliberately unset for the container. Nothing catches this
+automatically yet, and every instance so far presented as an unrelated error
+somewhere deep in a build.
+
 ### 5. Verbs
 
 | verb | does |
