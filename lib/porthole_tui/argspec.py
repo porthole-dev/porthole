@@ -119,7 +119,7 @@ def fields(spec):
             browse=(kind == "path"),
             dangerous=any(w in dest for w in DANGEROUS_FIELDS),
             default=kw.get("default"),
-            variadic=kw.get("nargs") in ("*", "+"),
+            variadic=kw.get("nargs") in ("*", "+", "..."),
         ))
     return out
 
@@ -235,6 +235,15 @@ def parse_example(example, verb, fields_):
                 return None
             if field.kind == "check":
                 values[field.dest] = True
+            elif field.variadic:
+                # nargs="..." on a flag means "everything after it is the
+                # value" (porthole sandbox shell --command pmbootstrap
+                # status): a single rest.pop(0) would strand later tokens
+                # as unmatched positionals, same failure mode as below.
+                group = [inline] if inline else []
+                group.extend(rest)
+                rest.clear()
+                values[field.dest] = " ".join(group)
             else:
                 values[field.dest] = inline or (rest.pop(0) if rest else "")
         else:
