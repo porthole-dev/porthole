@@ -70,7 +70,11 @@ build INSIDE the chroot and is owned by the chroot's build uid, so **the host
 user cannot write into it**. A cache file placed there fails silently if the
 write error is swallowed.
 
-**So the ways to make a build faster today, in order:** run the rung the change
-actually needs (`porthole build` measures and picks -- one module is ~40 s
-against `kernel`'s ~10 min), and use `PORTHOLE_LAX_BUILD=1` on the packaging
-rungs. The compile is not the problem.
+**So the way to make a build faster today** is to run the rung the change
+actually needs -- `porthole build` measures and picks, and one module is ~40 s
+against `kernel`'s ~10 min. The compile is not the problem.
+
+`PORTHOLE_LAX_BUILD=1` was recommended here and should not have been: measured
+the same day, it saves nothing (14.96 / 15.34 / 15.25 / 14.68 s interleaved on
+the kernel package) while still accepting stale build state. See
+[[lax-build-buys-nothing-measurable]].
