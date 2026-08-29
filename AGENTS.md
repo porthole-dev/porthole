@@ -210,8 +210,11 @@ It does NOT speed up the compile. The compile is cached separately, and **in
 the workspace that cache now works** -- the image rewrites envkernel's
 `CCACHE_DISABLE=1` to a `CCACHE_DIR`, and `_ph_arm_ccache` in `tools/ph-build.sh`
 installs ccache into `chroot_native` and links clang into its masquerade dir on
-every activate. Measured 2026-08-29: recompiling the same sources is 23/23 hits
-where it was 0. `PORTHOLE_NO_CCACHE=1` turns it off.
+every activate. Measured: the same 643-step rebuild is 1m49s with no cache, 2m09s on a run
+that misses everywhere, and **43 s** once the cache has seen those objects.
+So it costs ~18% the first time a set of objects is compiled and pays 2.5x on
+every repeat. `PORTHOLE_NO_CCACHE=1` turns it off if you build a tree once and
+never again.
 
 That helps a full rebuild -- a kernel version move, a common header, a fresh
 workspace -- and does nothing for the 7-second incremental loop, which never

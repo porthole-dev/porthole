@@ -192,9 +192,11 @@ measuring. Run `porthole build purge` if a stale dev package is suspected.
 It does NOT speed up the compile. The compile has its own cache, and **in the
 workspace it now works**: the image rewrites envkernel's `CCACHE_DISABLE=1`,
 and `_ph_arm_ccache` puts ccache and a clang symlink inside `chroot_native` on
-every activate. That pays on a full rebuild -- a kernel version move, a common
-header, a fresh workspace -- and does nothing for the incremental loop, which
-never repeats a compilation to cache. `PORTHOLE_NO_CCACHE=1` turns it off;
+every activate. The same 643-step rebuild: 1m49s uncached, 2m09s on a run that
+misses everywhere, 43 s once cached -- so ~18% dearer the first time a set of
+objects is compiled, 2.5x faster every repeat. That pays on a full rebuild --
+a kernel version move, a common header, a chroot zap, a fresh workspace -- and
+does nothing for the incremental loop, which never repeats a compilation. `PORTHOLE_NO_CCACHE=1` turns it off;
 `--host` builds stay uncached because your own pmbootstrap checkout is not
 patched. `brain/findings/the-workspace-caches-kernel-compiles.md`.
 

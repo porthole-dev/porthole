@@ -36,9 +36,13 @@ first-learned: 2026-08-29
 > **"Still not established" is now established**, all three points, and the
 > cache is live. See [[the-workspace-caches-kernel-compiles]].
 >
-> **What is still NOT known: why upstream disabled it.** The local pmbootstrap
-> checkout is a depth-1 clone with no history to blame, and no rationale is in
-> the file. Treat that as an open question, not as a cleared one.
+> **Why upstream disabled it, since answered.** `fe28a39f`, 2022-06-14, MR
+> 2189: *"Not extensively tested, but this shouldn't be necessary given that
+> you get incremental builds with envkernel and may reduce build times."* A
+> performance judgement, self-declared untested, and no correctness claim
+> anywhere in it. The depth-1 checkout on this host is why an earlier pass
+> called this unknowable; `git clone` of the upstream history answers it in one
+> pickaxe. See [[the-workspace-caches-kernel-compiles]].
 
 **The question** — bring-up sessions spend six to ten minutes per kernel build.
 How much of that is compilation that a cache should have removed?
