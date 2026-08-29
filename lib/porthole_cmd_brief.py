@@ -80,6 +80,8 @@ def cmd_brief(args, ctx) -> int:
     tools = tmod.collect(root, device)
 
     workspace = _workspace_state(root)
+    import porthole as _porthole
+    drifts = _porthole.drift(cfg)
 
     state = "not probed"
     if not args.no_device:
@@ -109,6 +111,7 @@ def cmd_brief(args, ctx) -> int:
             "traps": _device_traps(cfg),
         },
         "workspace": workspace,
+        "config_drift": drifts,
         "tools": {
             "count": len(tools),
             "undocumented": [t.name for t in tools if t.gaps],
@@ -207,6 +210,16 @@ def cmd_brief(args, ctx) -> int:
                 ctx.out.kv("", ctx.out.paint(port["next"]["command"], "cyan"), w)
             for item in port.get("stale", [])[:3]:
                 ctx.out.warn(f"{item['title']}: {item['detail']}")
+            ctx.out.blank()
+
+        if payload["config_drift"]:
+            ctx.out.heading("the environment disagrees with the profile")
+            for d in payload["config_drift"]:
+                verb = "REFUSES a build" if d["blocking"] else "worth checking"
+                ctx.out(ctx.out.paint(
+                    f"  {d['key']}: environment says {d['winning']}, "
+                    f"{d['committed_layer']} says {d['committed']}  "
+                    f"({verb})", "yellow"))
             ctx.out.blank()
 
         if not payload["workspace"]["ready"]:

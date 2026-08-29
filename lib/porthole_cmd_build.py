@@ -173,6 +173,35 @@ def _space_warning(cfg) -> str:
     return ""
 
 
+def _assert_no_drift(ctx, args) -> None:
+    """Refuse to build something other than what the profile says.
+
+    A stale `export PORTHOLE_KERNEL_PKG=...-6.18` outranks a profile committed
+    at 7.2, and nothing said so: the build succeeded and produced the retired
+    kernel. Observed twice -- once poisoning a rootfs chroot. `porthole config`
+    could always have shown it; nobody runs `porthole config` mid-build.
+    """
+    import porthole
+
+    drifts = [d for d in porthole.drift(ctx.cfg) if d["blocking"]]
+    advisories = [d for d in porthole.drift(ctx.cfg) if not d["blocking"]]
+    for adv in advisories:
+        ctx.out.warn(f"{adv['key']} is {adv['winning']} from the environment, "
+                     f"but the {adv['committed_layer']} says "
+                     f"{adv['committed']}")
+    if not drifts or getattr(args, "allow_env_override", False):
+        return
+
+    detail = "\n  ".join(porthole.drift_lines(drifts))
+    raise Bail(
+        "the environment is overriding the profile:\n  " + detail,
+        EX_FAIL,
+        "the profile is committed; your shell is not.\n"
+        "          unset " + " ".join(d["key"] for d in drifts)
+        + "    use the profile\n"
+        "          porthole build --allow-env-override     you mean it")
+
+
 def _workspace_available(ctx) -> bool:
     """Is there a running workspace to build in?
 
@@ -292,6 +321,8 @@ def cmd_build(args, ctx) -> int:
     func, what = ACTIONS[action]
     extra = _rung_args(args, action)
 
+    _assert_no_drift(ctx, args)
+
     problems = _preflight(ctx)
     tight = _space_warning(ctx.cfg)
     if tight and not problems:
@@ -371,6 +402,9 @@ SPEC = {
                         "help": "boot: rebuild Image.gz too, not just dtbs"}),
         (["--timeout"], {"type": int, "default": 5400, "metavar": "SEC",
                          "help": "seconds before giving up (default 5400)"}),
+        (["--allow-env-override"], {"action": "store_true",
+                                    "help": "build what the environment says, "
+                                            "not what the profile says"}),
         (["--host"], {"action": "store_true",
                       "help": "build on the host, not in the workspace"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),

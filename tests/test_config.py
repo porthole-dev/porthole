@@ -229,6 +229,90 @@ def test_ssh_opts_include_the_boot_survivable_flags():
 
 # ------------------------------------------------------------------- runner --
 
+# ------------------------------------------------------- environment drift --
+#
+# A stale `export PORTHOLE_KERNEL_PKG=...-6.18` outranked a profile committed
+# at 7.2, and the build succeeded while producing the retired kernel. Observed
+# twice, once poisoning a rootfs chroot. The provenance to catch it was always
+# there; nothing acted on it.
+
+def test_the_environment_beating_the_profile_is_blocking_drift():
+    tmp, xdg = sandbox(profile_env='PORTHOLE_KERNEL_PKG="linux-7.2"\n',
+                       device="testdev")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_KERNEL_PKG="linux-6.18")
+    drifts = porthole.drift(cfg)
+    hit = [d for d in drifts if d["key"] == "PORTHOLE_KERNEL_PKG"]
+    assert hit, drifts
+    assert hit[0]["winning"] == "linux-6.18", hit
+    assert hit[0]["committed"] == "linux-7.2", hit
+    assert hit[0]["committed_layer"] == "profile", hit
+    assert hit[0]["blocking"] is True, "a wrong kernel must refuse, not warn"
+
+
+def test_an_environment_that_agrees_is_not_drift():
+    tmp, xdg = sandbox(profile_env='PORTHOLE_KERNEL_PKG="linux-7.2"\n')
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_KERNEL_PKG="linux-7.2")
+    assert not [d for d in porthole.drift(cfg)
+                if d["key"] == "PORTHOLE_KERNEL_PKG"]
+
+
+def test_a_key_the_profile_never_sets_is_not_drift():
+    """Otherwise every unset key becomes a refusal the moment anyone exports
+    it, which is how a guard gets worked around instead of obeyed."""
+    tmp, xdg = sandbox(profile_env="")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_KERNEL_PKG="linux-6.18")
+    assert not [d for d in porthole.drift(cfg)
+                if d["key"] == "PORTHOLE_KERNEL_PKG"]
+
+
+def test_the_device_only_advises():
+    """Selecting a device from the environment is a documented workflow, and on
+    the reference host the environment is the CORRECT one while the stored
+    value is stale. Refusing there would block the normal setup."""
+    tmp, xdg = sandbox(profile_env="", user_env='PORTHOLE_DEVICE="testdev"\n')
+    (tmp / "profiles" / "other").mkdir(parents=True, exist_ok=True)
+    (tmp / "profiles" / "other" / "device.env").write_text("")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="other")
+    hit = [d for d in porthole.drift(cfg) if d["key"] == "PORTHOLE_DEVICE"]
+    assert hit, porthole.drift(cfg)
+    assert hit[0]["blocking"] is False, "the device must not refuse a build"
+
+
+def test_the_device_flag_is_not_mistaken_for_a_stale_export():
+    """`porthole -d CODENAME` reaches load_config as an environment value, so
+    without a marker the guard refuses a documented flag."""
+    tmp, xdg = sandbox(profile_env="", user_env='PORTHOLE_DEVICE="testdev"\n')
+    (tmp / "profiles" / "other").mkdir(parents=True, exist_ok=True)
+    (tmp / "profiles" / "other" / "device.env").write_text("")
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="other",
+               **{porthole.DELIBERATE_DEVICE: "1"})
+    assert not [d for d in porthole.drift(cfg)
+                if d["key"] == "PORTHOLE_DEVICE"]
+
+
+def test_the_refusal_names_both_values_and_where_each_came_from():
+    tmp, xdg = sandbox(profile_env='PORTHOLE_DEFCONFIG="right_defconfig"\n')
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_DEFCONFIG="wrong_defconfig")
+    text = "\n".join(porthole.drift_lines(porthole.drift(cfg)))
+    for needed in ("PORTHOLE_DEFCONFIG", "wrong_defconfig", "right_defconfig",
+                   "environment", "profile"):
+        assert needed in text, (needed, text)
+
+
+def test_config_remembers_what_each_layer_displaced():
+    tmp, xdg = sandbox(profile_env='PORTHOLE_DEFCONFIG="from_profile"\n')
+    cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev",
+               PORTHOLE_DEFCONFIG="from_env")
+    shadowed = dict((layer, value)
+                    for layer, value in cfg.shadowed("PORTHOLE_DEFCONFIG"))
+    assert shadowed.get("profile") == "from_profile", cfg.shadowed(
+        "PORTHOLE_DEFCONFIG")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
