@@ -196,6 +196,16 @@ build --envkernel` returns from `pmb/commands/build.py` before the strict-mode
 zap block, so `--lax` never reaches that path. (The kernel numbers this section
 used to quote were four readings of a flag that could not have done anything.)
 
+**In the WORKSPACE this is reversed, and it is not a preference.** A non-lax
+`pmbootstrap build` cannot run there at all: `zap_buildroots()` umounts the
+chroot, and the recursive `/dev` bind the rootless workspace needs leaves
+propagated sub-mounts that cannot be umounted by path -- `umount:
+/pmb/chroot_native/dev/shm: not mounted.` (exit 32) -- so the build dies at
+"Zapping buildroots" before it starts. `--lax` skips the zap and gets past it.
+Upstream's own reason for making strict the default was correctness
+(`e14f4169`, MR 2939, 2026-05), so this is a genuine trade and not a free win.
+`brain/findings/what-a-rootless-workspace-cannot-do.md` §5.
+
 So do not reach for it. It accepts something real -- this repo has been bitten
 repeatedly by stale build state, a `_p` apk outranking a release, a stale
 APKINDEX making install pick an older package, each one presenting as a

@@ -1,6 +1,6 @@
 ---
 id: what-a-rootless-workspace-cannot-do
-title: Four things a rootless container cannot do that pmbootstrap assumes, and what each one costs
+title: Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs
 scope: generic
 subsystem: build
 severity: finding
@@ -58,6 +58,31 @@ than left to fail inside kbuild with `mkdir: can't create directory '.tmp_174'`.
 image rather than as a script asking for something it already has. A shim that
 runs the command as who we already are -- and refuses if we are somehow not
 root -- grants nothing.
+
+**5. The `/dev` rbind that makes 2 work cannot be unmounted again, and
+`pmbootstrap build` without `--lax` needs to.** Upstream made strict mode the
+default in 2026-05 (`e14f4169`, MR 2939) and added `zap_buildroots()` in the
+same commit; it calls `shutdown(only_build_related=True)` ->
+`umount_all(chroot.path)`, which walks `/proc/self/mountinfo` and umounts each
+entry under the chroot. The recursive `/dev` bind from 2 puts
+`chroot_native/dev/{shm,pts,mqueue,fuse,...}` in that list as PROPAGATED
+sub-mounts: they are visible there and `umount` on them returns
+
+```
+umount: /pmb/chroot_native/dev/shm: not mounted.   (exit 32)
+```
+
+pmbootstrap raises `CommandFailedError` on that and the build dies **before it
+starts**, at "Zapping buildroots". Discriminated by running each once and
+slicing the log: nolax reaches the zap and dies there; `--lax` skips it and
+fails later at a different, unrelated point. So in the workspace `--lax` is not
+a speed trade at all -- it is the only path that gets past the zap.
+See [[lax-build-buys-nothing-measurable]].
+
+Not fixed here, and the two obvious moves both have a cost: dropping the rbind
+re-breaks 2, and forcing `--lax` accepts the stale build state upstream made
+strict to avoid. Recorded so the next person starts from the collision rather
+than from the traceback.
 
 **What this rules out** — that the workspace was one routing change away from
 working. It had never compiled anything. Also that any of this is fixable by

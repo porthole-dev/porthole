@@ -182,6 +182,16 @@ rungs are `install`, `export`, the flash and the boot wait. On the kernel rung
 the flag is inert outright -- `pmbootstrap build --envkernel` returns before
 the zap block ever runs.
 
+**In the WORKSPACE this is reversed, and it is not a preference.** A non-lax
+`pmbootstrap build` cannot run there at all: `zap_buildroots()` umounts the
+chroot, and the recursive `/dev` bind the rootless workspace needs leaves
+propagated sub-mounts that cannot be umounted by path -- `umount:
+/pmb/chroot_native/dev/shm: not mounted.` (exit 32) -- so the build dies at
+"Zapping buildroots" before it starts. `--lax` skips the zap and gets past it.
+Upstream's own reason for making strict the default was correctness
+(`e14f4169`, MR 2939, 2026-05), so this is a genuine trade and not a free win.
+`brain/findings/what-a-rootless-workspace-cannot-do.md` §5.
+
 The flag still accepts a real hazard -- stale build state, a `_p` apk
 outranking a release, each instance presenting as a mysterious wrong-kernel bug
 -- for no measured gain. `brain/findings/lax-build-buys-nothing-measurable.md`.

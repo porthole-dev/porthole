@@ -30,6 +30,41 @@ first-learned: 2026-08-29
 > a full kernel rebuild rather than as a chroot message. See
 > [[envkernel-disables-ccache]].
 
+> **CORRECTED AGAIN 2026-08-30, and this one inverts the advice for the
+> workspace.** Everything below was measured ON THE HOST. In the rootless
+> workspace a non-lax `pmbootstrap build` does not merely cost nothing -- it
+> **cannot run**. `zap_buildroots()` umounts the chroot, and the recursive
+> `/dev` bind the workspace needs puts propagated sub-mounts in
+> `/proc/self/mountinfo` that a rootless userns cannot umount by path:
+>
+> ```
+> umount: /pmb/chroot_native/dev/shm: not mounted.   (exit 32)
+> ```
+>
+> Discriminated by running each once and slicing pmbootstrap's log: nolax
+> reaches "Zapping buildroots" and dies there, before building anything;
+> `--lax` skips the zap and fails later at an unrelated point. So in the
+> workspace `--lax` is the only path that gets past the zap, and "do not reach
+> for it" is HOST advice. [[what-a-rootless-workspace-cannot-do]] §5.
+>
+> **Upstream's reason for the default, since asked** -- `e14f4169`, Aelin,
+> 2026-05-23, MR 2939: *"Strict mode is the more correct one and results in
+> consistent, reproducible behavior, which is why I believe it should be the
+> default. If users want quick builds without setting up the buildroot several
+> times, --lax can now be used."* Correctness, explicitly. That is the same
+> hazard this note weighs, now in upstream's own words rather than ours.
+>
+> Note how NEW all of this is: `--lax`, strict-as-default and
+> `zap_buildroots()` all arrived in that one 2026-05 commit. Before it, lax was
+> the default and no build ever deleted `chroot_native`.
+>
+> **Still not re-measured, and honestly:** the device-package A/B below was
+> inherited, not re-run. It could not be re-run here -- a second, independent
+> blocker (`gcc-x86_64`/`g++-x86_64` "no such package": the local x86_64 cross
+> toolchain has never been built in this workspace) stops package rungs on BOTH
+> paths, lax included. Cause undetermined. The host numbers stand as host
+> numbers.
+
 **The question** — `ph-build.sh` and `AGENTS.md` both say `pmbootstrap build`
 zaps the buildroot before every package and that this "is most of the wall
 clock in the flashing rungs", with `PORTHOLE_LAX_BUILD=1` offered as the
