@@ -287,6 +287,32 @@ def _check_envkernel(ch: Checks, cfg) -> None:
            "or set PORTHOLE_ENVKERNEL to helpers/envkernel.sh directly")
 
 
+def check_drift(ch: Checks, cfg) -> None:
+    """The environment quietly outranking a committed layer.
+
+    `porthole config` has always been able to show this; the point of a check
+    is that nobody runs `porthole config` before a build. Twice now a stale
+    export has built the wrong kernel.
+    """
+    import porthole
+
+    drifts = porthole.drift(cfg)
+    if not drifts:
+        ch.add("config: drift", "ok", "the environment agrees with the profile")
+        return
+    for d in drifts:
+        detail = (f"{d['key']}: environment says {d['winning']}, "
+                  f"{d['committed_layer']} says {d['committed']}")
+        if d["blocking"]:
+            ch.add("config: drift", "fail", detail,
+                   f"unset {d['key']}    # or `porthole build "
+                   f"--allow-env-override` if you mean it")
+        else:
+            ch.add("config: drift", "warn", detail,
+                   doc=f"unset {d['key']}, or `porthole use` to update the "
+                       f"stored value")
+
+
 def check_profile(ch: Checks, cfg, root: pathlib.Path) -> None:
     device = cfg.get("PORTHOLE_DEVICE", "")
     if not device:
@@ -607,6 +633,7 @@ def cmd_doctor(args, ctx) -> int:
 
     check_host(ch, cfg, family)
     check_workspace(ch, ctx, family)
+    check_drift(ch, cfg)
     check_profile(ch, cfg, ctx.root)
     check_identity(ch, cfg)
     if args.no_device:

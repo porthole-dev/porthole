@@ -137,6 +137,10 @@ class Ctx:
             device = getattr(self.args, "device", None)
             if device:
                 env["PORTHOLE_DEVICE"] = device
+                # `-d` reaches load_config as an environment value, which is
+                # indistinguishable from a forgotten export. Say which it was,
+                # or the drift guard refuses a documented flag.
+                env[porthole.DELIBERATE_DEVICE] = "1"
             try:
                 self._cfg = porthole.load_config(root=self.root, env=env)
             except porthole.ProfileNotFound as exc:

@@ -107,16 +107,103 @@ class Config(dict):
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
         self._sources: dict[str, str] = {}
+        self._shadowed: dict[str, list] = {}
 
     def set(self, key: str, value: str, layer: str) -> None:
+        # Remember what this displaced. The provenance above answers "where did
+        # the winning value come from"; this answers "and what did it beat",
+        # which is the question that matters when a stale export silently wins
+        # over a committed profile -- a shell saying 6.18 while the profile in
+        # git says 7.2, with a build quietly using the retired one.
+        if key in self and self[key] != value:
+            self._shadowed.setdefault(key, []).append(
+                (self._sources.get(key, LAYER_DEFAULT), self[key]))
         self[key] = value
         self._sources[key] = layer
+
+    def shadowed(self, key: str) -> list:
+        """(layer, value) pairs this key had before the winner, oldest first."""
+        return list(self._shadowed.get(key, []))
 
     def source(self, key: str) -> str:
         return self._sources.get(key, LAYER_DEFAULT)
 
     def sources(self) -> dict[str, str]:
         return dict(self._sources)
+
+
+# The keys where a stale shell silently changes WHAT GETS BUILT OR FLASHED.
+# Deliberately short. Everything else stays overridable without comment,
+# because `PHONE=... tk-foo.sh` is a documented shape and the docs are full of
+# it -- a guard that refuses those gets worked around, and then it protects
+# nothing.
+# Split by CONSEQUENCE, not by importance. A stale shell on one of these
+# changes what gets built with no other symptom -- the build succeeds and the
+# artefact is wrong -- so a build refuses.
+GUARDED_KEYS = (
+    "PORTHOLE_KERNEL_PKG",
+    "PORTHOLE_KERNEL_TREE",
+    "PORTHOLE_DEFCONFIG",
+    "PORTHOLE_ARCH",
+    "PORTHOLE_WORKDIR",
+)
+
+# PORTHOLE_DEVICE only WARNS, and that distinction was found by running the
+# check rather than reasoning about it. Choosing a device from the environment
+# (or `porthole -d`) is a documented workflow, and on the reference host the
+# environment is the CORRECT one while the stored `porthole use` value is
+# stale -- so refusing would block the normal setup to report that a config
+# file needs tidying. It is also not silent the way the others are: every verb
+# prints the device it is talking to.
+ADVISORY_KEYS = ("PORTHOLE_DEVICE",)
+
+# Set by `porthole -d CODENAME`, which reaches load_config as an environment
+# value and is otherwise indistinguishable from a forgotten export. Without
+# this the guard would refuse a documented flag on its first day.
+DELIBERATE_DEVICE = "PORTHOLE_DEVICE_FROM_FLAG"
+
+
+def drift(cfg: "Config") -> list:
+    """Guarded keys where the ENVIRONMENT is beating a committed layer.
+
+    Returns [{key, winning, winning_layer, committed, committed_layer,
+    blocking}], empty when everything agrees. `blocking` is what a build
+    refuses on; the rest is worth saying and not worth stopping for. Pure: a Config in, a list out, so every case is
+    testable with no device and no repo state.
+
+    Compares against the highest NON-environment layer that set the key, rather
+    than against the profile specifically. That generalisation is load-bearing:
+    PORTHOLE_KERNEL_PKG's committed source is the profile, but PORTHOLE_DEVICE's
+    is the user config that `porthole use` writes, and one rule covers both.
+    """
+    out = []
+    for key in GUARDED_KEYS + ADVISORY_KEYS:
+        if cfg.source(key) != LAYER_ENV:
+            continue
+        if key == "PORTHOLE_DEVICE" and cfg.get(DELIBERATE_DEVICE):
+            continue
+        winning = cfg.get(key, "")
+        for layer, value in reversed(cfg.shadowed(key)):
+            if layer == LAYER_DEFAULT or not value:
+                continue
+            if value != winning:
+                out.append({"key": key, "winning": winning,
+                            "winning_layer": LAYER_ENV,
+                            "committed": value, "committed_layer": layer,
+                            "blocking": key in GUARDED_KEYS})
+            break
+    return out
+
+
+def drift_lines(drifts: list) -> list:
+    """The refusal, as lines. Shared so build and flash cannot drift apart
+    about drift, and so the wording is testable."""
+    lines = []
+    for d in drifts:
+        lines.append(f"{d['key']} disagrees with the {d['committed_layer']}")
+        lines.append(f"    {d['winning_layer']:<22} {d['winning']}   <- winning")
+        lines.append(f"    {d['committed_layer']:<22} {d['committed']}")
+    return lines
 
 
 # ------------------------------------------------------------------ parsing --
