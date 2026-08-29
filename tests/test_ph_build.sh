@@ -146,5 +146,53 @@ STUB
 is "_ph_measure does not package"  "$(packages _ph_measure)" "no"
 is "_ph_make does package"         "$(packages _ph_make)"    "yes"
 
+# --- the arch-independent-dependency workaround --------------------------
+#
+# A `noarch`/`all` dependency of a foreign-arch device build makes pmbootstrap
+# ask for `gcc-<native>` -- a cross compiler to the native arch, which cannot
+# exist -- and the rung dies having built nothing. Every fresh workspace hits
+# it; a machine that has built the package once never does, which is why it
+# went unseen. _ph_pmb_build rebuilds the offender with the device arch named
+# and retries.
+#
+# pmbootstrap is STUBBED here: this asserts the recovery logic, not pmbootstrap.
+# The canned failure carries the real ANSI colour codes, because the first
+# version of the extraction matched happily against clean text and not at all
+# against what the command actually prints.
+pmb_stub() { # pmb_stub NATIVE -> "rc | recovery command | attempts"
+    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" NATIVE="$1" \
+        PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" \
+        PORTHOLE_ARCH=aarch64 TMP="$TMP" \
+        bash -c '
+        source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+        : > "$TMP/calls"
+        uname() { echo "$NATIVE"; }
+        pmbootstrap() {
+            echo "$*" >> "$TMP/calls"
+            case "$*" in
+              *--arch*) return 0 ;;                       # the recovery build
+              *) [ -s "$TMP/fixed" ] && return 0
+                 printf "fixed\n" > "$TMP/fixed"
+                 printf "\033[93m=> (1/4)\033[0m \033[94medge/rmtfs\033[0m: Installing dependencies\033[0m\n"
+                 printf "\033[91mERROR:\033[0m apk add crossdirect g++-%s gcc-%s abuild\033[0m\n" "$NATIVE" "$NATIVE"
+                 return 1 ;;
+            esac
+        }
+        _ph_pmb_build device-google-taimen >/dev/null 2>&1
+        printf "%s | %s | %s\n" "$?" "$(grep -c -- --arch "$TMP/calls")" "$(grep -o "rmtfs" "$TMP/calls" | head -1)"'
+}
+
+is "a native-arch cross request is recovered and retried" "$(pmb_stub x86_64)" "0 | 1 | rmtfs"
+
+# A failure that is NOT this bug must propagate untouched, or a real build
+# error would be retried forever behind a misleading explanation.
+other=$(env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+        PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" PORTHOLE_ARCH=aarch64 \
+        bash -c '
+        source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+        pmbootstrap() { echo "ERROR: something else entirely"; return 3; }
+        _ph_pmb_build device-google-taimen >/dev/null 2>&1; echo $?')
+is "an unrelated build failure is not retried" "$other" "3"
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

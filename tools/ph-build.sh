@@ -234,6 +234,30 @@ tkclean() {
 _PH_LAX=()
 [ -n "${PORTHOLE_LAX_BUILD:-}" ] && _PH_LAX=(--lax)
 
+# ...and in the WORKSPACE it is not a choice. A non-lax `pmbootstrap build`
+# cannot run there at all: zap_buildroots() umounts the chroot, and the
+# recursive /dev bind the rootless workspace needs (the mknod shim; --rbind is
+# not optional, a plain --bind gives 0:0 and pmbootstrap rejects it) leaves
+# PROPAGATED sub-mounts that a rootless userns cannot umount by path --
+#
+#   umount: /pmb/chroot_native/dev/shm: not mounted.   (exit 32)
+#
+# -- and pmbootstrap raises on that before building anything. Verified by
+# running each once and slicing pmbootstrap's log: nolax dies at "Zapping
+# buildroots", --lax gets past it and the whole queue completes.
+#
+# So this is not the speed-for-staleness trade the block above weighs. Without
+# it the packaging rungs simply do not exist in the workspace. It is still a
+# real trade -- upstream made strict the default FOR correctness (e14f4169, MR
+# 2939) -- and what covers us is that porthole guards the specific staleness
+# that has actually bitten this repo: _ph_assert_no_devpkgs refuses an
+# envkernel _p apk that would outrank a release, tkpurge-devpkgs clears them,
+# and _ph_make verifies the apk is newer than the Image.gz it packaged.
+#
+# Detected by a file only this image installs, rather than by a path
+# convention that would silently stop matching. `--host` is unaffected.
+[ -x /usr/local/bin/porthole-devnodes ] && _PH_LAX=(--lax)
+
 _ph_announce_tree() {
 	local branch="" head=""
 	if [ -d "$_PH_TREE/.git" ] || [ -f "$_PH_TREE/.git" ]; then
@@ -524,6 +548,60 @@ _ph_measure() {
 
 # _ph_measure, then package what it built. Everything downstream of a flashing
 # rung needs the apk; `auto` does not, and calls _ph_measure directly.
+# One `pmbootstrap build`, with the upstream bug that stops every FRESH
+# workspace on its first packaging rung worked around.
+#
+# THE BUG. A dependency whose APKBUILD arch resolves to the NATIVE arch --
+# `arch="noarch"` or `arch="all"` -- inside a build for a FOREIGN device arch
+# gets its cross mode computed against the device (aarch64: emulation needed,
+# so CROSS_NATIVE2 or CROSSDIRECT, cross ENABLED) while its own pkg_arch
+# resolves to native. pmb/build/_package.py then calls
+# `init_compiler(cross, pkg_arch)` and pmb/build/init.py asks for
+# `gcc-<native>` + `g++-<native>`: a cross compiler TO the native arch. That
+# package cannot exist -- nobody cross-compiles x86_64 from x86_64 -- so apk
+# answers "unable to select packages" and the rung dies having built nothing.
+# pmb/build/autodetect.py:52 is where the two archs stop agreeing.
+#
+# WHY IT LOOKS LIKE BAD LUCK. It only fires when such a dependency actually
+# needs BUILDING. A machine that has built it once has it in its local repo
+# forever after, which is why the reference host never saw this and every new
+# workspace does. On taimen it is `pinephone-callaudiod` (noarch) and then
+# `rmtfs` (all) -- two of the five packages behind `device-google-taimen`.
+#
+# THE FIX IS UPSTREAM'S OWN LOGIC. Naming the device arch explicitly makes
+# pkg_arch and cross agree again: it then asks for `gcc-aarch64`, which does
+# exist in the binary repo, and the package builds. Verified 2026-08-30.
+#
+# Bounded, and it re-runs the ORIGINAL command each pass rather than assuming
+# one offender: the queue can hold several, and a loop that trusts a failing
+# command to change its mind on its own is how a build spins for an hour.
+_ph_pmb_build() {
+	local pkg=$1 out plain rc dep native tries=0
+	native=$(uname -m)
+	while :; do
+		out=$(pmbootstrap build "${_PH_LAX[@]}" "$pkg" 2>&1); rc=$?
+		printf '%s\n' "$out"
+		[ "$rc" -eq 0 ] && return 0
+		# Colour codes are in the real output and would break both greps.
+		plain=$(printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g')
+		printf '%s\n' "$plain" | grep -q "gcc-$native" || return "$rc"
+		if [ "$tries" -ge 8 ]; then
+			echo ">> still asking for gcc-$native after $tries rebuilds -- giving up" >&2
+			return "$rc"
+		fi
+		dep=$(printf '%s\n' "$plain" |
+			grep -oE '\([0-9]+/[0-9]+\) [^ ]+/[^ :]+' | tail -1 | sed 's|.*/||')
+		[ -n "$dep" ] || return "$rc"
+		tries=$((tries + 1))
+		echo ">> $dep is arch-independent, and pmbootstrap asked for gcc-$native to"
+		echo ">>   build it -- a cross compiler to the native arch, which does not"
+		echo ">>   exist. Upstream bug; naming the device arch is what it should"
+		echo ">>   have done. Building it that way, then retrying:"
+		echo ">>   pmbootstrap build --arch ${PORTHOLE_ARCH} $dep"
+		pmbootstrap build "${_PH_LAX[@]}" --arch "${PORTHOLE_ARCH}" "$dep" || return "$rc"
+	done
+}
+
 _ph_make() {
 	_ph_measure || return 1
 	local out="$_PH_TREE/.output"
@@ -550,8 +628,8 @@ _ph_make() {
 	# Firmware BEFORE the device package: device-google-taimen-nonfree-firmware
 	# depends on it, and install fails with "no such package" if it is not built
 	# and indexed first.
-	pmbootstrap build "${_PH_LAX[@]}" "$_PH_FWPKG"
-	pmbootstrap build "${_PH_LAX[@]}" "$_PH_DEVPKG"
+	_ph_pmb_build "$_PH_FWPKG"
+	_ph_pmb_build "$_PH_DEVPKG"
 	pmbootstrap index
 }
 
@@ -656,7 +734,7 @@ _ph_install_kernel_release() {
 		# fires twice. The fast cycle poisons its own repo on every run; purge
 		# before building, which is exactly what tkpurge-devpkgs is for.
 		tkpurge-devpkgs || return 1
-		pmbootstrap build "${_PH_LAX[@]}" "$_PH_KPKG" || return 1
+		_ph_pmb_build "$_PH_KPKG" || return 1
 	fi
 	[ -f "$repo/$_PH_KPKG-$ver.apk" ] || {
 		echo ">> still no $_PH_KPKG-$ver.apk after building." >&2

@@ -79,10 +79,14 @@ fails later at a different, unrelated point. So in the workspace `--lax` is not
 a speed trade at all -- it is the only path that gets past the zap.
 See [[lax-build-buys-nothing-measurable]].
 
-Not fixed here, and the two obvious moves both have a cost: dropping the rbind
-re-breaks 2, and forcing `--lax` accepts the stale build state upstream made
-strict to avoid. Recorded so the next person starts from the collision rather
-than from the traceback.
+**Resolved 2026-08-30 by forcing `--lax` in the workspace only**
+(`tools/ph-build.sh`, detected by a file only this image installs, so `--host`
+is untouched). Not a free choice -- upstream made strict the default FOR
+correctness -- but the alternative is not "safer", it is "no packaging rung at
+all". What covers the trade is that porthole guards the staleness that has
+actually bitten this repo: `_ph_assert_no_devpkgs`, `tkpurge-devpkgs`, and the
+apk-newer-than-Image check in `_ph_make`. Dropping the rbind was the other
+option and it re-breaks 2.
 
 **What this rules out** — that the workspace was one routing change away from
 working. It had never compiled anything. Also that any of this is fixable by

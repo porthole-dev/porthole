@@ -45,7 +45,14 @@ first-learned: 2026-08-29
 > reaches "Zapping buildroots" and dies there, before building anything;
 > `--lax` skips the zap and fails later at an unrelated point. So in the
 > workspace `--lax` is the only path that gets past the zap, and "do not reach
-> for it" is HOST advice. [[what-a-rootless-workspace-cannot-do]] §5.
+> for it" is HOST advice. Since 2026-08-30 `tools/ph-build.sh` applies it
+> automatically in the workspace and nowhere else, so nobody has to know this.
+> [[what-a-rootless-workspace-cannot-do]] §5.
+>
+> With that and [[a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist]]
+> the packaging rung completes in the workspace for the first time:
+> `device-google-taimen-1-r34.apk`, five packages, from a repo that held none
+> of them.
 >
 > **Upstream's reason for the default, since asked** -- `e14f4169`, Aelin,
 > 2026-05-23, MR 2939: *"Strict mode is the more correct one and results in
