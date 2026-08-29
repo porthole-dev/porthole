@@ -368,10 +368,20 @@ def _lint_note(note, index, root) -> list[str]:
     # Only findings, and only names that resolve NOWHERE in the repo: a note may
     # legitimately mention envkernel.sh or some upstream script it does not own.
     if sev == "finding":
-        named = set(re.findall(r"\b([\w-]+\.(?:py|sh))\b",
-                               evidence + " " + note.body))
+        text = evidence + " " + note.body
+        named = set(re.findall(r"\b([\w-]+\.(?:py|sh))\b", text))
+        # A name the author QUALIFIED with a directory that is not ours is an
+        # upstream file they are pointing at, not an instrument they forgot to
+        # commit -- which is the exemption the comment above already claims and
+        # the check did not make. `pmb/install/partition.py` says where it
+        # lives; a bare `partition.py` does not, and stays flagged.
+        qualified = set(re.findall(r"\b([\w./-]+/([\w-]+\.(?:py|sh)))\b", text))
+        external = {base for path, base in qualified
+                    if not (root / path).exists()}
         missing = sorted(n for n in named
-                         if not any(root.rglob(n)) and not n.startswith("_"))
+                         if not any(root.rglob(n))
+                         and not n.startswith("_")
+                         and n not in external)
         if missing:
             problems.append(
                 "names %s for its evidence, and %s not in the repo -- commit "

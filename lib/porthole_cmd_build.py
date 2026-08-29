@@ -173,23 +173,85 @@ def _space_warning(cfg) -> str:
     return ""
 
 
-def _run(ctx, func: str, timeout: int, extra: list[str] | None = None) -> int:
-    """Source ph-build.sh and call one of its functions.
+def _workspace_available(ctx) -> bool:
+    """Is there a running workspace to build in?
 
-    bash, not sh: it uses arrays, `shopt -s expand_aliases` and `pushd`, and
-    envkernel's `make` is an alias that only bash will expand.
+    Never raises: this decides where a build runs, and a probe that throws
+    would turn "podman is being restarted" into "the build verb is broken".
     """
+    try:
+        import porthole_cmd_sandbox as sandbox
+        return bool(shutil.which("podman")) and sandbox._container_running()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _container_cmd(func: str, extra: list[str] | None,
+                   secrets) -> list[str]:
+    """The podman exec line for a build, as argv.
+
+    Pure, so where a build runs is testable without podman, a device or a
+    workdir -- none of which CI has.
+
+    The container's own PORTHOLE_* values were set when it was created and are
+    correct for the paths INSIDE it, so they are deliberately not re-sent from
+    the host, where PORTHOLE_WORKDIR names a directory that does not exist in
+    here. Only TK_* runtime values cross, because those are things the user set
+    for this invocation -- a password among them.
+    """
+    import porthole_cmd_sandbox as sandbox
+
+    call = " ".join([func, *(shlex.quote(a) for a in extra or [])])
+    argv = ["podman", "exec"]
+    # TK_ only, enforced HERE rather than trusting the caller to filter: the
+    # rule is that host paths never cross, and a rule that lives in the caller
+    # is one a second caller will not have. PORTHOLE_WORKDIR is the one that
+    # bites -- the host's names a directory that does not exist inside, and
+    # sending it is what made a real session refuse to build.
+    #
+    # `-e NAME`, not `-e NAME=value`: podman takes the value from OUR
+    # environment, so a rootfs password never appears in the podman argv where
+    # `ps` would show it to every user on the box. TK_PMOS_PASSWORD is exactly
+    # such a value, and tkbuild requires it.
+    for key in sorted(k for k in secrets if k.startswith("TK_")):
+        argv += ["-e", key]
+    argv += [sandbox.CONTAINER, "/bin/bash", "-lc",
+             f"cd /porthole && source tools/ph-build.sh && {call}"]
+    return argv
+
+
+def _host_cmd(script: pathlib.Path, func: str,
+              extra: list[str] | None) -> list[str]:
+    """bash, not sh: ph-build.sh uses arrays, `shopt -s expand_aliases` and
+    `pushd`, and envkernel's `make` is an alias only bash expands."""
+    call = " ".join([func, *(shlex.quote(a) for a in extra or [])])
+    return ["bash", "-c", f'source "{script}" && {call}']
+
+
+def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
+         host: bool = False) -> int:
+    """Run one of ph-build.sh's functions, in the workspace or on the host."""
     script = _script(ctx)
     env = dict(os.environ)
     for key, value in ctx.cfg.items():
         if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
             env[key] = value
+
     # shlex.quote, not naive interpolation: these arguments are a path and a
     # module name that reach a shell, and a path with a space in it would
     # otherwise arrive as two arguments.
     call = " ".join([func, *(shlex.quote(a) for a in extra or [])])
-    cmd = ["bash", "-c", f'source "{script}" && {call}']
-    ctx.out(ctx.out.paint(f"  $ source ph-build.sh && {call}", "grey"))
+    if not host and _workspace_available(ctx):
+        secrets = {k: v for k, v in env.items()
+                   if k.startswith("TK_") and isinstance(v, str)}
+        cmd = _container_cmd(func, extra, secrets)
+        ctx.out(ctx.out.paint(
+            f"  in the workspace: source ph-build.sh && {call}", "grey"))
+    else:
+        cmd = _host_cmd(script, func, extra)
+        why = "--host" if host else "no workspace running"
+        ctx.out(ctx.out.paint(
+            f"  on the host ({why}): source ph-build.sh && {call}", "grey"))
     try:
         return subprocess.run(cmd, env=env, cwd=str(ctx.root),
                               timeout=timeout).returncode
@@ -278,7 +340,8 @@ def cmd_build(args, ctx) -> int:
         raise Bail("this profile cannot build yet", EX_FAIL,
                    "; ".join(problems))
 
-    rc = _run(ctx, func, args.timeout, extra)
+    rc = _run(ctx, func, args.timeout, extra,
+              host=getattr(args, "host", False))
     if rc != 0:
         raise Bail(f"{func} failed", EX_FAIL,
                    "the output above is the build's; `pmbootstrap log` has more")
@@ -308,6 +371,8 @@ SPEC = {
                         "help": "boot: rebuild Image.gz too, not just dtbs"}),
         (["--timeout"], {"type": int, "default": 5400, "metavar": "SEC",
                          "help": "seconds before giving up (default 5400)"}),
+        (["--host"], {"action": "store_true",
+                      "help": "build on the host, not in the workspace"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],

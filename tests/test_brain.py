@@ -148,6 +148,57 @@ def test_brain_new_finding_lands_in_findings_with_its_own_template():
         (ROOT / "brain" / "findings" / "a-test-finding.md").unlink(missing_ok=True)
 
 
+def _lint_a_finding(body_extra, evidence):
+    """Write one finding into the repo, lint it, remove it. Returns the
+    complaint about instruments, or "" if there was none."""
+    note = ROOT / "brain" / "findings" / "zz-instrument-probe.md"
+    note.write_text(
+        "---\n"
+        "id: zz-instrument-probe\n"
+        "title: A probe for the instrument rule\n"
+        "scope: generic\n"
+        "subsystem: build\n"
+        "severity: finding\n"
+        "confidence: proven\n"
+        f"evidence: \"{evidence}\"\n"
+        "refutes: \"nothing; this is a lint probe\"\n"
+        "first-learned: 2026-08-29\n"
+        "---\n\n"
+        "**The question** — does the instrument rule fire?\n\n"
+        f"**The answer** — {body_extra}\n")
+    try:
+        out = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "porthole"), "brain", "lint"],
+            capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            if "commit the instrument" in line:
+                return line.strip()
+        return ""
+    finally:
+        note.unlink(missing_ok=True)
+
+
+def test_a_bare_instrument_name_is_still_refused():
+    """The guard exists because a finding once cited three scripts that had
+    never been committed, leaving the next session the conclusion and no way
+    to reproduce it."""
+    complaint = _lint_a_finding("measured with zzprobe.py, which is nowhere.",
+                                "measured with zzprobe.py across 40 runs")
+    assert "zzprobe.py" in complaint, (
+        "a finding citing an uncommitted instrument was accepted: " + repr(complaint))
+
+
+def test_an_upstream_file_named_with_its_path_is_accepted():
+    """A note may legitimately point at a file in ANOTHER project. Qualifying
+    it with a directory says where it lives, which is what makes it
+    re-checkable -- a bare basename does not."""
+    complaint = _lint_a_finding(
+        "see other/proj/zzprobe.py, which lives upstream.",
+        "read of other/proj/zzprobe.py at v1.2.3")
+    assert complaint == "", (
+        "a deliberately qualified upstream path was refused: " + complaint)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
