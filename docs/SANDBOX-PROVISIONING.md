@@ -382,15 +382,25 @@ Alongside `tests/test_sandbox.py`, whose escape attempts stay as they are:
 
 ## Phases
 
+**Phase 4 and §10's skill text were pulled forward and landed on 2026-08-29.**
+The original ordering put the demotion last, reasoning that the posture should
+land once nothing needed the broker. That was right for code and wrong for
+docs: phase 1 shipped the replacement, so every agent-facing document was then
+actively recommending the thing it replaced. An agent loading
+`skills/porthole-bringup/SKILL.md` learned nothing about the workspace at all.
+The lesson is narrow and worth keeping: **guidance has to move in the same
+commit range as the thing it describes, or it is wrong in the interval.**
+
+
 Deliberately sequenced; each phase is useful alone.
 
 | # | what | why here |
 |---|---|---|
 | **0** | probes — **done, 2026-08-29**, results above | the design rested on them |
 | **1** | Containerfile, `sandbox build`/`up`/`shell`/`down`, persistence, the `-it` fix, mounts, device key | nothing else is testable without it |
-| **2** | `doctor --fix`, ostree awareness, the distro smoke, **the `brief` onboarding line and the skill text (§10)** | the bootstrap claim verified, and an agent that can actually ask for what it needs |
+| **2** | `doctor --fix`, ostree awareness, the distro smoke, **the `brief` onboarding line** | the bootstrap claim verified, and an agent that can actually ask for what it needs |
 | **3** | fuse2fs shim, `porthole build` routing, preflight space check | the actual build loop |
-| **4** | default install grants no sudoers; **the §9 propagation pass across every file in that table**; `docs/SANDBOX.md` rewritten | the security posture lands once nothing needs it — and lands *everywhere*, or it has not landed |
+| **4** | ~~default install grants no sudoers~~ · ~~§9 propagation~~ · ~~`docs/SANDBOX.md` rewritten~~ — **done 2026-08-29**, ahead of its phase | the security posture lands once nothing needs it — and lands *everywhere*, or it has not landed |
 
 Phase 4 is the one most likely to be declared done while half-finished, because
 its work is spread across nine files instead of concentrated in one. Re-run the

@@ -313,6 +313,47 @@ def test_a_present_label_comes_back_verbatim():
         "/tmp/porthole-taimen.lock"
 
 
+# ---- the demotion, guarded ------------------------------------------------
+#
+# These exist because a propagation pass across nine files is exactly the kind
+# of work that rots silently: the code ships, the docs keep recommending the
+# thing it replaced, and an agent follows the docs. Grep, do not remember.
+
+def test_the_bringup_skill_tells_an_agent_the_workspace_exists():
+    text = (ROOT / "skills" / "porthole-bringup" / "SKILL.md").read_text()
+    assert "porthole sandbox" in text, (
+        "the bring-up skill never mentions the workspace, so an agent loading "
+        "it would reach for host root instead")
+    assert "sandbox shell" in text, "the skill does not say how to run a command"
+
+
+def test_agent_facing_docs_name_the_workspace_verbs():
+    for rel in ("AGENTS.md", "README.md", "skills/porthole-bringup/SKILL.md"):
+        text = (ROOT / rel).read_text()
+        assert "sandbox up" in text or "sandbox shell" in text, rel
+
+
+def test_wherever_the_broker_is_still_named_it_is_marked_as_the_fallback():
+    """The broker may be mentioned; it may not be offered as an equal."""
+    for rel in ("AGENTS.md", "README.md", "docs/SANDBOX.md"):
+        text = (ROOT / rel).read_text()
+        if "ph-sudo" not in text and "PMB_SUDO" not in text:
+            continue
+        low = text.lower()
+        assert "legacy" in low or "fallback" in low, (
+            f"{rel} names the broker without marking it a fallback")
+
+
+def test_the_verb_help_does_not_advertise_two_equal_tiers():
+    assert "Two tiers" not in sb.SPEC["description"], sb.SPEC["description"]
+
+
+def test_installing_the_broker_requires_an_explicit_flag():
+    flags = [names[0] for names, _kw in sb.SPEC["args"]]
+    assert "--broker" in flags, (
+        "a plain `sandbox install` must not grant a sudoers entry: " + str(flags))
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

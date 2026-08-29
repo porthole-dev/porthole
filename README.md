@@ -410,19 +410,26 @@ for a week, every process running as you gets silent, unlimited root. That is
 not something to hand an agent.
 
 ```sh
-porthole sandbox status     # what is configured, what the gaps are
-porthole sandbox install    # writes a script; read it, then run it
-porthole sandbox shell      # rootless container: root maps to YOUR uid
-porthole sandbox audit --denied
+porthole sandbox up                          # build the image, start the workspace
+porthole sandbox shell --command <command>   # one command; works with no TTY
+porthole sandbox shell                       # a shell, for a human
+porthole sandbox status                      # what is up, what is missing
 ```
 
-Two tiers: a **broker** that validates every root request pmbootstrap makes
-against an allowlist derived empirically (11 verbs, all paths confined to
-declared roots, every decision audited), and a **rootless container** where
-container-root maps to your own unprivileged uid.
+So don't have root at all. Builds run in a **persistent rootless container**
+where you are root inside — pmbootstrap therefore uses no sudo whatsoever — and
+your own unprivileged uid outside. **The default install grants no sudoers
+entry and no standing privilege**, so there is nothing for a mistake, a
+dependency or an injection to spend. Only what it mounts is reachable; your
+`~/.ssh`, `/etc` and home directory are not there.
 
-The threat model — including what each tier honestly does *not* stop — is in
-**[`docs/SANDBOX.md`](docs/SANDBOX.md)**. Read it before trusting either.
+`sandbox install --broker` still offers the older validating privilege broker
+for a host that cannot run podman — 11 verbs, every path confined, every
+decision audited — but it grants a real sudoers entry and cannot contain a
+determined chroot payload, so it is a fallback rather than the path.
+
+The threat model — including what this honestly does *not* stop — is in
+**[`docs/SANDBOX.md`](docs/SANDBOX.md)**. Read it before trusting it.
 
 ## For agents and LLMs
 

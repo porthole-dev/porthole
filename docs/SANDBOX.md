@@ -21,33 +21,137 @@ distinction between "pmbootstrap needs to bind-mount a chroot" and
 It is not that agents are untrustworthy in particular. It is that the blast
 radius of any mistake, from any source, is the whole machine.
 
-## The interception point
+## The answer: don't have root at all
 
-pmbootstrap escalates through exactly one documented hook —
-`pmb/config/sudo.py`:
-
-```python
-def sudo(cmd):
-    """Adapt a command to run as root."""
-    sudo = which_sudo()          # honours $PMB_SUDO
-    return [sudo, *cmd] if sudo else cmd
+```sh
+porthole sandbox up                          # build the image, start the workspace
+porthole sandbox shell --command <command>   # run one command in it
+porthole sandbox shell                       # a shell, for a human
+porthole sandbox status                      # what is up, what is missing
+porthole sandbox down                        # stop it; your files are untouched
 ```
 
-pmbootstrap invokes whatever `PMB_SUDO` names **directly**, prefixing nothing,
-so the broker cannot be that value: it refuses to run unless it is already
-root. `ph-sudo-client` is the unprivileged half that supplies the `sudo` step,
-and it is what `PMB_SUDO` points at. The broker never elevates itself -- a
-boundary that calls sudo on its own behalf is harder to reason about than one
-that simply refuses to run without privilege.
+A **persistent, named, rootless container**. The whole trick is one flag:
 
-So `PMB_SUDO=<something>` routes every root request pmbootstrap makes through a
-program of your choosing, as argv. That is the whole basis of this design, and
-it is a supported upstream feature rather than a hack.
+```sh
+podman run --userns=keep-id:uid=0,gid=0 ...
+```
 
-## What pmbootstrap actually asks for
+Inside, you are root — so pmbootstrap uses **no sudo at all**, because
+`which_sudo()` returns `None` when `os.getuid() == 0` (`pmb/config/sudo.py`).
+Outside, that root is your own unprivileged uid. An escape gets your uid, not
+the machine.
 
-Measured, not guessed. A logging shim was put in `PMB_SUDO` and a real
-`pmbootstrap chroot -- true` plus `pmbootstrap shutdown` was run:
+**The default install grants no sudoers entry, and no standing privilege of any
+kind.** That is the point: there is nothing for a mistake, a dependency or an
+injection to spend.
+
+### Why persistent
+
+Not `--rm`. All state lives in the mounts below, so the container itself is
+disposable and recreating it costs nothing — while recreating it per command
+would cost a second every time and lose the running adb server. It also means a
+human can open it in Ptyxis, or `podman exec -it porthole-sandbox bash`, and
+work in the same environment the agent drives. One environment, two front
+doors.
+
+### `--command` is what makes it usable by an agent
+
+`_shell` once passed `-it` unconditionally. An agent has no TTY, so podman
+failed before the command started, and the container tier had never once been
+reachable from the thing it was built for. `-it` is now used only when stdin is
+a terminal *and* no `--command` was given.
+
+### What it can reach
+
+Only what it mounts, and that list **is** the isolation boundary:
+
+| mount | why |
+|---|---|
+| the pmbootstrap work directory | the chroots and package cache |
+| this repo | the toolbox itself |
+| `/dev/bus/usb` | flashing; the host ACL grants your uid, and `keep-id` carries it in |
+| the device-mutex lock file | so a containerised agent and a host agent share one lock |
+| `~/.config/porthole`, **read-only** | so both sides resolve the *same* device |
+| a dedicated ssh key, **read-only** | so the workspace never needs `~/.ssh` |
+
+Your `~/.ssh`, `/etc`, home directory and other users' data are not present.
+
+Two of those are subtler than they look, and both were found in review rather
+than designed in:
+
+- The **config mount is read-only** because `config.env` sets `FASTBOOT` and
+  `ADB`, and the *host* executes those values as commands. Writable, it would
+  have been a container-to-host code execution channel. The cost is that
+  `porthole use` does not work from inside the container; switch devices on the
+  host.
+- The **device lock** needs host and container to compute the same path. That
+  needs the config mount *and* `TK_DEVICE_LOCK` passed through *and* the lock
+  recorded as a container label, so that a later `porthole use` cannot leave
+  the container guarding a different phone while the mutex still looks healthy.
+
+## What it does not do
+
+Being straight about this matters more than the feature list.
+
+**It does not protect the device.** A phone you have given passwordless sudo to
+is a phone a tool can brick. The device mutex, the forbidden-slot guard and
+confirm-before-irreversible are what cover that.
+
+**One host step still needs root, once.** Installing podman, and registering
+binfmt for cross-architecture builds, are host-global. That is a person
+installing software on their own computer — not a privilege the agent holds,
+and not something it can do. `porthole doctor` names both.
+
+**Loop devices are unavailable to a rootless container.** That is a kernel
+boundary, not a configuration knob: `LOOP_SET_FD` and block-device `mount`
+require `CAP_SYS_ADMIN` in the *initial* user namespace. It matters less than
+it sounds, because `pmbootstrap install --no-image` never touches a loop device
+(`_install.py` returns before `install_system_image`), and `fuse2fs` mounts
+ext4 from a plain file inside a user namespace, where ext4-on-loop is illegal.
+See `docs/SANDBOX-PROVISIONING.md`.
+
+## The legacy broker — `sandbox/ph-sudo`
+
+**Not installed by default. Only for a host that cannot run podman.**
+
+```sh
+porthole sandbox install --broker    # writes a script; read it, then run it
+```
+
+Before the workspace existed, this was the answer: pmbootstrap escalates
+through exactly one documented hook, `PMB_SUDO`, so pointing that at a
+validating broker routes every root request through a program of your choosing,
+as argv. One sudoers entry, for one root-owned file:
+
+```
+you ALL=(root) NOPASSWD: /usr/local/libexec/porthole/ph-sudo
+```
+
+It validates the verb against an allowlist, resolves every path argument inside
+declared roots (symlinks followed, `..` normalised), permits `sh -c` only for a
+literal append, restricts `mknod` to standard chroot nodes, rejects `remount`,
+`rbind` and `move`, and appends every decision to an audit log
+(`porthole sandbox audit --denied`).
+
+**Why it is a fallback rather than a tier.** `chroot <dir> <cmd>` runs an
+arbitrary command as root, and root inside a chroot can escape a chroot. The
+directory is confined; the payload is not. So it stops accidents, mistakes,
+blast radius and casual misuse — the overwhelming majority of real risk — and
+leaves an audit trail, but it is not a barrier against an adversary who
+controls what runs inside the chroot. Set `allow_chroot = 0` to refuse chroots
+entirely; the workspace covers that work now, so on a host with podman there is
+nothing left for the broker to do.
+
+It also **cannot build a package**: building runs `$WORKDIR/apk.static` as
+root, and the work directory is writable by the invoking user, so permitting an
+executable out of it would let anyone who can write there be root. The broker
+refuses, and that refusal is the boundary working rather than a gap.
+
+### What pmbootstrap actually asks for
+
+Measured, not guessed — a logging shim in `PMB_SUDO` across a real
+`pmbootstrap chroot -- true` plus `pmbootstrap shutdown`:
 
 ```
 72 root requests
@@ -56,193 +160,17 @@ Measured, not guessed. A logging shim was put in `PMB_SUDO` and a real
   1  touch         1  env           1  losetup
 ```
 
-Eleven verbs. **Every path argument was inside the pmbootstrap work directory**
-— with one exception found later, below.
+Eleven verbs, every path argument inside the work directory — with one
+exception found only by testing the finished broker against a *fresh* chroot,
+which immediately hit `mount --bind /proc <workdir>/chroot_native/proc ->
+DENIED`. A chroot cannot function without `/proc`, `/sys` and `/dev`. The fix
+was principled rather than a widening: for a bind mount the *destination* must
+be confined, and the *source* may additionally be one of a short list of kernel
+API filesystems. Host data stays refused.
 
-That is what makes a validating broker viable: the legitimate surface is small,
-regular, and confined.
-
-### One trace is not enough
-
-That capture ran against a chroot that was *already initialised*. Running the
-finished broker against a fresh one immediately hit a denial:
-
-```
-mount --bind /proc <workdir>/chroot_native/proc   ->  DENIED
-```
-
-A chroot cannot function without `/proc`, `/sys` and `/dev` bound into it, and
-pmbootstrap does that on every chroot init. The first trace never showed it.
-
-The fix was principled rather than a widening: for a **bind** mount the
-*destination* must always be confined, and the *source* may additionally be one
-of a short, exact list of kernel API filesystems. Host data — `/etc`, `/home`,
-`/root`, `/` — stays refused, because binding host data into a chroot hands it
-to whatever runs in there.
-
-**The lesson worth taking: derive the policy from a trace, then test it end to
+**The lesson worth keeping: derive the policy from a trace, then test it end to
 end against the real thing.** A denial is information; investigate it rather
 than relaxing the rule that produced it.
-
-### What the broker cannot do: build a package
-
-`pmbootstrap chroot`, `shutdown` and the device work around them run under the
-broker. **A package build does not, and cannot.**
-
-Building runs `$WORKDIR/apk.static` as root, on the host. The work directory is
-writable by the invoking user, so permitting an executable out of it would let
-anyone who can write there swap that binary and be root -- which is the whole
-of what this exists to prevent. So the broker refuses it, and that refusal is
-the boundary working rather than a gap to close:
-
-```
-sh -c "exec 3>…/apk_progress_fifo; …/apk.static --root … add …"   ->  DENIED
-                                                    executable must live in a
-                                                    system bin directory
-```
-
-The `exec 3>FIFO; <command>` shape itself IS accepted -- pmbootstrap uses it so
-apk can report progress on fd 3 -- and the command inside it is pulled apart
-and validated exactly like a top-level request, so nothing is laundered by
-appearing in there. It is the apk binary's location that is refused.
-
-For builds, use the container tier, where root maps to your own uid and there
-is no host privilege to confine in the first place. Keeping plain sudo for
-builds is the other option, and an honest one -- but then say so out loud
-rather than believing the broker is covering them.
-
-Reproduce it on your own setup before trusting this list:
-
-```sh
-cat > /tmp/logsudo <<'EOF'
-#!/usr/bin/env python3
-import json, os, subprocess, sys
-open("/tmp/argv.jsonl", "a").write(json.dumps(sys.argv[1:]) + "\n")
-sys.exit(subprocess.run(["sudo", *sys.argv[1:]]).returncode)
-EOF
-chmod +x /tmp/logsudo
-PMB_SUDO=/tmp/logsudo pmbootstrap chroot -- true
-```
-
-## Two tiers
-
-Neither is sufficient alone, and they are complementary rather than
-alternatives.
-
-### Tier 1 — the broker (`ph-sudo`)
-
-One sudoers entry, for one root-owned file:
-
-```
-you ALL=(root) NOPASSWD: /usr/local/libexec/porthole/ph-sudo
-```
-
-Everything pmbootstrap asks for arrives here as argv and is validated:
-
-| check | why |
-|---|---|
-| verb is in the allowlist | 11 verbs, derived from the capture above |
-| every path resolves inside a declared root | symlinks followed, `..` normalised |
-| `sh -c` only for `echo TEXT >> confined/path` | a free-form shell command is root by definition |
-| `mknod` only for standard chroot nodes | a block device inside a confined dir is a way out of it |
-| `mount` rejects `remount`, `rbind`, `move` | each can relocate or re-flag a mount out of the roots |
-| the binary lives in a system `bin` directory | otherwise the caller supplies the behaviour |
-| every request appended to an audit log | allowed and denied alike, with the reason |
-
-The policy lives at `/etc/porthole/sandbox.conf`, **root-owned**, and the broker
-refuses to run if it is writable by anyone else. The broker itself must be
-root-owned for the same reason: a boundary the agent can edit is theatre.
-
-### Tier 2 — the container (`porthole sandbox shell`)
-
-```sh
-podman run --userns=keep-id:uid=0,gid=0 ...
-```
-
-Inside, you are root, so pmbootstrap uses **no sudo at all** — `which_sudo()`
-returns `None` when `os.getuid() == 0`. Outside, that root is your own
-unprivileged uid.
-
-Verified on this setup: a file created by container-root came out owned by
-uid 1000. `chroot` works with default capabilities; `mount --bind` needs
-`SYS_ADMIN`, which inside a rootless user namespace confers nothing beyond that
-namespace.
-
-Only what you mount is reachable. Your ssh keys, `/etc`, other users' data and
-the rest of the machine are not present.
-
-## What each tier does not do
-
-Being straight about this matters more than the feature list.
-
-**The broker does not contain a determined chroot payload.**
-`chroot <dir> <cmd>` runs an arbitrary command as root. The *directory* is
-confined, but the payload is not — and root inside a chroot can escape a chroot.
-So the broker stops accidents, mistakes, blast radius and casual misuse, which
-is the overwhelming majority of real risk, and it leaves an audit trail. It is
-not a barrier against an adversary who controls what runs inside the chroot.
-
-Set `allow_chroot = 0` in the policy to refuse chroots on the host entirely and
-do that work only in the container.
-
-**The container does not cover everything.**
-
-| | works in the container |
-|---|---|
-| chroot operations, package builds, apk work | yes |
-| `pmbootstrap install` (needs loop devices) | no — needs real root on the host |
-| binfmt registration for cross-arch | no — host-global, one-time human step |
-| flashing a device | no — needs USB device access |
-
-So the honest arrangement is: container for the day-to-day loop an agent
-drives, broker for the host operations that genuinely need real root, and an
-interactive password for the rare rest.
-
-**Neither tier protects the device.** A phone you have given passwordless sudo
-to is a phone that a tool can brick. That is what the device mutex, the
-forbidden-slot guard and the confirm-before-irreversible rule are for.
-
-## Setting it up
-
-```sh
-porthole sandbox status     # what is configured, what is missing
-porthole sandbox install    # writes a script; read it, then run it
-```
-
-`install` deliberately does not run the privileged steps itself. Installing a
-security boundary should be a decision you make rather than something a tool
-does to you — and an agent cannot type a sudo password anyway, so handing it to
-you is the correct behaviour rather than a limitation.
-
-After running it:
-
-```sh
-export PMB_SUDO=/usr/local/bin/ph-sudo-client   # add to your profile
-sudo visudo    # DELETE the Defaults:you timestamp_timeout=<large> line
-```
-
-**That last step is the one that matters.** Installing the broker while leaving
-the blanket cache in place buys nothing: anything can still call plain `sudo`.
-
-Verify:
-
-```sh
-porthole sandbox status
-PMB_SUDO=/usr/local/bin/ph-sudo-client pmbootstrap chroot -- uname -a
-porthole sandbox audit --denied
-```
-
-Measured on the reference setup: a full `pmbootstrap chroot -- uname -a` against
-an uninitialised chroot brokered **31 root operations, all allowed**, and the
-chroot ran. The same broker refused, with exit 77 and an audit entry each:
-
-| attempt | refused because |
-|---|---|
-| `rm -rf /etc` | path escapes the declared roots |
-| `touch /etc/cron.d/backdoor` | path escapes the declared roots |
-| `sh -c 'cat /etc/shadow > /tmp/stolen'` | `sh -c` is only for a literal append |
-| `mount --bind /home <chroot>/home` | bind source is host data, not an API filesystem |
-| `bash -c id` | verb not in the allowlist |
 
 ## Reading the audit log
 
@@ -253,32 +181,30 @@ porthole sandbox audit --json      # for a machine
 ```
 
 A denial is not necessarily an attack — more often it is a pmbootstrap version
-doing something the allowlist has not seen. **Widen the policy deliberately when
-that happens, and never to make an error go away.** If a new verb is needed, add
-it to `sandbox/ph-sudo` with a test in `tests/test_sandbox.py` alongside, so the
-reason is recorded.
+doing something the allowlist has not seen. **Widen the policy deliberately
+when that happens, and never to make an error go away.**
 
 ## Testing
 
 `tests/test_sandbox.py` runs unprivileged, executes nothing, and is mostly
-escape attempts:
-
-- a path outside the roots
-- a sibling directory sharing a prefix (`/work` vs `/work-evil`)
-- a symlink planted inside the root pointing at `/etc`
-- `..` traversal
-- an arbitrary shell command, and a correctly-shaped one aimed at `/etc/passwd`
-- a device node for a raw disk
-- `mount --bind /etc`, `mount -o remount`
-- a chroot target outside the roots
-- a "mount" binary supplied from a writable directory
-- a policy file the invoking user can write
+escape attempts against the broker — a path outside the roots, a sibling
+directory sharing a prefix (`/work` vs `/work-evil`), a symlink planted inside
+the root, `..` traversal, a shell command aimed at `/etc/passwd`, a device node
+for a raw disk, `mount --bind /etc`, `mount -o remount`, a chroot target
+outside the roots, a "mount" binary supplied from a writable directory, and a
+policy file the invoking user can write.
 
 Those are the tests that matter. A broker that allows the right things is easy;
 one that refuses the wrong things is the product.
 
+`tests/test_sandbox_container.py` covers the workspace, and its assertions are
+the same idea: that the mount set never exposes `~/.ssh`, that the device key
+is read-only, that the lock path matches `tools/tk-device.sh` exactly, that
+`--command` omits `-it`, that `down` never passes `-v`, and that a failed
+`podman inspect` refuses rather than reading as "no drift".
+
 ## If you only do one thing
 
-Delete the `timestamp_timeout` line. Even with no broker and no container, going
-back to a normal 5-minute sudo cache shrinks a week-long window to a few
+Delete the `timestamp_timeout` line. Even with no workspace and no broker,
+going back to a normal 5-minute sudo cache shrinks a week-long window to a few
 minutes, and every escalation after that is one you were present for.

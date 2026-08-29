@@ -42,17 +42,21 @@ mknod, chmod, ln, rm, mkdir, touch, env, losetup), and **every path argument is
 inside the pmbootstrap work directory**. Measure it on your own setup rather
 than trusting that list.
 
-**Two tiers, because neither is enough alone:**
+**The remedy is to need no root at all.** `porthole sandbox up` runs the work
+in a persistent rootless container where you are uid 0 inside and your own
+unprivileged uid outside, so pmbootstrap uses no sudo whatsoever and no sudoers
+entry is granted. An escape reaches your uid, not the machine.
 
-1. A validating broker confines paths and refuses non-pmbootstrap verbs. Cheap,
-   always on, audited. Stops accidents and casual misuse.
-2. A rootless container where container-root maps to your own uid. This is the
-   real boundary: an escape reaches your uid, not the machine.
+A validating broker on `PMB_SUDO` (confining paths, refusing non-pmbootstrap
+verbs, auditing every decision) remains available for a host that cannot run
+podman, and it is far better than a blanket cache — but it is a fallback, not a
+second tier.
 
-**Be honest about the gap.** `chroot <dir> <cmd>` runs an arbitrary command as
-root, and root inside a chroot can escape a chroot. A broker confines the
-directory, not the payload. Claiming otherwise is worse than not having the
-broker, because it buys false confidence.
+**Be honest about the gap in that fallback.** `chroot <dir> <cmd>` runs an
+arbitrary command as root, and root inside a chroot can escape a chroot. A
+broker confines the directory, not the payload. Claiming otherwise is worse
+than not having the broker, because it buys false confidence. That gap is the
+reason the container is the answer rather than the second half of one.
 
 **The one thing worth doing even if you do nothing else:** delete the
 `timestamp_timeout` line. A five-minute cache instead of a week-long one turns
