@@ -15,7 +15,7 @@ first-learned: 2026-08-28
 WRONG. The power sequence, all four clocks, the trustzone PAS reset and every
 CPU write into venus all survive; the wedge is one `readl` of
 `CPU_CS_SCIACMDARG0` after `VIDC_CTRL_INIT`. See
-[[venus-wedges-on-one-register-read-after-ctrl-init]]. Everything else here --
+[[venus-wedges-on-the-first-vbif-write]]. Everything else here --
 the silence, the watchdog recovery, the bootloop risk, the blacklist -- still
 holds.
 
