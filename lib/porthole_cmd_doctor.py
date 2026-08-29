@@ -527,6 +527,38 @@ def bench(ch: Checks, ctx) -> None:
     timed("device state", dev.state, 100)
 
 
+def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
+    """A stale PMB_SUDO is the worst failure this subsystem can leave behind.
+
+    Reported from a real session: the broker was no longer installed, but
+    PMB_SUDO still pointed at it, so `porthole build` died with **exit 78 deep
+    inside pmbootstrap** and nothing anywhere said the words "PMB_SUDO". The
+    workaround reached for was `PMB_SUDO=sudo` -- the blanket credential cache
+    this whole subsystem exists to retire. Loud and named beats silent and
+    clever, so this is a FAIL with the unset command spelled out.
+    """
+    value = (ctx.cfg.get("PMB_SUDO") or os.environ.get("PMB_SUDO") or "").strip()
+    if not value:
+        ch.add("host: PMB_SUDO", "ok", "unset -- the workspace needs no broker")
+        return
+
+    target = shutil.which(value) or (value if os.path.exists(value) else "")
+    if not target or not os.access(target, os.X_OK):
+        ch.add("host: PMB_SUDO", "fail",
+               f"points at {value}, which is not executable",
+               "unset PMB_SUDO"
+               "    # the workspace needs no broker; a build otherwise dies "
+               "with exit 78 inside pmbootstrap")
+        return
+
+    if state.get("container_running"):
+        ch.add("host: PMB_SUDO", "warn",
+               f"{value} -- unused while the workspace is up",
+               doc="unset PMB_SUDO unless you build on the host")
+    else:
+        ch.add("host: PMB_SUDO", "ok", value)
+
+
 def check_workspace(ch: Checks, ctx, family: str) -> None:
     """podman and the build workspace.
 
@@ -557,6 +589,8 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
     # binfmt is host-global and needs root once. Named, never automated: it is
     # a person installing software on their own machine, not a privilege the
     # agent holds.
+    _check_pmb_sudo(ch, ctx, state)
+
     binfmt = pathlib.Path("/proc/sys/fs/binfmt_misc/qemu-aarch64")
     if binfmt.exists():
         ch.add("host: binfmt aarch64", "ok", "registered")

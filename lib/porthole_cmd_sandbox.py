@@ -20,6 +20,7 @@ import getpass
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -141,6 +142,13 @@ def _build_argv(root: pathlib.Path, force: bool) -> list[str]:
     return argv
 
 
+# The container's own PATH, plus the repo's bin. Set from out here rather than
+# baked into the image so an image built before this fix still gets it: an
+# agent whose `porthole` is not on PATH cannot use the workspace at all.
+CONTAINER_PATH = ("/porthole/bin:/usr/local/sbin:/usr/local/bin:"
+                  "/usr/sbin:/usr/bin:/sbin:/bin")
+
+
 def _up_argv(root, image, mounts, device) -> list[str]:
     """The persistent workspace.
 
@@ -168,6 +176,11 @@ def _up_argv(root, image, mounts, device) -> list[str]:
             # for the same device -- the whole point of that mount.
             "-e", "XDG_CONFIG_HOME=/run/porthole/config",
             "-e", f"TK_DEVICE_LOCK={_lock_path(device)}",
+            # /porthole/bin, or `porthole` is not a command in here at all --
+            # reported from a real session as the first thing that stopped an
+            # agent using the workspace. Set from out here rather than baked
+            # into the image, so an image built before this fix still gets it.
+            "-e", "PATH=" + CONTAINER_PATH,
             # The dedicated device key, at its in-container path. Unset, the
             # device tooling falls back to ~/.ssh/id_ed25519 -- which the
             # workspace deliberately cannot see, so ssh would simply fail.
@@ -175,10 +188,24 @@ def _up_argv(root, image, mounts, device) -> list[str]:
             # Same value, recorded where a later command can read it back and
             # notice that `porthole use` has moved on. See LOCK_LABEL.
             "--label", f"{LOCK_LABEL}={_lock_path(device)}"]
+    # The config mount carries the user-config LAYER, but the host's active
+    # device usually comes from the ENVIRONMENT -- a layer that stops at the
+    # container boundary. Without this the container resolves a DIFFERENT
+    # device than the host: reported from a real session as "the container
+    # defaults to cheetah" while the host was on taimen.
+    if device:
+        argv += ["-e", f"PORTHOLE_DEVICE={device}"]
+    # And the mount is /work, so the value must be /work. The profile carries a
+    # host path, which does not exist in here -- which is why that session's
+    # build refused with "this profile cannot build yet".
+    if any(dst == "/work" for _s, dst, _o in mounts):
+        argv += ["-e", "PORTHOLE_WORKDIR=/work"]
     for src, dst, opts in mounts:
         argv += ["-v", f"{src}:{dst}:{opts}"]
     argv += [image, "sleep", "infinity"]
     return argv
+
+
 
 
 def _lock_drift(baked: str, want: str) -> str:
@@ -785,6 +812,15 @@ def _build(ctx, args) -> int:
 
 # ------------------------------------------------------------------- shell --
 
+# Whitespace or any shell metacharacter. A bare `ls` is a program; anything
+# with a space, a pipe or a redirect is a line meant for a shell.
+_SHELL_CHARS = frozenset(" \t|&;<>()$`\\\"'*?[]{}~#\n")
+
+
+def _is_shell_line(text: str) -> bool:
+    return any(ch in _SHELL_CHARS for ch in text)
+
+
 def _exec_argv(command, tty: bool) -> list[str]:
     """`-it` ONLY for an interactive human.
 
@@ -796,8 +832,17 @@ def _exec_argv(command, tty: bool) -> list[str]:
     if tty:
         argv.append("-it")
     argv.append(CONTAINER)
-    argv += list(command) if command else ["/bin/bash"]
-    return argv
+    if not command:
+        return argv + ["/bin/bash"]
+    # `--command "pmbootstrap status"` arrives as ONE argv element, and podman
+    # would try to exec a file with that literal name -- reported from a real
+    # session as a crun "executable file not found" error, having done exactly
+    # what the flag looked like it should do. A single element carrying shell
+    # syntax is a shell line, so run it as one. Several elements are already
+    # argv and are passed through untouched.
+    if len(command) == 1 and _is_shell_line(command[0]):
+        return argv + ["/bin/bash", "-lc", command[0]]
+    return argv + list(command)
 
 
 def _shell(ctx, args) -> int:
@@ -813,7 +858,10 @@ def _shell(ctx, args) -> int:
     tty = sys.stdin.isatty() and not args.command
     argv = _exec_argv(args.command, tty)
     if args.dry_run:
-        print(" ".join(argv))
+        # shlex.quote: printed bare, a single-element `--command "a b"` looks
+        # exactly like the two-argument form and hides the very bug this
+        # wrapping exists to fix.
+        print(" ".join(shlex.quote(a) for a in argv))
         return EX_OK
     return subprocess.run(argv).returncode
 
