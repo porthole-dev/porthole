@@ -35,6 +35,7 @@ generic notes as well.
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
+| [the-workspace-loop-is-seconds-and-still-uncached](findings/the-workspace-loop-is-seconds-and-still-uncached.md) | `generic` | The workspace edit-build loop is 6-8 s, and ccache is still hit zero times |
 | [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
 | [venus-wedges-on-the-first-vbif-write](findings/venus-wedges-on-the-first-vbif-write.md) | `device:google-taimen` | msm8998 TZ refuses venus resume with -EINVAL, mainline swallows it, and the whole block stays dark |
@@ -141,7 +142,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 13
-- `generic` — 75
+- `generic` — 76
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1
