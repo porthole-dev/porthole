@@ -295,6 +295,47 @@ def test_plenty_of_space_is_neither_refused_nor_warned_about():
     assert not build._space_warning(cfg)
 
 
+def test_a_build_routes_into_the_workspace_by_default():
+    import porthole_cmd_build as build
+    argv = build._container_cmd("tkbuild", None, {})
+    assert argv[:2] == ["podman", "exec"], argv
+    assert argv[-3] == "/bin/bash" and argv[-2] == "-lc", argv
+    assert "cd /porthole" in argv[-1] and "tkbuild" in argv[-1], argv[-1]
+
+
+def test_the_rootfs_password_never_reaches_the_podman_argv():
+    """`-e NAME=value` would put it where `ps` shows it to every user on the
+    box. `-e NAME` makes podman read it from our environment instead."""
+    import porthole_cmd_build as build
+    argv = build._container_cmd("tkbuild", None, {"TK_PMOS_PASSWORD": "hunter2"})
+    assert "hunter2" not in " ".join(argv), argv
+    assert "TK_PMOS_PASSWORD" in argv, argv
+
+
+def test_host_paths_are_not_resent_into_the_container():
+    """The container's PORTHOLE_WORKDIR is /work, set when it was created. The
+    host's names a directory that does not exist in there, and sending it was
+    what made a real session refuse with 'this profile cannot build yet'."""
+    import porthole_cmd_build as build
+    argv = build._container_cmd("tkbuild", None,
+                                {"TK_X": "1", "PORTHOLE_WORKDIR": "/host/tree"})
+    assert "PORTHOLE_WORKDIR" not in argv, argv
+
+
+def test_module_arguments_survive_the_trip():
+    import porthole_cmd_build as build
+    argv = build._container_cmd("tkmod", ["drivers/media/i2c/imx179.ko", "imx179"], {})
+    assert "imx179" in argv[-1] and "imx179.ko" in argv[-1], argv[-1]
+
+
+def test_the_host_path_is_still_available():
+    import pathlib as _p
+    import porthole_cmd_build as build
+    argv = build._host_cmd(_p.Path("/repo/tools/ph-build.sh"), "tkclean", None)
+    assert argv[0] == "bash", argv
+    assert "ph-build.sh" in argv[-1] and "tkclean" in argv[-1], argv[-1]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

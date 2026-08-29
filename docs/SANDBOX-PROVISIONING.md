@@ -197,18 +197,30 @@ not a sandbox), plus: `pmbootstrap`, `android-tools`, `e2fsprogs`,
 `openssh-client`, `rsync`, `openssl`, `xz`, `tar`, `util-linux`, and the
 build deps envkernel expects.
 
-### 4. The fuse2fs shim
+### 4. The image build — NOT a fuse2fs shim
 
-A shim over `pmb/install/losetup.py`: `losetup` becomes a no-op and
-`mount /dev/loopN` becomes `fuse2fs -o fakeroot <img> <mnt>`.
+**This section originally described a shim and was wrong.** See
+`brain/findings/fuse2fs-cannot-replace-the-loop-device.md`.
 
-pmbootstrap keeps owning partition layout, `mkfs` arguments, fstab and UUIDs.
-That is not incidental — `tools/ph-build.sh:510` records a real device failure
-caused by boot.img and the rootfs disagreeing about filesystem UUIDs, and
-reimplementing image assembly in porthole would put us back in the business of
-getting that right.
+`fuse2fs` mounts a filesystem. pmbootstrap is not mounting a filesystem from a
+file — it is using the loop device to expose a **partitioned disk** so the
+kernel creates `/dev/installp1` and `p2`, which `parted`, `mkfs` and `mount`
+all then consume as block devices (`partition.py:58-61`, `format.py:260-266`).
+There is no point in that chain where `fuse2fs` has anything to substitute for,
+and `--split` still calls `losetup` per image.
 
-Upstreamable to pmbootstrap as-is, and it should be offered.
+What survives is the opening, not the mechanism:
+
+- `pmbootstrap install --no-image` never reaches any of it (source-verified).
+- `mkfs.ext4` needs no block device, and `mkfs.ext4 -d <dir>` populates a
+  filesystem from a directory with **no mount at all**.
+
+So the image can be assembled unprivileged — per-partition filesystem images,
+then `truncate` + `sfdisk` + `dd` on a plain file — but porthole would then own
+the partition layout and the filesystem UUIDs that `boot.img` hard-codes.
+`ph-build.sh:510` records a real device failure from exactly that pair
+disagreeing. **That trade-off is now the open decision**, and it is a different
+decision than the one this section originally recorded as settled.
 
 ### 5. Verbs
 
