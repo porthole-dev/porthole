@@ -145,6 +145,20 @@ after a build, the verb already did that work — and did it better, because a
 fixed sleep is wrong in both directions (`brain/laws/poll-never-sleep.md`).
 `TK_BOOT_DEADLINE` sets the give-up point; it is not a poll interval.
 
+**And a build is no longer a black box.** It prints a live bar with a phase and
+an ETA, writes the full log to `.run/build-<rung>-<stamp>.log`, and publishes
+where it is to `.run/build-status.json` the whole time. If you run a build in
+the background, **poll it instead of sleeping**:
+
+```sh
+porthole build --yes &            # or in your harness's background runner
+porthole build status --json    # rung, phase, progress, elapsed, eta, last line
+```
+
+`--verbose` streams the raw output instead of the bar. The ETA comes from what
+this rung took last time on this machine, so the first run of a rung says
+`eta --` rather than inventing a number.
+
 ## Non-negotiable
 
 **Never hand-roll what a tool does.** Writing `ssh ... reboot` or `sleep 60`
