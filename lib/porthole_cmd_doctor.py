@@ -350,11 +350,64 @@ def check_profile(ch: Checks, cfg, root: pathlib.Path) -> None:
                    f"active={cfg['PORTHOLE_ACTIVE_SLOT']} "
                    f"forbidden={cfg['PORTHOLE_SLOT_FORBIDDEN']}")
 
+    check_kernel_series(ch, cfg)
+
     # Measured, not inherited. Until it exists every boot verdict is a guess.
     if not cfg.get("PORTHOLE_REBOOT_BUDGET_S"):
         ch.add("profile: timing", "warn",
                "PORTHOLE_REBOOT_BUDGET_S unset -- measure cold boot to first ssh",
                doc="brain/traps/wait-long-enough-before-calling-a-boot-failed.md")
+
+
+# Keys whose value carries the kernel series as a `<major>.<minor>` token.
+# Deliberately not "every key that mentions a version": a SoC name like
+# msm8998 or gs201 has no dot and never matches, and DTB paths carry board
+# names rather than releases.
+SERIES_KEYS = ("PORTHOLE_KERNEL_PKG", "PORTHOLE_KCONFIG_FILE",
+               "PORTHOLE_KERNEL_BRANCH")
+_SERIES = re.compile(r"\d+\.\d+")
+
+
+def check_kernel_series(ch: Checks, cfg) -> None:
+    """The config disagreeing with ITSELF about which kernel this is.
+
+    `drift()` compares one layer against another and was blind to this: on
+    2026-08-29 every layer agreed and the profile was simply wrong internally.
+    The 6.18 -> 7.2 move updated PORTHOLE_KERNEL_PKG and PORTHOLE_KCONFIG_FILE
+    and left PORTHOLE_KERNEL_BRANCH naming the old branch two lines below the
+    first of them, where it sat for a day.
+
+    Nothing reads KERNEL_BRANCH -- the template calls it "the branch that is
+    the product" and it is documentation -- which is exactly why it rotted: an
+    unread key has no build to fail it. Warn rather than fail for the same
+    reason. A stale branch name misdirects a person; it does not build the
+    wrong kernel, and the keys that would are already blocking in
+    porthole.GUARDED_KEYS.
+
+    Judged on the RESOLVED value, not on the profile file, so a half-updated
+    set of exports is caught by the same rule -- and each value is reported
+    with the layer it came from, or the fix would send you to edit a file that
+    is already correct.
+    """
+    seen = {}
+    for key in SERIES_KEYS:
+        m = _SERIES.search(cfg.get(key, "") or "")
+        if m:
+            seen[key] = m.group(0)
+    if len(set(seen.values())) <= 1:
+        if seen:
+            ch.add("config: kernel series", "ok",
+                   f"{next(iter(set(seen.values())))} across "
+                   f"{len(seen)} key{'s' if len(seen) > 1 else ''}")
+        return
+    source = getattr(cfg, "source", lambda _k: "")
+    detail = ", ".join(f"{k}={v}" + (f" ({source(k)})" if source(k) else "")
+                       for k, v in seen.items())
+    ch.add("config: kernel series", "warn",
+           f"these do not name the same kernel: {detail}",
+           doc=f"profiles/{cfg.get('PORTHOLE_DEVICE', '')}/device.env holds "
+               f"the committed values; an `(environment)` above is an export "
+               f"outranking it")
 
 
 def check_identity(ch: Checks, cfg) -> None:
@@ -639,6 +692,20 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
     # a person installing software on their own machine, not a privilege the
     # agent holds.
     _check_pmb_sudo(ch, ctx, state)
+
+    # The thing this project exists to replace, reported by the verb people
+    # actually run. `porthole sandbox` has always shown it; nobody runs
+    # `porthole sandbox` before a build, and a 167-hour root credential cache
+    # left over from the pre-sandbox era outlived the design that needed it by
+    # a week for exactly that reason.
+    #
+    # A blank read is honest, not a hole: the scan goes through `sudo -n`, and
+    # a cache long enough to matter is precisely what makes `sudo -n` succeed.
+    # If it fails there is no standing credential to report.
+    for issue in sandbox._sudo_state()["issues"]:
+        ch.add("host: root credential cache", "warn", issue,
+               doc="sudo visudo    # remove the Defaults line; the workspace "
+                   "has no sudoers entry and needs none")
 
     binfmt = pathlib.Path("/proc/sys/fs/binfmt_misc/qemu-aarch64")
     if binfmt.exists():

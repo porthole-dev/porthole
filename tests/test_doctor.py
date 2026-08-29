@@ -139,3 +139,48 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_a_profile_that_disagrees_with_itself_about_the_kernel_is_caught():
+    """The exact 2026-08-29 state: the 6.18 -> 7.2 move updated the two keys a
+    build reads and left PORTHOLE_KERNEL_BRANCH naming the old branch. Nothing
+    reads that key, so no build could fail on it and drift() -- which compares
+    the environment against the profile -- saw every layer agreeing."""
+    ch = doctor.Checks()
+    doctor.check_kernel_series(ch, {
+        "PORTHOLE_DEVICE": "google-taimen",
+        "PORTHOLE_KERNEL_PKG": "linux-postmarketos-qcom-msm8998-7.2",
+        "PORTHOLE_KCONFIG_FILE": "config-postmarketos-qcom-msm8998-7.2.aarch64",
+        "PORTHOLE_KERNEL_BRANCH": "taimen-v6.18-wip",
+    })
+    row = ch.rows[-1]
+    assert row["status"] == "warn", row
+    assert "PORTHOLE_KERNEL_BRANCH=6.18" in row["detail"], row["detail"]
+    assert "PORTHOLE_KERNEL_PKG=7.2" in row["detail"], row["detail"]
+    assert "google-taimen" in row["doc"], row["doc"]
+    assert row["name"] == "config: kernel series", row
+
+
+def test_a_profile_where_every_key_names_the_same_series_is_quiet():
+    ch = doctor.Checks()
+    doctor.check_kernel_series(ch, {
+        "PORTHOLE_KERNEL_PKG": "linux-postmarketos-qcom-msm8998-7.2",
+        "PORTHOLE_KCONFIG_FILE": "config-postmarketos-qcom-msm8998-7.2.aarch64",
+        "PORTHOLE_KERNEL_BRANCH": "taimen-v7.2",
+    })
+    assert ch.rows[-1]["status"] == "ok", ch.rows[-1]
+
+
+def test_a_soc_number_is_not_read_as_a_kernel_version():
+    """cheetah's aport is `linux-postmarketos-gs201` and its other two keys are
+    blank. A check that matched any digits would invent a disagreement between
+    gs201 and nothing, on the one profile that has nothing to disagree about.
+    msm8998 has no dot either, which is what keeps taimen's own aport from
+    matching twice."""
+    ch = doctor.Checks()
+    doctor.check_kernel_series(ch, {
+        "PORTHOLE_KERNEL_PKG": "linux-postmarketos-gs201",
+        "PORTHOLE_KCONFIG_FILE": "",
+        "PORTHOLE_KERNEL_BRANCH": "",
+    })
+    assert ch.rows == [], ch.rows
