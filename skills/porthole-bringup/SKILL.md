@@ -51,6 +51,39 @@ porthole brain new <kebab-id> --severity finding --refutes "the theory it kills"
 `porthole brain <keyword>` searches. `--scope soc:<yours>` filters to what
 applies to your device (and always includes the generic notes).
 
+## Build in the workspace, never with host root
+
+pmbootstrap needs root. **You do not need it on the host, and must not ask for
+it.** The build environment is a persistent rootless container where you are
+uid 0 inside and the user's own unprivileged uid outside:
+
+```sh
+porthole sandbox status                      # is the workspace up?
+porthole sandbox up                          # build the image if needed, start it
+porthole sandbox shell --command <command>   # run one command in it
+porthole sandbox shell                       # a shell, if you are a human
+```
+
+`--command` works with no TTY, which is what makes this usable by an agent at
+all. Inside, `pmbootstrap` uses no sudo whatsoever, because it checks
+`os.getuid()` and you are already root there.
+
+**If the workspace is not set up, STOP and ask the person you are working
+with.** The one remaining privileged step is installing podman, and it needs a
+password you cannot and must not type:
+
+> This host has no porthole workspace yet. Please run `porthole doctor`, which
+> names what is missing and how to install it. I cannot do it for you, by
+> design.
+
+Do not work around it. Do not `sudo`. Do not suggest a sudo credential cache —
+`brain/traps/a-long-sudo-cache-is-unlimited-root.md` is why that trap exists.
+
+Only what the workspace mounts is reachable from inside it: the pmbootstrap
+work directory, this repo, the device lock, the USB bus and a device ssh key
+made for the job. The user's `~/.ssh`, `/etc` and home directory are not
+present, and that is the property the whole thing exists to keep.
+
 ## The iteration ladder — pick the cheapest rung that covers your change
 
 This is where bring-up sessions lose the most wall-clock. Four rungs, and the
@@ -113,6 +146,10 @@ something must physically move the device.
 
 **Confirm before anything irreversible** — flashing, thermal ramps, anything
 that can leave a slot unbootable.
+
+**Never ask for host root.** Builds go through `porthole sandbox shell`.
+A request for sudo, or for a longer sudo timeout, is a bug in your plan
+rather than a missing permission.
 
 **Never hardcode** an IP, username, slot letter or package name. Shell:
 `. tools/tk-lib.sh`. Python: `import porthole`.

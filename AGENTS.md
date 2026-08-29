@@ -110,16 +110,32 @@ See `brain/laws/the-lock-says-who-not-what.md`.
 Do not recover someone else's experiment out from under them. A device sitting
 in the bootloader is usually a measurement in progress, not a fault.
 
-### Never ask for host root outside the sandbox
+### Never ask for host root
 
-pmbootstrap needs root; you do not need it on the host. Use
-`porthole sandbox shell` (a rootless container where root maps to the user's own
-uid) or the brokered `PMB_SUDO`, which confines every request to declared paths
-and audits it.
+pmbootstrap needs root; you do not need it on the host, and the design grants
+you none. Builds run in a persistent rootless container where you are uid 0
+inside and the user's unprivileged uid outside:
 
-If a command is refused with exit 77, that is the broker. **Do not work around
-it** — report what you needed and why. Widening a security policy to make an
-error go away is how the policy stops meaning anything. `docs/SANDBOX.md`.
+```sh
+porthole sandbox status                      # is the workspace up?
+porthole sandbox up                          # build the image if needed, start it
+porthole sandbox shell --command <command>   # one command, works with no TTY
+```
+
+Inside it pmbootstrap uses no sudo at all — it checks `os.getuid()`, and you
+are root there. Outside, that root is just the user.
+
+**If the workspace is not set up, stop and ask.** Installing podman needs a
+password you cannot type, and that is deliberate rather than a limitation.
+Do not work around it, and never propose a sudo credential cache:
+`brain/traps/a-long-sudo-cache-is-unlimited-root.md`.
+
+`sandbox/ph-sudo` is a **legacy fallback** for a host without podman. It is not
+installed by default, it grants a real sudoers entry, and its own documentation
+admits it cannot contain a determined chroot payload. Prefer the workspace. If
+a command is refused with exit 77 that is the broker; report what you needed
+rather than widening the policy — that is how a policy stops meaning anything.
+`docs/SANDBOX.md`.
 
 ### Confirm before anything irreversible
 

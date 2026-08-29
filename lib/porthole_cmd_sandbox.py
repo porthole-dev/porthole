@@ -531,13 +531,36 @@ def _status(ctx) -> int:
 # ----------------------------------------------------------------- install --
 
 def _install(ctx, args) -> int:
-    """Emit the install script. Deliberately does not run privileged steps.
+    """Emit the LEGACY broker install script. Requires --broker, deliberately.
 
-    Installing a security boundary is a decision, not a side effect. And an
-    agent cannot type a sudo password anyway -- so it prints exactly what will
-    happen and lets a human run it, which is also how the human learns what
-    they just trusted.
+    The workspace container replaced this. It needs no sudoers entry at all, so
+    the default install now grants none: a boundary you do not need is one more
+    thing that can be wrong. The broker remains for a host without podman, and
+    for that host it is genuinely better than a blanket sudo cache -- but it is
+    a fallback, and choosing a weaker boundary should be explicit.
+
+    Still does not run the privileged steps itself. Installing a security
+    boundary is a decision, not a side effect, and an agent cannot type a sudo
+    password anyway -- so it prints exactly what will happen and lets a human
+    run it, which is also how the human learns what they just trusted.
     """
+    if not getattr(args, "broker", False):
+        ctx.out.heading("the workspace is the supported path")
+        ctx.out("  porthole sandbox up        build the image and start it")
+        ctx.out("  porthole sandbox shell     a shell, or --command for one command")
+        ctx.out.blank()
+        ctx.out("  It needs no sudoers entry, so this command no longer writes one.")
+        ctx.out("  Inside the container you are root and pmbootstrap uses no sudo.")
+        ctx.out.blank()
+        ctx.out(ctx.out.paint(
+            "  Only if this host cannot run podman: `porthole sandbox install "
+            "--broker`\n"
+            "  installs the legacy privilege broker, which DOES grant a real "
+            "sudoers entry\n"
+            "  and cannot contain a determined chroot payload. See "
+            "docs/SANDBOX.md.", "grey"))
+        return EX_OK
+
     src = ctx.root / BROKER_SRC
     client_src = ctx.root / CLIENT_SRC
     if not src.is_file():
@@ -803,9 +826,12 @@ SPEC = {
         "pmbootstrap needs root. The usual workaround -- a multi-day sudo\n"
         "credential cache -- gives every process running as you silent,\n"
         "unlimited root, which is not something to hand an agent.\n\n"
-        "Two tiers: a validating broker that confines every root request\n"
-        "pmbootstrap makes, and a rootless container where root maps to your\n"
-        "own uid. See docs/SANDBOX.md for the threat model."),
+        "So it runs in a persistent rootless container instead, where you are\n"
+        "root inside and your own unprivileged uid outside. No sudoers entry,\n"
+        "no standing privilege. `up` builds and starts it; `shell --command`\n"
+        "works without a TTY, which is what makes it usable by an agent.\n\n"
+        "`install --broker` is a legacy fallback for a host without podman.\n"
+        "See docs/SANDBOX.md for the threat model."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": ["status", "install", "shell", "audit",
@@ -820,6 +846,9 @@ SPEC = {
                          "help": "shell: print the podman command and stop"}),
         (["--force"], {"action": "store_true",
                        "help": "build: rebuild even if the tag exists"}),
+        (["--broker"], {"action": "store_true",
+                        "help": "install: the legacy sudoers broker, for a "
+                                "host with no podman"}),
         (["--denied"], {"action": "store_true", "help": "audit: only denials"}),
         (["--limit"], {"type": int, "default": 40, "help": "audit: how many"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
