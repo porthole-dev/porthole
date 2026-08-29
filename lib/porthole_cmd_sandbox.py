@@ -37,6 +37,14 @@ SUDOERS_DST = "/etc/sudoers.d/60-porthole-sandbox"
 BASE_IMAGE = "docker.io/library/alpine:3.24"
 CONTAINER = "porthole-sandbox"
 
+# The lock path baked into the container at `up` time, recorded on the
+# container itself. TK_DEVICE_LOCK is set once, at creation, and cannot follow
+# a later `porthole use <other-device>` -- so the container would go on locking
+# the old device's path while the host locks the new one, and two agents would
+# drive one phone with the mutex looking healthy. The label is what lets `up`
+# and `shell` notice.
+LOCK_LABEL = "io.porthole.device-lock"
+
 # Where the dedicated device ssh key lives on the host, and where it is mounted
 # inside the container. Deliberately NOT under the /porthole repo mount: a key
 # shadowing a path in the user's checkout is a confusing surprise.
@@ -159,11 +167,45 @@ def _up_argv(root, image, mounts, device) -> list[str]:
             # the SAME lock path the host mounted rather than a different one
             # for the same device -- the whole point of that mount.
             "-e", "XDG_CONFIG_HOME=/run/porthole/config",
-            "-e", f"TK_DEVICE_LOCK={_lock_path(device)}"]
+            "-e", f"TK_DEVICE_LOCK={_lock_path(device)}",
+            # Same value, recorded where a later command can read it back and
+            # notice that `porthole use` has moved on. See LOCK_LABEL.
+            "--label", f"{LOCK_LABEL}={_lock_path(device)}"]
     for src, dst, opts in mounts:
         argv += ["-v", f"{src}:{dst}:{opts}"]
     argv += [image, "sleep", "infinity"]
     return argv
+
+
+def _lock_drift(baked: str, want: str) -> str:
+    """The refusal message, or "" when the two locks agree.
+
+    Empty `baked` means a container from before the label existed: unknowable,
+    so it is not treated as drift.
+    """
+    if not baked or baked == want:
+        return ""
+    return (f"{CONTAINER} locks {baked} but this device locks {want}")
+
+
+def _container_lock() -> str:
+    """The lock path recorded on the running container, "" if it has none."""
+    out = subprocess.run(
+        ["podman", "inspect", "-f",
+         "{{index .Config.Labels " + json.dumps(LOCK_LABEL) + "}}", CONTAINER],
+        capture_output=True, text=True).stdout.strip()
+    return "" if out in ("<no value>", "") else out
+
+
+def _assert_lock_matches(ctx) -> None:
+    """Refuse to use a container that guards a different phone than we do."""
+    drift = _lock_drift(_container_lock(),
+                        _lock_path(ctx.cfg.get("PORTHOLE_DEVICE", "")))
+    if drift:
+        raise Bail(drift, EX_FAIL,
+                   "the device changed under the workspace; two agents would "
+                   "drive one phone with the mutex looking healthy. Run "
+                   "`porthole sandbox down` and `up` again")
 
 
 def _container_running() -> bool:
@@ -178,6 +220,7 @@ def _up(ctx, args) -> int:
         raise Bail("podman is not installed", EX_FAIL,
                    "the workspace needs it; see `porthole doctor`")
     if _container_running():
+        _assert_lock_matches(ctx)
         ctx.out(f"  {CONTAINER} is already up")
         return EX_OK
 
@@ -699,6 +742,7 @@ def _shell(ctx, args) -> int:
     if not _container_running():
         raise Bail(f"{CONTAINER} is not running", EX_FAIL,
                    "run `porthole sandbox up` first")
+    _assert_lock_matches(ctx)
 
     tty = sys.stdin.isatty() and not args.command
     argv = _exec_argv(args.command, tty)

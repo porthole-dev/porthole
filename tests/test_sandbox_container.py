@@ -205,6 +205,23 @@ def test_up_argv_sets_xdg_config_home_and_matching_device_lock():
         "bind-mounted lock file protects nothing: " + repr(argv))
 
 
+def test_up_argv_labels_the_container_with_the_lock_it_baked_in():
+    argv = _argv_for_test()
+    assert f"{sb.LOCK_LABEL}={sb._lock_path('testdev')}" in argv, (
+        "TK_DEVICE_LOCK is baked in at up time and cannot follow a later "
+        "`porthole use`; the label is how the drift is noticed: " + repr(argv))
+    assert argv[argv.index(f"{sb.LOCK_LABEL}={sb._lock_path('testdev')}") - 1] \
+        == "--label", argv
+
+
+def test_lock_drift_only_fires_on_a_real_mismatch():
+    assert sb._lock_drift("/tmp/a.lock", "/tmp/a.lock") == ""
+    assert sb._lock_drift("", "/tmp/a.lock") == "", (
+        "a container from before the label is unknowable, not drift")
+    msg = sb._lock_drift("/tmp/old.lock", "/tmp/new.lock")
+    assert "/tmp/old.lock" in msg and "/tmp/new.lock" in msg, msg
+
+
 def test_exec_argv_omits_tty_when_a_command_is_given():
     argv = sb._exec_argv(["pmbootstrap", "status"], tty=False)
     assert "-it" not in argv, (
