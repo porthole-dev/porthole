@@ -83,6 +83,7 @@ generic notes as well.
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
 | [stale-dev-package-outranks-your-build](traps/stale-dev-package-outranks-your-build.md) | `generic` | A _p<timestamp> dev snapshot outranks a release, so apk installs a kernel from days ago |
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
+| [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [unmasked-suspend-during-an-automated-wait-is-a-death-loop](traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md) | `generic` | Unmasking suspend before an automated wait can loop a device out of reach |
@@ -125,7 +126,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 7
-- `generic` — 65
+- `generic` — 66
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1
