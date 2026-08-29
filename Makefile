@@ -23,7 +23,7 @@ TEST_JOBS ?= 8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
-.PHONY: help test console smoke lint floor check ci fmt tools-doc brain-index clean install-completion docs docs-serve
+.PHONY: help test console smoke lint floor check ci distros fmt tools-doc brain-index clean install-completion docs docs-serve
 
 help:            ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -111,6 +111,12 @@ floor:           ## the suite on the declared python floor, in a container (need
 	  echo "WARNING: no podman -- cannot check the python $(PY_FLOOR) floor."; \
 	  echo "         Your interpreter is newer and accepts syntax CI will reject."; \
 	fi
+
+distros:         ## does doctor's install advice actually work, per distro? (needs podman)
+	@# Not in `make check`: it pulls four images. It exists because the hint
+	@# table was wrong on the reference host -- Silverblue reports ID=fedora
+	@# and has no dnf -- and nothing noticed, because nothing ran it.
+	@bash tests/distro-matrix.sh
 
 check: lint test ## lint then test, on YOUR interpreter -- the everyday one
 
