@@ -71,6 +71,27 @@ def run(namespace):
     return _runner.run(namespace)
 
 
+
+async def until(pilot, predicate, timeout=10.0, step=0.05):
+    """Pause until `predicate()` is true, or the deadline passes.
+
+    A fixed `pilot.pause(0.25)` encodes "long enough on an idle box", and the
+    suite now runs 16-way parallel -- so that stopped being a property anything
+    could rely on. Poll to a deadline instead: fast when the machine is idle,
+    correct when it is not. brain/laws/poll-never-sleep.md.
+
+    Returns the predicate's final value so the caller still asserts on it, and
+    gets a real message rather than a bare timeout.
+    """
+    import time as _time
+    deadline = _time.monotonic() + timeout
+    value = predicate()
+    while not value and _time.monotonic() < deadline:
+        await pilot.pause(step)
+        value = predicate()
+    return value
+
+
 def pilot(app_factory, body):
     """Drive an app with Textual's pilot. `body` is an async fn taking (app, pilot)."""
     async def _go():

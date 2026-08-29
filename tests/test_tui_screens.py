@@ -497,12 +497,20 @@ def test_output_reaches_the_drawer_while_the_job_runs():
         drawer = app.screen.query_one(JobDrawer)
         job = app.jobs.spawn("sh -c 'echo hello; sleep 100'")
         drawer.attach(job)
-        await pilot.pause(0.25)
+        # Poll to a deadline, not a fixed pause: this test flaked roughly one
+        # run in five once the suite went parallel, because 0.25s is "long
+        # enough" only on an idle box and the job has to spawn a shell first.
+        await tui_harness.until(pilot, lambda: "hello" in drawer.text())
         assert "hello" in drawer.text(), drawer.text()
         drawer.expanded = True
         await pilot.pause()
         log = drawer.query_one("#job-log", RichLog)
-        rendered = "\n".join(strip.text for strip in log.lines)
+
+        def rendered_text():
+            return "\n".join(strip.text for strip in log.lines)
+
+        await tui_harness.until(pilot, lambda: "hello" in rendered_text())
+        rendered = rendered_text()
         assert "hello" in rendered, \
             "the drawer's RichLog never received the job's output: {!r}".format(
                 rendered)
