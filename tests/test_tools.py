@@ -12,6 +12,7 @@ import os
 import pathlib
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import sys
 
@@ -54,6 +55,19 @@ def field(path, name):
 
 
 # ------------------------------------------------------------- the contract --
+
+def _concurrently(check, paths):
+    """Run `check(path)` over every path at once, collecting the complaints.
+
+    Three tests here spawn one subprocess per tool across 117 tools, which was
+    17.9s of a 73s suite -- all of it waiting. Threads rather than processes
+    because the work IS a subprocess call: the GIL is released for its whole
+    duration, and nothing has to be pickled.
+    """
+    workers = min(len(paths), (os.cpu_count() or 1) * 4) or 1
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return [bad for bad in pool.map(check, paths) if bad]
+
 
 def test_every_tool_declares_the_four_fields():
     """`head -20 <tool>` must answer what it does, what it needs, what it
@@ -118,26 +132,30 @@ def test_no_hardcoded_gadget_ip_outside_config():
 
 
 def test_shell_tools_parse():
-    bad = []
-    for path in tools():
+    def check(path):
         if path.suffix != ".sh" and not _is_shell(path):
-            continue
+            return None
         proc = subprocess.run(["bash", "-n", str(path)],
                               capture_output=True, text=True)
         if proc.returncode != 0:
-            bad.append(f"{path.name}: {proc.stderr.strip().splitlines()[:1]}")
+            return f"{path.name}: {proc.stderr.strip().splitlines()[:1]}"
+        return None
+
+    bad = _concurrently(check, tools())
     assert not bad, "shell syntax errors:\n  " + "\n  ".join(bad)
 
 
 def test_python_tools_compile():
-    bad = []
-    for path in tools():
+    def check(path):
         if path.suffix != ".py":
-            continue
+            return None
         proc = subprocess.run([sys.executable, "-m", "py_compile", str(path)],
                               capture_output=True, text=True)
         if proc.returncode != 0:
-            bad.append(f"{path.name}: {proc.stderr.strip().splitlines()[-1:]}")
+            return f"{path.name}: {proc.stderr.strip().splitlines()[-1:]}"
+        return None
+
+    bad = _concurrently(check, tools())
     assert not bad, "python syntax errors:\n  " + "\n  ".join(bad)
 
 
@@ -155,23 +173,27 @@ def test_host_python_tools_can_start():
     host-only tools: anything with `needs:` naming a device state or on-device
     may legitimately touch hardware just by importing.
     """
-    bad = []
-    scratch = tempfile.mkdtemp(prefix="porthole-smoke-")
-    for path in tools():
+    root = tempfile.mkdtemp(prefix="porthole-smoke-")
+
+    def check(path):
         if path.suffix != ".py":
-            continue
+            return None
         # Everything except on-device tools: a tool declaring BOOTED or
         # INITRAMFS still RUNS on the host, and is exactly as safe to --help.
         # Keying on "host only" instead would have excluded tsh.py, the tool
         # this test was written for, the moment its needs: was made accurate.
         if (field(path, "needs") or "").strip().startswith("on-device"):
-            continue
+            return None
+        # A cwd PER TOOL, not one shared between them. In a throwaway cwd
+        # because a tool that takes an output path as argv[1] treats "--help"
+        # as one: tk-tone.py wrote a WAV named `--help` into the repo root the
+        # first time this ran. Now that these run concurrently, a shared cwd
+        # would let two such tools race for the same filename.
+        scratch = os.path.join(root, path.stem)
+        os.makedirs(scratch, exist_ok=True)
         # stdin=DEVNULL, or a tool that prompts (tk-mount-cal.py walks you
         # through four physical poses) blocks forever on input() instead of
         # failing. The timeout stays as a backstop, not as the mechanism.
-        # In a throwaway cwd, because a tool that takes an output path as
-        # argv[1] treats "--help" as one: tk-tone.py wrote a WAV named
-        # `--help` into the repo root the first time this ran.
         proc = subprocess.run([sys.executable, str(path), "--help"],
                               capture_output=True, text=True, cwd=scratch,
                               stdin=subprocess.DEVNULL, timeout=30)
@@ -183,9 +205,10 @@ def test_host_python_tools_can_start():
         # reached to find out.
         for fatal in ("NameError", "ImportError", "ModuleNotFoundError"):
             if f"{fatal}:" in proc.stderr:
-                last = proc.stderr.strip().splitlines()[-1:]
-                bad.append(f"{path.name}: {last}")
-                break
+                return f"{path.name}: {proc.stderr.strip().splitlines()[-1:]}"
+        return None
+
+    bad = _concurrently(check, tools())
     assert not bad, "python tools that cannot run at all:\n  " + "\n  ".join(bad)
 
 

@@ -16,6 +16,10 @@ PY    := python3
 # The oldest interpreter bin/porthole accepts, and what CI's
 # matrix floor is. Keep the three in step.
 PY_FLOOR := 3.8
+# How many suites run at once. 8 measured best on a 16-thread/8-core box: the
+# two big suites are already internally parallel (tests/_runner.py), so a
+# higher number only contends with them -- -P 8 and -P 16 both land at ~13.9s.
+TEST_JOBS ?= 8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
@@ -29,10 +33,7 @@ test:            ## CI job "tests": suites, brain lint, shell lib, device mutex
 	@# Globbed, not listed. CI globs; a hand-kept list here silently diverged
 	@# and eight suites ran in CI but never locally.
 	@fail=0; \
-	for t in tests/test_*.py; do \
-	  printf '%-28s ' "$$(basename $$t)"; \
-	  $(PY) $$t || fail=1; \
-	done; \
+	PY="$(PY)" TEST_JOBS=$(TEST_JOBS) bash tests/run-suites.sh || fail=1; \
 	printf '%-28s ' 'brain lint'; \
 	out=$$(./bin/porthole brain lint 2>&1) && echo "ok" \
 	  || { echo FAIL; echo "$$out" | sed 's/^/    /'; fail=1; }; \

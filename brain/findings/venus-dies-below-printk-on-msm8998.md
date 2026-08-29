@@ -10,6 +10,15 @@ refutes: venus on msm8998 only needs CONFIG_VIDEO_QCOM_VENUS plus the firmware; 
 first-learned: 2026-08-28
 ---
 
+**SUPERSEDED IN PART, 2026-08-29** — the localisation below ("inside
+`core_power(POWER_ON)` or the first register touch after it") is now measured
+WRONG. The power sequence, all four clocks, the trustzone PAS reset and every
+CPU write into venus all survive; the wedge is one `readl` of
+`CPU_CS_SCIACMDARG0` after `VIDC_CTRL_INIT`. See
+[[venus-wedges-on-one-register-read-after-ctrl-init]]. Everything else here --
+the silence, the watchdog recovery, the bootloop risk, the blacklist -- still
+holds.
+
 **The question** — msm8998.dtsi describes venus fully and `BLOBS.md` lists the
 firmware, so enabling hardware video decode looks like a config flip plus a
 blob. Is it?
