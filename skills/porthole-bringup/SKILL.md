@@ -84,10 +84,24 @@ work directory, this repo, the device lock, the USB bus and a device ssh key
 made for the job. The user's `~/.ssh`, `/etc` and home directory are not
 present, and that is the property the whole thing exists to keep.
 
-## The iteration ladder — pick the cheapest rung that covers your change
+## The iteration ladder — let porthole pick the rung
 
-This is where bring-up sessions lose the most wall-clock. Four rungs, and the
-top one costs fifteen times the bottom one:
+**Run `porthole build`. It measures, then picks.** It does an incremental
+`make`, looks at what actually got rebuilt, and runs the cheapest rung that
+covers it — one module rebuilt means a ~40 s push, a moved `Image.gz` means a
+flash. Without `--yes` it compiles and tells you which rung it would run,
+touching no device.
+
+Do NOT reason your way to a rung from the diff and then type it. That is what
+this replaces, and it is where sessions lose the most wall-clock: a header edit
+moves every module's CRC without looking like a config change, and a Kconfig
+edit can flip a module to built-in. Both fool a reader of the diff. Neither
+fools "what did make actually write".
+
+Name a rung explicitly only to OVERRIDE the measurement — when you know
+something it cannot see, such as a deliberate full reflash after a desync.
+
+The rungs it chooses between, top one costing fifteen times the bottom:
 
 | rung | use it when | cost |
 |---|---|---|
@@ -98,8 +112,8 @@ top one costs fifteen times the bottom one:
 | `porthole build kernel --yes` | **rootfs** contents changed, or boot/rootfs desynced | ~10 min, reflash both |
 
 Run any rung without `--yes` and it previews rather than builds, printing this
-table so you can check you are on the right one — `porthole build fast`, say.
-Add `--kernel` to `boot` to rebuild `Image.gz` as well as the dtb.
+table so you can check you are on the right one. Add `--kernel` to `boot` to
+rebuild `Image.gz` as well as the dtb.
 
 **A device that ships from an aport does not close the `mod` rung.** The kernel
 on the phone may come from the aport series while your change is in the tree,
@@ -114,6 +128,10 @@ Going up a rung when you did not have to is the single most common way to turn
 a twenty-minute investigation into an afternoon. Going *down* one when the
 change needed the higher rung is worse: a CONFIG edit moves every module's
 `module_layout` CRC, so `mod` pushes a module the running kernel will refuse.
+
+`porthole build` gets both directions right by measuring instead of guessing,
+which is why it is the default and why typing a rung by hand should be the
+exception rather than the habit.
 
 ## Never sleep after a build verb
 

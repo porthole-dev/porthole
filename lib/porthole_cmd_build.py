@@ -42,6 +42,13 @@ from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 # caller. tests/test_build_flash.py now asserts every name here is real.
 # The descriptions are printed as "would <description>", so they read as verb
 # phrases rather than labels.
+# `auto` is deliberately NOT in here. ACTIONS maps a rung to a ph-build.sh
+# function, and a test asserts every target really exists -- because `fast`
+# pointed at a `tkfast` that never existed for the whole life of the verb.
+# `auto` has no shell function; it chooses one. Keeping it out leaves that
+# invariant absolute instead of adding an exemption a real typo could hide in.
+AUTO_DESC = "build the cheapest rung that covers what actually changed"
+
 ACTIONS = {
     "mod": ("tkmod",
             "build one module, push it, reload it and verify -- no reboot (~40s)"),
@@ -58,7 +65,9 @@ ACTIONS = {
 }
 
 # The rungs that compile and move the device. `clean` and `purge` are neither.
-BUILD_ACTIONS = ("mod", "boot", "fast", "kernel", "upgrade")
+# `auto` is here so its FALLBACK -- no tree yet, or an unfilled profile --
+# renders the ladder preview instead of running an empty function name.
+BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade")
 
 # What each rung covers, so the preview can say why you would pick another.
 # This is the table an agent needs and had no way to get.
@@ -202,6 +211,79 @@ def _assert_no_drift(ctx, args) -> None:
         "          porthole build --allow-env-override     you mean it")
 
 
+def _tree(cfg) -> pathlib.Path:
+    """Where the kernel tree is, matching ph-build.sh:51 exactly."""
+    tree = (cfg.get("PORTHOLE_KERNEL_TREE") or "").strip()
+    if tree:
+        return pathlib.Path(tree).expanduser()
+    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
+    return pathlib.Path(workdir).expanduser() / "linux" if workdir else pathlib.Path()
+
+
+def _classify(changed) -> tuple:
+    """Which rung covers what an incremental make actually rebuilt.
+
+    PURE -- a list of changed artifact paths in, (rung, args, reason) out --
+    because this is the decision that must not be wrong, and a pure function is
+    one that can be wrong in a test instead of on a device.
+
+    Measured rather than inferred from the source diff, and the difference is
+    not academic: a header edit moves every module's CRC without looking like a
+    config change, and a Kconfig edit can flip a module to built-in. Both fool
+    a diff reader. Neither fools "what did make actually write".
+    """
+    kos = sorted(p for p in changed if p.endswith(".ko"))
+    image = [p for p in changed
+             if p.endswith(("/Image.gz", "/Image", "Image.gz", "Image"))]
+    dtbs = [p for p in changed if p.endswith(".dtb")]
+
+    if not changed:
+        return (None, [], "make rebuilt nothing -- there is nothing to push")
+
+    if image:
+        return ("fast", [],
+                "Image.gz moved, so every module's CRC may have moved with it; "
+                "a pushed module would be refused by the running kernel")
+
+    if kos and not dtbs:
+        if len(kos) == 1:
+            name = pathlib.Path(kos[0]).name[:-len(".ko")]
+            return ("mod", [kos[0], name],
+                    f"one module rebuilt ({name}) and nothing else")
+        # brain/traps/pushing-one-module-of-a-pair-corrupts-the-other.md: modules
+        # built together share a struct layout, and pushing a subset corrupts
+        # the ones left behind. So several is not several `mod` runs.
+        return ("fast", [],
+                f"{len(kos)} modules rebuilt together; pushing a subset "
+                f"corrupts the ones left behind")
+
+    if dtbs and not kos:
+        return ("boot", [], "only the dtb changed")
+
+    return ("fast", [],
+            "both the dtb and modules changed, and no cheap rung covers both")
+
+
+def _changed_artifacts(tree: pathlib.Path, since) -> list:
+    """Artifacts under .output newer than `since`, as tree-relative paths."""
+    out = tree / ".output"
+    if not out.is_dir():
+        return []
+    found = []
+    for path in out.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix not in (".ko", ".dtb") and path.name not in (
+                "Image.gz", "Image"):
+            continue
+        try:
+            if path.stat().st_mtime > since:
+                found.append(str(path.relative_to(out)))
+        except OSError:
+            continue
+    return sorted(found)
+
+
 def _workspace_available(ctx) -> bool:
     """Is there a running workspace to build in?
 
@@ -313,15 +395,91 @@ def _rung_args(args, action: str) -> list[str]:
     return []
 
 
+def _auto(ctx, args) -> int:
+    """Make first, then run the cheapest rung that covers what changed.
+
+    The old default was `kernel` -- the MOST expensive of five rungs, at ~10
+    minutes against `mod`'s ~40 seconds. An agent typing the obvious
+    `porthole build --yes` got the 15x path, which is most of why sessions were
+    spending ten minutes on changes a module push covered.
+
+    Note this compiles even without --yes. That is a deliberate departure from
+    the other rungs' preview: the whole question `auto` answers is "which rung",
+    and only make can answer it. It touches NO device without --yes.
+    """
+    import time
+
+    tree = _tree(ctx.cfg)
+    if not (tree / "Makefile").is_file():
+        raise Bail(f"no kernel tree at {tree}", EX_FAIL,
+                   "set PORTHOLE_KERNEL_TREE, or PORTHOLE_WORKDIR with linux/ "
+                   "inside it")
+
+    # A second early, because make writes files as it runs and a clock that
+    # ticks between the stamp and the first write would hide the first object.
+    since = time.time() - 1
+    ctx.out(ctx.out.paint("  measuring: incremental make, then routing on what "
+                          "it actually rebuilt", "grey"))
+    rc = _run(ctx, "_ph_make", args.timeout, None,
+              host=getattr(args, "host", False))
+    if rc != 0:
+        return rc
+
+    changed = _changed_artifacts(tree, since)
+    rung, extra, reason = _classify(changed)
+
+    ctx.out.blank()
+    ctx.out.heading("what make rebuilt")
+    for path in changed[:8]:
+        ctx.out(f"  {path}")
+    if len(changed) > 8:
+        ctx.out(f"  ... and {len(changed) - 8} more")
+    if not changed:
+        ctx.out(ctx.out.paint("  nothing", "grey"))
+    ctx.out.blank()
+
+    if rung is None:
+        ctx.out(reason)
+        return EX_OK
+
+    func, what = ACTIONS[rung]
+    call = " ".join(["porthole", "build", rung, *extra, "--yes"])
+    ctx.out.heading(f"cheapest rung that covers it: {rung}")
+    ctx.out(f"  {reason}")
+    ctx.out(f"  {what}")
+    ctx.out(ctx.out.paint(f"  {call}", "cyan"))
+    ctx.out.blank()
+
+    if not args.yes:
+        ctx.out(ctx.out.paint(
+            "  nothing was pushed or flashed -- add --yes to run that rung",
+            "grey"))
+        return EX_OK
+    return _run(ctx, func, args.timeout, extra,
+                host=getattr(args, "host", False))
+
+
 def cmd_build(args, ctx) -> int:
-    action = args.action or "kernel"
-    if action not in ACTIONS:
+    action = args.action or "auto"
+    if action != "auto" and action not in ACTIONS:
         raise Bail(f"unknown action {action!r}", EX_USAGE,
-                   f"actions: {', '.join(ACTIONS)}")
-    func, what = ACTIONS[action]
-    extra = _rung_args(args, action)
+                   f"actions: auto, {', '.join(ACTIONS)}")
 
     _assert_no_drift(ctx, args)
+
+    if action == "auto":
+        # Measuring needs a tree to make in. Without one -- a new port, or a
+        # profile nobody has filled in yet -- fall through to the ordinary
+        # preview rather than erroring: "a profile that cannot build yet is the
+        # normal state of a new port", and a preview SHOWS what is wrong
+        # instead of refusing to describe it.
+        if not _preflight(ctx) and (_tree(ctx.cfg) / "Makefile").is_file():
+            return _auto(ctx, args)
+        func, what = "", AUTO_DESC
+        extra = []
+    else:
+        func, what = ACTIONS[action]
+        extra = _rung_args(args, action)
 
     problems = _preflight(ctx)
     tight = _space_warning(ctx.cfg)
@@ -371,6 +529,14 @@ def cmd_build(args, ctx) -> int:
         raise Bail("this profile cannot build yet", EX_FAIL,
                    "; ".join(problems))
 
+    if not func:
+        # `auto` with --yes but nothing to measure with. Say which of the two
+        # it is rather than running an empty command.
+        raise Bail("cannot choose a rung: there is no kernel tree to measure",
+                   EX_FAIL,
+                   f"expected {_tree(ctx.cfg)}/Makefile -- set "
+                   f"PORTHOLE_KERNEL_TREE, or name an explicit rung")
+
     rc = _run(ctx, func, args.timeout, extra,
               host=getattr(args, "host", False))
     if rc != 0:
@@ -395,7 +561,7 @@ SPEC = {
     "escapes_scope": True,
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION", "choices": list(ACTIONS),
-                      "help": " | ".join(ACTIONS) + "  (default kernel)"}),
+                      "help": "auto | " + " | ".join(ACTIONS) + "  (default: auto)"}),
         (["rest"], {"nargs": "*", "metavar": "ARG",
                     "help": "mod: MODULE.ko NAME"}),
         (["--kernel"], {"action": "store_true",

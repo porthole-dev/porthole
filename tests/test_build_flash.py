@@ -336,6 +336,69 @@ def test_the_host_path_is_still_available():
     assert "ph-build.sh" in argv[-1] and "tkclean" in argv[-1], argv[-1]
 
 
+# ---- rung selection: the decision that must not be wrong -------------------
+#
+# Measured, not inferred. A header edit moves every module's CRC without
+# looking like a config change, and a Kconfig edit can flip a module to
+# built-in; both fool a diff reader and neither fools "what did make write".
+
+def test_nothing_rebuilt_means_nothing_to_do():
+    import porthole_cmd_build as build
+    rung, _args, why = build._classify([])
+    assert rung is None, rung
+    assert "nothing" in why.lower(), why
+
+
+def test_one_module_takes_the_cheap_rung():
+    import porthole_cmd_build as build
+    rung, args, _why = build._classify(["drivers/media/i2c/imx179.ko"])
+    assert rung == "mod", rung
+    assert args == ["drivers/media/i2c/imx179.ko", "imx179"], args
+
+
+def test_several_modules_do_not_take_the_module_rung():
+    """brain/traps/pushing-one-module-of-a-pair-corrupts-the-other.md --
+    modules built together share a struct layout, so pushing a subset
+    corrupts the ones left behind."""
+    import porthole_cmd_build as build
+    rung, _args, why = build._classify(["drivers/a.ko", "drivers/b.ko"])
+    assert rung == "fast", rung
+    assert "subset" in why or "together" in why, why
+
+
+def test_only_a_dtb_takes_the_boot_rung():
+    import porthole_cmd_build as build
+    rung, _a, _w = build._classify(["arch/arm64/boot/dts/qcom/x.dtb"])
+    assert rung == "boot", rung
+
+
+def test_a_moved_image_forces_a_flash_because_crcs_move_with_it():
+    """The expensive case that MUST not be optimised away: a rebuilt kernel
+    refuses every module already on the phone."""
+    import porthole_cmd_build as build
+    rung, _a, why = build._classify(
+        ["arch/arm64/boot/Image.gz", "drivers/a.ko"])
+    assert rung == "fast", rung
+    assert "CRC" in why or "crc" in why, why
+
+
+def test_a_dtb_and_a_module_together_take_the_covering_rung():
+    import porthole_cmd_build as build
+    rung, _a, _w = build._classify(
+        ["arch/arm64/boot/dts/qcom/x.dtb", "drivers/a.ko"])
+    assert rung == "fast", rung
+
+
+def test_the_default_action_is_no_longer_the_most_expensive_rung():
+    """A bare `porthole build --yes` used to mean `kernel` (~10m) when `mod`
+    (~40s) usually covered it -- 15x, by default, for the command an agent
+    reaches for first."""
+    import inspect
+    import porthole_cmd_build as build
+    src = inspect.getsource(build.cmd_build)
+    assert 'args.action or "auto"' in src, src[:200]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

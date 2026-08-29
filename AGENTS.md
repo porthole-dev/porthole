@@ -66,9 +66,18 @@ If you are writing an `ssh ... reboot` one-liner or a `sleep 60`, stop. There is
 a tool and you have not found it yet. Both of those specific mistakes have cost
 whole sessions.
 
-### Build on the cheapest rung that covers the change
+### Let `porthole build` pick the rung
 
-| rung | covers | cost |
+**Run `porthole build`.** It does an incremental `make`, sees what actually got
+rebuilt, and runs the cheapest rung that covers it. Without `--yes` it compiles
+and reports which rung it would run, touching no device.
+
+Do not reason a rung out of the diff and type it: a header edit moves every
+module's CRC without looking like a config change, and a Kconfig edit can flip
+a module to built-in. Both fool a diff reader; neither fools what make wrote.
+Name a rung only to override the measurement.
+
+| rung it chooses between | covers | cost |
 |---|---|---|
 | `porthole build mod FOO.ko foo --yes` | a driver that is a module | ~40 s, no reboot |
 | `porthole build boot --yes` | DTS, or built-in code you can RAM-boot | ~40 s, one `fastboot boot` |
@@ -77,6 +86,9 @@ whole sessions.
 
 Run any of them without `--yes` to preview and print the table. `--kernel` on
 `boot` rebuilds `Image.gz` too.
+
+The old default for a bare `porthole build` was `kernel` -- the most expensive
+of the five. It is `auto` now.
 
 `mod` and `boot` are ~15x cheaper than the top rung and were unreachable until
 they were added to the verb table — they existed only as shell functions in
