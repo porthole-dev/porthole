@@ -18,6 +18,12 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
+# _runner lives beside this file. Inserted before importing it, because a
+# caller that reaches this module from somewhere other than tests/ would not
+# otherwise have that directory on the path.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import _runner  # noqa: E402  (needs the path above)
 
 MIN_PY = (3, 10)
 
@@ -56,21 +62,13 @@ def require():
 
 
 def run(namespace):
-    """The repo's standard runner. Pass `globals()`."""
-    tests = [(n, f) for n, f in sorted(namespace.items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except AssertionError as exc:
-            failed += 1
-            print("FAIL {}:\n  {}".format(name, exc))
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print("ERROR {}: {}: {}".format(name, type(exc).__name__, exc))
-    print("{}/{} passed".format(len(tests) - failed, len(tests)))
-    return 1 if failed else 0
+    """The repo's standard runner. Pass `globals()`.
+
+    Delegates to tests/_runner.py so there is one runner rather than a copy per
+    file. These suites are why it is parallel: 80 pilot tests, each building a
+    Textual app, were 45s of a 73s suite.
+    """
+    return _runner.run(namespace)
 
 
 def pilot(app_factory, body):
