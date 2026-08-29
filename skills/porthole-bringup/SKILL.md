@@ -174,12 +174,13 @@ this rung took last time on this machine, so the first run of a rung says
 
 ### When a rung is still slow
 
-**Do not reach for `PORTHOLE_LAX_BUILD=1`.** It skips the buildroot zap, and
-this section used to call that zap most of the wall clock in the flashing
-rungs. Measured 2026-08-29, interleaved, on a warm buildroot: kernel package
-14.96 / 15.34 / 15.25 / 14.68 s with the flag and without, device package
-1.66-1.72 s either way. **No difference.** The minutes in those rungs are
-`install`, `export`, the flash and the boot wait.
+**Do not reach for `PORTHOLE_LAX_BUILD=1`.** It skips the zap, and this
+section used to call that zap most of the wall clock in the flashing rungs.
+Measured 2026-08-29, interleaved, on a warm buildroot: the device package is
+1.66-1.72 s with the flag and without. **No difference.** The minutes in those
+rungs are `install`, `export`, the flash and the boot wait. On the kernel rung
+the flag is inert outright -- `pmbootstrap build --envkernel` returns before
+the zap block ever runs.
 
 The flag still accepts a real hazard -- stale build state, a `_p` apk
 outranking a release, each instance presenting as a mysterious wrong-kernel bug
@@ -188,10 +189,14 @@ outranking a release, each instance presenting as a mysterious wrong-kernel bug
 **What cuts a rung is picking the right one**, which `porthole build` does by
 measuring. Run `porthole build purge` if a stale dev package is suspected.
 
-It does NOT speed up the compile. envkernel bakes `CCACHE_DISABLE=1` into its
-own make command, so every kernel compile is uncached no matter what is
-installed -- see `brain/findings/envkernel-disables-ccache.md`. Do not go
-looking for a ccache setting to fix that; there isn't one on this path.
+It does NOT speed up the compile. The compile has its own cache, and **in the
+workspace it now works**: the image rewrites envkernel's `CCACHE_DISABLE=1`,
+and `_ph_arm_ccache` puts ccache and a clang symlink inside `chroot_native` on
+every activate. That pays on a full rebuild -- a kernel version move, a common
+header, a fresh workspace -- and does nothing for the incremental loop, which
+never repeats a compilation to cache. `PORTHOLE_NO_CCACHE=1` turns it off;
+`--host` builds stay uncached because your own pmbootstrap checkout is not
+patched. `brain/findings/the-workspace-caches-kernel-compiles.md`.
 
 ## Non-negotiable
 

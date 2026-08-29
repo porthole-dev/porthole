@@ -10,6 +10,26 @@ refutes: "PORTHOLE_LAX_BUILD=1 is most of the wall clock in the flashing rungs; 
 first-learned: 2026-08-29
 ---
 
+> **CORRECTED 2026-08-29, evening.** The conclusion below holds; half its
+> evidence does not. The kernel row of the table -- 14.96 / 15.34 / 15.25 /
+> 14.68 s, presented here as the strongest reading because it showed no
+> difference "at all" -- could not have shown one. `pmbootstrap build
+> --envkernel` returns from `pmb/commands/build.py` (3.11.1, lines 15-17)
+> BEFORE the strict-mode zap block, so `--lax` never reaches that path. Four
+> readings of a flag that was inert by construction.
+>
+> The device-package row is the live measurement and it stands: 1.66-1.72 s
+> either way, warm, interleaved. So the verdict is unchanged and the reason is
+> now narrower and firmer -- on the envkernel rung the flag does nothing at
+> all, and on the package rungs it saves 60 ms.
+>
+> One thing the name hides, found the same evening: `zap_buildroots()` deletes
+> **chroot_native** as well as `chroot_buildroot*` (`pmb/chroot/zap.py:48-50`).
+> A non-lax package build therefore takes the toolchain the next envkernel
+> compile would have used with it, which is why a "chroot re-init" surfaces as
+> a full kernel rebuild rather than as a chroot message. See
+> [[envkernel-disables-ccache]].
+
 **The question** — `ph-build.sh` and `AGENTS.md` both say `pmbootstrap build`
 zaps the buildroot before every package and that this "is most of the wall
 clock in the flashing rungs", with `PORTHOLE_LAX_BUILD=1` offered as the

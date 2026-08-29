@@ -184,12 +184,17 @@ deep inside pmbootstrap, naming nothing. `docs/SANDBOX.md`.
 
 ### When a rung is still slow
 
-`PORTHOLE_LAX_BUILD=1` skips the buildroot zap, and this section used to call
-that zap most of the wall clock in the flashing rungs. **Measured 2026-08-29:
-it is not, and the flag buys nothing.** Interleaved runs on a warm buildroot --
-kernel package 14.96 / 15.34 / 15.25 / 14.68 s, device package 1.66-1.72 s --
-show no difference either way. The minutes in those rungs are `install`,
-`export`, the flash and the boot wait, none of which the flag touches.
+`PORTHOLE_LAX_BUILD=1` skips the zap, and this section used to call that zap
+most of the wall clock in the flashing rungs. **Measured 2026-08-29: it is not,
+and the flag buys nothing.** Interleaved runs on a warm buildroot put the
+device package at 1.66-1.72 s either way. The minutes in those rungs are
+`install`, `export`, the flash and the boot wait, none of which the flag
+touches.
+
+On the kernel rung it is not merely unhelpful, it is **inert**: `pmbootstrap
+build --envkernel` returns from `pmb/commands/build.py` before the strict-mode
+zap block, so `--lax` never reaches that path. (The kernel numbers this section
+used to quote were four readings of a flag that could not have done anything.)
 
 So do not reach for it. It accepts something real -- this repo has been bitten
 repeatedly by stale build state, a `_p` apk outranking a release, a stale
@@ -201,10 +206,18 @@ mysterious wrong-kernel bug -- for no measured gain.
 does by measuring. Run `porthole build purge` if a stale dev package is
 suspected.
 
-It does NOT speed up the compile. envkernel bakes `CCACHE_DISABLE=1` into its
-own make command, so every kernel compile is uncached no matter what is
-installed -- see `brain/findings/envkernel-disables-ccache.md`. Do not go
-looking for a ccache setting to fix that; there isn't one on this path.
+It does NOT speed up the compile. The compile is cached separately, and **in
+the workspace that cache now works** -- the image rewrites envkernel's
+`CCACHE_DISABLE=1` to a `CCACHE_DIR`, and `_ph_arm_ccache` in `tools/ph-build.sh`
+installs ccache into `chroot_native` and links clang into its masquerade dir on
+every activate. Measured 2026-08-29: recompiling the same sources is 23/23 hits
+where it was 0. `PORTHOLE_NO_CCACHE=1` turns it off.
+
+That helps a full rebuild -- a kernel version move, a common header, a fresh
+workspace -- and does nothing for the 7-second incremental loop, which never
+repeats a compilation to cache. `--host` builds use your own pmbootstrap
+checkout, which is not patched and stays uncached.
+`brain/findings/the-workspace-caches-kernel-compiles.md`.
 
 ### Confirm before anything irreversible
 
