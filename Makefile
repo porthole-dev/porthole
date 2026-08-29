@@ -37,6 +37,7 @@ test:            ## CI job "tests": suites, brain lint, shell lib, device mutex
 	out=$$(./bin/porthole brain lint 2>&1) && echo "ok" \
 	  || { echo FAIL; echo "$$out" | sed 's/^/    /'; fail=1; }; \
 	printf '%-28s ' test_shell_lib.sh; bash tests/test_shell_lib.sh || fail=1; \
+	printf '%-28s ' test_ph_build.sh; bash tests/test_ph_build.sh || fail=1; \
 	printf '%-28s ' tk-device-test.sh; bash tools/tk-device-test.sh >/dev/null \
 	  && echo "ok" || { echo FAIL; fail=1; }; \
 	exit $$fail

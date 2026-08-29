@@ -777,8 +777,39 @@ tkflash-boot() {
 # Use this for kernel/DTS iteration. Switch back to tkbuild+tkflash when the
 # rootfs contents change (new packages, device-package files such as the sudoers
 # drop-in) or if boot and rootfs have desynced.
+# Is the local tree the same kernel as the aport we are about to ship?
+#
+# Compares MAJOR.MINOR only: the tree Makefile carries VERSION/PATCHLEVEL and
+# nothing finer, while the aport pins a point release (7.2.2). Taking the first
+# two components of pkgver makes "7.2.2" -> "7.2" and leaves a two-component
+# "6.18" alone, which the naive ${pkgver%.*} would have turned into "6".
+_ph_tree_matches_aport() {
+	_PH_TREE_V=$(awk -F' = ' '/^VERSION/{v=$2} /^PATCHLEVEL/{p=$2}
+	                          END{if (v != "") print v "." p}' "$_PH_TREE/Makefile" 2>/dev/null)
+	# shellcheck disable=SC2154  # pkgver is set by the sourced APKBUILD
+	_PH_APORT_V=$(. "$_PH_REPO/pmaports/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	              echo "$pkgver" | awk -F. '{print $1 "." $2}')
+	[ -n "$_PH_TREE_V" ] && [ -n "$_PH_APORT_V" ] || return 0   # unknown: build it
+	[ "$_PH_TREE_V" = "$_PH_APORT_V" ]
+}
+
 tkbuild-kernel() {
-	_ph_make || return 1
+	# This rung ships the APORT, not the tree: _ph_install_kernel_release adds
+	# the apk, tkpush-modules takes its modules out of the rootfs chroot, and
+	# the dtb is read back out of the apk below -- deliberately. So a tree build
+	# cannot change what lands on the phone. Building it anyway costs minutes at
+	# best; at worst it is a hard failure that looks like a kernel bug. On
+	# 2026-08-29 the tree sat on v6.18 while the aport had moved to 7.2.2, and
+	# _ph_make copied the 7.2 config into the 6.18 tree and died in
+	# drivers/gpu/drm with "unable to open output file". Nothing was wrong with
+	# either kernel; they were simply not the same one.
+	if _ph_tree_matches_aport; then
+		_ph_make || return 1
+	else
+		echo ">> skipping the tree build: tree is Linux $_PH_TREE_V, aport is $_PH_APORT_V"
+		echo ">>   this rung flashes the aport apk, so the tree cannot affect it."
+		echo ">>   use \`porthole build\` if you meant to build and verify the tree."
+	fi
 
 	# -r: the rootfs chroot, not the build chroot. -U -u: refresh the index and
 	# upgrade, so it picks up the apk just built rather than a cached older one.
