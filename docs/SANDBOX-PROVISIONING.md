@@ -121,12 +121,34 @@ podman run -d --name porthole-sandbox \
   --userns=keep-id:uid=0,gid=0 \
   --cap-add SYS_ADMIN,SYS_CHROOT,MKNOD \
   --device /dev/fuse \
-  -v <workdir>:/pmb -v <repo>:/porthole \
-  -v /dev/bus/usb:/dev/bus/usb \
-  -v <device-mutex-lock-dir> \
+  --security-opt label=disable \
+  --hostname porthole-sandbox \
+  -e XDG_CONFIG_HOME=/run/porthole/config \
+  -e TK_DEVICE_LOCK=<lock> \
+  -e PORTHOLE_SSH_KEY=/run/porthole/device_key \
+  --label io.porthole.device-lock=<lock> \
+  -v <workdir>:/pmb:rw \
+  -v <repo>:/porthole:rw \
+  -v /dev/bus/usb:/dev/bus/usb:rw \
+  -v <lock>:<lock>:rw \
   -v ~/.porthole/device_key:/run/porthole/device_key:ro \
-  porthole-sandbox:<VERSION>
+  -v <PORTHOLE_WORKDIR>:/work:rw \
+  -v ~/.config/porthole:/run/porthole/config/porthole:ro \
+  porthole-sandbox:<VERSION> sleep infinity
 ```
+
+That block is the isolation boundary, so it is written out in full: anything
+not named here is not reachable from inside. `<lock>` is
+`/tmp/porthole-<device>.lock`, the same path `tools/tk-device.sh` computes, and
+the `--label` records it so `up` and `shell` can refuse a container still
+guarding the device that was active when it was created. The `/work` and
+config mounts appear only when they exist; `--mount` appends more under
+`/mnt/`.
+
+The config mount is **read-only on purpose**. It is there so the container
+resolves the same `PORTHOLE_DEVICE` as the host — which needs reads. Writable,
+`config.env` would be a container-to-host code execution channel: it sets
+`FASTBOOT` and `ADB`, and the *host* executes those values as commands.
 
 `--userns=keep-id:uid=0,gid=0` is the whole trick: inside you are root, so
 `which_sudo()` returns `None` (`pmb/config/sudo.py:17`) and pmbootstrap uses no
