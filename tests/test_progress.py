@@ -36,9 +36,26 @@ def test_history_gives_a_fraction_from_the_compile_count():
 
 def test_the_fraction_never_reaches_one_before_the_build_does():
     """A bar that sits at 100% while the build is still going is how people
-    learn to distrust it."""
-    history = {"fast": {"total": 400, "compile_lines": 10}}
-    assert progress.fraction(history, "fast", 100, 999) <= 0.99
+    learn to distrust it. Below the baseline the ratio is honest."""
+    history = {"fast": {"total": 400, "compile_lines": 1000}}
+    assert progress.fraction(history, "fast", 100, 999) < 1.0
+
+
+def test_overrunning_the_baseline_reads_as_unknown_not_as_almost_done():
+    """Measured 2026-08-29: the stored baseline for `auto` was a small
+    incremental run, so a 3879-step full rebuild passed it in ~5 s. Clamping to
+    0.99 printed "99% eta 7s" for the remaining fourteen minutes of a 14m42s
+    build. An exhausted baseline is not 99%, it is unknown."""
+    history = {"auto": {"total": 44, "compile_lines": 6}}
+    assert progress.fraction(history, "auto", elapsed=5, compile_seen=300) is None
+    assert progress.eta(history, "auto", elapsed=300, frac=None) is None
+    assert "?" in progress.bar(None)
+
+
+def test_an_eta_is_not_reported_as_zero_once_the_last_total_is_passed():
+    """`max(0.0, total - elapsed)` pinned a long build at "eta 0s" forever."""
+    history = {"kernel": {"total": 600, "compile_lines": 0}}
+    assert progress.eta(history, "kernel", elapsed=900, frac=None) is None
 
 
 def test_elapsed_is_the_fallback_when_nothing_has_compiled_yet():

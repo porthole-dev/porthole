@@ -104,14 +104,22 @@ def fraction(history: dict, rung: str, elapsed: float,
     that runs long -- and falls back to elapsed-against-last-total. Returns None
     when there is no history at all, which the bar renders as unknown rather
     than as zero.
+
+    It also returns None once this build has OVERRUN the baseline, and that is
+    the interesting case. The baseline is the last run of this rung, which may
+    have been a small incremental build; a full rebuild blows past it in
+    seconds. Clamping to 0.99 there reported "99%, eta 7s" for the fourteen
+    remaining minutes of a 14m42s build. An exhausted baseline does not mean
+    almost done, it means this run is not the run we measured -- unknown, the
+    same answer as no history at all.
     """
     runs = (history or {}).get(rung) or {}
     lines = runs.get("compile_lines")
     if isinstance(lines, int) and lines > 0 and compile_seen > 0:
-        return min(0.99, compile_seen / float(lines))
+        return compile_seen / float(lines) if compile_seen < lines else None
     total = estimate_total(history, rung)
     if total:
-        return min(0.99, elapsed / float(total))
+        return elapsed / float(total) if elapsed < total else None
     return None
 
 
@@ -125,8 +133,8 @@ def eta(history: dict, rung: str, elapsed: float, frac):
     if frac is not None and frac >= 0.05:
         return max(0.0, elapsed / frac - elapsed)
     total = estimate_total(history, rung)
-    if total:
-        return max(0.0, total - elapsed)
+    if total and elapsed < total:
+        return total - elapsed
     return None
 
 
