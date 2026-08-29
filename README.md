@@ -11,7 +11,7 @@ Pixel 2 XL, made generic — so the next device starts from month three instead 
 day one.
 
 ```
-98 tools · 62 knowledge notes · 28 commands · zero third-party dependencies in the CLI
+117 tools · 96 knowledge notes · 30 commands · zero third-party dependencies in the CLI
 ```
 
 > **Work in progress.** This is under active development against real hardware,
@@ -67,7 +67,7 @@ with nothing installed.
 | pmbootstrap | building and flashing images | you can still probe and debug a running device |
 | shellcheck | `make lint` when contributing | optional |
 
-**You do not need all of it to start.** Run `porthole next` and it will tell
+**You do not need all of it to start.** Run `porthole doctor` and it will tell
 you exactly what is missing, what each thing is for, and the install command
 **for your distribution** — it reads `/etc/os-release` and adjusts.
 
@@ -424,7 +424,7 @@ dependency or an injection to spend. Only what it mounts is reachable; your
 `~/.ssh`, `/etc` and home directory are not there.
 
 `sandbox install --broker` still offers the older validating privilege broker
-for a host that cannot run podman — 11 verbs, every path confined, every
+for a host that cannot run podman — 26 allowed verbs, every path confined, every
 decision audited — but it grants a real sudoers entry and cannot contain a
 determined chroot payload, so it is a fallback rather than the path.
 

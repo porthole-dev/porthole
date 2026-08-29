@@ -23,6 +23,10 @@ of confidently testing nothing.
 ## Layout
 
 - **`laws/`** — cross-device methodology. The most portable thing here.
+- **`findings/`** — a question this port has CLOSED, and the theories it kills.
+  The largest section, and the one to search before forming a theory: a trap
+  says "do not do X", a finding says "X is already answered, and here is what
+  is now dead".
 - **`traps/`** — specific failure modes, each citing the evidence that proved it.
 - **`playbooks/`** — ordered bring-up recipes: what to do, in what order, and
   what counts as done.
@@ -40,7 +44,7 @@ id: usb-gadget-lies-as-fastboot          # kebab-case, matches the filename
 title: lsusb labels a running gadget as "fastboot"
 scope: generic                            # generic | soc:<soc> | device:<codename>
 subsystem: boot
-severity: law | trap | technique | fact
+severity: law | finding | trap | technique | fact
 confidence: proven | probable | suspected
 evidence: <where the proof lives>
 first-learned: 2026-07-25

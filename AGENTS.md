@@ -81,6 +81,7 @@ Name a rung only to override the measurement.
 |---|---|---|
 | `porthole build mod FOO.ko foo --yes` | a driver that is a module | ~40 s, no reboot |
 | `porthole build boot --yes` | DTS, or built-in code you can RAM-boot | ~40 s, one `fastboot boot` |
+| `porthole build boot --kernel --yes` | built-in code, only where the device RAM-boots without modules | ~40 s, one `fastboot boot` |
 | `porthole build fast --yes` | a CONFIG change (module CRCs move) | ~6 min, flashes boot |
 | `porthole build kernel --yes` | rootfs changed, or boot/rootfs desynced | ~10 min, reflash both |
 

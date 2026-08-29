@@ -1,9 +1,11 @@
 # Sandbox provisioning — design
 
-<!-- porthole:design-doc -- the verbs below are proposed, not built -->
+<!-- porthole:design-doc -- phases 0,1,2,4 are BUILT; 3 is partly built -->
 
-**Status:** designed, not built. Supersedes the 2026-08-26 revision of this
-file, whose central conclusion was wrong. Measurements re-run 2026-08-29.
+**Status:** phases 0, 1, 2 and 4 shipped on 2026-08-29 and the verbs they
+describe are real. Phase 3 is partly built: routing and the space check landed,
+the image build did not -- see §4, whose original design was wrong. Supersedes
+the 2026-08-26 revision of this file. Measurements re-run 2026-08-29.
 
 ## The goal, stated as a guarantee
 

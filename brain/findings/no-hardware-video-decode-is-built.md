@@ -10,6 +10,12 @@ refutes: video playback is slow because the GPU or CPU underperform; venus is un
 first-learned: 2026-08-28
 ---
 
+> **SUPERSEDED IN PART, 2026-08-29.** The headline is no longer true: hardware
+> H.264 and VP9 decode were brought up on this device and verified bit-exact.
+> What survives is the narrower claim -- that venus being described in DT does
+> not mean decode is built, and that enabling it alone does not give Firefox
+> hardware decode. See [[venus-decode-works-and-what-it-took]].
+
 **The question** — YouTube in Firefox is very slow. Is that the GPU?
 
 **The answer** — no. **No hardware video decoder is built into the shipping

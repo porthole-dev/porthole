@@ -37,7 +37,7 @@ PORTHOLE_NO_MUX=1 bash -c '. tools/tk-lib.sh; ssh "${TK_SSH_OPTS[@]}" "$PHONE" t
   e=$(date +%s%3N); echo "$(( (e-s)/5 ))ms each"'
 ```
 
-Multiplexing lives in the shared `TK_SSH_OPTS`, so all ~114 tools inherit it from
+Multiplexing lives in the shared `TK_SSH_OPTS`, so all ~117 tools inherit it from
 one edit:
 
 ```

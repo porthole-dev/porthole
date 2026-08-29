@@ -24,7 +24,7 @@ measuring "the aport versus one unrelated topic branch", which is noise.
 
 The workflow is topic branch -> `format-patch` -> numbered series -> aport.
 The **aport series is what ships** (`porthole build fast` builds it; it applies
-cleanly to pristine v6.18). `linux/` is where patches are authored.
+cleanly to the shipping base; v7.2 since 2026-08-29). `linux/` is where patches are authored.
 
 **The right audit** is per branch, on commit subjects, not per file:
 

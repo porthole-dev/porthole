@@ -129,7 +129,7 @@ profile first. Over-claiming portability is worse than scoping honestly.
 The first console was stdlib `curses`, on the rule that a tool whose job is to
 work on a broken host must not need anything installed. That rule is still
 right, and it is why the CLI will never grow a dependency: `porthole next`,
-`porthole doctor` and all 98 tools run on Python 3.8 with nothing but the
+`porthole doctor` and all 117 tools run on Python 3.8 with nothing but the
 standard library.
 
 The console is a different contract. It is the interface you drive a port
