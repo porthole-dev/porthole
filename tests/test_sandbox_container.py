@@ -223,6 +223,22 @@ def test_exec_argv_targets_the_named_container():
     assert sb.CONTAINER in argv, argv
 
 
+def test_down_removes_the_container_but_names_no_volume():
+    argv = sb._down_argv()
+    assert argv[:3] == ["podman", "rm", "-f"], argv
+    assert sb.CONTAINER in argv, argv
+    assert "-v" not in argv and "--volumes" not in argv, (
+        "the mounts are the user's real directories -- never remove them")
+
+
+def test_container_state_reports_the_workspace():
+    state = sb._container_state(ROOT)
+    for key in ("podman", "image", "image_built", "container_running",
+                "device_key", "issues"):
+        assert key in state, (key, sorted(state))
+    assert state["image"] == sb._image_tag(ROOT), state["image"]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -206,6 +206,25 @@ def _up(ctx, args) -> int:
     return rc
 
 
+def _down_argv() -> list[str]:
+    """Remove the container, never the mounts.
+
+    Every mount is a real directory of the user's -- the pmbootstrap workdir,
+    the repo, the device lock. `podman rm -v` would be a data-loss bug, so the
+    flag is absent and a test keeps it absent.
+    """
+    return ["podman", "rm", "-f", CONTAINER]
+
+
+def _down(ctx) -> int:
+    if not shutil.which("podman"):
+        raise Bail("podman is not installed", EX_FAIL, "nothing to stop")
+    rc = subprocess.run(_down_argv(), capture_output=True).returncode
+    ctx.out(f"  {CONTAINER} removed (mounted directories untouched)"
+            if rc == 0 else f"  {CONTAINER} was not running")
+    return EX_OK
+
+
 # ------------------------------------------------------------------ status --
 
 def _broker_state(root: pathlib.Path) -> dict:
@@ -291,11 +310,15 @@ def _sudo_state() -> dict:
     return out
 
 
-def _container_state() -> dict:
-    out = {"podman": shutil.which("podman"), "issues": []}
+def _container_state(root: pathlib.Path) -> dict:
+    out = {"podman": shutil.which("podman"), "image": _image_tag(root),
+           "image_built": False, "container_running": False,
+           "device_key": "", "issues": []}
+    key = pathlib.Path.home() / ".porthole" / "device_key"
+    out["device_key"] = str(key) if key.exists() else ""
     if not out["podman"]:
-        out["issues"].append("podman not installed -- the container tier is "
-                             "unavailable; the broker still works")
+        out["issues"].append("podman not installed -- the workspace is "
+                             "unavailable. `porthole doctor --fix`")
         return out
     user = getpass.getuser()
     for path in ("/etc/subuid", "/etc/subgid"):
@@ -306,6 +329,18 @@ def _container_state() -> dict:
                                      f"containers cannot map uids")
         except OSError:
             out["issues"].append(f"cannot read {path}")
+    out["image_built"] = subprocess.run(
+        ["podman", "image", "exists", out["image"]]).returncode == 0
+    if not out["image_built"]:
+        out["issues"].append(f"{out['image']} is not built -- "
+                             f"run `porthole sandbox build`")
+    out["container_running"] = _container_running()
+    if out["image_built"] and not out["container_running"]:
+        out["issues"].append(f"{CONTAINER} is not running -- "
+                             f"run `porthole sandbox up`")
+    if not out["device_key"]:
+        out["issues"].append("no device key yet -- `porthole sandbox up` "
+                             "creates one so the workspace never needs ~/.ssh")
     return out
 
 
@@ -325,8 +360,10 @@ def cmd_sandbox(args, ctx) -> int:
         return _build(ctx, args)
     if action == "up":
         return _up(ctx, args)
+    if action == "down":
+        return _down(ctx)
     raise Bail(f"unknown action {action!r}", EX_USAGE,
-               "actions: status, install, shell, audit, uninstall, build, up")
+               "actions: status, install, shell, audit, uninstall, build, up, down")
 
 
 def _status(ctx) -> int:
@@ -334,7 +371,7 @@ def _status(ctx) -> int:
         "broker": _broker_state(ctx.root),
         "policy": _policy_state(),
         "sudo": _sudo_state(),
-        "container": _container_state(),
+        "container": _container_state(ctx.root),
         "env": {"PMB_SUDO": os.environ.get("PMB_SUDO", "")},
     }
     issues = sum((v.get("issues", []) for v in state.values()
@@ -369,10 +406,15 @@ def _status(ctx) -> int:
              if s["timestamp_timeout"] else "default")
         o.blank()
 
-        o.heading("container tier")
+        o.heading("workspace")
         c = state["container"]
-        line("podman", bool(c["podman"]) and not c["issues"],
-             c["podman"] or o.paint("not installed", "grey"))
+        line("podman", bool(c["podman"]), c["podman"] or o.paint("not installed", "grey"))
+        line("image", c["image_built"],
+             c["image"] if c["image_built"] else o.paint("not built", "grey"))
+        line("container", c["container_running"],
+             CONTAINER if c["container_running"] else o.paint("not running", "grey"))
+        line("device key", bool(c["device_key"]),
+             c["device_key"] or o.paint("not created", "grey"))
         o.blank()
 
         if issues:
@@ -668,12 +710,12 @@ SPEC = {
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": ["status", "install", "shell", "audit",
-                                  "uninstall", "build", "up"],
-                      "help": "status | install | shell | audit | uninstall | build | up"}),
+                                  "uninstall", "build", "up", "down"],
+                      "help": "status | install | shell | audit | uninstall | build | up | down"}),
         (["--root"], {"action": "append", "metavar": "PATH",
                       "help": "install: a path the broker may touch (repeatable)"}),
         (["--mount"], {"action": "append", "metavar": "PATH",
-                       "help": "shell: extra path to mount in"}),
+                       "help": "up: extra path to mount into the workspace"}),
         (["--command"], {"nargs": "...", "help": "shell: command instead of a shell"}),
         (["--dry-run"], {"action": "store_true",
                          "help": "shell: print the podman command and stop"}),
@@ -685,9 +727,10 @@ SPEC = {
     ],
     "run": cmd_sandbox,
     "examples": [
+        "porthole sandbox up               # build if needed, then start it",
+        "porthole sandbox shell            # a shell inside the workspace",
+        "porthole sandbox shell --command pmbootstrap status",
         "porthole sandbox status",
-        "porthole sandbox install",
-        "porthole sandbox shell            # rootless container",
-        "porthole sandbox audit --denied   # what was refused",
+        "porthole sandbox down",
     ],
 }
