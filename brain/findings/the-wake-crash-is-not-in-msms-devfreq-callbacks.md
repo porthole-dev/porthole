@@ -46,6 +46,16 @@ arm: `1da4000.ufshc` has its own devfreq monitor and it was polling every 60 ms
 throughout those 100 clean cycles. So "a devfreq monitor work item running" and
 "a CPU woken every ~50 ms" are both insufficient. Only the GPU's poll matters.
 
+> **SUPERSEDED, 2026-08-27 (evening).** Everything above this line stands --
+> msm's own devfreq callbacks really are not the site. The paragraph below does
+> NOT: it concludes the cause is inside the devfreq core "rather than any
+> register access", and the answer turned out to be a GPU register access after
+> all, in `a5xx_hw_init()`, reached when a runtime power collapse is too short
+> to discharge GX. The two sibling notes carry the same correction; this one
+> was missed, so a reader following the link from either of them landed on a
+> dead end with no sign it was one.
+> See [[a-short-power-collapse-leaves-the-a5xx-cp-alive]].
+
 **What is left.** The devfreq core's own periodic path for THIS device, with
 every msm callback inert: the `devfreq_monitor` delayed work, `devfreq->lock`
 -- which `msm_devfreq_suspend()`, `msm_devfreq_resume()`, `msm_devfreq_idle()`
@@ -57,4 +67,5 @@ register access. msm's own `idle_work`/`boost_work` delayed works are also worth
 eliminating: they are GPU-specific and are not what `polling_interval` gates.
 
 Related: [[holding-vdd-mx-does-not-stop-the-wake-crash]],
-[[the-wake-crash-is-devfreq-not-a-register-access]].
+[[the-wake-crash-is-devfreq-not-a-register-access]],
+[[a-short-power-collapse-leaves-the-a5xx-cp-alive]].

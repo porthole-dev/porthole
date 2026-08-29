@@ -52,7 +52,7 @@ misreadings of the empty directory:
   a guide to it, but it is the same trick with an older driver against the
   same non-persistent RAM. Both its backport sections target pre-3.6
   downstream kernels anyway; taimen's vendor kernel is 4.4 and mainline is
-  6.18, so there is nothing to backport in either direction.
+  mainline, so there is nothing to backport in either direction.
 
 **How it was established** — `a small /dev/mem poke script (not committed, since lost)`: `mmap` on `/dev/mem` at each
 candidate physical address, write a 16-byte magic, verify in-boot, reboot,

@@ -241,6 +241,11 @@ def _up_argv(root, image, mounts, device) -> list[str]:
     # that path does not exist in here. The image carries its own at a fixed
     # path, matching the installed CLI's version.
     argv += ["-e", "PORTHOLE_PMBOOTSTRAP_SRC=" + PMBOOTSTRAP_SRC_IN]
+    # The fourth of these, found by audit rather than by a failing build. The
+    # work dir is MOUNTED at /pmb but the config still named the host path, so
+    # ph-build.sh and the pmaports lookup would both have read a directory that
+    # does not exist in here.
+    argv += ["-e", "PORTHOLE_PMB_DIR=/pmb"]
     for src, dst, opts in mounts:
         argv += ["-v", f"{src}:{dst}:{opts}"]
     argv += [image, "sleep", "infinity"]

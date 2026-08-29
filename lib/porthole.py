@@ -144,6 +144,11 @@ GUARDED_KEYS = (
     "PORTHOLE_KERNEL_PKG",
     "PORTHOLE_KERNEL_TREE",
     "PORTHOLE_DEFCONFIG",
+    # Same failure class as KERNEL_PKG, and it was missed on the first pass:
+    # the profile's own comment says this must track PORTHOLE_KERNEL_PKG and
+    # that a stale value fails the build with a bare `cp: cannot stat`. Both
+    # were stale in the same shell for the same reason.
+    "PORTHOLE_KCONFIG_FILE",
     "PORTHOLE_ARCH",
     "PORTHOLE_WORKDIR",
 )
