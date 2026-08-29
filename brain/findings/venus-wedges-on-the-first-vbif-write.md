@@ -64,12 +64,26 @@ active in SW mode at the wedge point, with all six clocks on); and rating the
 core clocks, which the vendor does via __scale_clocks() and mainline skips on
 3XX. **The preset table itself matches the vendor byte for byte.**
 
-**The one remaining difference** in the vendor's `__venus_power_on()` that
-mainline does not do at all: `__alloc_imem(device, res->imem_size)`, with
-`qcom,imem-size = <524288>` in msm8998-vidc.dtsi, called BEFORE
-`__set_registers()`. `msm8998_res` has `vmem_id = VIDC_RESOURCE_NONE,
-vmem_size = 0`. That is the next thing to try, and it is now the only
-untried step in the sequence.
+**The IMEM lead is weaker than it looks.** The vendor calls
+`__alloc_imem(device, res->imem_size)` (`qcom,imem-size = <524288>`) inside
+`__venus_power_on()` before `__set_registers()`, and mainline never allocates
+IMEM -- but mainline's `vmem_id/vmem_size/vmem_addr` are consumed by
+`venus_hfi_core_set_resource()` at hfi_venus.c:1111, which is an HFI *message*
+to a firmware that is already running. It cannot be a precondition for a
+register write that happens before the firmware talks at all. No mainline SoC
+sets a non-NONE vmem_id. Worth trying only for a side effect of the allocation
+itself, not as the obvious missing step.
+
+**The cheap discriminator nobody has run**: does a *read* of 0x80124 hang too,
+or only the write? Every arm so far has been a write. If reads work and writes
+do not, that is an access-permission story (XPU, TZ ownership); if both hang,
+it is power/clock/address decode. One knob, one boot, and it splits the
+remaining space in half.
+
+**And the honest option**: this bisect is publishable. linux-media has the
+people who would know -- Marc Gonzalez wrote the RFC, Vikash Garodia is
+actively touching msm8998 venus this month. Nine controlled refutations and a
+one-instruction localisation is a better bug report than most.
 
 **Two earlier fixes tried and refuted, each with its own control**
 
