@@ -51,6 +51,9 @@ LOCK_LABEL = "io.porthole.device-lock"
 # shadowing a path in the user's checkout is a confusing surprise.
 DEVICE_KEY = ".porthole/device_key"      # relative to $HOME
 DEVICE_KEY_IN = "/run/porthole/device_key"
+# Where the image keeps the pmbootstrap SOURCE checkout. The apk package
+# ships no helpers/, and helpers/envkernel.sh is what every build uses.
+PMBOOTSTRAP_SRC_IN = "/opt/pmbootstrap-src"
 
 
 def _image_tag(root: pathlib.Path) -> str:
@@ -234,6 +237,10 @@ def _up_argv(root, image, mounts, device) -> list[str]:
     # build refused with "this profile cannot build yet".
     if any(dst == "/work" for _s, dst, _o in mounts):
         argv += ["-e", "PORTHOLE_WORKDIR=/work"]
+    # Same shape again: the user config names a HOST pmbootstrap checkout, and
+    # that path does not exist in here. The image carries its own at a fixed
+    # path, matching the installed CLI's version.
+    argv += ["-e", "PORTHOLE_PMBOOTSTRAP_SRC=" + PMBOOTSTRAP_SRC_IN]
     for src, dst, opts in mounts:
         argv += ["-v", f"{src}:{dst}:{opts}"]
     argv += [image, "sleep", "infinity"]

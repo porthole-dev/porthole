@@ -441,6 +441,25 @@ def test_the_image_installs_a_compiler_cache():
     assert "ccache" in text, "no compiler cache in the workspace image"
 
 
+def test_the_image_carries_the_helper_every_build_needs():
+    """The apk package installs the `pmb` python package and NO helpers/.
+    helpers/envkernel.sh exists only in the source repo, and every kernel build
+    goes through it -- so the workspace had a working CLI and could not build a
+    kernel."""
+    text = (ROOT / "sandbox" / "Containerfile").read_text()
+    assert "envkernel.sh" in text, "nothing guarantees envkernel is in the image"
+    assert "pmbootstrap.git" in text, "the source checkout is not cloned"
+
+
+def test_the_container_is_pointed_at_its_own_pmbootstrap_source():
+    """The user config names a HOST checkout, which does not exist inside."""
+    mounts = sb._mounts(ROOT, "/pmb-work", "/host/tree",
+                        pathlib.Path("/k/device_key"), "taimen", [])
+    argv = sb._up_argv(ROOT, "img:1", mounts, "taimen")
+    assert f"PORTHOLE_PMBOOTSTRAP_SRC={sb.PMBOOTSTRAP_SRC_IN}" in argv, argv
+    assert sb.PMBOOTSTRAP_SRC_IN.startswith("/opt/"), sb.PMBOOTSTRAP_SRC_IN
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
