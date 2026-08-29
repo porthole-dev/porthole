@@ -348,6 +348,12 @@ def _tree_inside(tree, workdir) -> str:
     return "/work" if str(rel) == "." else f"/work/{rel}"
 
 
+# Behaviour switches that must reach the workspace. Deliberately a list of
+# NAMES, not a prefix: see _container_cmd, where the standing rule is that
+# host PORTHOLE_* values never cross because they name host paths.
+KNOBS_THAT_CROSS = ("PORTHOLE_NO_CCACHE", "PORTHOLE_LAX_BUILD")
+
+
 def _container_cmd(func: str, extra: list[str] | None,
                    secrets, tree_inside: str = "") -> list[str]:
     """The podman exec line for a build, as argv.
@@ -377,6 +383,21 @@ def _container_cmd(func: str, extra: list[str] | None,
     # such a value, and tkbuild requires it.
     for key in sorted(k for k in secrets if k.startswith("TK_")):
         argv += ["-e", key]
+    # The narrow exception, by NAME and not by prefix. These two are switches
+    # rather than settings: `1` or unset, no path in either, so none of them
+    # can name a directory that does not exist in here. Everything the rule
+    # above exists to stop is a value; a list of names cannot grow into one by
+    # accident.
+    #
+    # Found by running it. PORTHOLE_NO_CCACHE was documented as the way to turn
+    # the compiler cache off and did nothing in the workspace, because the
+    # filter dropped it before podman ever saw it -- so the off switch worked
+    # only on the one path (`--host`) where the cache is off anyway.
+    # PORTHOLE_LAX_BUILD had the same hole, unnoticed because the advice is not
+    # to use it.
+    for key in KNOBS_THAT_CROSS:
+        if os.environ.get(key):
+            argv += ["-e", key]
     # The one host path that is translated rather than dropped: see
     # _tree_inside. Sent as NAME=value, not NAME -- the value is the
     # container's path, not ours, so it cannot come from our environment.

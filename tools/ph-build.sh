@@ -201,11 +201,22 @@ tkclean() {
 #
 # One line, at the top, naming the branch as well as the path -- the branch is
 # what makes "that is not the tree I meant" obvious at a glance.
-# `pmbootstrap build` zaps the buildroot before every package and --lax skips
-# that. This block used to claim the zap was most of the wall clock in the
-# flashing rungs. MEASURED 2026-08-29 and it is not, on a warm buildroot:
-# the kernel package took 14.96 / 15.34 / 15.25 / 14.68 s with --lax and
-# without alternating, and the device package 1.66-1.72 s either way.
+# `pmbootstrap build` zaps before every package and --lax skips that. This
+# block used to claim the zap was most of the wall clock in the flashing rungs.
+# MEASURED 2026-08-29 and it is not, on a warm buildroot: the device package
+# took 1.66-1.72 s with --lax and without, alternating.
+#
+# The kernel row of that measurement (14.96 / 15.34 / 15.25 / 14.68 s) proved
+# nothing and has been dropped: `pmbootstrap build --envkernel` returns from
+# pmb/commands/build.py BEFORE the strict-mode zap block, so --lax cannot
+# reach that path at all. On line 450 below the flag is inert by construction,
+# not merely unhelpful. The three package builds are where it is live.
+#
+# Also worth knowing, because the name misleads: zap_buildroots() deletes
+# chroot_native as well as chroot_buildroot* (pmb/chroot/zap.py). So a
+# non-lax package build takes the toolchain the next envkernel compile would
+# have used with it -- which is why a "chroot re-init" shows up as a full
+# kernel rebuild, and why _ph_arm_ccache re-arms on every activate.
 #
 # So the knob buys nothing measurable while it accepts something real. This
 # repo has been bitten repeatedly by stale build state -- the _p apk that
@@ -224,14 +235,32 @@ _PH_LAX=()
 [ -n "${PORTHOLE_LAX_BUILD:-}" ] && _PH_LAX=(--lax)
 
 _ph_announce_tree() {
-	local branch=""
+	local branch="" head=""
 	if [ -d "$_PH_TREE/.git" ] || [ -f "$_PH_TREE/.git" ]; then
-		branch=$(git -C "$_PH_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null)
-		branch=" [${branch:-detached} $(git -C "$_PH_TREE" rev-parse --short HEAD 2>/dev/null)]"
+		head=$(git -C "$_PH_TREE" rev-parse --abbrev-ref HEAD 2>/dev/null)
+		branch=" [${head:-detached} $(git -C "$_PH_TREE" rev-parse --short HEAD 2>/dev/null)]"
 	fi
 	echo ">> tree: $_PH_TREE$branch"
+
 	[ -n "${PORTHOLE_KERNEL_TREE:-}" ] ||
 		echo ">>       (default; set PORTHOLE_KERNEL_TREE to build a worktree)"
+
+	# The one thing that reads PORTHOLE_KERNEL_BRANCH, and the reason it now
+	# has a reader at all. The key is documentation -- "the branch that is the
+	# product" -- and on 2026-08-29 the 6.18 -> 7.2 move updated every key a
+	# build consumes and left this one naming the old branch for a day. An
+	# unread key has no build to fail it, so it rots silently; one line that
+	# reads it is a smaller fix than a checker that watches it rot.
+	#
+	# Only when a branch NAME resolved. A worktree seen from inside the
+	# workspace container is detached as far as git there is concerned, and a
+	# warning that fires on every containerised build is a warning nobody
+	# reads. `porthole doctor` catches the version-token case from either side.
+	if [ -n "${PORTHOLE_KERNEL_BRANCH:-}" ] && [ -n "$head" ] &&
+	   [ "$head" != HEAD ] && [ "$head" != "$PORTHOLE_KERNEL_BRANCH" ]; then
+		echo ">> NOTE: profile says the product branch is $PORTHOLE_KERNEL_BRANCH"
+		echo ">>       this tree is on $head -- one of the two is stale"
+	fi
 
 	# Say it out loud when the tree and the phone are different kernels.
 	# Both facts were already printed by other commands and nobody put them
@@ -271,6 +300,65 @@ _ph_defconfig_current() {
 		[ -f "$_PH_OUT/.config" ] && [ "$_PH_OUT/.config" -nt "$dc" ]
 }
 
+# Put ccache in the path of the compile. Three things have to be true at once
+# and NONE of them were, which is why a cache directory existed for months and
+# was never written to.
+#
+#  1. The compiler must live where the cache does. The compile runs as pmos
+#     inside chroot_native -- x86_64, cross-compiling with clang -- not in the
+#     workspace image and not in an aarch64 chroot. So the ccache that matters
+#     is the one installed INSIDE chroot_native; the image's own package sits
+#     on a different rootfs and could never be reached. It also explains the
+#     `cache_ccache_aarch64` that "never appeared after an aarch64 build": it
+#     never could, the chroot doing the work is the native one.
+#  2. CCACHE_DISABLE=1 must be gone. envkernel bakes it into its make alias;
+#     sandbox/Containerfile rewrites that line to CCACHE_DIR. On the HOST path
+#     (`--host`) the upstream helper is untouched, so this function arms a
+#     cache host builds still will not use. Not worth forking a checkout that
+#     is not ours; the workspace is the supported path.
+#  3. clang must be reachable THROUGH ccache. /usr/lib/ccache/bin is first on
+#     the chroot PATH (pmb/config/__init__.py) but Alpine's ccache ships
+#     masquerade symlinks for gcc/cc/g++/c++ only -- no clang. An LLVM=1 build
+#     walks straight past it without the two symlinks below.
+#
+# Re-armed on every activate rather than once, because `pmbootstrap build`
+# without --lax calls zap_buildroots(), and that deletes chroot_native itself,
+# not just the buildroots the name suggests. Every flashing rung would
+# otherwise disarm the cache. The guard is a plain path test rather than a
+# chroot round trip, so the normal case -- already armed -- costs nothing.
+#
+# Never fails the build. A cache is an optimisation; a build that refuses
+# because one could not be set up is strictly worse than an uncached build.
+# PORTHOLE_NO_CCACHE=1 skips it entirely.
+_ph_arm_ccache() {
+	[ -n "${PORTHOLE_NO_CCACHE:-}" ] && return 0
+	# Point 2, TESTED rather than assumed by asking which envkernel is about
+	# to be sourced. One that still carries CCACHE_DISABLE=1 compiles uncached
+	# whatever is installed, so arming a cache for it is work that buys
+	# nothing -- and on the host path it would also be installing a package
+	# into somebody's own chroot for no gain. If a host checkout is ever
+	# patched the same way, this starts arming it with no further change.
+	local ek
+	ek=$(_ph_find_envkernel 2>/dev/null) || return 0
+	grep -q CCACHE_DISABLE "$ek" 2>/dev/null && return 0
+	[ -e "$_PH_PMB/chroot_native/usr/lib/ccache/bin/clang" ] && return 0
+	echo ">> arming ccache in chroot_native (once per chroot)"
+	pmbootstrap -q chroot -- apk add ccache >/dev/null 2>&1 || {
+		echo ">>   could not install ccache in the chroot -- compiling uncached"
+		return 0; }
+	# RELATIVE, like the symlinks apk puts next to them, and not by taste: the
+	# guard above stats this path from OUTSIDE the chroot, where an absolute
+	# /usr/bin/ccache resolves to the container's own filesystem and is not
+	# there. An absolute link is dangling to `[ -e ]`, so the guard never
+	# fired and every single build paid another chroot round trip to re-arm
+	# something already armed.
+	pmbootstrap -q chroot -- sh -c \
+		'for c in clang clang++; do ln -sf ../../../bin/ccache /usr/lib/ccache/bin/$c; done' \
+		>/dev/null 2>&1 ||
+		echo ">>   could not link clang into the ccache dir -- compiling uncached"
+	return 0
+}
+
 # Bring envkernel up and LEAVE THE CALLER IN $_PH_TREE. The caller must popd.
 #
 # The asymmetry is deliberate: `make` is an alias envkernel defines, aliases
@@ -287,6 +375,7 @@ _ph_activate() {
 	# Clear any stacked /mnt/linux binds BEFORE adding another one, or
 	# pmbootstrap will abort on the shadowed .output/Makefile overmount.
 	tkclean || { echo ">> could not unstack /mnt/linux -- run 'pmbootstrap shutdown' and retry"; return 1; }
+	_ph_arm_ccache
 	type deactivate >/dev/null 2>&1 && deactivate
 	pushd "$_PH_TREE" >/dev/null || return 1
 	set --   # `source` would pass our args to envkernel, which rejects them
@@ -942,9 +1031,25 @@ tkflash-boot() {
 _ph_tree_matches_aport() {
 	_PH_TREE_V=$(awk -F' = ' '/^VERSION/{v=$2} /^PATCHLEVEL/{p=$2}
 	                          END{if (v != "") print v "." p}' "$_PH_TREE/Makefile" 2>/dev/null)
+	# The `[ -n ]` below is the "unknown: build it" escape, and until 2026-08-29
+	# it could not fire: awk printed "." for an empty pkgver, "." is not empty,
+	# and the comparison then refused the build with
+	#   REFUSING: tree is Linux 7.2 but linux-...-7.2 is .
+	# -- a message about a version mismatch when the real problem was that the
+	# APKBUILD could not be read at all. Reproduced by running `pmbootstrap zap`
+	# inside the workspace: that unmounts porthole's own bind mounts, pmaports
+	# goes empty, and this is the face it wears. Say which of the two it is.
+	local apkbuild="$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD"
+	if [ ! -r "$apkbuild" ]; then
+		echo ">> cannot read the aport at $apkbuild" >&2
+		echo ">>   if it is an empty directory the workspace lost its mounts;" >&2
+		echo ">>   \`porthole sandbox up\` re-arms them." >&2
+		_PH_APORT_V=""
+		return 0
+	fi
 	# shellcheck disable=SC2154  # pkgver is set by the sourced APKBUILD
-	_PH_APORT_V=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
-	              echo "$pkgver" | awk -F. '{print $1 "." $2}')
+	_PH_APORT_V=$(. "$apkbuild" 2>/dev/null
+	              [ -n "$pkgver" ] && echo "$pkgver" | awk -F. '{print $1 "." $2}')
 	[ -n "$_PH_TREE_V" ] && [ -n "$_PH_APORT_V" ] || return 0   # unknown: build it
 	[ "$_PH_TREE_V" = "$_PH_APORT_V" ]
 }

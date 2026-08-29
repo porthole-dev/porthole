@@ -10,6 +10,36 @@ refutes: "kernel rebuilds are slow because of the chroot zap alone; enabling cca
 first-learned: 2026-08-29
 ---
 
+> **CORRECTED AND RESOLVED 2026-08-29, evening.** The headline claim is
+> right and was never the whole story. `CCACHE_DISABLE=1` is still on the make
+> alias (3.11.1, `helpers/envkernel.sh:281`, re-read today) -- but two other
+> things had to be wrong for the cache to stay empty, and both were:
+>
+> - **The ccache was on the wrong rootfs.** A kernel compile runs as pmos
+>   inside `chroot_native`, and `ccache` was *not installed there*. The
+>   workspace image's own `apk add ccache sccache` put it on the container
+>   rootfs, which a chroot cannot see. Removing `CCACHE_DISABLE=1` alone would
+>   have changed nothing.
+> - **clang was not reachable through ccache.** `/usr/lib/ccache/bin` is first
+>   on the chroot PATH (`pmb/config/__init__.py`), but Alpine's ccache ships
+>   masquerade symlinks for `gcc`/`cc`/`g++`/`c++` and none for clang -- and
+>   this build is `LLVM=1`. Two symlinks were missing.
+>
+> **The `cache_ccache_aarch64` evidence below is a misread.** envkernel
+> compiles in the NATIVE chroot and cross-compiles with clang, so the
+> directory pmbootstrap bind-mounts for it is `cache_ccache_x86_64`. An
+> aarch64 cache dir could not have appeared from a kernel build no matter what
+> was enabled, and its absence proved nothing. The 273 MB aarch64 dir cited
+> here as "populated but cold" belongs to aarch64 *package* builds, a
+> different path with a different cache.
+>
+> **"Still not established" is now established**, all three points, and the
+> cache is live. See [[the-workspace-caches-kernel-compiles]].
+>
+> **What is still NOT known: why upstream disabled it.** The local pmbootstrap
+> checkout is a depth-1 clone with no history to blame, and no rationale is in
+> the file. Treat that as an open question, not as a cleared one.
+
 **The question** — bring-up sessions spend six to ten minutes per kernel build.
 How much of that is compilation that a cache should have removed?
 

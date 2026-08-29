@@ -516,11 +516,32 @@ def test_a_missing_containerfile_hashes_to_nothing_rather_than_raising():
     assert sb._containerfile_sha(pathlib.Path("/nonexistent/porthole")) == ""
 
 
-def test_the_image_installs_a_compiler_cache():
-    """It was absent entirely, so nothing in the workspace could use one even
-    where a build path wanted to."""
+def test_the_image_defuses_the_line_that_made_every_kernel_build_uncached():
+    """envkernel bakes CCACHE_DISABLE=1 into the make alias every rung compiles
+    through, and it is set on the command itself so nothing an outer script
+    exports can beat it. The image rewrites it to CCACHE_DIR.
+
+    Asserted here as well as in the image build because the failure is silent:
+    without it builds still succeed, just uncached, and the only symptom is a
+    cache directory that never grows."""
     text = (ROOT / "sandbox" / "Containerfile").read_text()
-    assert "ccache" in text, "no compiler cache in the workspace image"
+    assert "CCACHE_DISABLE=1|CCACHE_DIR=" in text, \
+        "the image no longer rewrites envkernel's CCACHE_DISABLE line"
+    assert "! grep -q 'CCACHE_DISABLE'" in text, \
+        "the rewrite is not asserted, so an upstream rename would pass silently"
+
+
+def test_the_image_does_not_install_a_compiler_cache_of_its_own():
+    """A compile runs in chroot_native, a different rootfs. A ccache installed
+    in the image cannot be reached from one, and having it there is what made
+    an empty cache directory look like a configuration problem for months."""
+    lines = (ROOT / "sandbox" / "Containerfile").read_text().splitlines()
+    # Comments stripped: the block above this line says "ccache sccache" while
+    # explaining why they are gone, and a grep over the whole file would read
+    # the explanation as the thing it explains.
+    recipe = [ln for ln in lines if not ln.lstrip().startswith("#")]
+    assert not any("apk add" in ln for ln in recipe if "ccache" in ln), recipe
+    assert not any(ln.strip().startswith("ccache") for ln in recipe), recipe
 
 
 def test_the_image_carries_the_helper_every_build_needs():

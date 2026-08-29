@@ -11,10 +11,15 @@ FROM docker.io/library/alpine:3.24
 # release. (It is not on PyPI above 2.1.0, and Alpine 3.22 was still on 3.9.0 --
 # both were reasons an earlier draft cloned from git. Neither applies here.)
 #
-# ccache and sccache are here because they were ABSENT, so nothing in the
-# workspace could have used them even where a build path wanted to. Note this
-# does not by itself speed up kernel builds: envkernel bakes CCACHE_DISABLE=1
-# into its own make command, so the compile is uncached whatever is installed.
+# There is deliberately NO ccache in this list, and an earlier revision that
+# had one was cargo-culting. A kernel compile does not run in this image: it
+# runs as pmos inside pmbootstrap's chroot_native, a separate Alpine rootfs in
+# the work dir. A package installed here is not on that rootfs and can never be
+# reached from a compile, so `apk add ccache sccache` here cached exactly
+# nothing and could not have. The cache the compile actually uses is armed
+# INSIDE the chroot, by `_ph_arm_ccache` in tools/ph-build.sh -- there rather
+# than once, because `pmbootstrap build` without --lax calls zap_buildroots(),
+# which deletes chroot_native itself and would undo any one-time setup.
 # brain/findings/envkernel-disables-ccache.md.
 #
 # android-tools is 35.0.2: Google's newer platform-tools are glibc-only and
@@ -22,7 +27,6 @@ FROM docker.io/library/alpine:3.24
 # beyond what the supported devices need -- do not "fix" it with the zip.
 RUN apk add --no-cache \
       pmbootstrap \
-      ccache sccache \
       android-tools \
       e2fsprogs fuse2fs fuse \
       util-linux parted multipath-tools \
@@ -43,6 +47,33 @@ RUN v="$(pmbootstrap --version)" \
       /opt/pmbootstrap-src \
  && test -f /opt/pmbootstrap-src/helpers/envkernel.sh \
  || (echo "FATAL: no helpers/envkernel.sh for pmbootstrap $v; the workspace cannot build a kernel without it" >&2; exit 1)
+
+# The one upstream line this image rewrites, and the reason kernel builds here
+# were uncached from the first day.
+#
+# envkernel builds its `make` alias as a chroot invocation with environment
+# assignments in front of it, and one of them is CCACHE_DISABLE=1 (helpers/
+# envkernel.sh:281 in 3.11.1). That is set per invocation, on the command
+# itself, so it beats any variable an outer script exports -- and every rung
+# compiles through this alias. No pmbootstrap setting reaches it either:
+# `pmbootstrap`'s own ccache option governs package builds via
+# pmb/build/backend.py, a different path entirely.
+#
+# Replaced rather than deleted, so the cache lands in the directory
+# pmbootstrap already bind-mounts for it ($WORK/cache_ccache_$ARCH ->
+# /mnt/pmbootstrap/ccache, pmb/config/__init__.py). Without the explicit
+# CCACHE_DIR the cache would resolve through the /home/pmos/.ccache symlink
+# and ccache's own legacy-directory fallback -- which works today and is not
+# something to rest a build on.
+#
+# ASSERTED, not hoped: if a future pmbootstrap renames or moves that line the
+# sed matches nothing, and the IMAGE BUILD fails here rather than the discovery
+# being a session that quietly compiles uncached for a week.
+RUN sed -i 's|CCACHE_DISABLE=1|CCACHE_DIR=/mnt/pmbootstrap/ccache|' \
+      /opt/pmbootstrap-src/helpers/envkernel.sh \
+ && grep -q 'CCACHE_DIR=/mnt/pmbootstrap/ccache' /opt/pmbootstrap-src/helpers/envkernel.sh \
+ && ! grep -q 'CCACHE_DISABLE' /opt/pmbootstrap-src/helpers/envkernel.sh \
+ || (echo "FATAL: envkernel.sh no longer carries CCACHE_DISABLE=1 where this image expects it; re-read helpers/envkernel.sh before assuming kernel builds are cached" >&2; exit 1)
 
 # The load-bearing assertion. The whole zero-privilege design rests on
 # `pmbootstrap install --no-image` returning before it ever reaches losetup

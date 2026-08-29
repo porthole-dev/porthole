@@ -564,3 +564,39 @@ def test_pushing_modules_names_the_siblings_left_behind():
     assert "NOT being pushed" in text, (
         "tk-push-module.sh does not warn about modules built alongside the "
         "ones being pushed")
+
+
+def test_the_ccache_off_switch_actually_reaches_the_workspace():
+    """It did not. PORTHOLE_NO_CCACHE was documented as the way to turn the
+    compiler cache off and the env filter dropped it before podman saw it, so
+    the switch worked only on the one path where the cache is already off.
+    Found by setting it and watching the build arm the cache anyway."""
+    import porthole_cmd_build as build
+    saved = {k: os.environ.get(k) for k in build.KNOBS_THAT_CROSS}
+    try:
+        for k in build.KNOBS_THAT_CROSS:
+            os.environ.pop(k, None)
+        assert "PORTHOLE_NO_CCACHE" not in build._container_cmd("tkbuild", None, {})
+
+        os.environ["PORTHOLE_NO_CCACHE"] = "1"
+        argv = build._container_cmd("tkbuild", None, {})
+        assert "PORTHOLE_NO_CCACHE" in argv, argv
+        # By name, so the value comes from our environment rather than the
+        # podman argv -- the same rule the TK_ secrets follow.
+        assert "PORTHOLE_NO_CCACHE=1" not in argv, argv
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_no_host_path_setting_crosses_by_accident():
+    """The list is names, not a prefix, because the standing rule is that host
+    PORTHOLE_* values never reach the workspace -- the host's PORTHOLE_WORKDIR
+    names a directory that does not exist in there, and sending it made a real
+    session refuse to build."""
+    import porthole_cmd_build as build
+    for key in build.KNOBS_THAT_CROSS:
+        assert not any(w in key for w in ("DIR", "TREE", "PATH", "WORKDIR")), key
