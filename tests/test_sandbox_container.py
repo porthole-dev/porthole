@@ -262,6 +262,23 @@ def test_down_removes_the_container_but_names_no_volume():
         "the mounts are the user's real directories -- never remove them")
 
 
+def test_down_message_distinguishes_removed_from_never_running():
+    assert "removed" in sb._down_message(True), sb._down_message(True)
+    assert "untouched" in sb._down_message(True), (
+        "say the mounts survived; that is the reassurance `down` owes")
+    assert "not running" in sb._down_message(False), sb._down_message(False)
+    assert "removed" not in sb._down_message(False), (
+        "`podman rm -f` exits 0 either way -- this claimed a removal that "
+        "never happened once already")
+
+
+def test_device_key_path_has_one_definition():
+    home = pathlib.Path(tempfile.mkdtemp(prefix="porthole-key-test-"))
+    assert sb._ensure_device_key(home) == home / sb.DEVICE_KEY, (
+        "the created key and the path status reports must be the same "
+        "constant; two copies of a security-relevant path drift")
+
+
 def test_container_state_reports_the_workspace():
     state = sb._container_state(ROOT)
     for key in ("podman", "image", "image_built", "container_running",

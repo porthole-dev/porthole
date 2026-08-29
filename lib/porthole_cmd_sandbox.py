@@ -48,7 +48,7 @@ LOCK_LABEL = "io.porthole.device-lock"
 # Where the dedicated device ssh key lives on the host, and where it is mounted
 # inside the container. Deliberately NOT under the /porthole repo mount: a key
 # shadowing a path in the user's checkout is a confusing surprise.
-DEVICE_KEY = "~/.porthole/device_key"
+DEVICE_KEY = ".porthole/device_key"      # relative to $HOME
 DEVICE_KEY_IN = "/run/porthole/device_key"
 
 
@@ -67,7 +67,7 @@ def _ensure_device_key(home: pathlib.Path) -> pathlib.Path:
     falls back to ~/.ssh/id_ed25519 -- a personal key. Generating one key that
     only ever reaches the phone is what lets both statements be true.
     """
-    key = home / ".porthole" / "device_key"
+    key = home / DEVICE_KEY
     if key.exists():
         return key
     if not shutil.which("ssh-keygen"):
@@ -273,6 +273,13 @@ def _down_argv() -> list[str]:
     return ["podman", "rm", "-f", CONTAINER]
 
 
+def _down_message(existed: bool) -> str:
+    """Split out because this exact branch already reported a removal that
+    never happened; a pure function is a branch a test can reach."""
+    return (f"  {CONTAINER} removed (mounted directories untouched)"
+            if existed else f"  {CONTAINER} was not running")
+
+
 def _down(ctx) -> int:
     if not shutil.which("podman"):
         raise Bail("podman is not installed", EX_FAIL, "nothing to stop")
@@ -281,8 +288,7 @@ def _down(ctx) -> int:
     existed = subprocess.run(
         ["podman", "container", "exists", CONTAINER]).returncode == 0
     subprocess.run(_down_argv(), capture_output=True)
-    ctx.out(f"  {CONTAINER} removed (mounted directories untouched)" if existed
-            else f"  {CONTAINER} was not running")
+    ctx.out(_down_message(existed))
     return EX_OK
 
 
@@ -375,7 +381,7 @@ def _container_state(root: pathlib.Path) -> dict:
     out = {"podman": shutil.which("podman"), "image": _image_tag(root),
            "image_built": False, "container_running": False,
            "device_key": "", "issues": []}
-    key = pathlib.Path.home() / ".porthole" / "device_key"
+    key = pathlib.Path.home() / DEVICE_KEY
     out["device_key"] = str(key) if key.exists() else ""
     if not out["podman"]:
         out["issues"].append("podman not installed -- the workspace is "
