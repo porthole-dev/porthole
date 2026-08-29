@@ -53,7 +53,25 @@ offsets, plus one at 0xe2010 which is `WRAPPER_BASE + 0x2010` and not VBIF at
 all. Whatever gates VBIF access on this SoC -- a clock, a subcore GDSC, an
 ordering step -- mainline is not doing it before it writes there.
 
-**Two fixes tried and refuted, each with its own control**
+**Nine hypotheses refuted, each with its own control.** In order tried:
+the missing interconnect vote; core_power/the four clocks; the CPU access path
+and the CPU_CS_SCIACMDARG0 poll; the swallowed TZ -EINVAL; releasing the CPU
+with venus_reset_cpu(); the content-protection regions; the two MMSS NoC clocks
+(gcc_mmss_sys_noc_axi_clk really was off, and voting it really did change the
+state -- and did not fix the wedge); the vendor's preset ORDERING, with the
+presets written before venus_boot(); the vcodec subcore power domains (verified
+active in SW mode at the wedge point, with all six clocks on); and rating the
+core clocks, which the vendor does via __scale_clocks() and mainline skips on
+3XX. **The preset table itself matches the vendor byte for byte.**
+
+**The one remaining difference** in the vendor's `__venus_power_on()` that
+mainline does not do at all: `__alloc_imem(device, res->imem_size)`, with
+`qcom,imem-size = <524288>` in msm8998-vidc.dtsi, called BEFORE
+`__set_registers()`. `msm8998_res` has `vmem_id = VIDC_RESOURCE_NONE,
+vmem_size = 0`. That is the next thing to try, and it is now the only
+untried step in the sequence.
+
+**Two earlier fixes tried and refuted, each with its own control**
 
 - *"Release the CPU ourselves when TZ refuses."* `venus_reset_cpu()`, the
   no-TZ path's action, **wedges the bus too**. The wrapper registers it writes
