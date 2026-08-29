@@ -15,6 +15,7 @@ generic notes as well.
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
+| [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
@@ -63,6 +64,7 @@ generic notes as well.
 | [a-module-reload-does-not-reset-this-cards-audio-state](traps/a-module-reload-does-not-reset-this-cards-audio-state.md) | `device:google-taimen` | A module reload re-registers the card and leaves capture broken — audio needs a reboot |
 | [a-ram-booted-kernel-cannot-survive-a-long-sleep](traps/a-ram-booted-kernel-cannot-survive-a-long-sleep.md) | `generic` | A RAM-booted kernel cannot survive a long sleep — suspend work needs a flashed slot |
 | [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
+| [a-sideloaded-device-apk-can-eat-the-radio-stack](traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md) | `generic` | A sideloaded device apk can eat the radio stack |
 | [a-stale-inherited-env-outbuilds-the-profile](traps/a-stale-inherited-env-outbuilds-the-profile.md) | `generic` | A stale inherited env outbuilds the profile |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
@@ -133,7 +135,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 12
-- `generic` — 68
+- `generic` — 70
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1
