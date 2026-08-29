@@ -205,6 +205,17 @@ def test_up_argv_sets_xdg_config_home_and_matching_device_lock():
         "bind-mounted lock file protects nothing: " + repr(argv))
 
 
+def test_up_argv_points_ssh_at_the_mounted_device_key():
+    argv = _argv_for_test()
+    assert f"PORTHOLE_SSH_KEY={sb.DEVICE_KEY_IN}" in argv, (
+        "unset, the device tooling falls back to ~/.ssh/id_ed25519 -- which "
+        "the workspace deliberately cannot see: " + repr(argv))
+    mounts = sb._mounts(ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"),
+                        "testdev", [])
+    assert sb.DEVICE_KEY_IN in [dst for _s, dst, _o in mounts], (
+        "the value must name a path that is actually mounted")
+
+
 def test_up_argv_labels_the_container_with_the_lock_it_baked_in():
     argv = _argv_for_test()
     assert f"{sb.LOCK_LABEL}={sb._lock_path('testdev')}" in argv, (

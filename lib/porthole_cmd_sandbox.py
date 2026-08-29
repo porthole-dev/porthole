@@ -168,6 +168,10 @@ def _up_argv(root, image, mounts, device) -> list[str]:
             # for the same device -- the whole point of that mount.
             "-e", "XDG_CONFIG_HOME=/run/porthole/config",
             "-e", f"TK_DEVICE_LOCK={_lock_path(device)}",
+            # The dedicated device key, at its in-container path. Unset, the
+            # device tooling falls back to ~/.ssh/id_ed25519 -- which the
+            # workspace deliberately cannot see, so ssh would simply fail.
+            "-e", f"PORTHOLE_SSH_KEY={DEVICE_KEY_IN}",
             # Same value, recorded where a later command can read it back and
             # notice that `porthole use` has moved on. See LOCK_LABEL.
             "--label", f"{LOCK_LABEL}={_lock_path(device)}"]
@@ -252,8 +256,10 @@ def _up(ctx, args) -> int:
             f"  {CONTAINER} up. root inside maps to uid {os.getuid()} outside.\n"
             f"  mounted: {', '.join(d for _s, d, _o in mounts)}\n"
             f"  nothing else on this host is reachable from in here.\n"
-            f"  device key: {key} -- add its .pub to the phone, then set\n"
-            f"    PORTHOLE_SSH_KEY={key}", "grey"))
+            f"  device key: {key}\n"
+            f"    put {key}.pub in the phone's authorized_keys -- one time.\n"
+            f"    PORTHOLE_SSH_KEY is already wired to {DEVICE_KEY_IN} in\n"
+            f"    here; set nothing yourself.", "grey"))
     return rc
 
 
