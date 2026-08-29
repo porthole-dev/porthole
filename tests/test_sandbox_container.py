@@ -287,6 +287,32 @@ def test_container_state_reports_the_workspace():
     assert state["image"] == sb._image_tag(ROOT), state["image"]
 
 
+def test_a_failed_inspect_is_not_read_as_an_absent_label():
+    """The drift guard must be loud when it cannot answer.
+
+    `podman inspect` exits 125 with EMPTY stdout when its template names a
+    field that no longer exists. Treating that as "no label" would disable
+    device-lock drift detection for every container, silently -- and a silent
+    pass reads exactly like agreement. It has to refuse instead.
+    """
+    try:
+        sb._lock_from_inspect(125, "", "Error: unknown field .Config.Nope")
+    except Exception as exc:
+        assert "device-lock label" in str(exc), exc
+    else:
+        assert False, "a failed inspect was accepted as an absent label"
+
+
+def test_an_absent_label_is_reported_as_absent_not_as_a_lock():
+    for stdout in ("", "   ", "<no value>"):
+        assert sb._lock_from_inspect(0, stdout, "") == "", repr(stdout)
+
+
+def test_a_present_label_comes_back_verbatim():
+    assert sb._lock_from_inspect(0, "/tmp/porthole-taimen.lock\n", "") == \
+        "/tmp/porthole-taimen.lock"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -59,17 +59,21 @@ echo "### /lib/modules/$KVER"
 # warning and not a refusal, because pushing a genuine subset is legitimate
 # when the change really is confined to one module -- but it should be a
 # decision rather than an oversight.
-_siblings=""
+# An array read line by line, not `for x in $(find ...)`: unquoted command
+# substitution splits on every space, so a build directory containing a space
+# would make this warn about two paths that do not exist while staying silent
+# about the one that does -- and this warning exists precisely to be trusted.
+_siblings=()
 for ko in "$@"; do
     d=$(dirname "$ko")
-    for other in $(find "$d" -name '*.ko' 2>/dev/null); do
+    while IFS= read -r other; do
         case " $* " in *" $other "*) continue ;; esac
-        _siblings="$_siblings $other"
-    done
+        _siblings+=("$other")
+    done < <(find "$d" -name '*.ko' 2>/dev/null)
 done
-if [ -n "$_siblings" ]; then
+if [ ${#_siblings[@]} -gt 0 ]; then
     echo "### WARNING: built alongside, but NOT being pushed:"
-    for s in $_siblings; do echo "###   $s"; done
+    for s in "${_siblings[@]}"; do echo "###   $s"; done
     echo "### If your change touched a header these share, pushing a subset"
     echo "### corrupts the struct layout between them -- see"
     echo "### brain/traps/pushing-one-module-of-a-pair-corrupts-the-other.md"
