@@ -6,7 +6,7 @@ subsystem: build
 severity: finding
 confidence: proven
 evidence: "helpers/envkernel.sh in the pmbootstrap checkout (EXTERNAL to this repo -- re-check it there) builds its `make` alias with `CCACHE_DISABLE=1` baked in, around line 281. Corroborated on the reference host 2026-08-29: cache_ccache_aarch64 holds 273 MB across 5230 files and `find -newermt '-30 days'` returns NOTHING, so the cache is populated but cold."
-refutes: "kernel rebuilds are slow because of the chroot zap alone; enabling ccache in pmbootstrap's config would speed up envkernel builds; the ccache directory in the work dir means ccache is working"
+refutes: "kernel rebuilds are slow because of the chroot zap alone; enabling ccache in pmbootstrap's config would speed up envkernel builds; the ccache directory in the work dir means ccache is working; re-enabling ccache would make incremental kernel builds fast"
 first-learned: 2026-08-29
 ---
 
@@ -39,7 +39,31 @@ uncached.
 It also rules out fixing this through pmbootstrap's own `ccache` setting: that
 governs package builds via `pmb/build/backend.py`, not the envkernel alias.
 
-**Not yet established, and deliberately so.** Whether re-enabling it actually
+**MEASURED 2026-08-29, and the answer is that it does not matter much.** Two
+`porthole build auto` runs on the taimen tree, host-side:
+
+| run | wall | compile steps |
+|---|---|---|
+| nothing to rebuild | 44 s | 0 |
+| one driver file touched (`hfi_venus.c` -> `venus-core.ko`) | 54 s | 6 |
+
+So the fixed cost -- chroot init plus make's own dependency scan -- is about
+40 s, and compiling one module is about 10 s of it. **The compile is not the
+bottleneck**, and ccache could not have helped either run: `.output` lives in
+the tree on the host and survives chroot recreation, so an incremental build
+never repeats a compilation, and repeating compilations is the only thing
+ccache accelerates.
+
+Where it would still pay is a full rebuild -- `make clean`, a kernel version
+move, or a header change touching thousands of files. Those are rare here.
+
+**So the six-to-ten minute builds are not this.** They are the packaging rungs:
+`pmbootstrap build` zapping the buildroot, plus `install` and `export`. That is
+what `PORTHOLE_LAX_BUILD=1` addresses, and what picking the right rung avoids
+entirely -- the same touched file routes to `mod` at ~40 s rather than `kernel`
+at ~10 minutes.
+
+**Still not established** Whether re-enabling it actually
 helps here has NOT been measured. Three things have to be true and none were
 checked, because the pmbootstrap work directory was in use by another agent at
 the time:
