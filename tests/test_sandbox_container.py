@@ -2,10 +2,16 @@
 # SPDX-License-Identifier: MIT
 """The sandbox workspace container: image build and lifecycle argv shapes.
 
-Every test here calls a pure function that RETURNS a podman command line.
-Nothing invokes podman. That is deliberate: CI has no podman and no device,
+Almost every test here calls a pure function that RETURNS a podman command
+line, and invokes nothing. That is deliberate: CI has no podman and no device,
 and a lifecycle test that needs either would simply be skipped there, which is
 the same as not having it (see the Makefile's note on silent skips).
+
+The exception is test_container_state_reports_the_workspace, which shells out
+to `podman image exists` and `podman ps`. It asserts only on the SHAPE of what
+comes back, so it passes with podman absent -- but it is the one test here
+whose result depends on the machine, and it is the one that will flake if
+something else is starting or stopping containers while the suite runs.
 """
 import os
 import pathlib
@@ -352,6 +358,52 @@ def test_installing_the_broker_requires_an_explicit_flag():
     flags = [names[0] for names, _kw in sb.SPEC["args"]]
     assert "--broker" in flags, (
         "a plain `sandbox install` must not grant a sudoers entry: " + str(flags))
+
+
+# ---- reported from a real session that could not build in the workspace ----
+
+def test_a_single_string_command_runs_as_a_shell_line():
+    """`--command "pmbootstrap status"` arrives as ONE argv element, and
+    podman would try to exec a file with that literal name."""
+    argv = sb._exec_argv(["pmbootstrap status"], tty=False)
+    assert argv[-3:] == ["/bin/bash", "-lc", "pmbootstrap status"], argv
+
+
+def test_an_argv_command_is_passed_through_untouched():
+    argv = sb._exec_argv(["pmbootstrap", "status"], tty=False)
+    assert argv[-2:] == ["pmbootstrap", "status"], argv
+    assert "-lc" not in argv, argv
+
+
+def test_a_bare_program_name_is_not_wrapped():
+    assert sb._exec_argv(["ls"], tty=False)[-1] == "ls"
+
+
+def test_the_container_can_find_porthole():
+    argv = sb._up_argv(ROOT, "img:1", sb._mounts(
+        ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"), "testdev", []),
+        "testdev")
+    path = [a for a in argv if a.startswith("PATH=")]
+    assert path and "/porthole/bin" in path[0], (
+        "porthole is not a command inside the workspace: " + str(path))
+
+
+def test_the_container_is_told_which_device_the_host_is_on():
+    """The config mount carries the user-config layer, but the host's active
+    device usually comes from the ENVIRONMENT, which stops at the boundary."""
+    argv = sb._up_argv(ROOT, "img:1", sb._mounts(
+        ROOT, "/pmb-work", None, pathlib.Path("/k/device_key"), "taimen", []),
+        "taimen")
+    assert "PORTHOLE_DEVICE=taimen" in argv, argv
+
+
+def test_the_workdir_is_the_mount_not_the_host_path():
+    mounts = sb._mounts(ROOT, "/pmb-work", "/host/tree",
+                        pathlib.Path("/k/device_key"), "taimen", [])
+    argv = sb._up_argv(ROOT, "img:1", mounts, "taimen")
+    assert "PORTHOLE_WORKDIR=/work" in argv, (
+        "the profile's host path does not exist inside the container: "
+        + str([a for a in argv if "WORKDIR" in a]))
 
 
 def main():

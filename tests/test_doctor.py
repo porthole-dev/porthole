@@ -57,6 +57,35 @@ def test_doctor_offers_fix_and_dry_run():
     assert "--fix" in flags and "--dry-run" in flags, flags
 
 
+class _Ctx:
+    def __init__(self, cfg):
+        self.cfg = cfg
+
+
+def test_a_dangling_pmb_sudo_fails_with_a_named_fix():
+    """Reported from a real session: the broker was gone, PMB_SUDO still
+    pointed at it, and the build died with exit 78 deep inside pmbootstrap
+    without anything mentioning PMB_SUDO."""
+    ch = doctor.Checks()
+    doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": "/nonexistent/ph-sudo"}), {})
+    row = ch.rows[-1]
+    assert row["status"] == "fail", row
+    assert "unset PMB_SUDO" in row["fix"], row["fix"]
+    assert "78" in row["fix"], "the fix should name the exit code you would see"
+
+
+def test_an_unset_pmb_sudo_is_fine():
+    import os
+    saved = os.environ.pop("PMB_SUDO", None)
+    try:
+        ch = doctor.Checks()
+        doctor._check_pmb_sudo(ch, _Ctx({}), {})
+        assert ch.rows[-1]["status"] == "ok", ch.rows[-1]
+    finally:
+        if saved is not None:
+            os.environ["PMB_SUDO"] = saved
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
