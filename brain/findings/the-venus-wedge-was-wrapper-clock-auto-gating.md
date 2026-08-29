@@ -64,6 +64,13 @@ probe away from a re-check.
 
 **Still open, precisely characterised (the next campaign)**
 
+**CLOSED the same evening** — all four are resolved or reframed in
+[[venus-decode-works-and-what-it-took]]: (1) was the unclocked decoder
+engine, not the event mechanism; (2)+(3) collapse into "the firmware does
+not survive any power collapse", now sidestepped with pm_runtime_forbid;
+(4) a pmaports temp fork of gst-plugins-good enables the stateful v4l2
+element. The list below is kept as written for the record.
+
 1. **First clean decode session stalls at source-change**: fw accepts
    SESSION_INIT and buffer queueing (bandwidth votes fire, ~13 IRQs), but no
    capture format ever becomes valid; ffmpeg's h264_v4l2m2m polls G_FMT x60

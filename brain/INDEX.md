@@ -16,6 +16,7 @@ generic notes as well.
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
+| [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
 | [holding-vdd-mx-does-not-stop-the-wake-crash](findings/holding-vdd-mx-does-not-stop-the-wake-crash.md) | `soc:msm8998` | Holding VDD_MX does not stop the display-wake crash -- neither enabled nor at TURBO |
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
@@ -29,6 +30,7 @@ generic notes as well.
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
+| [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
 | [venus-wedges-on-the-first-vbif-write](findings/venus-wedges-on-the-first-vbif-write.md) | `device:google-taimen` | msm8998 TZ refuses venus resume with -EINVAL, mainline swallows it, and the whole block stays dark |
 | [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
@@ -130,8 +132,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 11
-- `generic` — 67
+- `device:google-taimen` — 12
+- `generic` — 68
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1
