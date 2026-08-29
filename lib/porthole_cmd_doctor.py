@@ -30,6 +30,11 @@ PACKAGES = {
         "debian": "sudo apt install android-sdk-platform-tools",
         "arch": "sudo pacman -S android-tools",
         "fedora": "sudo dnf install android-tools",
+        # An ostree host has no dnf, and rpm-ostree needs a reboot. The
+        # unpacked SDK avoids both and is what the reference host uses.
+        "fedora-atomic": ("unpack Google's platform-tools into ~/.local/bin"
+                          "    # or: rpm-ostree install android-tools "
+                          "(needs a reboot)"),
         "alpine": "sudo apk add android-tools",
         "suse": "sudo zypper install android-tools",
         "macos": "brew install android-platform-tools",
@@ -38,6 +43,11 @@ PACKAGES = {
         "debian": "sudo apt install android-sdk-platform-tools",
         "arch": "sudo pacman -S android-tools",
         "fedora": "sudo dnf install android-tools",
+        # An ostree host has no dnf, and rpm-ostree needs a reboot. The
+        # unpacked SDK avoids both and is what the reference host uses.
+        "fedora-atomic": ("unpack Google's platform-tools into ~/.local/bin"
+                          "    # or: rpm-ostree install android-tools "
+                          "(needs a reboot)"),
         "alpine": "sudo apk add android-tools",
         "suse": "sudo zypper install android-tools",
         "macos": "brew install android-platform-tools",
@@ -50,8 +60,25 @@ PACKAGES = {
         "suse": "sudo zypper install openssh-clients",
         "macos": "(preinstalled)",
     },
+    # NOT `pipx install pmbootstrap`. PyPI's newest is 2.1.0 -- the 3.x series
+    # is not published there at all -- so pip would install a major version
+    # behind what this toolbox targets. Verified 2026-08-29.
     "pmbootstrap": {
-        "*": "pipx install pmbootstrap    # or: pip install --user pmbootstrap",
+        "alpine": "sudo apk add pmbootstrap",
+        "*": ("porthole sandbox up    # the workspace image ships it\n"
+              "          on the host instead: your distro's pmbootstrap "
+              "package, or a\n"
+              "          git clone of pmbootstrap with "
+              "PORTHOLE_PMBOOTSTRAP_SRC set to it"),
+    },
+    "podman": {
+        "debian": "sudo apt install podman",
+        "arch": "sudo pacman -S podman",
+        "fedora": "sudo dnf install podman",
+        "fedora-atomic": "(preinstalled on atomic Fedora)",
+        "alpine": "sudo apk add podman",
+        "suse": "sudo zypper install podman",
+        "macos": "brew install podman && podman machine init",
     },
     "textual": {
         "debian": "sudo apt install python3-pip && pip install --user 'textual>=8,<9'",
@@ -72,6 +99,18 @@ PACKAGES = {
 }
 
 
+def is_atomic() -> bool:
+    """Is this an image-based (ostree/bootc) host?
+
+    It matters because the package-manager hint is WRONG on one: Silverblue
+    reports ID=fedora and has no `dnf` at all, so `porthole doctor` was
+    printing `sudo dnf install android-tools` on the very machine this toolbox
+    is developed on. `/run/ostree-booted` is what ostree itself puts there.
+    """
+    return (pathlib.Path("/run/ostree-booted").exists()
+            or pathlib.Path("/sysroot/ostree").is_dir())
+
+
 def distro_family() -> str:
     """Best-effort distro family for install hints. 'unknown' is fine."""
     if sys.platform == "darwin":
@@ -89,7 +128,7 @@ def distro_family() -> str:
         if ident in ("arch", "archlinux", "manjaro"):
             return "arch"
         if ident in ("fedora", "rhel", "centos"):
-            return "fedora"
+            return "fedora-atomic" if is_atomic() else "fedora"
         if ident in ("alpine", "postmarketos"):
             return "alpine"
         if ident in ("suse", "opensuse", "opensuse-leap", "opensuse-tumbleweed"):
@@ -98,8 +137,15 @@ def distro_family() -> str:
 
 
 def install_hint(tool: str, family: str) -> str:
+    """The fix line for a tool, most specific entry first.
+
+    A `-atomic` family falls back to its base rather than to `*`: most tools
+    install the same way on Silverblue as on Fedora, and only the ones that
+    genuinely differ need their own entry.
+    """
     table = PACKAGES.get(tool, {})
-    return (table.get(family) or table.get("*")
+    base = family.split("-", 1)[0]
+    return (table.get(family) or table.get(base) or table.get("*")
             or f"install {tool} with your package manager")
 
 
@@ -481,12 +527,52 @@ def bench(ch: Checks, ctx) -> None:
     timed("device state", dev.state, 100)
 
 
+def check_workspace(ch: Checks, ctx, family: str) -> None:
+    """podman and the build workspace.
+
+    podman is the ONE thing that still needs a package manager. Everything else
+    the build needs -- pmbootstrap, the toolchain, fuse2fs, android-tools --
+    lives in the image, which is why this is the only host prerequisite worth
+    failing on.
+    """
+    import porthole_cmd_sandbox as sandbox
+
+    state = sandbox._container_state(ctx.root)
+    if not state["podman"]:
+        ch.add("host: podman", "fail",
+               "not found -- builds run in a rootless container",
+               install_hint("podman", family))
+        return
+    ch.add("host: podman", "ok", state["podman"])
+    if state["image_built"]:
+        ch.add("workspace: image", "ok", state["image"])
+    else:
+        ch.add("workspace: image", "warn", "not built",
+               doc="porthole sandbox up")
+    if state["container_running"]:
+        ch.add("workspace: container", "ok", sandbox.CONTAINER)
+    else:
+        ch.add("workspace: container", "warn", "not running",
+               doc="porthole sandbox up")
+    # binfmt is host-global and needs root once. Named, never automated: it is
+    # a person installing software on their own machine, not a privilege the
+    # agent holds.
+    binfmt = pathlib.Path("/proc/sys/fs/binfmt_misc/qemu-aarch64")
+    if binfmt.exists():
+        ch.add("host: binfmt aarch64", "ok", "registered")
+    else:
+        ch.add("host: binfmt aarch64", "warn",
+               "not registered -- cross-arch package builds need it",
+               doc="install qemu-user-static (host-global, needs root once)")
+
+
 def cmd_doctor(args, ctx) -> int:
     family = distro_family()
     ch = Checks()
     cfg = ctx.cfg
 
     check_host(ch, cfg, family)
+    check_workspace(ch, ctx, family)
     check_profile(ch, cfg, ctx.root)
     check_identity(ch, cfg)
     if args.no_device:
@@ -528,7 +614,71 @@ def cmd_doctor(args, ctx) -> int:
                     "and re-run `porthole doctor`.")
 
     ctx.emit(payload, render)
+
+    if getattr(args, "fix", False):
+        return _fix(ch, ctx, args)
     return EX_FAIL if ch.worst() == "fail" else EX_OK
+
+
+def _fix(ch: Checks, ctx, args) -> int:
+    """Run the fixes the checks named -- after showing them, and after asking.
+
+    Every command is printed before anything runs, because this is the verb
+    people reach for on a machine they do not know well, and a tool that
+    installs software without saying what is a tool you cannot trust twice.
+
+    An agent must NOT get past the prompt: the remaining privileged step needs
+    a password, and asking the human is the correct behaviour rather than a
+    limitation. --dry-run prints the plan and stops, which is what the distro
+    matrix in tests/ci-local.sh exercises.
+    """
+    todo = [r for r in ch.rows if r["status"] in ("fail", "warn")
+            and (r["fix"] or r["doc"])]
+    if not todo:
+        ctx.out(ctx.out.paint("nothing to fix", "green"))
+        return EX_OK
+
+    ctx.out.blank()
+    ctx.out.heading("what --fix would run")
+    for row in todo:
+        ctx.out(f"  {row['name']}")
+        ctx.out(ctx.out.paint(f"      {row['fix'] or row['doc']}", "cyan"))
+    ctx.out.blank()
+
+    if getattr(args, "dry_run", False):
+        ctx.out(ctx.out.paint("--dry-run: nothing was run", "grey"))
+        return EX_OK
+
+    if not sys.stdin.isatty():
+        ctx.out.warn("not a terminal, so nothing was run. These need a "
+                     "password you should type yourself -- run "
+                     "`porthole doctor --fix` interactively.")
+        return EX_FAIL if ch.worst() == "fail" else EX_OK
+
+    ctx.out("Run these now? Each is printed again as it runs. [y/N] ")
+    try:
+        if (input().strip().lower() or "n")[0] != "y":
+            ctx.out("nothing was run")
+            return EX_OK
+    except (EOFError, KeyboardInterrupt):
+        ctx.out.blank()
+        return EX_OK
+
+    failed = 0
+    for row in todo:
+        cmd = (row["fix"] or row["doc"]).split("#", 1)[0].strip()
+        # Multi-line and prose hints are guidance, not commands. Saying so is
+        # better than running the first line of a paragraph.
+        if not cmd or "\n" in (row["fix"] or row["doc"]) or cmd.startswith("("):
+            ctx.out.warn(f"{row['name']}: do this one by hand -- {cmd or 'see above'}")
+            continue
+        ctx.out(ctx.out.paint(f"  $ {cmd}", "cyan"))
+        if subprocess.run(cmd, shell=True).returncode != 0:
+            failed += 1
+            ctx.out.warn(f"{row['name']}: that command failed")
+    ctx.out.blank()
+    ctx.out("re-run `porthole doctor` to see where you are")
+    return EX_FAIL if failed else EX_OK
 
 
 SPEC = {
@@ -549,6 +699,10 @@ SPEC = {
         (["--all"], {"action": "store_true", "help": "every check"}),
         (["--no-device"], {"action": "store_true",
                            "help": "skip anything that touches the device"}),
+        (["--fix"], {"action": "store_true",
+                     "help": "show the fixes, then offer to run them"}),
+        (["--dry-run"], {"action": "store_true",
+                         "help": "--fix: print the plan and stop"}),
     ],
     "run": cmd_doctor,
     "examples": [

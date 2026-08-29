@@ -44,6 +44,33 @@ RULES = [
 ]
 
 
+def _workspace_state(root: pathlib.Path) -> dict:
+    """Is the build workspace usable, and if not, what should be said about it?
+
+    This belongs in `brief` rather than behind `porthole doctor` because brief
+    is the verb AGENTS.md tells every agent to run first. An agent that does
+    not know the workspace is missing reaches for host sudo instead, which is
+    the single thing this whole subsystem exists to prevent.
+    """
+    try:
+        import porthole_cmd_sandbox as sandbox
+        state = sandbox._container_state(root)
+    except Exception:  # noqa: BLE001
+        return {"ready": True, "message": ""}
+
+    if not state["podman"]:
+        return {"ready": False, "message":
+                "no podman on this host, so there is no build workspace. "
+                "ASK the person you are working with to run "
+                "`porthole doctor --fix` -- it needs a password you must not "
+                "type. Do not use host sudo instead."}
+    if not state["image_built"] or not state["container_running"]:
+        return {"ready": False, "message":
+                "the build workspace is not up. Run `porthole sandbox up` "
+                "before building; do not fall back to host sudo."}
+    return {"ready": True, "message": ""}
+
+
 def cmd_brief(args, ctx) -> int:
     root = ctx.root
     cfg = ctx.cfg
@@ -51,6 +78,8 @@ def cmd_brief(args, ctx) -> int:
 
     import porthole_cmd_tools as tmod
     tools = tmod.collect(root, device)
+
+    workspace = _workspace_state(root)
 
     state = "not probed"
     if not args.no_device:
@@ -79,6 +108,7 @@ def cmd_brief(args, ctx) -> int:
             "profile_gaps": profile_gaps,
             "traps": _device_traps(cfg),
         },
+        "workspace": workspace,
         "tools": {
             "count": len(tools),
             "undocumented": [t.name for t in tools if t.gaps],
@@ -177,6 +207,16 @@ def cmd_brief(args, ctx) -> int:
                 ctx.out.kv("", ctx.out.paint(port["next"]["command"], "cyan"), w)
             for item in port.get("stale", [])[:3]:
                 ctx.out.warn(f"{item['title']}: {item['detail']}")
+            ctx.out.blank()
+
+        if not payload["workspace"]["ready"]:
+            # stdout, not out.warn: warn goes to stderr, which reorders against
+            # block-buffered stdout the moment this is piped -- and this is the
+            # verb agents pipe. A warning that lands somewhere else in the
+            # output is a warning that gets read as belonging to something else.
+            ctx.out.heading("the build workspace")
+            ctx.out(ctx.out.paint(
+                "  " + payload["workspace"]["message"], "yellow"))
             ctx.out.blank()
 
         ctx.out.heading("suggested next steps")
