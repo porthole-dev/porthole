@@ -10,6 +10,15 @@ refutes: the wedge is inside core_power(POWER_ON); the wedge is the CPU_CS_SCIAC
 first-learned: 2026-08-29
 ---
 
+**CLOSED, 2026-08-29 (later the same day)** — both "still open" questions
+are answered in [[the-venus-wedge-was-wrapper-clock-auto-gating]]: the pages
+were unreachable because `WRAPPER_CLOCK_CONFIG` (wrapper+0x04) powers on as
+0x007f001f (internal clock auto-gating); one write of 0 unlocks everything,
+and aport patch 0192 lands it. A plain READ of 0x80124 wedged identically, so
+the TZ/protection framing below is refuted; the TZ -EINVAL is benign
+(cold-boot only, resume returns 0 after a real suspend). Everything below
+remains the route that made the localisation possible.
+
 **The root cause, measured** — the trustzone refuses to resume venus, and
 mainline maps that refusal to success:
 
