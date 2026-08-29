@@ -86,6 +86,25 @@ def test_an_unset_pmb_sudo_is_fine():
             os.environ["PMB_SUDO"] = saved
 
 
+def test_pmb_sudo_naming_the_broker_is_caught():
+    """The failure BOTH agent reports hit, and existence alone missed it: the
+    broker is present and executable, so the first version of this check said
+    ok. pmbootstrap invokes PMB_SUDO directly and the broker refuses to run
+    unless already root, so the build dies with exit 78 naming nothing."""
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_sandbox as sandbox
+
+    ch = doctor.Checks()
+    doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": sandbox.BROKER_DST}), {})
+    row = ch.rows[-1]
+    assert row["status"] == "fail", row
+    assert "BROKER" in row["detail"], row["detail"]
+    assert sandbox.CLIENT_DST in row["fix"], (
+        "the fix must name the client, which is the value that works: "
+        + row["fix"])
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
