@@ -113,7 +113,64 @@ def _preflight(ctx) -> list[str]:
         problems.append(f"PORTHOLE_WORKDIR does not exist: {workdir}")
     if not shutil.which("pmbootstrap"):
         problems.append("pmbootstrap is not on PATH")
+    problems += _space_problems(cfg)
     return problems
+
+
+# Measured on the reference host, 2026-08-29, on an established workdir:
+#   chroot_native 15G · cache_apk_aarch64 2.0G · rootfs chroot 2.1G · total 29G
+# A kernel tree and its objects sit on top of that. These are the headroom a
+# build needs to FINISH, not the size of the result -- which is the number that
+# matters, because running out at minute forty costs the whole build.
+SPACE_FLOOR_GB = 5      # below this a build cannot finish; refuse
+SPACE_WARN_GB = 20      # below this it may, and it is worth saying so
+
+
+def _free_gb(path: str) -> float:
+    st = os.statvfs(path)
+    return (st.f_bsize * st.f_bavail) / (1024 ** 3)
+
+
+def _space_problems(cfg) -> list[str]:
+    """Refuse a build that cannot finish, in one second rather than forty
+    minutes.
+
+    pmbootstrap has its own check, but it runs after the chroots are prepared
+    and only covers the image it is about to create. The expensive part is
+    everything before that.
+    """
+    workdir = cfg.get("PORTHOLE_PMB_DIR") or str(
+        pathlib.Path.home() / ".local/var/pmbootstrap")
+    probe = pathlib.Path(workdir).expanduser()
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        free = _free_gb(str(probe))
+    except OSError:
+        return []
+    if free < SPACE_FLOOR_GB:
+        return [f"only {free:.1f} GB free on {probe} -- a build needs at least "
+                f"{SPACE_FLOOR_GB} GB to finish. Free some space, or point "
+                f"PORTHOLE_PMB_DIR at a bigger filesystem"]
+    return []
+
+
+def _space_warning(cfg) -> str:
+    """Not a refusal: tight but survivable, and worth knowing before you wait."""
+    workdir = cfg.get("PORTHOLE_PMB_DIR") or str(
+        pathlib.Path.home() / ".local/var/pmbootstrap")
+    probe = pathlib.Path(workdir).expanduser()
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        free = _free_gb(str(probe))
+    except OSError:
+        return ""
+    if free < SPACE_WARN_GB:
+        return (f"{free:.1f} GB free on {probe}. A full kernel rung wants "
+                f"more like {SPACE_WARN_GB} GB; this may still work, but "
+                f"ENOSPC at minute forty is the usual way it does not")
+    return ""
 
 
 def _run(ctx, func: str, timeout: int, extra: list[str] | None = None) -> int:
@@ -174,6 +231,9 @@ def cmd_build(args, ctx) -> int:
     extra = _rung_args(args, action)
 
     problems = _preflight(ctx)
+    tight = _space_warning(ctx.cfg)
+    if tight and not problems:
+        ctx.out.warn(tight)
 
     # A preview SHOWS what is wrong; it does not refuse. Refusing to describe
     # the build because the build could not run is unhelpful precisely when you

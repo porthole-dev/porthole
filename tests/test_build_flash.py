@@ -274,6 +274,27 @@ def test_tkmod_proves_the_new_module_is_the_running_one():
     assert "srcversion" in body, "tkmod does not verify which build is loaded"
 
 
+def test_a_build_that_cannot_finish_is_refused_before_it_starts():
+    """ENOSPC at minute forty costs the whole build. /proc reports zero free
+    space and always exists, so it is a stable stand-in for a full disk."""
+    import porthole_cmd_build as build
+    problems = build._space_problems({"PORTHOLE_PMB_DIR": "/proc"})
+    assert problems, "a disk with no free space was not refused"
+    assert "PORTHOLE_PMB_DIR" in problems[0], (
+        "the refusal must name the knob that relocates the workdir: "
+        + problems[0])
+
+
+def test_plenty_of_space_is_neither_refused_nor_warned_about():
+    import porthole_cmd_build as build
+    root = "/"
+    if build._free_gb(root) < build.SPACE_WARN_GB:
+        return  # this machine genuinely is tight; nothing to assert
+    cfg = {"PORTHOLE_PMB_DIR": root}
+    assert not build._space_problems(cfg)
+    assert not build._space_warning(cfg)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
