@@ -174,7 +174,7 @@ def build(verb, fields_, values):
         if f.kind == "check":
             parts.append(f.flag)
         else:
-            parts.extend([f.flag, _render(value)])
+            parts.extend([f.flag, _render_value(f, value)])
     return " ".join(parts)
 
 
