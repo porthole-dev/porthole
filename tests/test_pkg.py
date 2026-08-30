@@ -319,6 +319,18 @@ def test_every_build_says_how_to_watch_it_not_only_a_detached_one():
     assert len(pkg.watch_hint(tty=False)) > len(pkg.watch_hint(tty=True))
 
 
+def test_watch_never_starts_with_a_blank_screen():
+    """A watch that prints nothing for thirty seconds is indistinguishable
+    from a hang, and is why the developer stopped trusting it. Reproduced:
+    `timeout 5 porthole pkg watch` produced zero output when the status file
+    held an already-finished build."""
+    stale = {"rung": "pkg:gst-plugins-good", "state": "done", "pid": 1,
+             "elapsed": 795.0, "started": 1000.0}
+    said = pkg.waiting_line(stale, now=2000.0)
+    assert said and "gst-plugins-good" in said
+    assert pkg.waiting_line(None, now=2000.0), "no status file must still say something"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

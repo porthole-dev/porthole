@@ -561,6 +561,27 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     return EX_OK
 
 
+def waiting_line(snap, now=None) -> str:
+    """What `watch` is doing while there is nothing live to attach to.
+
+    Said once immediately and then repeated, never left to silence. Measured:
+    `timeout 5 porthole pkg watch` against an already-finished build printed
+    NOTHING, because the old code's grace window was a bare `continue` --
+    thirty seconds of blank screen that reads as a hang, not as "waiting".
+    Pure (a snapshot and a clock, no file, no sleep) so the wording is
+    testable without driving the loop.
+    """
+    import porthole_progress as progress
+
+    now = time.time() if now is None else now
+    if not snap:
+        return "  nothing has built in this checkout yet -- waiting for a build to start"
+    stopped = progress.finished_at(snap)
+    ago = progress.fmt_dur(now - stopped) if stopped is not None else "a while"
+    return (f"  {snap.get('rung', '?')} finished {ago} ago -- "
+            f"waiting for a new build to start")
+
+
 def _watch(ctx, args) -> int:
     """Follow the status file until the build stops.
 
@@ -580,48 +601,72 @@ def _watch(ctx, args) -> int:
     path = rundir / "pkg-status.json"
     tty = os.isatty(1)
 
-    # A just-detached build has not published yet. Wait a little rather than
-    # reporting "no build" for the build we were asked to watch.
-    appear = time.time() + 30
-    while not path.exists() and time.time() < appear:
-        time.sleep(0.25)
-    if not path.exists():
+    def snapshot():
+        # Absent, or read mid-rename: both are "nothing to attach to yet",
+        # not an error -- the writer is atomic, so the next read succeeds.
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):
+            return None
+
+    started_watching = time.time()
+    appear = started_watching + 30
+
+    def is_stale(snap):
+        # A run that had already finished before this watch began is
+        # somebody else's build. Keep waiting for ours rather than reporting
+        # theirs -- belt and braces behind publish_pending, for a `watch`
+        # started by hand rather than straight after `--detach`.
+        if not snap:
+            return False
+        stopped = progress.finished_at(snap)
+        return (progress.liveness(snap) != "running" and stopped is not None
+                and stopped < started_watching)
+
+    # Never silent: say what was found BEFORE the first sleep, then keep
+    # saying it (repainted in place on a tty, throttled on a pipe) for as
+    # long as there is nothing live -- instead of the old bare `continue`.
+    last_note = 0.0
+    snap = snapshot()
+    while (snap is None or is_stale(snap)) and time.time() < appear:
+        line = waiting_line(snap)
+        if tty:
+            print("\r\033[2K" + line, end="", flush=True)
+        elif last_note == 0.0 or time.time() - last_note > max(args.interval, 15):
+            last_note = time.time()
+            print(line, flush=True)
+        time.sleep(0.25 if snap is None else args.interval)
+        snap = snapshot()
+    if tty:
+        print("\r\033[2K", end="")
+
+    if snap is None:
         raise Bail("no package build has published a status here", EX_FAIL,
                    "start one with `porthole pkg build <aport>`")
 
-    last_note = 0.0
-    snap = {}
-    started_watching = time.time()
-    while True:
-        try:
-            snap = json.loads(path.read_text())
-        except (OSError, ValueError):
-            # A read that lands mid-rename. The writer is atomic, so the next
-            # one succeeds; treating this as an error would end the watch on a
-            # race that resolves itself in 500ms.
+    # The grace window ran out with nothing new. Say so plainly, then fall
+    # through and render the stale run -- clearly labelled as the PREVIOUS
+    # build, not left to look current the way the silent version did.
+    if is_stale(snap):
+        ctx.out(ctx.out.paint(
+            "  no new build started -- showing the previous run:", "yellow"))
+    else:
+        while True:
+            live = progress.liveness(snap)
+            if tty:
+                print("\r\033[2K  " + progress.line_of(snap), end="", flush=True)
+            elif time.time() - last_note > max(args.interval, 15):
+                last_note = time.time()
+                print("  " + progress.line_of(snap), flush=True)
+            if live != "running":
+                break
             time.sleep(args.interval)
-            continue
-        live = progress.liveness(snap)
-        # A run that had already finished before this watch began is somebody
-        # else's build. Keep waiting for ours rather than reporting theirs --
-        # belt and braces behind publish_pending, for a `watch` started by
-        # hand rather than straight after `--detach`.
-        stopped = progress.finished_at(snap)
-        if (live != "running" and stopped is not None
-                and stopped < started_watching and time.time() < appear):
-            time.sleep(args.interval)
-            continue
+            snap = snapshot() or snap
         if tty:
-            print("\r\033[2K  " + progress.line_of(snap), end="", flush=True)
-        elif time.time() - last_note > max(args.interval, 15):
-            last_note = time.time()
-            print("  " + progress.line_of(snap), flush=True)
-        if live != "running":
-            break
-        time.sleep(args.interval)
+            print("\r\033[2K", end="")
 
-    if tty:
-        print("\r\033[2K", end="")
     head, rows = progress.status_report(snap)
     ctx.out("  " + head)
     for label, value in rows:
