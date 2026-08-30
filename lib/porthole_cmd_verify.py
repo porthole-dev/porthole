@@ -58,9 +58,24 @@ def _workdir(ctx) -> pathlib.Path:
 
 
 def _dtc() -> str:
-    """dtc, wherever it is. A kernel tree builds one at scripts/dtc/dtc."""
+    """dtc, wherever it is. A kernel tree builds one at scripts/dtc/dtc.
+
+    Falls back to the workspace. dtc is absent from a stock host and the
+    device-tree check is the ONLY one that reads reg properties, so without
+    this `porthole verify` reports INCOMPLETE forever -- and a verdict that
+    can never be clean is one people stop reading.
+    """
     found = shutil.which(os.environ.get("DTC", "dtc")) or shutil.which("dtc")
-    return found or ""
+    if found:
+        return found
+    try:
+        import porthole_cmd_sandbox as sandbox
+
+        if sandbox._container_running():
+            return f"podman exec {sandbox.CONTAINER} dtc"
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
 
 
 # ------------------------------------------------------------------ checks --
@@ -122,7 +137,11 @@ def check_dts_compiles(ctx, work) -> Check:
         return Check("device tree compiles", SKIP,
                      f"{detail} — set PORTHOLE_DTS_INCLUDES")
 
-    proc = subprocess.run([dtc, "-I", "dts", "-O", "dtb", "-o", os.devnull],
+    # dtc may be the container fallback ("podman exec porthole-sandbox dtc"),
+    # a three-word string that is one argv element short if passed straight
+    # through -- split it so both the host path and the podman prefix work.
+    proc = subprocess.run(dtc.split() + ["-I", "dts", "-O", "dtb", "-o",
+                                         os.devnull],
                           input=pre.stdout, capture_output=True, text=True)
     # Warnings need a baseline. Upstream .dtsi files emit some unconditionally
     # -- msm8998.dtsi trips simple_bus_reg, a USI block muxes i2c/serial/spi
@@ -348,7 +367,8 @@ def _collect_warnings(ctx, work, source) -> list:
     if pre.returncode != 0:
         raise Bail("cannot preprocess the device tree", EX_FAIL,
                    "set PORTHOLE_DTS_INCLUDES")
-    proc = subprocess.run([dtc, "-I", "dts", "-O", "dtb", "-o", os.devnull],
+    proc = subprocess.run(dtc.split() + ["-I", "dts", "-O", "dtb", "-o",
+                                         os.devnull],
                           input=pre.stdout, capture_output=True, text=True)
     return [l for l in proc.stderr.splitlines() if "Warning" in l]
 

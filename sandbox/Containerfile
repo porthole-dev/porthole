@@ -31,6 +31,7 @@ RUN apk add --no-cache \
       e2fsprogs fuse2fs fuse \
       util-linux parted multipath-tools \
       openssh-client rsync git \
+      dtc \
       python3 openssl xz tar bash coreutils
 
 # The apk package installs the `pmb` PYTHON PACKAGE and nothing else -- 164

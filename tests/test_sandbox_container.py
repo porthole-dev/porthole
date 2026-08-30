@@ -625,6 +625,18 @@ def test_the_workspace_runs_an_init_that_reaps():
     assert "--init" in argv, argv
 
 
+def test_the_image_carries_dtc():
+    """`porthole verify` ends INCOMPLETE on every clean checkout because dtc
+    is absent from the host AND the image, so the device-tree check -- the
+    only one that reads reg properties -- never runs for anybody. A verdict
+    that is permanently incomplete trains people to stop reading it."""
+    import pathlib
+
+    text = (pathlib.Path(__file__).resolve().parent.parent
+            / "sandbox" / "Containerfile").read_text()
+    assert "dtc" in text, "dtc is not installed in the sandbox image"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
