@@ -97,6 +97,7 @@ generic notes as well.
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
+| [pmbootstrap-never-runs-the-shell-in-an-apkbuild](traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md) | `generic` | pmbootstrap parses an APKBUILD line by line and never runs the shell |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
 | [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
 | [running-a-device-script-on-the-host](traps/running-a-device-script-on-the-host.md) | `generic` | A device-side script run on the host produces plausible, entirely wrong output |
@@ -107,6 +108,7 @@ generic notes as well.
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
+| [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
 | [unmasked-suspend-during-an-automated-wait-is-a-death-loop](traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md) | `generic` | Unmasking suspend before an automated wait can loop a device out of reach |
 | [usb-gadget-rerandomises-the-host-mac](traps/usb-gadget-rerandomises-the-host-mac.md) | `generic` | The USB gadget hands the host a new MAC on every boot |
 | [usb-ids-cannot-tell-booted-from-bootloader](traps/usb-ids-cannot-tell-booted-from-bootloader.md) | `generic` | lsusb can label a running pmOS USB gadget as "fastboot |
@@ -147,7 +149,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 13
-- `generic` — 81
+- `generic` — 83
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1

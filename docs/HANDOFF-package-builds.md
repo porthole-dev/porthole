@@ -1,6 +1,18 @@
 <!-- porthole | handoff | 2026-08-30 -->
 # porthole should build packages, not only kernels
 
+> **STATUS 2026-08-30 — the verb landed.** `porthole pkg build|watch|status|
+> outdated` exists, the four numbered requirements below are implemented and
+> tested, and both defects are fixed. Two things surfaced only by running it:
+> pmbootstrap prefixes every relayed line with `[HH:MM:SS]`, so the ninja
+> `[N/M]` match had to strip it or the "real percentage" would have been
+> permanently unknown; and the last six lines of a failed `pmbootstrap build`
+> are its version banner, so the failure tail now prefers lines that name a
+> cause. **What is still open is the WebKit work at the bottom of this file** —
+> the patch is written and unbuilt. `porthole pkg build webkit2gtk-6.0
+> --detach` is now the way to run it, and `porthole pkg watch` the way to
+> follow it without sitting on the output.
+
 **For the agent picking this up.** This is a design gap, not a bug report. It
 was found the hard way on 2026-08-30: a multi-hour `webkit2gtk-6.0` build was
 started, failed after ninety seconds, and **nobody noticed for half an hour**,
@@ -42,6 +54,24 @@ exists"). Anyone reaching for "build a package with porthole" finds this verb,
 tries it, and gets something unrelated. Renaming it, or at minimum making the
 help text say "container image", would stop the next person losing the same
 five minutes.
+
+## Before anything else: the buildroot needs a lock
+
+While writing this handoff, the webkit build it describes was destroyed by a
+second agent running `pmbootstrap build gst-plugins-good` in the same
+workspace. One buildroot chroot per arch, `abuild` cleans `$srcdir` before
+unpacking, no lock anywhere -- 37 minutes of an 8233-object build gone, and the
+failure blamed clang++ for missing source files rather than naming the
+collision. See `brain/traps/two-pmbootstrap-builds-destroy-each-other.md`.
+
+The phone already has this guard: `tools/tk-device.sh` takes an flock and exits
+75 when it cannot, because one physical device cannot serve two callers. The
+buildroot has exactly the same property. A package-build verb is the natural
+home for the same idiom, and shipping the verb *without* it would make the
+collision easier to hit, not harder -- more agents running more long builds.
+
+Record the holder like the device mutex does, so the second caller is told who
+is building what instead of queueing blind or, worse, proceeding.
 
 ## What to build
 
@@ -110,6 +140,10 @@ the missing progress bar.
 
 ## Second defect, cheap to fix, found alongside
 
+> Fixed. `porthole_progress.liveness()` decides from the pid whether a run is
+> still alive, and `status_report()` draws a bar and an ETA only for one that
+> is. Anything else says what happened and how long ago: `FAILED  97m19s ago`.
+
 `porthole build status` reports a **stale run as though it were live**. After
 the failed `porthole build auto` at 11:45 it kept printing:
 
@@ -127,6 +161,10 @@ should say so, or `status` should refuse to render a bar for a run whose pid is
 gone.
 
 ## A pmbootstrap trap worth a brain note
+
+> Written up as `brain/traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md`,
+> and `porthole pkg build` now warns about it before starting rather than
+> letting it surface ninety seconds into cmake.
 
 `pmb/parse/_apkbuild.py` parses APKBUILDs **line by line and never executes the
 shell** (`_parse_attributes(path, lines, ...)`). So this, which is how Alpine
