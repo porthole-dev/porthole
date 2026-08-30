@@ -31,6 +31,7 @@ generic notes as well.
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
+| [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
 | [the-venus-wedge-was-wrapper-clock-auto-gating](findings/the-venus-wedge-was-wrapper-clock-auto-gating.md) | `device:google-taimen` | The msm8998 venus wedge was wrapper clock auto-gating, and one write closes it |
 | [the-vocproc-refuses-a-volume-step-without-cal](findings/the-vocproc-refuses-a-volume-step-without-cal.md) | `soc:msm8998` | In-call volume: the vocproc refuses VSS_IVOLUME_CMD_SET_STEP without a registered volume calibration table |
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
@@ -105,6 +106,7 @@ generic notes as well.
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
 | [stale-dev-package-outranks-your-build](traps/stale-dev-package-outranks-your-build.md) | `generic` | A _p<timestamp> dev snapshot outranks a release, so apk installs a kernel from days ago |
+| [the-av1-demotion-deleted-the-v4l2-ranks](traps/the-av1-demotion-deleted-the-v4l2-ranks.md) | `generic` | A second environment.d file setting the same variable deletes the first one's value |
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
@@ -149,8 +151,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 13
-- `generic` — 84
+- `device:google-taimen` — 14
+- `generic` — 85
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1
