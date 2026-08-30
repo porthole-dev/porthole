@@ -181,7 +181,7 @@ in a package runs fully emulated under qemu-aarch64, single-threaded. For webkit
 that is a large fraction of wall clock and it is invisible in the object count.
 Worth measuring before assuming the compile itself is the thing to optimise.
 
-## Third: package builds run emulated, not cross-compiled
+## Third: 40% of compiler CPU is emulated, and crossdirect is only half-connected
 
 Measured during the webkit build on a 16-core host, fully loaded (92% user,
 load 32):
@@ -199,6 +199,38 @@ through `qemu-aarch64` rather than run natively against an aarch64 sysroot.
 webkit took ~1.7 h for 8233 objects this way; native cross-compilation should
 be several times faster, and this is the single biggest lever on the iteration
 loop for userspace packages.
+
+**CORRECTION to an earlier revision of this document.** It said package builds
+"run emulated, not cross-compiled". That was too strong and partly wrong.
+crossdirect IS working: cmake records
+`CMAKE_CXX_COMPILER:FILEPATH=/native/usr/lib/crossdirect/aarch64/clang++`, that
+wrapper is a genuine `ELF 64-bit LSB pie executable, x86-64`, and native
+invocations are visible:
+
+    /native/usr/bin/clang++ -target aarch64-alpine-linux-musl --sysroot=/ ...
+
+The real defect is that it is only half-connected. Sampled over 30s during
+WebCore compilation:
+
+    native (crossdirect)  : 173 samples
+    emulated (qemu clang) : 116 samples   -> 40% of compiler CPU is emulated
+
+The emulated half invokes the compiler by absolute path,
+`qemu-aarch64-static /usr/bin/clang++`, which bypasses PATH entirely -- and so
+bypasses crossdirect, even though `/native/usr/lib/crossdirect/aarch64` is FIRST
+in the build's PATH ahead of `/usr/lib/ccache/bin`. Something in the WebKit
+build (or ccache re-execing a resolved compiler) is not going through the
+wrapper. Finding what, and making it, is worth more than any other single
+change here: it is 40% of the compile time of the largest package in the tree.
+
+Note also that ccache itself is the aarch64 binary running under qemu --
+`qemu-aarch64-static /usr/bin/ccache /native/.../clang++` -- so every object
+pays emulated hashing of its preprocessed source before the native compiler is
+reached. Whether an emulated ccache in front of a native compiler is a net win
+on a cold cache is worth measuring; the kernel path already solved this by
+putting ccache inside chroot_native (see
+`brain/findings/the-workspace-caches-kernel-compiles.md`), and package builds
+did not inherit that.
 
 **Quantified on the rebuild, and it is worse than "somewhat slower".** The
 emulation cost is not spread evenly across compilation -- it is concentrated in
