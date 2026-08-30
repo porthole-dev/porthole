@@ -125,7 +125,7 @@ ci: check console smoke floor ## every job CI runs, plus the python floor
 	@echo "== green here means green on GitHub: the jobs run these same targets =="
 
 brain-index:     ## regenerate brain/INDEX.md
-	@./bin/porthole brain --reindex
+	@./bin/porthole brain reindex
 
 docs:            ## generate the documentation site sources
 	@./bin/porthole docs build
