@@ -278,6 +278,11 @@ class Tracker:
         self.last = ""
         self.state = "running"
         self._written = 0.0
+        # (when, compile_seen) so BOTH trackers can measure a real rate. The
+        # kernel rungs used to extrapolate elapsed-against-last-total, which
+        # has the same failure mode the package builds measured: a long
+        # single-threaded step makes the estimate grow without bound.
+        self._samples = collections.deque(maxlen=4096)
 
     @property
     def elapsed(self) -> float:
@@ -290,6 +295,7 @@ class Tracker:
         self.phase = phase_of(line, self.phase)
         if is_compile_line(line):
             self.compile_seen += 1
+            self._samples.append((time.time(), self.compile_seen))
         self.last = line[:200]
 
     def _fraction(self):
@@ -400,11 +406,6 @@ class PkgTracker(Tracker):
         self.ninja_total = 0
         self.step = ""
         self.compiles = 0
-        # (when, compiles) each time a COMPILE step lands. Only compiles, so a
-        # ten-minute Generating step contributes no samples and the rate
-        # correctly goes unknown instead of going to nearly zero and being
-        # divided by.
-        self._samples = collections.deque(maxlen=4096)
 
     def feed(self, line: str) -> None:
         line = line.rstrip("\n")

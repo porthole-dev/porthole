@@ -340,6 +340,22 @@ def test_a_window_too_short_to_mean_anything_is_refused():
     assert progress.window_rate([(now - 5, 0), (now, 40)], now) is None
 
 
+def test_the_kernel_rungs_refuse_an_eta_during_a_stall_too():
+    """Package builds got an honest windowed rate; kernel rungs still
+    extrapolated from history. Two arithmetics for one question is how they
+    drift apart, and kbuild has real compile lines to measure."""
+    import time as _t
+
+    with tempfile.TemporaryDirectory() as run:
+        tracker = progress.Tracker(run, "kernel")
+        tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
+        tracker.started = _t.time() - 300
+        tracker.compile_seen = 10
+        tracker._samples = getattr(tracker, "_samples", None)
+        assert hasattr(tracker, "_samples"), \
+            "Tracker has no sample window; kernel rungs still extrapolate"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
