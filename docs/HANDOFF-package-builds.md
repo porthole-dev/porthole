@@ -134,6 +134,53 @@ Requirements that are not obvious and were each paid for:
    file nobody was watching. Whatever this verb does, a dead build must be
    visible from `status`.
 
+## Progress: `[N/M]` alone will lie, and here is exactly how
+
+Measured on the webkit rebuild, so a progress implementation can be designed
+against the real shape rather than the assumed one.
+
+**1. ccache replay makes the percentage jump for free.** The killed run had
+compiled 2658 objects. On restart ccache replayed them almost instantly, so the
+bar went 0% -> 32% in about fifteen minutes, of which six were cmake configure.
+Any ETA derived from that window is nonsense: it is measuring cache lookups,
+not compilation. A rate must be computed from a window that contains real
+compiles, or the first ETA shown to the user will be wildly optimistic and then
+wildly pessimistic minutes later.
+
+**2. The counter stalls completely on single-threaded generator steps.** Sampled
+over four minutes mid-build:
+
+    2660 objects -> 2665 objects   (+5 in 240s)
+
+which naively extrapolates to **74 hours remaining**. The build was perfectly
+healthy. It was blocked on one step:
+
+    [2665/8233] Generating .../JavaScriptCore/DerivedSources/LLIntDesiredOffsets.h
+    99.6%  qemu-aarch64-static /usr/bin/ruby .../offlineasm/generate_offset_extractor.rb
+
+Load average 1.82 on a 16-core host, 91.8% idle -- fifteen cores doing nothing
+while one emulated Ruby process worked. WebKit has several of these (offlineasm,
+the bindings generators); other packages have their own. Extrapolating a rate
+across such a stall produces a number that is not merely wrong but alarming, and
+an agent watching it will conclude the build is broken and kill a working run.
+
+**What follows for the implementation:**
+
+- Track a phase, not just a count. abuild and ninja both say what they are doing
+  (`Generating` vs `Building CXX object`); a stalled counter during `Generating`
+  is normal and should be displayed as such rather than folded into an ETA.
+- Compute the rate over compiles only, and discard windows with near-zero
+  progress instead of dividing by them.
+- Show elapsed always; show ETA only once there is a defensible rate. "elapsed
+  25m, generating" is honest and useful. "eta 74h" is neither.
+
+**3. crossdirect covers compilers only.** Its wrapper directory holds
+`cc c++ clang clang++ gcc g++ cpp cargo rustc` plus archivers and compression
+tools -- **no ruby, no perl, no python**. So every Ruby and Perl generator step
+in a package runs fully emulated under qemu-aarch64, single-threaded. For webkit
+that is a large fraction of wall clock and it is invisible in the object count.
+Worth measuring before assuming the compile itself is the thing to optimise.
+
 ## Third: package builds run emulated, not cross-compiled
 
 Measured during the webkit build on a 16-core host, fully loaded (92% user,
