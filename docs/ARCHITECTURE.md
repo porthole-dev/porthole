@@ -77,13 +77,16 @@ New helpers are `ph_*`, so the two namespaces stay readable.
 | 0 | success | continue |
 | 1 | the thing under test failed | report it — a result, not an error |
 | 64 | usage error | fix the invocation |
+| 69 | the tool could not run at all | **not a finding** — the check did not happen |
 | 75 | could not get the device lock | **retry** |
 | 76 | device in the wrong state | **do not retry** — something must move it |
 | 124 | killed at the hold ceiling | a wedge; investigate |
 
-The 75/76 split earns its keep: waiting fixes a 75 and never fixes a 76. Keep 1
-for "the measurement says no", so an agent can tell a broken tool from a
-negative answer.
+The 75/76 split earns its keep: waiting fixes a 75 and never fixes a 76. The
+1/69 split is the one that tells a broken tool from a negative answer: keep 1
+for "the measurement says no" and 69 for "no measurement happened". `aports
+lint` reported "lint found problems" for a subcommand pmbootstrap had removed,
+which is exit 1 lying about the user's packages.
 
 ## Tool header convention
 

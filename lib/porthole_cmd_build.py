@@ -30,7 +30,7 @@ import threading
 import time
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
 
 # Each verb maps to a shell function ph-build.sh defines. The names are kept
 # from the taimen toolbox because they are what every runbook prints and what
@@ -446,8 +446,10 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
         # A Pixel 5 porter had no workspace and no host pmbootstrap either,
         # and hit an error that named neither cause nor fix.
         if not shutil.which("pmbootstrap"):
+            # 69, not 1: nothing ran, so this is not "the build failed".
             raise Bail(
-                f"no workspace and no host pmbootstrap ({why_not})", EX_FAIL,
+                f"no workspace and no host pmbootstrap ({why_not})",
+                EX_UNAVAILABLE,
                 "run `porthole sandbox up`, or install pmbootstrap on the "
                 "host — the redfin port hit this with neither and got an "
                 "error that named neither")

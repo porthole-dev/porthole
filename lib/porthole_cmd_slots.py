@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_UNAVAILABLE
 
 _PREFIX = "(bootloader) "
 
@@ -103,7 +103,8 @@ def _probe(ctx, args) -> int:
         listed = subprocess.run(["fastboot", "devices"],
                                 capture_output=True, text=True, timeout=20)
     except FileNotFoundError:
-        raise Bail("fastboot is not installed", EX_FAIL,
+        # 69, not 1: the check did not happen. 1 would say the slots are bad.
+        raise Bail("fastboot is not installed", EX_UNAVAILABLE,
                    "`porthole doctor` names how to install it") from None
     except subprocess.SubprocessError as exc:
         raise Bail(f"fastboot failed: {exc}", EX_FAIL) from None
@@ -117,7 +118,7 @@ def _probe(ctx, args) -> int:
         proc = subprocess.run(["fastboot", "getvar", "all"],
                               capture_output=True, text=True, timeout=60)
     except FileNotFoundError:
-        raise Bail("fastboot is not installed", EX_FAIL,
+        raise Bail("fastboot is not installed", EX_UNAVAILABLE,
                    "`porthole doctor` names how to install it") from None
     except subprocess.SubprocessError as exc:
         raise Bail(f"fastboot failed: {exc}", EX_FAIL) from None
