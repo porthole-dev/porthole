@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE
 import porthole_pmaports as pmap
 
 
@@ -112,12 +112,36 @@ def cmd_channel(args, ctx) -> int:
         ctx.out.hint(f"porthole channel {args.name} --yes    to go ahead")
         return EX_OK
 
+    require_channel_key(args.name, info, pmaports)
     rc = subprocess.run(["pmbootstrap", "config", "channel", args.name]).returncode
     if rc != 0:
         raise Bail("pmbootstrap refused the channel change", EX_FAIL)
     ctx.out(ctx.out.paint(f"  channel is now {args.name}", "green"))
     ctx.out.hint("pmbootstrap pull     # sync pmaports to the new branch")
     return EX_OK
+
+
+def require_channel_key(name: str, info: dict, pmaports) -> None:
+    """Bail 69 if this pmbootstrap has no `channel` config key.
+
+    `channel` stopped being a config key in 3.x -- argparse rejects it with
+    exit 2 -- and shelling it anyway rendered that as "pmbootstrap refused the
+    channel change": the same sentence-shape as "lint found problems", a
+    broken tool reported as a finding about the user's work. The READ side of
+    this verb was fixed in 456cb3b; the write side kept the bug. Ask first,
+    exactly as `aports lint` does.
+    """
+    import porthole_pmb_api as pmb_api
+
+    gone = pmb_api.missing("config_keys", "channel")
+    if not gone:
+        return
+    branch = (info or {}).get("branch_pmaports") or name
+    raise Bail(f"{gone}, so porthole cannot switch the channel for you",
+               EX_UNAVAILABLE,
+               f"the channel is set by which pmaports branch is checked out, "
+               f"not by a config key: `git -C {pmaports} checkout {branch}` "
+               f"then `pmbootstrap pull`")
 
 
 def _dirty(pmaports) -> list[str]:

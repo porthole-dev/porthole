@@ -27,11 +27,15 @@ import subprocess
 # asserts each one exists in the installed pmbootstrap, which is what stops
 # this drifting again silently.
 #
-# WHY lint and channel are absent: porthole also calls `lint` and `config
-# channel`, but Tasks 2 and 3 wrap both with missing() first. A call guarded
-# by missing() degrades gracefully (e.g. "lint not available" instead of
-# "lint failed"), so listing it here would fail the guard on every pmbootstrap
-# that dropped it -- which is every one today. Only unconditional calls belong
+# WHY `lint` and `channel` are absent: porthole still calls both, but never
+# unconditionally. `aports lint` and the `channel <name> --yes` switch each
+# ask missing() first and bail EX_UNAVAILABLE (69) when the answer is no, so
+# they degrade into "this pmbootstrap has no lint" rather than into a finding
+# about the user's packages. Reading the current channel no longer shells
+# pmbootstrap at all -- it parses pmaports.cfg (456cb3b).
+#
+# Listing a guarded call here would fail the guard below on every pmbootstrap
+# that dropped it, which is every one today. Only unconditional calls belong
 # here.
 PORTHOLE_USES = {
     "subcommands": frozenset({

@@ -95,6 +95,42 @@ def test_a_pmaports_cfg_without_a_channel_says_so():
     assert channel.channel_of_cfg("[pmaports]\nversion=7\n") == ""
 
 
+def test_switching_a_channel_is_blocked_not_reported_as_a_refusal():
+    """The third instance of this branch's own bug. Reading the channel was
+    fixed; WRITING it still shelled `pmbootstrap config channel <name>`, which
+    3.11.1 rejects with argparse exit 2, and rendered that as "pmbootstrap
+    refused the channel change" -- the identical sentence-shape to "lint found
+    problems"."""
+    import porthole_cmd_channel as channel
+    from porthole_cli import Bail, EX_UNAVAILABLE
+
+    original = api.missing
+    api.missing = lambda kind, name: "pmbootstrap 3.11.1 has no `channel` config key"
+    try:
+        channel.require_channel_key(
+            "v26.06", {"branch_pmaports": "v26.06"}, "/w/pmaports")
+    except Bail as exc:
+        assert exc.code == EX_UNAVAILABLE, exc.code
+        assert "refused" not in exc.message.lower(), exc.message
+        assert "branch" in exc.hint, exc.hint
+    else:
+        raise AssertionError("the channel write is not guarded by missing()")
+    finally:
+        api.missing = original
+
+
+def test_a_pmbootstrap_that_still_has_the_channel_key_is_not_blocked():
+    """Positive control: the guard must not refuse a pmbootstrap that works."""
+    import porthole_cmd_channel as channel
+
+    original = api.missing
+    api.missing = lambda kind, name: ""
+    try:
+        channel.require_channel_key("v26.06", {}, "/w/pmaports")
+    finally:
+        api.missing = original
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
