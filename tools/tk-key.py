@@ -12,8 +12,16 @@ there is no wlopm here, and writing the backlight does nothing while the DRM
 connector is disabled. A power-key press is the path the compositor listens on.
 
   tk-key.py power        one KEY_POWER press/release
-  tk-key.py type 147147  type digits (e.g. a lock-screen PIN)
+  tk-key.py type 123456  type digits
+  tk-key.py type -       read the digits from stdin instead of argv
   tk-key.py enter        one KEY_ENTER
+
+NEVER pass a real lock-screen PIN as an argument. It lands in `ps`, in shell
+history, and -- because /dev/uinput needs root -- in journald, which logs
+sudo's whole command line: `COMMAND=/usr/bin/python3 tk-key.py type <pin>`
+is then on disk in plaintext for as long as the journal is kept. Pipe it:
+
+    printf %s "$PIN" | sudo python3 tk-key.py type -
 """
 import fcntl, os, struct, sys, time
 
@@ -51,7 +59,9 @@ if cmd == "power":
 elif cmd == "enter":
     press(KEY_ENTER)
 elif cmd == "type":
-    for ch in sys.argv[2]:
+    arg = sys.argv[2] if len(sys.argv) > 2 else "-"
+    digits = sys.stdin.readline().strip() if arg == "-" else arg
+    for ch in digits:
         if ch in DIGITS:
             press(DIGITS[ch])
     press(KEY_ENTER)
