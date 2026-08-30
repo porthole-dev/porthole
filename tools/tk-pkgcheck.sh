@@ -43,10 +43,29 @@ set -u
 # shellcheck source=../lib/porthole.sh
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APORTS="$REPO/pmaports/device/testing"
 STATE="$REPO/.pkg-content-hashes"
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
-OWNED=(device-google-taimen linux-postmarketos-qcom-msm8998-6.18)
+
+# Aports we own live in TWO places: the device aports, and temp/ -- the forks
+# we carry of upstream packages. temp/ was not checked here until 2026-08-30,
+# and that is precisely where the damage happened: temp/phoc sat at 0.56.0
+# while the mirror moved to 0.57.0, apk took the newer stock build, and both
+# GPU-reset patches vanished with no message anywhere. Nine hours of corrupt
+# session followed, diagnosed as a WebKit bug. A fork nobody checks is a fork
+# that silently is not installed.
+APORT_DIRS=("$REPO/pmaports/device/testing" "$REPO/pmaports/temp")
+KERNEL_APORT=linux-postmarketos-qcom-msm8998-7.2
+OWNED=(device-google-taimen "$KERNEL_APORT" phoc gst-plugins-good)
+
+# First directory that has it. Keeps the caller from caring which tree an
+# aport lives in.
+aport_dir() {
+	local base
+	for base in "${APORT_DIRS[@]}"; do
+		[ -d "$base/$1" ] && { printf '%s\n' "$base/$1"; return 0; }
+	done
+	return 1
+}
 rc=0; touch "$STATE"
 
 note() { printf '%s\n' "$*"; }
@@ -54,7 +73,7 @@ fail() { printf 'FAIL  %s\n' "$*"; rc=1; }
 
 # --- A. content vs pkgrel ---------------------------------------------------
 for p in "${OWNED[@]}"; do
-	d="$APORTS/$p"; [ -d "$d" ] || { fail "$p: no such aport"; continue; }
+	d=$(aport_dir "$p") || { fail "$p: no such aport in any aport dir"; continue; }
 	rel=$(sed -n 's/^pkgrel=//p' "$d/APKBUILD" | head -1)
 	# Hash the APKBUILD and every regular file beside it, sorted for stability.
 	h=$(find "$d" -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum \
@@ -79,7 +98,7 @@ inst_dev=$(timeout 15 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
 	'apk info -v' 2>/dev/null)
 
 for p in "${OWNED[@]}"; do
-	d="$APORTS/$p"; [ -d "$d" ] || continue
+	d=$(aport_dir "$p") || continue
 	rel=$(sed -n 's/^pkgrel=//p' "$d/APKBUILD" | head -1)
 	ver=$(sed -n 's/^pkgver=//p' "$d/APKBUILD" | head -1)
 	# The parent plus every subpackage name, which is where drift hides.
@@ -103,7 +122,7 @@ done
 # apk DB are not replaced), so /proc/version is the only truth.
 kver=$(timeout 15 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
 	'grep -o "#[0-9]*" /proc/version' 2>/dev/null)
-krel=$(sed -n 's/^pkgrel=//p' "$APORTS/linux-postmarketos-qcom-msm8998-6.18/APKBUILD" | head -1)
+krel=$(sed -n 's/^pkgrel=//p' "$(aport_dir "$KERNEL_APORT")/APKBUILD" | head -1)
 if [ -n "$kver" ]; then
 	want="#$((krel + 1))"
 	[ "$kver" = "$want" ] && note "ok    running kernel $kver == aport r$krel + 1" \
