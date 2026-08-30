@@ -65,6 +65,30 @@ def test_the_guard_can_actually_fail():
         "the guard no longer detects a missing subcommand"
 
 
+def test_an_unavailable_subcommand_is_blocked_not_a_finding():
+    """`porthole aports lint` printed "lint found problems" for a subcommand
+    pmbootstrap does not have. AGENTS.md section 6: a tool that broke must
+    never be reported as an answer."""
+    import porthole_cmd_aports as aports
+
+    assert hasattr(aports, "_lint_unavailable"), \
+        "cmd_lint has no unavailability path"
+    message = aports._lint_unavailable("pmbootstrap 3.11.1 has no `lint` subcommand")
+    assert "3.11.1" in message
+    assert "found problems" not in message.lower()
+
+
+def test_the_channel_comes_from_the_pmaports_branch():
+    """`pmbootstrap config channel` is not a key in 3.x. The channel IS the
+    pmaports branch, which is readable without pmbootstrap at all."""
+    import porthole_cmd_channel as channel
+
+    assert channel.channel_of_branch("v24.06") == "v24.06"
+    assert channel.channel_of_branch("master") == "edge"
+    assert channel.channel_of_branch("systemd-edge") == "systemd-edge"
+    assert channel.channel_of_branch("") == ""
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

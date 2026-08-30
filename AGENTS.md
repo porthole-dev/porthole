@@ -421,6 +421,7 @@ have the full rules.
 | 0 | success | continue |
 | 1 | the thing under test failed | report it — a result, not an error |
 | 64 | usage error | fix the invocation |
+| 69 | the tool could not run at all | not a finding — the check did not happen |
 | 75 | could not get the device lock | **retry** |
 | 76 | device in the wrong state | **do not retry** — something must move it |
 | 124 | killed at the hold ceiling | a wedge; investigate, do not just rerun |

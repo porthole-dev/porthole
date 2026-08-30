@@ -16,7 +16,7 @@ import pathlib
 import re
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
 import porthole_pmaports as pmap
 
 
@@ -729,13 +729,32 @@ def cmd_build(args, ctx, pmaports) -> int:
     return EX_OK
 
 
+def _lint_unavailable(reason: str) -> str:
+    """What to say when pmbootstrap cannot lint at all.
+
+    Separated so a test can assert the wording never drifts back into
+    sounding like a finding about the user's packages.
+    """
+    return (f"{reason}. apkbuild-lint moved out of pmbootstrap; pmaports CI "
+            f"still runs it, so this is a gap in local checking rather than "
+            f"a problem with your package")
+
+
 def cmd_lint(args, ctx, pmaports) -> int:
     """apkbuild-lint, on your packages by default.
 
     The same check pmaports CI runs, so a clean run here is the difference
     between a merge request that gets reviewed and one bounced before anybody
-    reads it.
+    reads it -- WHEN the installed pmbootstrap still has it. 3.11.1 does not,
+    and reporting that as "lint found problems" is the exact confusion
+    AGENTS.md section 6 forbids: the tool broke, the answer is not "no".
     """
+    import porthole_pmb_api as pmb_api
+
+    gone = pmb_api.missing("subcommands", "lint")
+    if gone:
+        raise Bail(_lint_unavailable(gone), EX_UNAVAILABLE,
+                   "pmaports CI lints the merge request; nothing local to fix")
     rc, _, _ = pmb(ctx, "lint", *_resolve_pkgs(args, ctx, pmaports), timeout=900)
     if rc != 0:
         raise Bail("lint found problems", EX_FAIL,
