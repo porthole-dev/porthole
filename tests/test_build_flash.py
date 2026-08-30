@@ -440,6 +440,40 @@ def test_the_default_action_is_no_longer_the_most_expensive_rung():
     assert 'args.action or "auto"' in src, src[:200]
 
 
+def test_the_failure_tail_names_the_cause_not_the_boilerplate():
+    """Measured on the first real `porthole pkg` run: the last six lines of a
+    failed pmbootstrap build are its version banner and a troubleshooting
+    link, and the ERROR line that said what happened was above them. A tail
+    that reliably prints boilerplate is the "fail loudly" rule failing
+    quietly."""
+    log = "\n".join([
+        "[11:28:34] => edge/device-x: Building package",
+        "[11:29:02] \033[91mERROR:\033[0m Package not found after build: "
+        "/pmb/packages/edge/aarch64/device-x-1-r35.apk",
+        "See also: <https://postmarketos.org/troubleshooting>",
+        "Run 'pmbootstrap log' for details.",
+        "Before you report this error, ensure that pmbootstrap is up to date.",
+        "Find the latest version here: https://gitlab.postmarketos.org/tags",
+        "Your version: 3.11.1",
+        "Channel: systemd-edge",
+        "systemd: yes (systemd selected in pmbootstrap init)",
+    ])
+    import porthole_cmd_build as B
+
+    tail = B.failure_tail(log)
+    assert any("Package not found after build" in line for line in tail), tail
+    assert len(tail) <= 6
+
+
+def test_a_log_with_no_error_line_still_gets_a_tail():
+    """No match must not mean no output -- something is always better than
+    silence when a build has just failed."""
+    import porthole_cmd_build as B
+
+    tail = B.failure_tail("\n".join(f"line {n}" for n in range(20)))
+    assert tail == [f"line {n}" for n in range(14, 20)]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

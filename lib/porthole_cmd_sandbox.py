@@ -807,18 +807,24 @@ SPEC = {
         "root inside and your own unprivileged uid outside. No sudoers entry,\n"
         "no standing privilege. `up` builds and starts it; `shell --command`\n"
         "works without a TTY, which is what makes it usable by an agent.\n\n"
+        "`build` here means the CONTAINER IMAGE. To build a PACKAGE, the\n"
+        "verb is `porthole pkg build <aport>` -- anyone reaching for\n"
+        "\"build a package with porthole\" lands on this verb first and\n"
+        "loses five minutes to it.\n\n"
         "See docs/SANDBOX.md for the threat model."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": ["status", "shell", "build", "up", "down"],
-                      "help": "status | shell | build | up | down"}),
+                      "help": "status | shell | build (the container IMAGE, "
+                              "not a package) | up | down"}),
         (["--mount"], {"action": "append", "metavar": "PATH",
                        "help": "up: extra path to mount into the workspace"}),
         (["--command"], {"nargs": "...", "help": "shell: command instead of a shell"}),
         (["--dry-run"], {"action": "store_true",
                          "help": "shell: print the podman command and stop"}),
         (["--force"], {"action": "store_true",
-                       "help": "build: rebuild even if the tag exists"}),
+                       "help": "build: rebuild the container image even if "
+                               "the tag exists"}),
         (["--broker"], {"action": "store_true",
                         "help": "install: the legacy sudoers broker, for a "
                                 "host with no podman"}),

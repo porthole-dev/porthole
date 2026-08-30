@@ -53,13 +53,31 @@ at once is the normal case, not the exotic one. The phone already has a mutex
 physical device cannot serve two callers. The buildroot has exactly the same
 property and no such guard.
 
-**What would fix it:** the same flock idiom as the device mutex, taken on the
-pmbootstrap work dir for the duration of a build, with the holder recorded so
-the second caller is told who is building what rather than queueing blind. See
-`docs/HANDOFF-package-builds.md` -- a package-build verb is the natural place to
-put it, and building it without the lock just makes the collision easier to
-trigger.
+**FIXED 2026-08-30 in `porthole pkg`.** The same flock idiom as the device
+mutex, taken on the pmbootstrap work dir for the length of a build, with the
+holder recorded in a `.holder` sidecar so the second caller is told who is
+building what rather than queueing blind:
 
-**Until then:** check before you start, and treat a long build as exclusive.
-Losing 37 minutes is the cheap version; the expensive version is believing the
-compiler is broken.
+    $ porthole pkg build phoc
+    porthole: the buildroot is busy: webkit2gtk-6.0 pid=154591 since=13:52:27
+      -> two pmbootstrap builds share one buildroot and delete each other's
+         source tree. Wait, or --wait SECONDS.
+    $ echo $?
+    75
+
+Exit 75, the same retryable code the device mutex uses, because "the buildroot
+is busy" is a reason to come back and not a reason to think the package is
+broken. `--wait SECONDS` queues deliberately.
+
+Two more holes were closed with it, both of which recreate the collision on
+their own: a killed or timed-out `porthole pkg build` used to leave pmbootstrap
+running INSIDE the container (killing a `podman exec` client does not kill what
+it exec'd), and it now kills the container-side process too. And a `pgrep -f
+"pmbootstrap.*build"` guard written into a shell one-liner MATCHES ITS OWN
+COMMAND LINE, so an agent polling that way waits for itself forever and never
+starts. Take the lock; do not grep for the neighbour.
+
+**This still bites anything that calls pmbootstrap directly** -- `porthole
+sandbox shell --command 'pmbootstrap build ...'` takes no lock, because it is a
+bare command runner. Use `porthole pkg build`, which is what the lock is
+attached to.

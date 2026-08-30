@@ -22,9 +22,11 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
+import threading
 import time
 import sys
 
@@ -446,24 +448,43 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     return _stream(ctx, cmd, env, timeout, rung or func)
 
 
-def _stream(ctx, cmd, env, timeout: int, rung: str) -> int:
+def _stream(ctx, cmd, env, timeout: int, rung: str,
+            tracker_cls=None, log_prefix: str = "build", follow=None,
+            on_kill=None) -> int:
     """Run the build, publishing where it is the whole time.
 
     Every line goes to a log file unconditionally, so "quiet by default" never
     costs anyone the output they needed. The terminal gets a live bar when it
     is a terminal, a periodic line when it is not (an agent's pipe), and the
     raw stream under --verbose.
+
+    `follow` is a second line source, tailed in the background. pmbootstrap
+    needs it: it prints only its own `=> step` lines to stdout and sends the
+    ACTUAL build output -- abuild, meson, every ninja `[N/M]` -- to its own
+    log.txt. Parsing only stdout meant a 991-step ninja build produced a bar
+    that never moved, and no amount of unbuffering fixes that, because the
+    lines were never written to stdout in the first place.
+
+    `tracker_cls` and `log_prefix` are what let `porthole pkg` share this. The
+    subprocess plumbing -- the log, the timeout kill, the tail on failure, the
+    15-second heartbeat for a pipe -- is identical for a package and a kernel;
+    only the thing reading the lines differs. Two copies of this loop is how
+    the package path would have ended up with no log rotation and no tail.
     """
     import porthole_progress as progress
 
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
     rundir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    logpath = rundir / f"build-{rung}-{stamp}.log"
+    # `pkg:webkit2gtk-6.0` is the rung; the log wants the name, not the
+    # namespace, or it comes out as `pkg-pkg:webkit...` with a colon in the
+    # filename that half the shell has to quote.
+    slug = rung.split(":", 1)[-1].replace("/", "-")
+    logpath = rundir / f"{log_prefix}-{slug}-{stamp}.log"
     verbose = getattr(getattr(ctx, "args", None), "verbose", False)
     tty = sys.stdout.isatty()
 
-    tracker = progress.Tracker(rundir, rung)
+    tracker = (tracker_cls or progress.Tracker)(rundir, rung)
     tracker.publish(force=True)
     ctx.out(ctx.out.paint(f"  log: {logpath}", "grey"))
 
@@ -474,6 +495,43 @@ def _stream(ctx, cmd, env, timeout: int, rung: str) -> int:
                                 text=True, bufsize=1)
     except FileNotFoundError:
         raise Bail("bash is not installed", EX_FAIL) from None
+
+    # The publish below only fires when a LINE arrives. Quiet phases are
+    # normal and long -- installing build dependencies, a cmake configure that
+    # prints nothing for ninety seconds -- and during one the status file
+    # freezes. A frozen `elapsed` is indistinguishable from a hung build to
+    # anything watching, which is the whole failure this instrumentation
+    # exists to end. Measured on a real gst-plugins-good build: `status` said
+    # `elapsed 7s` four minutes in.
+    #
+    # publish() is atomic (tmp file + rename), so a heartbeat racing the line
+    # loop can only ever leave one whole snapshot behind.
+    stop_beat = threading.Event()
+
+    def _heartbeat():
+        while not stop_beat.wait(5.0):
+            tracker.publish(force=True)
+
+    threading.Thread(target=_heartbeat, daemon=True).start()
+
+    def _follow(path):
+        # Seek to the END first: log.txt is shared and long-lived, and
+        # replaying somebody else's build from the top would report their
+        # progress as ours.
+        try:
+            with open(path, errors="replace") as handle:
+                handle.seek(0, os.SEEK_END)
+                while not stop_beat.is_set():
+                    line = handle.readline()
+                    if line:
+                        tracker.feed(line)
+                    else:
+                        time.sleep(0.2)
+        except OSError:
+            pass  # no log to follow is not a reason to fail a build
+
+    if follow:
+        threading.Thread(target=_follow, args=(follow,), daemon=True).start()
 
     last_note = 0.0
     killed = False
@@ -498,8 +556,15 @@ def _stream(ctx, cmd, env, timeout: int, rung: str) -> int:
                 if tracker.elapsed > timeout:
                     killed = True
                     proc.kill()
+                    # Killing a `podman exec` client does NOT kill what it
+                    # exec'd. Without this the timed-out build keeps compiling
+                    # inside the container, still holding the buildroot, and
+                    # deletes the source tree of whatever starts next.
+                    if on_kill:
+                        on_kill()
                     break
     finally:
+        stop_beat.set()
         if tty and not verbose:
             sys.stdout.write("\r\033[2K")
             sys.stdout.flush()
@@ -511,17 +576,57 @@ def _stream(ctx, cmd, env, timeout: int, rung: str) -> int:
                    f"the partial log is at {logpath}")
     ctx.out(ctx.out.paint(
         f"  {rung}: {progress.fmt_dur(tracker.elapsed)}"
-        f"  ({tracker.compile_seen} compile steps)", "grey"))
+        f"  ({tracker.compile_seen} build steps)", "grey"))
     # A failed build otherwise says only "0 compile steps" and exits 1: the
     # reason is in the log, and whoever is reading this -- an agent especially
     # -- has no idea a log is worth opening. The last few lines are where the
     # shell says why it refused, every time.
     if rc != 0 and not verbose:
-        tail = [ln.rstrip() for ln in logpath.read_text(
-            errors="replace").splitlines() if ln.strip()][-6:]
-        for line in tail:
+        for line in failure_tail(logpath.read_text(errors="replace")):
             ctx.out(ctx.out.paint(f"  | {line}", "grey"))
     return rc
+
+
+# Anything that names the failure. Deliberately narrow -- a pattern that
+# matched "error" anywhere would select compiler warnings mentioning the word.
+_SAYS_WHY = re.compile(
+    r"^\s*(ERROR|FATAL|Traceback|error:|fatal:|\S+: error:)|"
+    r"\bcould not\b|\bnot found\b|\bNo such file\b", re.I)
+
+
+def failure_tail(text: str, limit: int = 6) -> list[str]:
+    """The lines that say WHY, not merely the last lines.
+
+    The last six lines of a failed `pmbootstrap build` are its version banner
+    and a link to the troubleshooting page -- measured, on the first real run
+    of `porthole pkg`. The line that mattered, `ERROR: Package not found after
+    build: .../device-google-taimen-1-r35.apk`, was six lines above that and
+    scrolled off. A tail that reliably prints the boilerplate instead of the
+    error is the "fail loudly" requirement failing quietly.
+
+    So: prefer lines that name a failure, keep the last one for context, and
+    fall back to a plain tail when nothing matches.
+    """
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    named = [ln for ln in lines if _SAYS_WHY.search(_strip_ansi(ln))]
+    if not named:
+        return lines[-limit:]
+    keep = named[-(limit - 1):]
+    if lines[-1] not in keep:
+        keep = keep + [lines[-1]]
+    return keep
+
+
+_ANSI = re.compile(r"\033\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """pmbootstrap colours the word ERROR, and the escape sits between the
+    line start and the word -- so an anchored match fails on exactly the
+    lines it most needs to catch."""
+    return _ANSI.sub("", text)
 
 
 def _rung_args(args, action: str) -> list[str]:
@@ -566,6 +671,32 @@ def _auto(ctx, args) -> int:
         raise Bail(f"no kernel tree at {tree}", EX_FAIL,
                    "set PORTHOLE_KERNEL_TREE, or PORTHOLE_WORKDIR with linux/ "
                    "inside it")
+
+    # Local aports drift on their own schedule, and `auto` is where people
+    # come to be told what needs rebuilding. It ADVISES and never acts: a
+    # webkit build is hours, and a rung chooser that silently started one is
+    # the worst surprise this tool could hand anyone. Said BEFORE the make, so
+    # it still reaches you when the kernel half fails.
+    #
+    # Never fatal. Deciding which kernel rung to run must not become breakable
+    # by a missing pmaports checkout or an unreadable APKBUILD.
+    try:
+        import porthole_cmd_pkg as pkg
+
+        usable, _ = _workspace_usable(ctx)
+        stale = pkg.outdated(pkg._find_pmaports(ctx),
+                             pkg._packages_dir(ctx, usable),
+                             ctx.cfg.get("PORTHOLE_ARCH") or "aarch64")
+    except Exception:  # noqa: BLE001
+        stale = []
+    if stale:
+        names = ", ".join(name for name, _ in stale[:4])
+        more = "" if len(stale) <= 4 else f" (+{len(stale) - 4} more)"
+        ctx.out(ctx.out.paint(
+            f"  {len(stale)} local aport(s) also need rebuilding: {names}{more}",
+            "yellow"))
+        ctx.out(ctx.out.paint(
+            "  porthole pkg outdated   # why, and what to run", "grey"))
 
     # A second early, because make writes files as it runs and a clock that
     # ticks between the stamp and the first write would hide the first object.
@@ -629,15 +760,16 @@ def _status(ctx) -> int:
         return ctx.emit({"state": "none"},
                         lambda: ctx.out("no build has run in this checkout"))
 
+    # The bar and the ETA are drawn by status_report ONLY for a run that is
+    # still alive. This used to render them straight out of the snapshot, so a
+    # build that died at 11:45 kept printing `[>   ] starting ... eta 6s` for
+    # hours: `state failed` was in the output and nobody read it, because a bar
+    # says "in flight" louder than a word says otherwise.
     def render():
-        ctx.out(f"  {progress.bar(snap.get('progress'))} "
-                f"{snap.get('phase', '?')}")
-        ctx.out.kv("rung", snap.get("rung", "?"), 10)
-        ctx.out.kv("state", snap.get("state", "?"), 10)
-        ctx.out.kv("elapsed", progress.fmt_dur(snap.get("elapsed")), 10)
-        ctx.out.kv("eta", progress.fmt_dur(snap.get("eta")), 10)
-        if snap.get("last"):
-            ctx.out.kv("last", snap["last"][:100], 10)
+        head, rows = progress.status_report(snap)
+        ctx.out("  " + head)
+        for label, value in rows:
+            ctx.out.kv(label, value, 10)
 
     return ctx.emit(snap, render)
 

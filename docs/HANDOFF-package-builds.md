@@ -1,17 +1,41 @@
 <!-- porthole | handoff | 2026-08-30 -->
 # porthole should build packages, not only kernels
 
-> **STATUS 2026-08-30 — the verb landed.** `porthole pkg build|watch|status|
-> outdated` exists, the four numbered requirements below are implemented and
-> tested, and both defects are fixed. Two things surfaced only by running it:
-> pmbootstrap prefixes every relayed line with `[HH:MM:SS]`, so the ninja
-> `[N/M]` match had to strip it or the "real percentage" would have been
-> permanently unknown; and the last six lines of a failed `pmbootstrap build`
-> are its version banner, so the failure tail now prefers lines that name a
-> cause. **What is still open is the WebKit work at the bottom of this file** —
-> the patch is written and unbuilt. `porthole pkg build webkit2gtk-6.0
-> --detach` is now the way to run it, and `porthole pkg watch` the way to
-> follow it without sitting on the output.
+> **STATUS 2026-08-30 — the verb landed.** `porthole pkg
+> build|watch|status|outdated` exists, the four numbered requirements below
+> are implemented and tested, and both defects are fixed.
+>
+> Four things surfaced only by RUNNING it, none of them guessable from the
+> code. **(1)** pmbootstrap puts only its own `=> step` lines on stdout and
+> sends the actual build output — abuild, meson, every ninja `[N/M]` — to its
+> own `$WORK/log.txt`. Parsing stdout gave a bar that never moved, and no
+> amount of unbuffering fixes that, because those lines are never written to
+> stdout at all; the tracker now tails `log.txt` in a background thread.
+> **(2)** pmbootstrap prefixes every line with `[HH:MM:SS]`, so the anchored
+> `[N/M]` match must strip it or the fraction is permanently unknown.
+> **(3)** the tracker published only when a line arrived, so a quiet phase
+> froze `elapsed` — indistinguishable from a hung build; there is now a 5 s
+> heartbeat. **(4)** the last six lines of a failed `pmbootstrap build` are
+> its version banner, so the failure tail prefers lines that name a cause.
+>
+> Verified live on a real `gst-plugins-good` build:
+> `[====>             ]  27% build       3m10s eta   8m24s`.
+>
+> **The buildroot collision is fixed too.** `porthole pkg build` now takes an
+> flock on the pmbootstrap work dir for the length of the build and records
+> the holder, so a second build is refused with exit 75 naming who is building
+> what, instead of silently deleting their source tree. `--wait SECONDS`
+> queues. Two holes that recreate the collision were closed with it: a killed
+> build used to leave pmbootstrap running inside the container, and a
+> `pgrep -f "pmbootstrap.*build"` guard in a shell one-liner matches its own
+> command line and waits forever. See
+> `brain/traps/two-pmbootstrap-builds-destroy-each-other.md`.
+>
+> **What is still open is the WebKit work at the bottom of this file** — the
+> patch is written and the package unbuilt. `porthole pkg build
+> webkit2gtk-6.0 --detach` starts it so it outlives the session, and
+> `porthole pkg watch` follows it in any terminal without anyone having to sit
+> on the output.
 
 **For the agent picking this up.** This is a design gap, not a bug report. It
 was found the hard way on 2026-08-30: a multi-hour `webkit2gtk-6.0` build was

@@ -414,6 +414,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `next` | where am I in this port, and what is the one next thing | yes | no |
 | `brief` | everything an agent needs to start a session, in one call | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
+| `pkg` | build a userspace aport, with a real progress bar | yes | no |
 | `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |
 | `verify` | every check that runs with no device attached | yes | no |
 | `tools` | search the toolbox and read a tool's contract | yes | no |

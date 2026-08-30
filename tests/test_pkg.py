@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""`porthole pkg` -- the parts that can be wrong without a build running.
+
+Every assertion here is about a decision made BEFORE or AFTER pmbootstrap
+runs: which aport, which command, whether the artifact landed, whether a
+status file describes something still alive. None of it needs podman, a
+device, or four hours.
+"""
+from __future__ import annotations
+
+import pathlib
+import sys
+import tempfile
+import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
+
+import porthole_cmd_pkg as pkg  # noqa: E402
+import porthole_progress as progress  # noqa: E402
+
+
+APKBUILD = """\
+pkgname=phoc
+pkgver=0.57.0
+pkgrel=50
+arch="all"
+"""
+
+
+def _tree(tmp: pathlib.Path):
+    """A pmaports-shaped checkout: a flat category and a nested device one."""
+    (tmp / "temp" / "phoc").mkdir(parents=True)
+    (tmp / "temp" / "phoc" / "APKBUILD").write_text(APKBUILD)
+    (tmp / "device" / "testing" / "device-x").mkdir(parents=True)
+    (tmp / "device" / "testing" / "device-x" / "APKBUILD").write_text(
+        "pkgname=device-x\npkgver=1\npkgrel=35\n")
+    return tmp
+
+
+# ------------------------------------------------------------ resolution --
+
+def test_an_aport_is_found_at_either_depth():
+    with tempfile.TemporaryDirectory() as d:
+        root = _tree(pathlib.Path(d))
+        assert pkg.find_aport(root, "phoc") == root / "temp" / "phoc"
+        assert pkg.find_aport(root, "device-x") == \
+            root / "device" / "testing" / "device-x"
+
+
+def test_an_unknown_aport_is_none_rather_than_a_guess():
+    with tempfile.TemporaryDirectory() as d:
+        assert pkg.find_aport(_tree(pathlib.Path(d)), "nope") is None
+
+
+def test_the_three_fields_are_read_without_running_the_shell():
+    fields = pkg.apkbuild_fields(APKBUILD)
+    assert fields == {"pkgname": "phoc", "pkgver": "0.57.0", "pkgrel": "50"}
+
+
+def test_a_quoted_field_reads_the_same_as_a_bare_one():
+    assert pkg.apkbuild_fields('pkgver="1.2.3"\n')["pkgver"] == "1.2.3"
+
+
+# ------------------------------------------------- the pmbootstrap trap --
+
+def test_a_conditionally_appended_dependency_is_warned_about():
+    """The trap that cost a full webkit configure: pmbootstrap parses an
+    APKBUILD line by line, so a dependency added inside a case/esac is never
+    installed and the build dies inside cmake naming a library apk has."""
+    text = APKBUILD + '\ncase "$CARCH" in\n*)\n\tmakedepends="$makedepends '\
+                      'libjxl-dev"\n\t;;\nesac\n'
+    assert "invisible to it" in pkg.conditional_dep_warning(text)
+
+
+def test_a_plain_apkbuild_is_not_warned_about():
+    assert pkg.conditional_dep_warning(APKBUILD + 'makedepends="meson"\n') == ""
+
+
+def test_the_warning_names_the_package_rather_than_the_shape():
+    text = APKBUILD + 'makedepends="cmake"\ncase "$CARCH" in\n*)\n\t'\
+                      'makedepends="$makedepends libjxl-dev"\n\t;;\nesac\n'
+    assert "libjxl-dev is appended conditionally" in pkg.conditional_dep_warning(text)
+
+
+def test_an_aport_already_fixed_is_not_warned_about():
+    """The real webkit2gtk-6.0 appends libjxl-dev inside a case/esac AND
+    lists it statically, having already been bitten once. Firing on that is a
+    warning about correct code, which is how a check trains people to ignore
+    it -- and this check has exactly one chance to be believed, ninety seconds
+    before a cmake failure that blames something else."""
+    text = APKBUILD + 'makedepends="cmake libjxl-dev"\ncase "$CARCH" in\n*)\n\t'\
+                      'makedepends="$makedepends libjxl-dev"\n\t;;\nesac\n'
+    assert pkg.conditional_dep_warning(text) == ""
+
+
+def test_a_multi_line_dependency_list_is_read_whole():
+    """Dependency lists wrap across lines. Reading only the first would call
+    every package after the newline missing."""
+    text = 'makedepends="\n\tcmake\n\tlibjxl-dev\n\t"\n'
+    assert "libjxl-dev" in pkg.static_deps(text, "makedepends")
+
+
+# -------------------------------------------------------------- the apk --
+
+def test_the_expected_apk_names_the_version_the_aport_declares():
+    with tempfile.TemporaryDirectory() as d:
+        packages = pathlib.Path(d)
+        (packages / "edge" / "aarch64").mkdir(parents=True)
+        want = pkg.expected_apk(packages, "aarch64", pkg.apkbuild_fields(APKBUILD))
+        assert want.name == "phoc-0.57.0-r50.apk"
+        assert want.parent == packages / "edge" / "aarch64"
+
+
+def test_an_apkbuild_missing_a_field_names_no_artifact():
+    """Better to say we cannot check than to check the wrong filename."""
+    assert pkg.expected_apk(pathlib.Path("/tmp"), "aarch64",
+                            {"pkgname": "phoc"}) is None
+
+
+# ----------------------------------------------------------- the command --
+
+def test_the_workspace_build_always_passes_lax():
+    """--lax is not a speed knob in the workspace, it is the only thing that
+    runs: a non-lax build umounts the chroot and cannot put it back."""
+    cmd = pkg.container_cmd("phoc", "aarch64")
+    assert "--lax" in " ".join(cmd)
+    assert cmd[0] == "podman"
+    assert "pmbootstrap build --lax phoc --arch aarch64" in cmd[-1]
+
+
+def test_pmbootstrap_is_forced_to_flush_its_output():
+    """pmbootstrap is Python: into a pipe it block-buffers and says nothing
+    until it exits. Five minutes into a real build the log was zero bytes
+    while the compiler was visibly running, which makes every bar in this
+    verb decorative."""
+    assert "PYTHONUNBUFFERED=1" in pkg.container_cmd("phoc", "aarch64")
+    assert pkg.UNBUFFERED["PYTHONUNBUFFERED"] == "1"
+
+
+def test_an_aport_name_reaching_the_shell_is_quoted():
+    assert "'a b'" in pkg.container_cmd("a b", "aarch64")[-1]
+
+
+def test_the_host_build_is_not_lax_unless_asked():
+    assert "--lax" not in pkg.host_cmd("phoc", "aarch64", lax=False)
+    assert "--lax" in pkg.host_cmd("phoc", "aarch64", lax=True)
+
+
+# ------------------------------------------------------------- outdated --
+
+def _apk(packages: pathlib.Path, name: str, when=None):
+    path = packages / "edge" / "aarch64" / f"{name}.apk"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x")
+    if when:
+        import os
+        os.utime(path, (when, when))
+    return path
+
+
+def test_an_aport_never_built_here_is_not_reported():
+    """Quietness is the feature. temp/ carries eighteen forks; listing the
+    ones nobody has built would train everyone to ignore the check."""
+    with tempfile.TemporaryDirectory() as d:
+        root = _tree(pathlib.Path(d) / "aports")
+        packages = pathlib.Path(d) / "packages"
+        packages.mkdir()
+        assert pkg.outdated(root, packages, "aarch64") == []
+
+
+def test_a_bumped_pkgrel_with_no_matching_apk_is_reported():
+    with tempfile.TemporaryDirectory() as d:
+        root = _tree(pathlib.Path(d) / "aports")
+        packages = pathlib.Path(d) / "packages"
+        _apk(packages, "phoc-0.57.0-r49")
+        found = dict(pkg.outdated(root, packages, "aarch64"))
+        assert "phoc" in found and "0.57.0-r50" in found["phoc"]
+
+
+def test_an_edited_aport_is_reported_even_at_the_same_version():
+    """The phoc case: the apk exists at the right version, but a patch beside
+    the APKBUILD changed after it was built, so what ships is not what you
+    edited."""
+    with tempfile.TemporaryDirectory() as d:
+        root = _tree(pathlib.Path(d) / "aports")
+        packages = pathlib.Path(d) / "packages"
+        _apk(packages, "phoc-0.57.0-r50", when=time.time() - 600)
+        (root / "temp" / "phoc" / "fix.patch").write_text("diff")
+        found = dict(pkg.outdated(root, packages, "aarch64"))
+        assert found.get("phoc") == "edited since it was last built"
+
+
+def test_an_untouched_aport_is_silent():
+    with tempfile.TemporaryDirectory() as d:
+        root = _tree(pathlib.Path(d) / "aports")
+        packages = pathlib.Path(d) / "packages"
+        _apk(packages, "phoc-0.57.0-r50", when=time.time() + 600)
+        assert dict(pkg.outdated(root, packages, "aarch64")).get("phoc") is None
+
+
+def test_a_subpackage_apk_does_not_invent_an_aport():
+    with tempfile.TemporaryDirectory() as d:
+        root = _tree(pathlib.Path(d) / "aports")
+        packages = pathlib.Path(d) / "packages"
+        _apk(packages, "phoc-dev-0.57.0-r50")
+        assert dict(pkg.outdated(root, packages, "aarch64")).get("phoc-dev") is None
+
+
+# ---------------------------------------------------------- the buildroot --
+#
+# One workspace, one buildroot per arch, and abuild wipes $srcdir before it
+# unpacks. The cost of getting this wrong is measured: a webkit build died 37
+# minutes in with `clang++: no such file or directory: TextMetrics.idl`,
+# because a second build had replaced the source tree underneath it.
+
+def test_a_second_build_is_refused_while_one_holds_the_buildroot():
+    with tempfile.TemporaryDirectory() as d:
+        with pkg.buildroot_lock(d, "webkit2gtk-6.0"):
+            assert not pkg._lock_is_free(d)
+            try:
+                with pkg.buildroot_lock(d, "gst-plugins-good"):
+                    assert False, "the second build was allowed to start"
+            except Exception as exc:
+                assert "busy" in str(exc)
+
+
+def test_the_refusal_names_who_is_building_rather_than_just_saying_busy():
+    """"Someone has it" sends you looking. The holder file is what turns that
+    into an answer -- the same reason tk-device.sh records one."""
+    with tempfile.TemporaryDirectory() as d:
+        with pkg.buildroot_lock(d, "webkit2gtk-6.0"):
+            assert "webkit2gtk-6.0" in pkg.lock_holder(d)
+
+
+def test_the_lock_is_released_and_the_holder_cleared_afterwards():
+    with tempfile.TemporaryDirectory() as d:
+        with pkg.buildroot_lock(d, "phoc"):
+            pass
+        assert pkg.lock_holder(d) == ""
+        assert pkg._lock_is_free(d)
+
+
+def test_waiting_gives_up_with_the_retryable_code_not_a_plain_failure():
+    """75 means "retry"; 1 means "the build failed". An agent that cannot
+    tell them apart reports a busy buildroot as a broken package."""
+    from porthole_cli import EX_LOCK
+
+    with tempfile.TemporaryDirectory() as d:
+        with pkg.buildroot_lock(d, "webkit2gtk-6.0"):
+            try:
+                with pkg.buildroot_lock(d, "phoc", wait=0.2):
+                    assert False, "should not have acquired"
+            except Exception as exc:
+                assert getattr(exc, "code", None) == EX_LOCK, exc
+
+
+def main():
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    failed = 0
+    for name, fn in tests:
+        try:
+            fn()
+        except AssertionError as exc:
+            failed += 1
+            print(f"FAIL {name}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            print(f"ERROR {name}: {type(exc).__name__}: {exc}")
+    print(f"{len(tests) - failed}/{len(tests)} passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
