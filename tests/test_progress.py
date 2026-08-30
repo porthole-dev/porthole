@@ -340,30 +340,12 @@ def test_a_window_too_short_to_mean_anything_is_refused():
     assert progress.window_rate([(now - 5, 0), (now, 40)], now) is None
 
 
-def test_a_kernel_rung_refuses_an_eta_when_its_compile_rate_stalls():
-    """Kernel rungs used to extrapolate elapsed against the last total, which
-    grows without bound through a long single-threaded step -- the package
-    path measured that producing a 74-hour estimate on a healthy build. With
-    a real compile-line count and a stalled window, the honest answer is that
-    we do not know."""
-    import time as _t
-
-    with tempfile.TemporaryDirectory() as run:
-        tracker = progress.Tracker(run, "kernel")
-        tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
-        tracker.started = _t.time() - 4000        # long overrun of the baseline
-        tracker.compile_seen = 40
-        # Four compiles across four minutes: below RATE_MIN_STEPS, so the
-        # window is discarded rather than divided by.
-        now = _t.time()
-        tracker._samples.clear()
-        tracker._samples.extend([(now - 240, 37), (now - 160, 38),
-                                 (now - 80, 39), (now, 40)])
-        assert tracker._eta(0.008) is None
-
-
-def test_a_kernel_rung_with_a_healthy_rate_still_gets_an_eta():
-    """The refusal must not be so broad that the field is never populated."""
+def test_a_kernel_rung_prefers_a_measured_rate_over_the_history_baseline():
+    """The windowed rate must actually win when there is one. Chosen so the
+    two paths disagree: the window says 8000s, the history baseline says
+    1200s. Asserting `is not None` would pass under either, which is how an
+    earlier version of this test failed to notice _eta was never wired to
+    window_rate at all."""
     import time as _t
 
     with tempfile.TemporaryDirectory() as run:
@@ -373,8 +355,35 @@ def test_a_kernel_rung_with_a_healthy_rate_still_gets_an_eta():
         tracker.compile_seen = 1000
         now = _t.time()
         tracker._samples.clear()
-        tracker._samples.extend([(now - 120 + i, 800 + i * 2) for i in range(0, 120, 4)])
-        assert tracker._eta(0.2) is not None
+        # 30 samples over 116s, 2 compiles apart: rate 0.5/s, comfortably past
+        # RATE_MIN_SPAN and RATE_MIN_STEPS.
+        tracker._samples.extend(
+            [(now - 116 + i * 4, 800 + i * 2) for i in range(30)])
+        # (5000 - 1000) remaining / 0.5 per second.
+        assert tracker._eta(0.2) == 8000.0, tracker._eta(0.2)
+
+
+def test_a_kernel_rung_falls_back_to_history_when_the_window_is_too_thin():
+    """The fallback must survive. A first run has no samples at all, and
+    removing the history path would leave it with no ETA -- which is the
+    black box this whole module replaced. 300/0.2 - 300 = 1200."""
+    import time as _t
+
+    with tempfile.TemporaryDirectory() as run:
+        tracker = progress.Tracker(run, "kernel")
+        tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
+        tracker.started = _t.time() - 300
+        tracker.compile_seen = 1000
+        now = _t.time()
+        tracker._samples.clear()
+        # Four samples across four minutes: span is long enough but only three
+        # steps, below RATE_MIN_STEPS, so the window is discarded.
+        tracker._samples.extend([(now - 240, 997), (now - 160, 998),
+                                 (now - 80, 999), (now, 1000)])
+        # Exact equality is flaky here: elapsed is live wall-clock time,
+        # and microseconds pass between setting `started` and calling
+        # `_eta`, so the raw value is 1200.00003... not 1200.0 exactly.
+        assert abs(tracker._eta(0.2) - 1200.0) < 0.01, tracker._eta(0.2)
 
 
 def main():
