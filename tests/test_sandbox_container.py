@@ -664,6 +664,18 @@ def test_a_container_without_dtc_skips_rather_than_failing():
     assert result == "" or "podman" not in result, result
 
 
+def test_the_containerised_dtc_can_receive_stdin():
+    """`podman exec` drops stdin without -i, and dtc reads its source from
+    stdin -- so the fallback compiled nothing and reported
+    `<stdin>:0.0 syntax error`, which reads as a broken device tree rather
+    than as a command that was never given any input."""
+    import porthole_cmd_verify as verify
+
+    found = verify._dtc()
+    if found.startswith("podman"):
+        assert "-i" in found.split(), found
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

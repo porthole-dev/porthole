@@ -83,7 +83,14 @@ def _dtc() -> str:
                  "command -v dtc"],
                 capture_output=True, text=True, timeout=20)
             if probe.returncode == 0:
-                return f"podman exec {sandbox.CONTAINER} dtc"
+                # -i is not optional: `podman exec` drops stdin without it,
+                # proved directly -- `echo test | podman exec CONTAINER cat`
+                # prints nothing, `podman exec -i CONTAINER cat` prints
+                # "test". Every call site pipes the .dts source in on stdin,
+                # so a containerised dtc without -i compiles nothing and
+                # reports `<stdin>:0.0 syntax error` -- a tooling gap wearing
+                # the costume of a broken device tree.
+                return f"podman exec -i {sandbox.CONTAINER} dtc"
     except Exception:  # noqa: BLE001
         pass
     return ""
