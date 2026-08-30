@@ -451,6 +451,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `cd` | print a path to cd into: workdir, kernel, pmaports, profile | no | no |
 | `next` | where am I in this port, and what is the one next thing | yes | no |
 | `brief` | everything an agent needs to start a session, in one call | yes | no |
+| `slots` | read A/B slot policy from the device, never guess it | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
 | `pkg` | build a userspace aport, with a real progress bar | yes | no |
 | `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |
