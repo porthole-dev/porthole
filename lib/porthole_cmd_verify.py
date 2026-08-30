@@ -71,8 +71,19 @@ def _dtc() -> str:
     try:
         import porthole_cmd_sandbox as sandbox
 
+        # A container that predates this image's dtc addition is still
+        # "running" -- _container_running() alone would hand back a command
+        # that fails inside, turning an honest "this check did not run" into
+        # a false "your device tree is broken". Same confusion `aports lint`
+        # was fixed for on this branch: a tooling gap is not a check failure.
+        # Probe for real before promising a working command.
         if sandbox._container_running():
-            return f"podman exec {sandbox.CONTAINER} dtc"
+            probe = subprocess.run(
+                ["podman", "exec", sandbox.CONTAINER, "sh", "-c",
+                 "command -v dtc"],
+                capture_output=True, text=True, timeout=20)
+            if probe.returncode == 0:
+                return f"podman exec {sandbox.CONTAINER} dtc"
     except Exception:  # noqa: BLE001
         pass
     return ""

@@ -637,6 +637,33 @@ def test_the_image_carries_dtc():
     assert "dtc" in text, "dtc is not installed in the sandbox image"
 
 
+def test_a_container_without_dtc_skips_rather_than_failing():
+    """A tooling gap must not read as a check failure. With the container up
+    but the image predating the dtc change, verify reported
+    `fail device tree compiles: executable dtc not found` -- the same
+    confusion `aports lint` was fixed for on this branch."""
+    import porthole_cmd_verify as verify
+
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+
+        class R:
+            returncode = 1
+            stdout = ""
+        return R()
+
+    original = verify.subprocess.run
+    verify.subprocess.run = fake_run
+    try:
+        # No host dtc on this machine, so this exercises the container path.
+        result = verify._dtc()
+    finally:
+        verify.subprocess.run = original
+    assert result == "" or "podman" not in result, result
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
