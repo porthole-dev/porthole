@@ -95,6 +95,9 @@ def test_durations_read_as_durations():
     assert progress.fmt_dur(41) == "41s"
     assert progress.fmt_dur(161) == "2m41s"
     assert progress.fmt_dur(None) == "--"
+    # These builds are hours. `134m10s` is a number you have to do arithmetic
+    # on before it tells you anything.
+    assert progress.fmt_dur(8050) == "2h14m"
 
 
 def test_history_survives_a_round_trip():
@@ -228,7 +231,7 @@ def test_a_finished_run_is_never_drawn_as_a_bar():
             "elapsed": 0.4, "progress": None, "eta": 6, "started": 1.0}
     head, rows = progress.status_report(snap, now=7201.4)
     assert "[" not in head and "FAILED" in head
-    assert "120m00s ago" in head
+    assert "2h00m ago" in head, head
     assert not any(label == "eta" for label, _ in rows)
 
 
@@ -251,6 +254,90 @@ def test_a_watcher_renders_the_same_line_the_build_prints():
     with tempfile.TemporaryDirectory() as run:
         tracker = progress.Tracker(run, "auto")
         assert tracker.line() == progress.line_of(tracker.snapshot())
+
+
+# ------------------------------------------------- an ETA worth believing --
+#
+# Both cases below are MEASURED, from the webkit rebuild. See
+# docs/HANDOFF-package-builds.md, "[N/M] alone will lie".
+
+_LINES = {"compile": "[{}/{}] Building CXX object Source/WebCore/x.o",
+          "generate": "[{}/{}] Generating DerivedSources/LLIntAssembly.h"}
+
+
+def _driven(steps, total=8233, configure_secs=360):
+    """A PkgTracker fed real ninja lines on a synthetic clock.
+
+    The lines go through `feed()` so the parsing, the phase and the step kind
+    are all the production path; only the clock is faked, by rewriting the
+    sample timestamps afterwards. A fixture that sets the counters directly
+    would pass while `feed()` was broken.
+    """
+    import time as _t
+    tracker = progress.PkgTracker(tempfile.mkdtemp(), "pkg:webkit2gtk-6.0")
+    span = sum(dt for dt, _ in steps)
+    tracker.started = _t.time() - span - configure_secs
+    now, n, stamps = _t.time() - span, 2600, []
+    for dt, kind in steps:
+        now += dt
+        n += 1
+        tracker.feed("[12:01:02] " + _LINES[kind].format(n, total))
+        if kind == "compile":
+            stamps.append((now, tracker.compiles))
+    tracker._samples.clear()
+    tracker._samples.extend(stamps)
+    return tracker
+
+
+def test_a_generator_stall_refuses_an_eta_instead_of_saying_74_hours():
+    """Measured: the counter moved five steps in 240s while one emulated Ruby
+    process ran JavaScriptCore's offlineasm, fifteen cores idle. Extrapolating
+    that says 74 hours on a perfectly healthy build, and an agent watching
+    that number kills it. The honest answer is that we do not know."""
+    assert _driven([(48.0, "generate")] * 5)._eta(0.32) is None
+
+
+def test_a_stall_is_shown_as_generating_rather_than_as_a_stuck_build():
+    snap = _driven([(48.0, "generate")] * 5).snapshot()
+    assert "generating" in progress.line_of(snap)
+    assert "eta      --" in progress.line_of(snap)
+
+
+def test_a_steady_compile_rate_does_produce_an_eta():
+    """The refusal must not be so cautious that the field is never populated:
+    a bar that never shows an ETA is the black box this replaced."""
+    tracker = _driven([(1.25, "compile")] * 400)
+    remaining = tracker.ninja_total - tracker.compile_seen
+    assert abs(tracker._eta(0.32) - remaining / 0.8) < remaining * 0.05
+
+
+def test_the_rate_ignores_time_spent_not_compiling():
+    """Measured from the FIRST COMPILE, not from the start. Folding in six
+    minutes of cmake configure reports a compile rate several times lower
+    than the real one, and an ETA to match."""
+    slow = _driven([(1.25, "compile")] * 400, configure_secs=3600)._eta(0.32)
+    fast = _driven([(1.25, "compile")] * 400, configure_secs=0)._eta(0.32)
+    assert abs(slow - fast) < 1.0, (slow, fast)
+
+
+def test_no_eta_at_all_during_the_opening_minutes():
+    """The first fifteen minutes of a resumed build are ccache replaying
+    already-compiled objects -- 2658 of them on the measured run. Any rate
+    taken there is measuring cache lookups."""
+    tracker = _driven([(0.3, "compile")] * 200, configure_secs=0)
+    tracker.started = tracker.started + 1e9  # elapsed ~0
+    assert tracker._eta(0.32) is None
+
+
+def test_a_window_with_too_few_compiles_is_discarded_not_divided_by():
+    now = 1000.0
+    assert progress.window_rate([(now - 200, 0), (now, 3)], now) is None
+    assert progress.window_rate([(now - 100, 0), (now, 90)], now) == 0.9
+
+
+def test_a_window_too_short_to_mean_anything_is_refused():
+    now = 1000.0
+    assert progress.window_rate([(now - 5, 0), (now, 40)], now) is None
 
 
 def main():

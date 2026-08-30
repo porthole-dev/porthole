@@ -24,6 +24,7 @@ user-facing ETA is testable without running a build.
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import pathlib
@@ -97,6 +98,24 @@ _PKG_MARKERS = (
 )
 
 
+# What ninja says it is DOING, which decides whether the step counts towards a
+# rate. A `Generating` step is one emulated Ruby or Perl process holding one
+# core; counting it as progress is what produced "eta 74h" on a healthy build.
+_STEP_KIND = (
+    ("compile", re.compile(r"\b(Building|Compiling)\b", re.I)),
+    ("link", re.compile(r"\b(Linking|Archiving|Indexing)\b", re.I)),
+    ("generate", re.compile(r"\b(Generating|Copying|Creating)\b", re.I)),
+)
+
+
+def step_kind(line: str) -> str:
+    """`compile` | `link` | `generate` | `other` for one ninja step line."""
+    for name, pattern in _STEP_KIND:
+        if pattern.search(line):
+            return name
+    return "other"
+
+
 def ninja_progress(line: str):
     """`(done, total)` from a `[N/M]` line, or None.
 
@@ -145,7 +164,11 @@ def fmt_dur(seconds) -> str:
     seconds = int(max(0, seconds))
     if seconds < 60:
         return "{}s".format(seconds)
-    return "{}m{:02d}s".format(seconds // 60, seconds % 60)
+    if seconds < 3600:
+        return "{}m{:02d}s".format(seconds // 60, seconds % 60)
+    # webkit is measured in hours. `134m10s` is a number you have to do
+    # arithmetic on before it means anything.
+    return "{}h{:02d}m".format(seconds // 3600, (seconds % 3600) // 60)
 
 
 def bar(fraction, width: int = 18) -> str:
@@ -279,13 +302,18 @@ class Tracker:
         """
         return fraction(self.history, self.rung, self.elapsed, self.compile_seen)
 
+    def _eta(self, frac):
+        """Seconds remaining. A seam, like _fraction: a package build has a
+        real step count to divide and a kernel build does not."""
+        return eta(self.history, self.rung, self.elapsed, frac)
+
     def snapshot(self) -> dict:
         frac = self._fraction()
         return {"rung": self.rung, "phase": self.phase or "starting",
                 "state": self.state, "pid": os.getpid(),
                 "elapsed": round(self.elapsed, 1),
                 "progress": None if frac is None else round(frac, 3),
-                "eta": eta(self.history, self.rung, self.elapsed, frac),
+                "eta": self._eta(frac),
                 "compile_lines": self.compile_seen,
                 "last": self.last,
                 "started": round(self.started, 1)}
@@ -316,6 +344,44 @@ class Tracker:
         return line_of(self.snapshot(), width)
 
 
+# How a package build's ETA is allowed to be computed. Every one of these
+# numbers exists because the naive version was measured lying:
+#
+#   ccache replay      the restarted webkit run went 0% -> 32% in fifteen
+#                      minutes because ccache replayed 2658 already-compiled
+#                      objects. An ETA over that window measures cache
+#                      lookups, not compilation.
+#   generator stalls   sampled mid-build, the counter moved five steps in 240s
+#                      while one emulated Ruby process ran JavaScriptCore's
+#                      offlineasm with fifteen cores idle. Extrapolating that
+#                      says 74 HOURS remaining on a healthy build, and an
+#                      agent watching that number kills the build.
+#
+# See docs/HANDOFF-package-builds.md, "[N/M] alone will lie".
+RATE_WINDOW = 180.0    # trailing seconds the rate is measured over
+RATE_MIN_SPAN = 60.0   # ...and the least of it worth dividing by
+RATE_MIN_STEPS = 8     # ...and the fewest compiles in it worth trusting
+ETA_WARMUP = 180.0     # no ETA at all before this; the start is all cache
+
+
+def window_rate(samples, now: float, window: float = RATE_WINDOW):
+    """Compile steps per second over the trailing window, or None.
+
+    None means "no defensible rate", which is a different statement from zero
+    and is rendered as `--` rather than as an ETA. A stall produces None here
+    rather than a very large ETA downstream, which is the whole point: the
+    honest answer to "how long is this generator step" is that we do not know.
+    """
+    recent = [(when, done) for when, done in samples if when >= now - window]
+    if len(recent) < 2:
+        return None
+    span = recent[-1][0] - recent[0][0]
+    steps = recent[-1][1] - recent[0][1]
+    if span < RATE_MIN_SPAN or steps < RATE_MIN_STEPS:
+        return None
+    return steps / span
+
+
 class PkgTracker(Tracker):
     """A package build, whose percentage is stated rather than inferred.
 
@@ -332,6 +398,13 @@ class PkgTracker(Tracker):
     def __init__(self, rundir, rung: str):
         super().__init__(rundir, rung)
         self.ninja_total = 0
+        self.step = ""
+        self.compiles = 0
+        # (when, compiles) each time a COMPILE step lands. Only compiles, so a
+        # ten-minute Generating step contributes no samples and the rate
+        # correctly goes unknown instead of going to nearly zero and being
+        # divided by.
+        self._samples = collections.deque(maxlen=4096)
 
     def feed(self, line: str) -> None:
         line = line.rstrip("\n")
@@ -341,7 +414,60 @@ class PkgTracker(Tracker):
         step = ninja_progress(line)
         if step:
             self.compile_seen, self.ninja_total = step
+            self.step = step_kind(line)
+            if self.step == "compile":
+                self.compiles += 1
+                self._samples.append((time.time(), self.compiles))
         self.last = line[:200]
+
+    def rate(self):
+        """Compiles per second right now, or None when nothing supports one."""
+        return window_rate(self._samples, time.time())
+
+    def _eta(self, frac):
+        """Remaining steps divided by a rate we can defend, or None.
+
+        Deliberately NOT `elapsed / fraction - elapsed`, which is what the
+        kernel rungs use and what produced the 74-hour number: that treats
+        every second so far as representative, and on these builds it is not
+        -- the first fifteen minutes are ccache replay and the middle contains
+        single-threaded generator steps with fifteen cores idle.
+        """
+        if self.elapsed < ETA_WARMUP or self.ninja_total <= 0:
+            return None
+        recent = self.rate()
+        if not recent:
+            return None
+        # The slower of the recent window and the run so far. After a ccache
+        # replay the sustained rate is inflated by thousands of cache hits, so
+        # the minimum keeps the estimate from inheriting that optimism once
+        # real compilation starts. Pessimistic is the right direction to err:
+        # an ETA that shortens is a pleasant surprise, one that grows tenfold
+        # is what teaches people to ignore the field.
+        #
+        # Measured from the FIRST COMPILE, not from the start of the build.
+        # Dividing by total elapsed would fold in dependency install, fetch and
+        # a six-minute cmake configure -- none of which compiled anything --
+        # and report a compile rate several times lower than the real one.
+        best = recent
+        if len(self._samples) >= 2:
+            first_at, first_n = self._samples[0]
+            span = time.time() - first_at
+            if span > 0:
+                sustained = (self.compiles - first_n) / span
+                if sustained > 0:
+                    best = min(recent, sustained)
+        remaining = max(0, self.ninja_total - self.compile_seen)
+        return remaining / best if best > 0 else None
+
+    def snapshot(self) -> dict:
+        snap = super().snapshot()
+        recent = self.rate()
+        snap["rate"] = None if recent is None else round(recent, 2)
+        snap["step"] = self.step
+        snap["steps"] = f"{self.compile_seen}/{self.ninja_total}" \
+            if self.ninja_total else ""
+        return snap
 
     def _fraction(self):
         # ninja's own numbers first: they are the total the build declared, so
@@ -365,8 +491,20 @@ def line_of(snap, width: int = 18) -> str:
     """
     frac = snap.get("progress")
     pct = "--" if frac is None else "{:>3d}%".format(int(frac * 100))
-    return "{} {} {:<9} {:>7} eta {:>7}".format(
-        bar(frac, width), pct, snap.get("phase") or "starting",
+    # A ninja step that is Generating rather than Building is shown as such.
+    # It is the single most useful thing on this line during a stall: the
+    # counter is not moving, and "generating" says that is expected while
+    # "build" invites the reader to conclude the thing has hung.
+    phase = snap.get("phase") or "starting"
+    phase = {"generate": "generating", "link": "linking"}.get(
+        snap.get("step"), phase) if phase == "build" else phase
+    rate = snap.get("rate")
+    # Rate is shown for package builds and omitted for kernel rungs, which
+    # have no step count to have a rate over.
+    tail = "" if "rate" not in snap else \
+        " {:>6}".format("--/s" if not rate else "{:.1f}/s".format(rate))
+    return "{} {} {:<10}{} {:>7} eta {:>7}".format(
+        bar(frac, width), pct, phase, tail,
         fmt_dur(snap.get("elapsed")), fmt_dur(snap.get("eta")))
 
 
