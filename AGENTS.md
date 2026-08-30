@@ -131,9 +131,17 @@ porthole pkg outdated                        # what you edited and did not rebui
 `porthole sandbox shell --command 'pmbootstrap build ...'` is refused for these
 reasons; `--raw` overrides it if you genuinely mean to bypass all of them.
 
-**Run it in the background and let the harness tell you it finished.** Do not
-poll a long build in a loop -- that spends a request per check to re-read a
-number that moved 1%. If you must watch, `porthole pkg watch` costs nothing.
+**Run it in the background and let the harness tell you it finished -- but
+that puts the bar somewhere the HUMAN CANNOT SEE.** A background task's
+stdout is a log file or a buffer the harness reads, not a terminal in front of
+a person. `porthole pkg watch` exists precisely so the developer is never
+blind to a build that is running because you decided not to poll it, and it
+only works if they know to type it. So every time you start a build, you MUST
+put `porthole pkg watch` in your reply to the human as a command they can run
+right now -- not "if you must watch", not only when they ask, every time,
+full stop. Do not poll the status yourself in a loop, though: that still
+spends a request per check to re-read a number that moved 1%. Say the command
+to the human; do not read it back to yourself.
 
 The percentage is real (ninja states its total), but **the ETA is deliberately
 absent during generator steps.** A `[N/M]` counter stalls dead on
@@ -421,6 +429,7 @@ have the full rules.
 | 0 | success | continue |
 | 1 | the thing under test failed | report it — a result, not an error |
 | 64 | usage error | fix the invocation |
+| 69 | the tool could not run at all | not a finding — the check did not happen |
 | 75 | could not get the device lock | **retry** |
 | 76 | device in the wrong state | **do not retry** — something must move it |
 | 124 | killed at the hold ceiling | a wedge; investigate, do not just rerun |
@@ -450,6 +459,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `cd` | print a path to cd into: workdir, kernel, pmaports, profile | no | no |
 | `next` | where am I in this port, and what is the one next thing | yes | no |
 | `brief` | everything an agent needs to start a session, in one call | yes | no |
+| `slots` | read A/B slot policy from the device, never guess it | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
 | `pkg` | build a userspace aport, with a real progress bar | yes | no |
 | `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |

@@ -10,16 +10,41 @@ from __future__ import annotations
 
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE
 import porthole_pmaports as pmap
 
 
+def channel_of_cfg(text: str) -> str:
+    """The channel pmaports declares in pmaports.cfg, or "".
+
+    Read rather than inferred. `pmbootstrap config channel` stopped being a
+    key in 3.x, and the obvious replacement -- the git branch -- is not the
+    channel either: this checkout sits on `taimen-bringup` while pmaports.cfg
+    declares `channel=edge`. Inferring it from the branch traded "unknown"
+    for a confident wrong answer.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("channel=") and not line.startswith("#"):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
 def current(cfg) -> str:
+    """Which channel this checkout is on, read from pmaports.cfg.
+
+    `pmbootstrap config channel` is gone in 3.x. The channel lives in
+    pmaports.cfg, not the git branch -- this checkout sits on taimen-bringup
+    while declaring edge, proving the branch is not the channel.
+    """
+    pmaports = pmap.find_pmaports(cfg)
+    if not pmaports:
+        return ""
     try:
-        proc = subprocess.run(["pmbootstrap", "config", "channel"],
-                              capture_output=True, text=True, timeout=20)
-        return proc.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
+        cfg_file = pmaports / "pmaports.cfg"
+        text = cfg_file.read_text()
+        return channel_of_cfg(text)
+    except (OSError, AttributeError):
         return ""
 
 
@@ -87,12 +112,36 @@ def cmd_channel(args, ctx) -> int:
         ctx.out.hint(f"porthole channel {args.name} --yes    to go ahead")
         return EX_OK
 
+    require_channel_key(args.name, info, pmaports)
     rc = subprocess.run(["pmbootstrap", "config", "channel", args.name]).returncode
     if rc != 0:
         raise Bail("pmbootstrap refused the channel change", EX_FAIL)
     ctx.out(ctx.out.paint(f"  channel is now {args.name}", "green"))
     ctx.out.hint("pmbootstrap pull     # sync pmaports to the new branch")
     return EX_OK
+
+
+def require_channel_key(name: str, info: dict, pmaports) -> None:
+    """Bail 69 if this pmbootstrap has no `channel` config key.
+
+    `channel` stopped being a config key in 3.x -- argparse rejects it with
+    exit 2 -- and shelling it anyway rendered that as "pmbootstrap refused the
+    channel change": the same sentence-shape as "lint found problems", a
+    broken tool reported as a finding about the user's work. The READ side of
+    this verb was fixed in 456cb3b; the write side kept the bug. Ask first,
+    exactly as `aports lint` does.
+    """
+    import porthole_pmb_api as pmb_api
+
+    gone = pmb_api.missing("config_keys", "channel")
+    if not gone:
+        return
+    branch = (info or {}).get("branch_pmaports") or name
+    raise Bail(f"{gone}, so porthole cannot switch the channel for you",
+               EX_UNAVAILABLE,
+               f"the channel is set by which pmaports branch is checked out, "
+               f"not by a config key: `git -C {pmaports} checkout {branch}` "
+               f"then `pmbootstrap pull`")
 
 
 def _dirty(pmaports) -> list[str]:

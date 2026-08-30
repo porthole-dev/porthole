@@ -5,6 +5,27 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- `porthole slots` — A/B slot state read from the device by `fastboot getvar`
+  rather than from a note somebody wrote down, and the retry counters that
+  explain a boot landing in the bootloader by itself.
+- `porthole pkg stop` — cancel a package build on both sides of the container
+  boundary. Killing the `podman exec` client never killed what it exec'd, so
+  cancelling meant two kills by hand and still left the buildroot locked.
+- `porthole pkg watch`, `pkg status --json` and a detached `pkg build`, so a
+  four-hour build is watchable from a second terminal and pollable by an agent
+  without burning a request every thirty seconds.
+- Exit code **69 — the tool could not run at all**. `aports lint` printed
+  "lint found problems" for a subcommand pmbootstrap 3.11.1 had removed, and
+  `channel <name> --yes` printed "pmbootstrap refused the channel change" for
+  a config key that no longer exists: both exit 1, both a broken tool wearing
+  the costume of a finding about the user's work. Documented in AGENTS.md §6,
+  `brain/laws/exit-codes-are-an-api.md` and `docs/ARCHITECTURE.md`.
+- `lib/porthole_pmb_api.py` — porthole asks the installed pmbootstrap which
+  subcommands and config keys it has instead of assuming, and
+  `tests/test_pmb_api.py` fails here rather than in front of a user when the
+  next one disappears.
+- `porthole brief` says whether anything is building and who holds the
+  buildroot. Two agents collided in this repo because nothing answered that.
 - The console is rebuilt on Textual. Argument forms, generated from the
   argparse specs each verb already declares — every verb is now reachable
   with real arguments, where previously the palette could run a verb's
@@ -41,6 +62,11 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 - `Makefile` with `test`, `lint`, `check`, `install-completion`.
 
 ### Changed
+- `aports build` delegates to `pkg build`, so there is one build path with the
+  progress bar, `--lax` handling, the artifact check and `--detach`, instead of
+  two doors with only one of them good.
+- The workspace image ships `dtc`, and `verify` probes for it inside the
+  container before promising a command that would have compiled nothing.
 - The console needs Python 3.10 and `textual`; the CLI and every tool still
   need neither and run on 3.8 with nothing installed.
 - 22 tools that opened their own ssh with hand-rolled flags now use the shared
@@ -51,6 +77,27 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   missing, and refuses (in code) to report a failure without a fix.
 
 ### Fixed
+- `pkg build --force --detach` built without `--force`, and `--wait N --detach`
+  returned success while the child bailed on the busy buildroot: the detached
+  argv was rebuilt by hand and dropped both flags.
+- `pkg stop` trusted `state: running` in the status file, so a snapshot left
+  behind by a killed build or a reboot could send SIGTERM to whatever pid the
+  OS had recycled; and with no status file at all it wrote one saying a build
+  had failed.
+- `porthole channel` read the channel from the git branch — this checkout sits
+  on `taimen-bringup` while pmaports.cfg declares `edge` — and switching it
+  shelled a config key pmbootstrap 3.x removed.
+- `slots` ran `fastboot getvar all` first, which blocks for a full minute with
+  no device attached instead of failing; `fastboot devices` answers instantly
+  and is the authoritative check, since lsusb mislabels the running gadget.
+- The containerised `dtc` was invoked without `-i`, and `podman exec` drops
+  stdin without it, so every device tree compiled to `<stdin>:0.0 syntax
+  error` — a tooling gap that read as a broken device tree.
+- `brief` probed the host pmbootstrap dir for the buildroot lock, which a
+  workspace build never takes, so a foreign build showed as "buildroot free".
+- `pkg build` arms the native ccache the way the kernel path has since the
+  chroot_native fix; packages had never inherited it and paid qemu to hash
+  every preprocessed source.
 - `panes/console.py` was imported by nothing, so the device-log colouring it
   contained had never been reachable.
 - The reader's `r` binding was shadowed by an earlier `elif` and refreshed

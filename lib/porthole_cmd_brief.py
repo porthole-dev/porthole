@@ -14,6 +14,7 @@ session, including on a host with no device attached.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 
 import porthole
@@ -42,6 +43,25 @@ RULES = [
      "session: `porthole brain new <id>`, then `--lint`, then `--submit`. "
      "A session that learned something and wrote nothing down is unfinished."),
 ]
+
+
+def activity_summary(snap, holder: str = "", alive=None) -> str:
+    """One line: is anything building here, and who holds the buildroot.
+
+    Pure, so it is testable without a container. This is the first question
+    when picking up a handoff -- two agents collided in this repo on
+    2026-08-30 because nothing answered it -- and it used to require
+    hand-rolling `podman exec ps` plus a lock probe.
+    """
+    import porthole_progress as progress
+
+    live = progress.liveness(snap or {}, alive)
+    if live == "running":
+        target = (snap or {}).get("rung", "?")
+        return f"{live}: {target} ({progress.fmt_dur((snap or {}).get('elapsed'))})"
+    if holder:
+        return f"idle, but the buildroot lock is held by: {holder}"
+    return "idle — no package build running, buildroot free"
 
 
 def _workspace_state(root: pathlib.Path) -> dict:
@@ -90,6 +110,33 @@ def cmd_brief(args, ctx) -> int:
             state = ctx.device().state(max_age=30)
         except Exception as exc:  # noqa: BLE001
             state = f"probe failed: {exc}"
+
+    # The first question anyone picking up a handoff asks: is a build
+    # running, and who holds the buildroot. Two agents collided in this repo
+    # on 2026-08-30 because nothing answered it, and answering it by hand
+    # meant `podman exec ps` plus a lock probe.
+    import porthole_buildroot as buildroot
+
+    rundir = pathlib.Path(cfg.get("PORTHOLE_RUNDIR") or (root / ".run"))
+    try:
+        pkg_snap = json.loads((rundir / "pkg-status.json").read_text())
+    except (OSError, ValueError):
+        pkg_snap = {}
+    # The HOST pmbootstrap dir is the wrong place to look for the lock on the
+    # default path: a workspace build takes it in sandbox._sandbox_pmb(), so
+    # probing ~/.local/var/pmbootstrap reported "buildroot free" for exactly
+    # the foreign build this line exists to catch. `pkg` already decides this
+    # the right way; reuse its decision rather than a second copy. Never
+    # fatal: brief must not crash because a lock file is unreadable.
+    import porthole_cmd_build as _build
+    import porthole_cmd_pkg as _pkg
+
+    try:
+        pmb_workdir = _pkg._pmb_workdir(ctx, _build._workspace_usable(ctx)[0])
+        holder = buildroot.lock_holder(pmb_workdir)
+    except Exception:  # noqa: BLE001
+        holder = ""
+    builds_line = activity_summary(pkg_snap, holder)
 
     laws = _notes(root, "laws")
     profile_gaps = [k for k in ("PORTHOLE_SOC", "PORTHOLE_ARCH",
@@ -166,6 +213,7 @@ def cmd_brief(args, ctx) -> int:
                   "ABSENT": "grey"}.get(state, "grey")
         ctx.out.kv("state", ctx.out.paint(state, colour), w)
         ctx.out.kv("tools", str(len(tools)), w)
+        ctx.out.kv("builds", builds_line, w)
         if payload["device"]["traps"]:
             ctx.out.blank()
             ctx.out.heading("device traps encoded in the profile")

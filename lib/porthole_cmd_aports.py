@@ -16,7 +16,7 @@ import pathlib
 import re
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
 import porthole_pmaports as pmap
 
 
@@ -711,22 +711,58 @@ def cmd_checksum(args, ctx, pmaports) -> int:
                    "a source in the APKBUILD could not be fetched — check the "
                    "URL, and that every local file listed actually exists")
     ctx.out(ctx.out.paint("  checksums updated", "green"))
+    for name in _resolve_pkgs(args, ctx, pmaports):
+        directory = _pkg_dir(pmaports, name)
+        if directory is None:
+            continue
+        stray = untracked_patches(
+            directory, (directory / "APKBUILD").read_text(errors="replace"))
+        if stray:
+            ctx.out(ctx.out.paint(
+                f"  {name}: {', '.join(stray)} sit beside the APKBUILD but are "
+                f"not in source=, so they get no checksum and will not apply",
+                "yellow"))
+            ctx.out(ctx.out.paint(
+                f"  porthole aports patch {name}   adds them properly", "cyan"))
     return EX_OK
 
 
 def cmd_build(args, ctx, pmaports) -> int:
-    pkgs = _resolve_pkgs(args, ctx, pmaports)
-    argv = ["build"]
-    if args.force:
-        argv.append("--force")
-    if args.arch:
-        argv += ["--arch", args.arch]
-    rc, _, _ = pmb(ctx, *argv, *pkgs, timeout=args.timeout)
-    if rc != 0:
-        raise Bail(f"build failed for {', '.join(pkgs)}", EX_FAIL,
-                   "pmbootstrap log   shows the build output")
-    ctx.out(ctx.out.paint(f"  built {', '.join(pkgs)}", "green"))
-    return EX_OK
+    """Build a package -- through `porthole pkg`, which is the one
+    implementation.
+
+    This used to call pmbootstrap directly, which meant `aports build` had no
+    progress bar, no --lax handling in the workspace, no artifact
+    verification and no way to detach. Two doors where one is worse is how the
+    redfin port ended up using neither and hand-rolling pmbootstrap instead.
+    """
+    import argparse
+
+    import porthole_cmd_pkg as pkgverb
+
+    rc = EX_OK
+    for name in _resolve_pkgs(args, ctx, pmaports):
+        forwarded = argparse.Namespace(
+            target=name, arch=getattr(args, "arch", None),
+            timeout=getattr(args, "timeout", pkgverb.DEFAULT_TIMEOUT),
+            verbose=False, dry_run=False, detach=False, wait=0.0,
+            json=getattr(args, "json", False),
+            force=getattr(args, "force", False))
+        rc = pkgverb._build(ctx, forwarded)
+        if rc != EX_OK:
+            return rc
+    return rc
+
+
+def _lint_unavailable(reason: str) -> str:
+    """What to say when pmbootstrap cannot lint at all.
+
+    Separated so a test can assert the wording never drifts back into
+    sounding like a finding about the user's packages.
+    """
+    return (f"{reason}. apkbuild-lint moved out of pmbootstrap; pmaports CI "
+            f"still runs it, so this is a gap in local checking rather than "
+            f"a problem with your package")
 
 
 def cmd_lint(args, ctx, pmaports) -> int:
@@ -734,8 +770,16 @@ def cmd_lint(args, ctx, pmaports) -> int:
 
     The same check pmaports CI runs, so a clean run here is the difference
     between a merge request that gets reviewed and one bounced before anybody
-    reads it.
+    reads it -- WHEN the installed pmbootstrap still has it. 3.11.1 does not,
+    and reporting that as "lint found problems" is the exact confusion
+    AGENTS.md section 6 forbids: the tool broke, the answer is not "no".
     """
+    import porthole_pmb_api as pmb_api
+
+    gone = pmb_api.missing("subcommands", "lint")
+    if gone:
+        raise Bail(_lint_unavailable(gone), EX_UNAVAILABLE,
+                   "pmaports CI lints the merge request; nothing local to fix")
     rc, _, _ = pmb(ctx, "lint", *_resolve_pkgs(args, ctx, pmaports), timeout=900)
     if rc != 0:
         raise Bail("lint found problems", EX_FAIL,
@@ -878,6 +922,20 @@ def cmd_patches(args, ctx, pmaports) -> int:
 
 
 SOURCE_BLOCK = re.compile(r'^(source=")(.*?)(")', re.M | re.S)
+
+
+def untracked_patches(directory, apkbuild_text: str) -> list:
+    """`.patch` files beside the APKBUILD that `source=` does not list.
+
+    pmbootstrap checksums what is in source=, so a patch listed only in
+    patches= silently gets no checksum and the build fails later complaining
+    about something else. `porthole aports patch` has always handled this
+    correctly; the redfin session did it by hand because nothing said so.
+    """
+    match = SOURCE_BLOCK.search(apkbuild_text)
+    listed = set(match.group(2).split()) if match else set()
+    return sorted(path.name for path in directory.glob("*.patch")
+                  if path.name not in listed)
 
 
 def _rewrite_source(apkbuild: pathlib.Path, patches: list[str]) -> bool:

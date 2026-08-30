@@ -340,6 +340,52 @@ def test_a_window_too_short_to_mean_anything_is_refused():
     assert progress.window_rate([(now - 5, 0), (now, 40)], now) is None
 
 
+def test_a_kernel_rung_prefers_a_measured_rate_over_the_history_baseline():
+    """The windowed rate must actually win when there is one. Chosen so the
+    two paths disagree: the window says 8000s, the history baseline says
+    1200s. Asserting `is not None` would pass under either, which is how an
+    earlier version of this test failed to notice _eta was never wired to
+    window_rate at all."""
+    import time as _t
+
+    with tempfile.TemporaryDirectory() as run:
+        tracker = progress.Tracker(run, "kernel")
+        tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
+        tracker.started = _t.time() - 300
+        tracker.compile_seen = 1000
+        now = _t.time()
+        tracker._samples.clear()
+        # 30 samples over 116s, 2 compiles apart: rate 0.5/s, comfortably past
+        # RATE_MIN_SPAN and RATE_MIN_STEPS.
+        tracker._samples.extend(
+            [(now - 116 + i * 4, 800 + i * 2) for i in range(30)])
+        # (5000 - 1000) remaining / 0.5 per second.
+        assert tracker._eta(0.2) == 8000.0, tracker._eta(0.2)
+
+
+def test_a_kernel_rung_falls_back_to_history_when_the_window_is_too_thin():
+    """The fallback must survive. A first run has no samples at all, and
+    removing the history path would leave it with no ETA -- which is the
+    black box this whole module replaced. 300/0.2 - 300 = 1200."""
+    import time as _t
+
+    with tempfile.TemporaryDirectory() as run:
+        tracker = progress.Tracker(run, "kernel")
+        tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
+        tracker.started = _t.time() - 300
+        tracker.compile_seen = 1000
+        now = _t.time()
+        tracker._samples.clear()
+        # Four samples across four minutes: span is long enough but only three
+        # steps, below RATE_MIN_STEPS, so the window is discarded.
+        tracker._samples.extend([(now - 240, 997), (now - 160, 998),
+                                 (now - 80, 999), (now, 1000)])
+        # Exact equality is flaky here: elapsed is live wall-clock time,
+        # and microseconds pass between setting `started` and calling
+        # `_eta`, so the raw value is 1200.00003... not 1200.0 exactly.
+        assert abs(tracker._eta(0.2) - 1200.0) < 0.01, tracker._eta(0.2)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

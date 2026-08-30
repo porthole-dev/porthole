@@ -278,6 +278,11 @@ class Tracker:
         self.last = ""
         self.state = "running"
         self._written = 0.0
+        # (when, compile_seen) so BOTH trackers can measure a real rate. The
+        # kernel rungs used to extrapolate elapsed-against-last-total, which
+        # has the same failure mode the package builds measured: a long
+        # single-threaded step makes the estimate grow without bound.
+        self._samples = collections.deque(maxlen=4096)
 
     @property
     def elapsed(self) -> float:
@@ -290,6 +295,7 @@ class Tracker:
         self.phase = phase_of(line, self.phase)
         if is_compile_line(line):
             self.compile_seen += 1
+            self._samples.append((time.time(), self.compile_seen))
         self.last = line[:200]
 
     def _fraction(self):
@@ -303,8 +309,20 @@ class Tracker:
         return fraction(self.history, self.rung, self.elapsed, self.compile_seen)
 
     def _eta(self, frac):
-        """Seconds remaining. A seam, like _fraction: a package build has a
-        real step count to divide and a kernel build does not."""
+        """Seconds remaining, from a measured rate where one exists.
+
+        A seam, like _fraction. The windowed rate comes first because the
+        history path extrapolates elapsed-against-last-total, and that grows
+        without bound through a long single-threaded step -- the package
+        builds measured it producing a 74-hour estimate on a healthy build.
+        When there are too few samples to divide by, the history path is
+        still the best available answer, so it remains the fallback rather
+        than being replaced.
+        """
+        recent = window_rate(self._samples, time.time())
+        total = (self.history or {}).get(self.rung, {}).get("compile_lines")
+        if recent and isinstance(total, int) and total > self.compile_seen:
+            return (total - self.compile_seen) / recent
         return eta(self.history, self.rung, self.elapsed, frac)
 
     def snapshot(self) -> dict:
@@ -400,11 +418,6 @@ class PkgTracker(Tracker):
         self.ninja_total = 0
         self.step = ""
         self.compiles = 0
-        # (when, compiles) each time a COMPILE step lands. Only compiles, so a
-        # ten-minute Generating step contributes no samples and the rate
-        # correctly goes unknown instead of going to nearly zero and being
-        # divided by.
-        self._samples = collections.deque(maxlen=4096)
 
     def feed(self, line: str) -> None:
         line = line.rstrip("\n")

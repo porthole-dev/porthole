@@ -615,6 +615,76 @@ def test_a_build_hidden_behind_a_cd_is_still_caught():
         == "build"
 
 
+def test_the_workspace_runs_an_init_that_reaps():
+    """PID 1 is `sleep infinity`, which reaps nothing. One interrupted webkit
+    build left four zombie clang++ processes behind, and a workspace that
+    lives for weeks accumulates them."""
+    import porthole_cmd_sandbox as sandbox
+
+    argv = sandbox._up_argv("/root", "img", [], "google-taimen")
+    assert "--init" in argv, argv
+
+
+def test_the_image_carries_dtc():
+    """`porthole verify` ends INCOMPLETE on every clean checkout because dtc
+    is absent from the host AND the image, so the device-tree check -- the
+    only one that reads reg properties -- never runs for anybody. A verdict
+    that is permanently incomplete trains people to stop reading it."""
+    import pathlib
+
+    text = (pathlib.Path(__file__).resolve().parent.parent
+            / "sandbox" / "Containerfile").read_text()
+    assert "dtc" in text, "dtc is not installed in the sandbox image"
+
+
+def _dtc_via_container(returncode: int) -> str:
+    """`verify._dtc()` with the host dtc removed and the workspace up.
+
+    Both tests below used to run their assertions only when the host had no
+    dtc -- a state `porthole doctor` tells people to fix -- so on any machine
+    that took that advice they executed nothing and still passed. They guard
+    the two most recent fixes on this branch, so they have to reach the
+    container path whatever the host has.
+    """
+    import porthole_cmd_sandbox as sandbox
+    import porthole_cmd_verify as verify
+
+    class Probe:
+        stdout = "/usr/bin/dtc\n" if returncode == 0 else ""
+
+    Probe.returncode = returncode
+
+    saved = (verify.shutil.which, verify.subprocess.run,
+             sandbox._container_running)
+    verify.shutil.which = lambda *a, **k: None
+    verify.subprocess.run = lambda *a, **k: Probe
+    sandbox._container_running = lambda *a, **k: True
+    try:
+        return verify._dtc()
+    finally:
+        (verify.shutil.which, verify.subprocess.run,
+         sandbox._container_running) = saved
+
+
+def test_a_container_without_dtc_skips_rather_than_failing():
+    """A tooling gap must not read as a check failure. With the container up
+    but the image predating the dtc change, verify reported
+    `fail device tree compiles: executable dtc not found` -- the same
+    confusion `aports lint` was fixed for on this branch."""
+    assert _dtc_via_container(1) == "", _dtc_via_container(1)
+
+
+def test_the_containerised_dtc_can_receive_stdin():
+    """`podman exec` drops stdin without -i, and dtc reads its source from
+    stdin -- so the fallback compiled nothing and reported
+    `<stdin>:0.0 syntax error`, which reads as a broken device tree rather
+    than as a command that was never given any input."""
+    import porthole_cmd_sandbox as sandbox
+
+    found = _dtc_via_container(0)
+    assert found == "podman exec -i {} dtc".format(sandbox.CONTAINER), found
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -233,6 +233,173 @@ def test_a_field_that_cannot_be_resolved_is_dropped_not_guessed():
     assert "pkgname" not in pkg.apkbuild_fields("pkgname=$(uname -r)\n")
 
 
+def test_stopping_kills_both_sides_not_just_the_client():
+    """`podman exec` and the process it exec'd are different processes.
+    Killing only the client leaves pmbootstrap compiling inside, still holding
+    the buildroot -- which is precisely the state that destroys the next
+    build. Cancelling had to be done by hand, twice, in one session."""
+    class FakeSnap(dict):
+        pass
+
+    alive = lambda pid: pid == 4242  # noqa: E731
+    result = pkg.stop_plan(FakeSnap({"state": "running", "pid": 4242}), alive)
+    assert result == ("kill", 4242), result
+    assert pkg.stop_plan(FakeSnap({"state": "done", "pid": 4242}), alive) == ("none", 0)
+    assert pkg.stop_plan(FakeSnap({}), alive) == ("none", 0)
+
+
+def test_stopping_does_not_signal_a_recycled_pid():
+    """`state: running` is a claim, not a fact: a SIGKILLed build or a reboot
+    leaves it set with a pid the OS is then free to reuse, and stop_plan
+    trusted it -- so `pkg stop` could SIGTERM an unrelated process. The
+    docstring promised the protection the code did not implement."""
+    dead = {"state": "running", "pid": 4242}
+    assert pkg.stop_plan(dead, lambda pid: False) == ("none", 0)
+    assert pkg.stop_plan(dead, lambda pid: True) == ("kill", 4242)
+
+
+def test_stopping_with_no_status_file_writes_nothing():
+    """With no status file snap is {}, and _stop wrote it back anyway --
+    publishing `{"state": "failed"}` for a build that never ran, which
+    `pkg status` and `brief` then reported as the answer."""
+    class Out:
+        def __call__(self, *a):
+            pass
+
+        def paint(self, text, _colour=""):
+            return text
+
+    class Ctx:
+        out = Out()
+
+        def __init__(self, rundir):
+            self.cfg = {"PORTHOLE_RUNDIR": str(rundir)}
+            self.root = rundir
+
+        def emit(self, payload, render):
+            render()
+            return payload
+
+    with tempfile.TemporaryDirectory() as d:
+        rundir = pathlib.Path(d)
+        # Stubbed so the assertion is about the status file and not about
+        # whether this machine happens to have podman up.
+        saved = (pkg._kill_inside, pkg._pmb_workdir, pkg.build_module)
+        pkg._kill_inside = lambda: None
+        pkg._pmb_workdir = lambda ctx, usable: rundir
+        pkg.build_module = lambda: type(
+            "B", (), {"_workspace_usable": staticmethod(lambda ctx: (False, "test"))})
+        try:
+            pkg._stop(Ctx(rundir))
+        finally:
+            pkg._kill_inside, pkg._pmb_workdir, pkg.build_module = saved
+        assert not (rundir / "pkg-status.json").exists(), \
+            "_stop invented a failed build that never ran"
+
+
+def test_detach_forwards_the_flags_that_change_the_build():
+    """`--detach` rebuilds the argv by hand, so anything not listed is
+    silently dropped. It dropped `--force` (a declared flag doing nothing) and
+    `--wait` (the child then bailed EX_LOCK into the spawn log while the
+    parent had already returned EX_OK and armed `pkg watch`)."""
+    class Args:
+        timeout, force, wait = 3600, True, 600.0
+
+    argv = pkg.detach_argv("/w/bin/porthole", "webkit2gtk-6.0", "aarch64", Args())
+    assert "--force" in argv, argv
+    assert argv[argv.index("--wait") + 1] == "600.0", argv
+
+    class Plain:
+        timeout, force, wait = 3600, False, 0.0
+
+    bare = pkg.detach_argv("/w/bin/porthole", "phoc", "aarch64", Plain())
+    assert "--force" not in bare and "--wait" not in bare, bare
+
+
+def test_there_is_one_package_build_implementation():
+    """`aports build` and `pkg build` both built packages, but aports build
+    called raw pmbootstrap: no progress bar, no --lax handling, no artifact
+    check, no detach. Two doors and only one of them good is worse than one
+    door, and the redfin developer used neither."""
+    import inspect
+
+    import porthole_cmd_aports as aports
+
+    source = inspect.getsource(aports.cmd_build)
+    assert "porthole_cmd_pkg" in source or "_delegate_to_pkg" in source, \
+        "aports build still has its own build implementation"
+
+
+def test_force_reaches_pmbootstrap():
+    """A declared flag that silently does nothing is worse than no flag.
+    `aports build --force` became a no-op when it started delegating."""
+    assert "--force" in pkg.container_cmd("phoc", "aarch64", force=True)[-1]
+    assert "--force" not in pkg.container_cmd("phoc", "aarch64")[-1]
+    assert "--force" in pkg.host_cmd("phoc", "aarch64", lax=False, force=True)
+    assert "--force" not in pkg.host_cmd("phoc", "aarch64", lax=False)
+
+
+def test_a_patch_missing_from_source_is_named():
+    """E3 from the redfin report: a patch listed only in patches= gets no
+    checksum, because pmbootstrap checksums what is in source=. The fix
+    already existed as `porthole aports patch` and was never found, so the
+    session hand-edited and lost time. Name it where the mistake happens."""
+    import porthole_cmd_aports as aports
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        directory = pathlib.Path(d)
+        (directory / "fix.patch").write_text("diff")
+        (directory / "other.patch").write_text("diff")
+        apkbuild = 'source="foo.tar.gz\n\tfix.patch\n\t"\n'
+        missing = aports.untracked_patches(directory, apkbuild)
+        assert missing == ["other.patch"], missing
+
+
+def test_the_brief_can_say_whether_a_build_is_running():
+    """The first question when picking up a handoff, and the one two agents
+    collided over in this repo. Answering it used to mean hand-rolling
+    `podman exec ps` and a lock probe."""
+    import porthole_cmd_brief as brief
+
+    summary = brief.activity_summary(
+        {"state": "running", "rung": "pkg:webkit2gtk-6.0", "pid": 1,
+         "elapsed": 900.0, "progress": 0.32, "eta": None, "started": 0.0},
+        holder="webkit2gtk-6.0 pid=123 since=13:52:27",
+        alive=lambda _: True)
+    assert "webkit2gtk-6.0" in summary
+    assert "running" in summary
+
+
+def test_the_brief_says_idle_when_nothing_is_building():
+    import porthole_cmd_brief as brief
+
+    assert "idle" in brief.activity_summary({}, holder="", alive=lambda _: False)
+
+
+def test_every_build_says_how_to_watch_it_not_only_a_detached_one():
+    """The developer could only watch a build if the agent happened to use
+    --detach. Run as a background task -- which AGENTS.md tells agents to do --
+    the bar goes to a log the human never sees, so nothing ever told them how
+    to look."""
+    assert "porthole pkg watch" in pkg.watch_hint(tty=True)
+    assert "porthole pkg watch" in pkg.watch_hint(tty=False)
+    # Loudest exactly when the human cannot see the bar.
+    assert len(pkg.watch_hint(tty=False)) > len(pkg.watch_hint(tty=True))
+
+
+def test_watch_never_starts_with_a_blank_screen():
+    """A watch that prints nothing for thirty seconds is indistinguishable
+    from a hang, and is why the developer stopped trusting it. Reproduced:
+    `timeout 5 porthole pkg watch` produced zero output when the status file
+    held an already-finished build."""
+    stale = {"rung": "pkg:gst-plugins-good", "state": "done", "pid": 1,
+             "elapsed": 795.0, "started": 1000.0}
+    said = pkg.waiting_line(stale, now=2000.0)
+    assert said and "gst-plugins-good" in said
+    assert pkg.waiting_line(None, now=2000.0), "no status file must still say something"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -308,6 +308,12 @@ def _up_argv(root, image, mounts, device) -> list[str]:
     on the default netns) and `--privileged` (the entire point).
     """
     argv = ["podman", "run", "-d", "--name", CONTAINER,
+            # PID 1 here is `sleep infinity`, which reaps nothing. An
+            # interrupted build leaves its compiler children unreaped: four
+            # zombie clang++ processes were left by one cancelled webkit run,
+            # and this container is meant to live for weeks. --init supplies a
+            # real init that reaps them.
+            "--init",
             "--userns=keep-id:uid=0,gid=0",
             # SYS_ADMIN for bind mounts, SYS_CHROOT for chroots, MKNOD for the
             # chroot's device nodes. Inside a rootless userns none of these

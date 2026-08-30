@@ -36,9 +36,10 @@ import pathlib
 import re
 import shlex
 import shutil
+import sys
 import time
 
-from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE
 
 # Four hours. webkit is the reason: it is measured in hours on this hardware,
 # and a timeout that kills it at the default half hour would be a tool that
@@ -264,7 +265,7 @@ def outdated(pmaports: pathlib.Path, packages: pathlib.Path, arch: str):
     return found
 
 
-def container_cmd(aport: str, arch: str) -> list[str]:
+def container_cmd(aport: str, arch: str, force: bool = False) -> list[str]:
     """The podman line for a package build. Pure, so WHERE it runs is testable
     without podman.
 
@@ -280,8 +281,11 @@ def container_cmd(aport: str, arch: str) -> list[str]:
     """
     import porthole_cmd_sandbox as sandbox
 
-    call = " ".join(["pmbootstrap", "build", "--lax",
-                     shlex.quote(aport), "--arch", shlex.quote(arch)])
+    argv = ["pmbootstrap", "build", "--lax", shlex.quote(aport),
+            "--arch", shlex.quote(arch)]
+    if force:
+        argv.append("--force")
+    call = " ".join(argv)
     # PYTHONUNBUFFERED is not a nicety, it is what makes this verb work at
     # all. pmbootstrap is Python; writing to a pipe rather than a tty it
     # switches to block buffering and holds its output until it exits.
@@ -293,12 +297,14 @@ def container_cmd(aport: str, arch: str) -> list[str]:
             "/bin/bash", "-lc", f"cd /porthole && {call}"]
 
 
-def host_cmd(aport: str, arch: str, lax: bool) -> list[str]:
+def host_cmd(aport: str, arch: str, lax: bool, force: bool = False) -> list[str]:
     """The host equivalent. Non-lax by default: on a real root filesystem the
     zap is correct, and it is only the rootless workspace that cannot do it."""
     argv = ["pmbootstrap", "build"]
     if lax:
         argv.append("--lax")
+    if force:
+        argv.append("--force")
     return argv + [aport, "--arch", arch]
 
 
@@ -383,16 +389,29 @@ def _build(ctx, args) -> int:
             env[key] = value
     env.update(UNBUFFERED)
 
+    force = getattr(args, "force", False)
     if usable:
-        cmd = container_cmd(aport, arch)
+        cmd = container_cmd(aport, arch, force=force)
         ctx.out(ctx.out.paint("  building IN THE WORKSPACE (container, --lax)",
                               "cyan"))
     elif shutil.which("pmbootstrap"):
-        cmd = host_cmd(aport, arch, bool(env.get("PORTHOLE_LAX_BUILD")))
+        cmd = host_cmd(aport, arch, bool(env.get("PORTHOLE_LAX_BUILD")),
+                       force=force)
         ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
     else:
+        # 69, not 1: there is nothing here that could build, so this is not
+        # a statement about the package.
         raise Bail(f"no workspace and no pmbootstrap on PATH ({why_not})",
-                   EX_FAIL, "run `porthole sandbox up` first")
+                   EX_UNAVAILABLE, "run `porthole sandbox up` first")
+
+    # Said every time, not only on --detach: an agent running this build as a
+    # background task is the exact case where the bar goes into a log the
+    # human never opens. `porthole pkg watch` is the only way back in.
+    # (--detach prints its own copy below, alongside the pid/log it just
+    # produced, so skip here rather than say it twice in the same run.)
+    tty = sys.stdout.isatty()
+    if args.dry_run or not args.detach:
+        ctx.out(ctx.out.paint(watch_hint(tty), "cyan" if tty else "yellow"))
 
     if args.dry_run:
         print(" ".join(shlex.quote(a) for a in cmd))
@@ -404,6 +423,13 @@ def _build(ctx, args) -> int:
     packages = _packages_dir(ctx, usable)  # noqa: E501
     want = expected_apk(packages, arch, fields)
     before = want.exists() and want.stat().st_mtime if want else False
+
+    if usable:
+        # Arm the native ccache before building. Without this, ccache in the
+        # aarch64 buildroot is itself an emulated binary and every object pays
+        # qemu for hashing its preprocessed source. The kernel path has done
+        # this since the chroot_native fix; packages never inherited it.
+        _arm_ccache(ctx)
 
     # pmbootstrap keeps the real build output in its own log.txt and puts
     # only high-level `=> step` lines on stdout. Following that file is what
@@ -433,6 +459,48 @@ def _build(ctx, args) -> int:
     return EX_OK
 
 
+def watch_hint(tty: bool) -> str:
+    """How to watch this build, said every time a build starts.
+
+    Printed in EVERY mode, not just --detach. The bar goes to whatever
+    captured stdout, so when an agent runs the build in a background task the
+    developer sees nothing at all -- which is the whole reason this exists.
+    Loudest exactly when stdout is not a terminal, because that is when the
+    human cannot see the bar.
+    """
+    if tty:
+        return "  porthole pkg watch  -- live bar in another terminal"
+    return ("  >>> HUMAN CAN'T SEE THIS BUILD -- stdout is captured, not a "
+            "terminal. Tell them to run: porthole pkg watch")
+
+
+def _arm_ccache(ctx) -> None:
+    """Put ccache in chroot_native, where it runs as a native binary.
+
+    tools/ph-build.sh's `_ph_arm_ccache` is what the kernel path already
+    calls on every `tkbuild`; PORTHOLE_CCACHE_STANDALONE makes the same
+    function reachable without envkernel, which the kernel path needs and
+    a package build has no reason to bring up.
+
+    Best effort: a build must never fail because the cache could not be
+    armed. Every failure mode here (podman missing, container down, the
+    chroot not yet bootstrapped) is caught and swallowed -- an unarmed
+    cache just means the next build is slower, not broken.
+    """
+    import subprocess
+
+    import porthole_cmd_sandbox as sandbox
+
+    try:
+        subprocess.run(
+            ["podman", "exec", "-e", "PORTHOLE_CCACHE_STANDALONE=1",
+             sandbox.CONTAINER, "/bin/bash", "-lc",
+             "cd /porthole && source tools/ph-build.sh"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def _kill_inside() -> None:
     """Kill the build INSIDE the container.
 
@@ -455,6 +523,28 @@ def _kill_inside() -> None:
         pass
 
 
+def detach_argv(porthole, aport: str, arch: str, args) -> list:
+    """The argv a detached build re-invokes itself with. Pure, so the
+    forwarding is testable without spawning anything.
+
+    Rebuilt by hand, so every flag that changes what the build DOES has to be
+    listed here or it is silently dropped. Two were: `--force`, which made
+    `pkg build X --force --detach` build without force -- the declared flag
+    that does nothing, already ruled unacceptable once on this branch -- and
+    `--wait`, which made `pkg build X --wait 600 --detach` return EX_OK after
+    publish_pending while the child hit the busy-buildroot check with wait=0,
+    bailed EX_LOCK into the spawn log, and left `pkg watch` following a
+    "running" snapshot for a build that never started.
+    """
+    argv = [str(porthole), "pkg", "build", aport, "--arch", arch,
+            "--timeout", str(args.timeout)]
+    if getattr(args, "force", False):
+        argv.append("--force")
+    if getattr(args, "wait", 0):
+        argv += ["--wait", str(args.wait)]
+    return argv
+
+
 def _detach(ctx, args, aport: str, arch: str) -> int:
     """Start the build in its own session and return immediately.
 
@@ -474,8 +564,7 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
     rundir.mkdir(parents=True, exist_ok=True)
     spawn_log = rundir / f"pkg-{aport}-detached.log"
-    argv = [str(ctx.root / "bin" / "porthole"), "pkg", "build", aport,
-            "--arch", arch, "--timeout", str(args.timeout)]
+    argv = detach_argv(ctx.root / "bin" / "porthole", aport, arch, args)
     with open(spawn_log, "w") as handle:
         proc = subprocess.Popen(argv, cwd=str(ctx.root), stdout=handle,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -488,11 +577,32 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     progress.publish_pending(rundir, f"pkg:{aport}", proc.pid)
     ctx.out.kv("pid", str(proc.pid), 10)
     ctx.out.kv("log", str(spawn_log), 10)
-    ctx.out(ctx.out.paint("  porthole pkg watch          # live bar, costs "
-                          "nothing to leave open", "cyan"))
+    tty = sys.stdout.isatty()
+    ctx.out(ctx.out.paint(watch_hint(tty), "cyan" if tty else "yellow"))
     ctx.out(ctx.out.paint("  porthole pkg status --json  # one-shot, for a "
                           "script or an agent", "cyan"))
     return EX_OK
+
+
+def waiting_line(snap, now=None) -> str:
+    """What `watch` is doing while there is nothing live to attach to.
+
+    Said once immediately and then repeated, never left to silence. Measured:
+    `timeout 5 porthole pkg watch` against an already-finished build printed
+    NOTHING, because the old code's grace window was a bare `continue` --
+    thirty seconds of blank screen that reads as a hang, not as "waiting".
+    Pure (a snapshot and a clock, no file, no sleep) so the wording is
+    testable without driving the loop.
+    """
+    import porthole_progress as progress
+
+    now = time.time() if now is None else now
+    if not snap:
+        return "  nothing has built in this checkout yet -- waiting for a build to start"
+    stopped = progress.finished_at(snap)
+    ago = progress.fmt_dur(now - stopped) if stopped is not None else "a while"
+    return (f"  {snap.get('rung', '?')} finished {ago} ago -- "
+            f"waiting for a new build to start")
 
 
 def _watch(ctx, args) -> int:
@@ -514,48 +624,72 @@ def _watch(ctx, args) -> int:
     path = rundir / "pkg-status.json"
     tty = os.isatty(1)
 
-    # A just-detached build has not published yet. Wait a little rather than
-    # reporting "no build" for the build we were asked to watch.
-    appear = time.time() + 30
-    while not path.exists() and time.time() < appear:
-        time.sleep(0.25)
-    if not path.exists():
+    def snapshot():
+        # Absent, or read mid-rename: both are "nothing to attach to yet",
+        # not an error -- the writer is atomic, so the next read succeeds.
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):
+            return None
+
+    started_watching = time.time()
+    appear = started_watching + 30
+
+    def is_stale(snap):
+        # A run that had already finished before this watch began is
+        # somebody else's build. Keep waiting for ours rather than reporting
+        # theirs -- belt and braces behind publish_pending, for a `watch`
+        # started by hand rather than straight after `--detach`.
+        if not snap:
+            return False
+        stopped = progress.finished_at(snap)
+        return (progress.liveness(snap) != "running" and stopped is not None
+                and stopped < started_watching)
+
+    # Never silent: say what was found BEFORE the first sleep, then keep
+    # saying it (repainted in place on a tty, throttled on a pipe) for as
+    # long as there is nothing live -- instead of the old bare `continue`.
+    last_note = 0.0
+    snap = snapshot()
+    while (snap is None or is_stale(snap)) and time.time() < appear:
+        line = waiting_line(snap)
+        if tty:
+            print("\r\033[2K" + line, end="", flush=True)
+        elif last_note == 0.0 or time.time() - last_note > max(args.interval, 15):
+            last_note = time.time()
+            print(line, flush=True)
+        time.sleep(0.25 if snap is None else args.interval)
+        snap = snapshot()
+    if tty:
+        print("\r\033[2K", end="")
+
+    if snap is None:
         raise Bail("no package build has published a status here", EX_FAIL,
                    "start one with `porthole pkg build <aport>`")
 
-    last_note = 0.0
-    snap = {}
-    started_watching = time.time()
-    while True:
-        try:
-            snap = json.loads(path.read_text())
-        except (OSError, ValueError):
-            # A read that lands mid-rename. The writer is atomic, so the next
-            # one succeeds; treating this as an error would end the watch on a
-            # race that resolves itself in 500ms.
+    # The grace window ran out with nothing new. Say so plainly, then fall
+    # through and render the stale run -- clearly labelled as the PREVIOUS
+    # build, not left to look current the way the silent version did.
+    if is_stale(snap):
+        ctx.out(ctx.out.paint(
+            "  no new build started -- showing the previous run:", "yellow"))
+    else:
+        while True:
+            live = progress.liveness(snap)
+            if tty:
+                print("\r\033[2K  " + progress.line_of(snap), end="", flush=True)
+            elif time.time() - last_note > max(args.interval, 15):
+                last_note = time.time()
+                print("  " + progress.line_of(snap), flush=True)
+            if live != "running":
+                break
             time.sleep(args.interval)
-            continue
-        live = progress.liveness(snap)
-        # A run that had already finished before this watch began is somebody
-        # else's build. Keep waiting for ours rather than reporting theirs --
-        # belt and braces behind publish_pending, for a `watch` started by
-        # hand rather than straight after `--detach`.
-        stopped = progress.finished_at(snap)
-        if (live != "running" and stopped is not None
-                and stopped < started_watching and time.time() < appear):
-            time.sleep(args.interval)
-            continue
+            snap = snapshot() or snap
         if tty:
-            print("\r\033[2K  " + progress.line_of(snap), end="", flush=True)
-        elif time.time() - last_note > max(args.interval, 15):
-            last_note = time.time()
-            print("  " + progress.line_of(snap), flush=True)
-        if live != "running":
-            break
-        time.sleep(args.interval)
+            print("\r\033[2K", end="")
 
-    if tty:
-        print("\r\033[2K", end="")
     head, rows = progress.status_report(snap)
     ctx.out("  " + head)
     for label, value in rows:
@@ -606,6 +740,85 @@ def _status(ctx) -> int:
     return ctx.emit(snap, render)
 
 
+def stop_plan(snap, alive=None) -> tuple:
+    """`("kill", pid)` or `("none", 0)`. Pure, so the decision is testable.
+
+    `state: running` is not evidence that anything is running -- a SIGKILLed
+    build, a reboot, a terminal that went away all leave that field set with
+    no one to clear it, and the pid in it is a number the OS has since been
+    free to hand to something else. progress.liveness() exists for exactly
+    that, and trusting the field instead is how this could signal an unrelated
+    process. `alive` is a parameter rather than a lookup inside so the
+    decision stays pure and testable with no clock and no /proc.
+    """
+    import porthole_progress as progress
+
+    if progress.liveness(snap, alive) != "running":
+        return ("none", 0)
+    pid = (snap or {}).get("pid")
+    return ("kill", pid) if isinstance(pid, int) and pid > 0 else ("none", 0)
+
+
+def _stop(ctx) -> int:
+    """Cancel a running package build, both sides of the container boundary.
+
+    Killing the `podman exec` client does NOT kill what it exec'd: the build
+    keeps compiling inside, still holding the buildroot, and the next build
+    then deletes its source tree. Cancelling used to mean doing both by hand.
+    """
+    import signal
+
+    import porthole_buildroot as buildroot
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    try:
+        snap = json.loads((rundir / "pkg-status.json").read_text())
+    except (OSError, ValueError):
+        snap = {}
+
+    action, pid = stop_plan(snap)
+    if action == "kill":
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    # Always sweep the container side: a build started outside this verb holds
+    # the buildroot just as hard, and that is how the collisions happened.
+    _kill_inside()
+
+    workdir = _pmb_workdir(ctx, build_module()._workspace_usable(ctx)[0])
+    holder = buildroot.lock_holder(workdir)
+    # Only UPDATE a snapshot; never invent one. With no status file at all
+    # snap is {}, and writing it back published `{"state": "failed"}` -- a
+    # failed build that never existed, which `pkg status` and `brief` then
+    # reported as the answer.
+    if snap:
+        snap["state"] = "failed"
+        try:
+            (rundir / "pkg-status.json").write_text(json.dumps(snap, indent=2))
+        except OSError:
+            pass
+
+    def render():
+        if action == "kill":
+            ctx.out(ctx.out.paint(f"  stopped pid {pid}", "green"))
+        else:
+            ctx.out("no package build was running here")
+        ctx.out(ctx.out.paint("  container-side pmbootstrap swept", "grey"))
+        if holder:
+            ctx.out(ctx.out.paint(f"  lock was held by: {holder}", "grey"))
+        _ = progress  # rendering only
+
+    return ctx.emit({"stopped": pid if action == "kill" else None}, render)
+
+
+def build_module():
+    import porthole_cmd_build as build
+
+    return build
+
+
 def cmd_pkg(args, ctx) -> int:
     action = args.action or "status"
     if action == "status":
@@ -614,6 +827,8 @@ def cmd_pkg(args, ctx) -> int:
         return _watch(ctx, args)
     if action == "outdated":
         return _outdated(ctx)
+    if action == "stop":
+        return _stop(ctx)
     return _build(ctx, args)
 
 
@@ -635,8 +850,8 @@ SPEC = {
         "See docs/HANDOFF-package-builds.md."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["build", "status", "watch", "outdated"],
-                      "help": "build | status | watch | outdated"}),
+                      "choices": ["build", "status", "watch", "outdated", "stop"],
+                      "help": "build | status | watch | outdated | stop"}),
         (["target"], {"nargs": "?", "metavar": "APORT",
                       "help": "build: the aport to build"}),
         (["--arch"], {"metavar": "ARCH",
@@ -650,6 +865,8 @@ SPEC = {
                          "help": "build: print the command and stop"}),
         (["--detach"], {"action": "store_true",
                         "help": "build: start it in its own session and return"}),
+        (["--force"], {"action": "store_true",
+                       "help": "build: rebuild even if the apk is current"}),
         (["--interval"], {"type": float, "default": 1.0,
                           "help": "watch: seconds between reads (default 1)"}),
         (["--wait"], {"type": float, "default": 0.0, "metavar": "SECONDS",
@@ -664,5 +881,6 @@ SPEC = {
         "porthole pkg watch",
         "porthole pkg outdated",
         "porthole pkg status --json",
+        "porthole pkg stop",
     ],
 }
