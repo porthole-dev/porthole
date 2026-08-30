@@ -412,6 +412,13 @@ def _build(ctx, args) -> int:
     want = expected_apk(packages, arch, fields)
     before = want.exists() and want.stat().st_mtime if want else False
 
+    if usable:
+        # Arm the native ccache before building. Without this, ccache in the
+        # aarch64 buildroot is itself an emulated binary and every object pays
+        # qemu for hashing its preprocessed source. The kernel path has done
+        # this since the chroot_native fix; packages never inherited it.
+        _arm_ccache(ctx)
+
     # pmbootstrap keeps the real build output in its own log.txt and puts
     # only high-level `=> step` lines on stdout. Following that file is what
     # makes the ninja `[N/M]` fraction reachable at all.
@@ -438,6 +445,33 @@ def _build(ctx, args) -> int:
         f"  {want.name}  ({want.stat().st_size // 1024} KiB"
         f"{'' if fresh else ', UNCHANGED -- nothing was rebuilt'})", "green"))
     return EX_OK
+
+
+def _arm_ccache(ctx) -> None:
+    """Put ccache in chroot_native, where it runs as a native binary.
+
+    tools/ph-build.sh's `_ph_arm_ccache` is what the kernel path already
+    calls on every `tkbuild`; PORTHOLE_CCACHE_STANDALONE makes the same
+    function reachable without envkernel, which the kernel path needs and
+    a package build has no reason to bring up.
+
+    Best effort: a build must never fail because the cache could not be
+    armed. Every failure mode here (podman missing, container down, the
+    chroot not yet bootstrapped) is caught and swallowed -- an unarmed
+    cache just means the next build is slower, not broken.
+    """
+    import subprocess
+
+    import porthole_cmd_sandbox as sandbox
+
+    try:
+        subprocess.run(
+            ["podman", "exec", "-e", "PORTHOLE_CCACHE_STANDALONE=1",
+             sandbox.CONTAINER, "/bin/bash", "-lc",
+             "cd /porthole && source tools/ph-build.sh"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def _kill_inside() -> None:

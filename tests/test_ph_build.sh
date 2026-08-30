@@ -194,5 +194,20 @@ other=$(env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
         _ph_pmb_build device-google-taimen >/dev/null 2>&1; echo $?')
 is "an unrelated build failure is not retried" "$other" "3"
 
+# --- ccache reachable from outside envkernel ------------------------------
+
+test_arm_ccache_is_callable_standalone() {
+	# Package builds pay emulated hashing of every preprocessed source,
+	# because ccache in the aarch64 buildroot IS an aarch64 binary running
+	# under qemu. The kernel path already fixed this by putting ccache in
+	# chroot_native; packages never inherited it. Calling the same function
+	# is the whole fix, so it has to be reachable from outside envkernel.
+	grep -q '^_ph_arm_ccache()' "$ROOT/tools/ph-build.sh" || return 1
+	grep -q 'PORTHOLE_CCACHE_STANDALONE' "$ROOT/tools/ph-build.sh" || return 1
+}
+if test_arm_ccache_is_callable_standalone; then ok; else
+	bad "_ph_arm_ccache is callable standalone" "marker or function missing"
+fi
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

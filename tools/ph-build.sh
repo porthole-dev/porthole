@@ -383,6 +383,16 @@ _ph_arm_ccache() {
 	return 0
 }
 
+# Callable without envkernel, so the PACKAGE path can arm the same cache. The
+# kernel rungs have had native ccache since the chroot_native fix; package
+# builds run ccache as the emulated aarch64 binary in front of the compiler
+# and pay qemu for hashing every preprocessed source.
+# PORTHOLE_CCACHE_STANDALONE is the marker tests/test_ph_build.sh looks for.
+if [ -n "${PORTHOLE_CCACHE_STANDALONE:-}" ]; then
+	_ph_arm_ccache
+	return 0 2>/dev/null || exit 0
+fi
+
 # Bring envkernel up and LEAVE THE CALLER IN $_PH_TREE. The caller must popd.
 #
 # The asymmetry is deliberate: `make` is an alias envkernel defines, aliases
