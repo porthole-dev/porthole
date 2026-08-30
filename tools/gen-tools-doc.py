@@ -23,7 +23,7 @@ GROUPS = [
                                   "recover", "dtbo", "bootimg", "to-fastboot")),
     ("Device state and supervision", ("device", "supervise", "deadman", "soak",
                                       "stallwatch", "lifeline", "hang", "cycle")),
-    ("Power, suspend and thermal", ("suspend", "thermal", "sysstate", "osm",
+    ("Power, suspend and thermal", ("afk", "suspend", "thermal", "sysstate", "osm",
                                     "cpufreq", "usb-wake")),
     ("Display and GPU", ("fps", "dpu", "display", "gesture", "firstpaint",
                          "ringdump", "perf")),
