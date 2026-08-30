@@ -261,6 +261,15 @@ def test_there_is_one_package_build_implementation():
         "aports build still has its own build implementation"
 
 
+def test_force_reaches_pmbootstrap():
+    """A declared flag that silently does nothing is worse than no flag.
+    `aports build --force` became a no-op when it started delegating."""
+    assert "--force" in pkg.container_cmd("phoc", "aarch64", force=True)[-1]
+    assert "--force" not in pkg.container_cmd("phoc", "aarch64")[-1]
+    assert "--force" in pkg.host_cmd("phoc", "aarch64", lax=False, force=True)
+    assert "--force" not in pkg.host_cmd("phoc", "aarch64", lax=False)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

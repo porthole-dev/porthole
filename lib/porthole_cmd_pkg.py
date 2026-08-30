@@ -264,7 +264,7 @@ def outdated(pmaports: pathlib.Path, packages: pathlib.Path, arch: str):
     return found
 
 
-def container_cmd(aport: str, arch: str) -> list[str]:
+def container_cmd(aport: str, arch: str, force: bool = False) -> list[str]:
     """The podman line for a package build. Pure, so WHERE it runs is testable
     without podman.
 
@@ -280,8 +280,11 @@ def container_cmd(aport: str, arch: str) -> list[str]:
     """
     import porthole_cmd_sandbox as sandbox
 
-    call = " ".join(["pmbootstrap", "build", "--lax",
-                     shlex.quote(aport), "--arch", shlex.quote(arch)])
+    argv = ["pmbootstrap", "build", "--lax", shlex.quote(aport),
+            "--arch", shlex.quote(arch)]
+    if force:
+        argv.append("--force")
+    call = " ".join(argv)
     # PYTHONUNBUFFERED is not a nicety, it is what makes this verb work at
     # all. pmbootstrap is Python; writing to a pipe rather than a tty it
     # switches to block buffering and holds its output until it exits.
@@ -293,12 +296,14 @@ def container_cmd(aport: str, arch: str) -> list[str]:
             "/bin/bash", "-lc", f"cd /porthole && {call}"]
 
 
-def host_cmd(aport: str, arch: str, lax: bool) -> list[str]:
+def host_cmd(aport: str, arch: str, lax: bool, force: bool = False) -> list[str]:
     """The host equivalent. Non-lax by default: on a real root filesystem the
     zap is correct, and it is only the rootless workspace that cannot do it."""
     argv = ["pmbootstrap", "build"]
     if lax:
         argv.append("--lax")
+    if force:
+        argv.append("--force")
     return argv + [aport, "--arch", arch]
 
 
@@ -383,12 +388,14 @@ def _build(ctx, args) -> int:
             env[key] = value
     env.update(UNBUFFERED)
 
+    force = getattr(args, "force", False)
     if usable:
-        cmd = container_cmd(aport, arch)
+        cmd = container_cmd(aport, arch, force=force)
         ctx.out(ctx.out.paint("  building IN THE WORKSPACE (container, --lax)",
                               "cyan"))
     elif shutil.which("pmbootstrap"):
-        cmd = host_cmd(aport, arch, bool(env.get("PORTHOLE_LAX_BUILD")))
+        cmd = host_cmd(aport, arch, bool(env.get("PORTHOLE_LAX_BUILD")),
+                       force=force)
         ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
     else:
         raise Bail(f"no workspace and no pmbootstrap on PATH ({why_not})",
@@ -719,6 +726,8 @@ SPEC = {
                          "help": "build: print the command and stop"}),
         (["--detach"], {"action": "store_true",
                         "help": "build: start it in its own session and return"}),
+        (["--force"], {"action": "store_true",
+                       "help": "build: rebuild even if the apk is current"}),
         (["--interval"], {"type": float, "default": 1.0,
                           "help": "watch: seconds between reads (default 1)"}),
         (["--wait"], {"type": float, "default": 0.0, "metavar": "SECONDS",

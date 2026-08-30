@@ -733,7 +733,8 @@ def cmd_build(args, ctx, pmaports) -> int:
             target=name, arch=getattr(args, "arch", None),
             timeout=getattr(args, "timeout", pkgverb.DEFAULT_TIMEOUT),
             verbose=False, dry_run=False, detach=False, wait=0.0,
-            json=getattr(args, "json", False))
+            json=getattr(args, "json", False),
+            force=getattr(args, "force", False))
         rc = pkgverb._build(ctx, forwarded)
         if rc != EX_OK:
             return rc
