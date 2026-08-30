@@ -53,6 +53,18 @@ _APORT_GLOBS = ("*/{}/APKBUILD", "*/*/{}/APKBUILD")
 
 _FIELD = re.compile(r'^(pkgname|pkgver|pkgrel)=["\']?([^"\'#\s]+)', re.M)
 
+# Any simple `name=value` assignment, for expanding the ones the three fields
+# above refer to. Kernel aports almost universally write
+#
+#     _flavor="postmarketos-qcom-msm8998-7.2"
+#     pkgname=linux-$_flavor
+#
+# so reading pkgname literally yields `linux-$_flavor`, and everything
+# downstream then looks for an apk by that name and concludes a package that
+# built perfectly well was never built.
+_ASSIGN = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)=["\']?([^"\'#\n]*)', re.M)
+_VAR = re.compile(r'\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?')
+
 # pmb/parse/_apkbuild.py reads an APKBUILD LINE BY LINE and never executes the
 # shell. So a dependency appended inside a case/esac -- which is how Alpine
 # itself writes a per-arch dependency -- is invisible to pmbootstrap, is never
@@ -69,142 +81,12 @@ _APPEND = re.compile(
     r"^\s*(makedepends|depends|checkdepends)=[\"']?\$\1\s+([^\"'\n]*)", re.M)
 
 
-# One workspace has ONE buildroot chroot per arch, and abuild cleans $srcdir
-# before it unpacks. A second `pmbootstrap build` started while the first is
-# compiling therefore DELETES the first one's source tree mid-flight, and
-# pmbootstrap has no lock of its own. It cost a webkit build 37 minutes in,
-# and the failure named clang rather than the collision:
-#
-#   clang++: error: no such file or directory: '.../TextMetrics.idl'
-#
-# The phone already has this guard (tools/tk-device.sh, exit 75) because one
-# device cannot serve two callers. The buildroot has exactly the same property.
-# Same idiom deliberately: flock plus a `.holder` sidecar, so the second caller
-# is told who is building what instead of queueing blind.
-#
-# flock and not a hand-rolled lockfile, for the reason tk-device.sh gives: the
-# kernel drops it when the holder dies, so a crashed build does not wedge
-# everyone until a human notices.
-# See brain/traps/two-pmbootstrap-builds-destroy-each-other.md.
-LOCK_NAME = ".porthole-buildroot.lock"
-
-
-def _holder_path(workdir) -> pathlib.Path:
-    return pathlib.Path(workdir) / (LOCK_NAME + ".holder")
-
-
-def lock_holder(workdir) -> str:
-    """What is currently building here, or "" if nothing is."""
-    try:
-        return _holder_path(workdir).read_text().strip()
-    except OSError:
-        return ""
-
-
-def _lock_is_free(workdir) -> bool:
-    """A cheap probe, for refusing early rather than after a detach."""
-    import fcntl
-
-    path = pathlib.Path(workdir) / LOCK_NAME
-    try:
-        with open(path, "a") as handle:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                return False
-            fcntl.flock(handle, fcntl.LOCK_UN)
-    except OSError:
-        return True  # cannot tell; the real lock below is the authority
-    return True
-
-
-@contextlib.contextmanager
-def buildroot_lock(workdir, aport: str, wait: float = 0.0):
-    """Exclusive use of the buildroot for the length of one build."""
-    import fcntl
-
-    path = pathlib.Path(workdir) / LOCK_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(path, "a")
-    deadline = time.time() + wait
-    while True:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except OSError:
-            if time.time() >= deadline:
-                who = lock_holder(workdir) or "another build"
-                handle.close()
-                raise Bail(
-                    f"the buildroot is busy: {who}", EX_LOCK,
-                    "starting now would delete its source tree mid-build "
-                    "(brain/traps/two-pmbootstrap-builds-destroy-each-other). "
-                    "Wait for it, or pass --wait SECONDS to queue.") from None
-            time.sleep(1.0)
-    try:
-        _holder_path(workdir).write_text(
-            f"{aport} pid={os.getpid()} since={time.strftime('%H:%M:%S')}\n")
-    except OSError:
-        pass
-    try:
-        yield
-    finally:
-        try:
-            _holder_path(workdir).unlink()
-        except OSError:
-            pass
-        try:
-            fcntl.flock(handle, fcntl.LOCK_UN)
-        finally:
-            handle.close()
-
-
-def foreign_build(ps_output: str) -> str:
-    """A pmbootstrap build running that did NOT come through this verb, or "".
-
-    The flock only binds callers who take it. `porthole sandbox shell
-    --command 'pmbootstrap build ...'` is a bare command runner and takes
-    nothing, and that is exactly how the webkit build that got destroyed was
-    started -- so a lock alone still lets `porthole pkg build` walk into one.
-
-    Reads `ps -eo pid=,args=` and filters HERE rather than asking pgrep to
-    match a pattern. A `pgrep -f "pmbootstrap.*build"` run through `sh -c`
-    puts that pattern into its own command line and matches ITSELF, so a
-    guard written that way reports "busy" forever and never starts -- observed
-    in a real session, waiting on a buildroot that had been free for minutes.
-    A ps line cannot contain the filter, because the filter never reaches it.
-    """
-    for line in ps_output.splitlines():
-        if "pmbootstrap" in line and " build" in line and "pgrep" not in line:
-            # Name the package if it is on the command line; a pid alone sends
-            # the reader back to ps to find out what they are waiting for.
-            words = line.split()
-            for i, word in enumerate(words):
-                if word == "build" and i + 1 < len(words):
-                    tail = [w for w in words[i + 1:] if not w.startswith("-")]
-                    if tail:
-                        return tail[0]
-            return "another pmbootstrap build"
-    return ""
-
-
-def _foreign_build(ctx, in_container: bool) -> str:
-    """Ask the container what is running. Never raises: refusing to build is
-    a safety measure, and it must not itself become a way to fail."""
-    import subprocess
-
-    if not in_container:
-        return ""
-    import porthole_cmd_sandbox as sandbox
-
-    try:
-        done = subprocess.run(
-            ["podman", "exec", sandbox.CONTAINER, "ps", "-eo", "pid=,args="],
-            capture_output=True, text=True, timeout=20)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return foreign_build(done.stdout)
-
+# The buildroot mutex lives in porthole_buildroot: `pmbootstrap checksum`
+# destroyed a kernel build on the redfin port, so a lock only this verb takes
+# is not a lock. Re-exported here because the tests and the call sites below
+# read better with the short names.
+from porthole_buildroot import (  # noqa: E402
+    foreign_build, hold, is_free, lock_holder, running_build)
 
 def _find_pmaports(ctx):
     import porthole_pmaports as pmaports
@@ -224,16 +106,40 @@ def find_aport(pmaports: pathlib.Path, name: str):
     return None
 
 
+def expand_vars(value: str, assignments: dict, depth: int = 4) -> str:
+    """Substitute `$var` / `${var}` from other assignments in the same file.
+
+    Bounded and textual, never a shell. Reading an APKBUILD by executing it is
+    how a build tool acquires arbitrary code execution from a package it was
+    only asked to look at, so a value needing command substitution is left
+    unexpanded and rejected by the caller instead.
+    """
+    for _ in range(depth):
+        if "$" not in value:
+            break
+        value = _VAR.sub(
+            lambda m: assignments.get(m.group(1), m.group(0)), value)
+    return value
+
+
 def apkbuild_fields(text: str) -> dict:
     """`pkgname`/`pkgver`/`pkgrel` out of an APKBUILD.
 
-    A regex and not a shell: reading an APKBUILD by executing it is how a
-    build tool acquires arbitrary code execution from a package it was only
-    asked to look at. These three fields are literal in every APKBUILD that
-    pmbootstrap itself can parse, and one it cannot parse is a bug this verb
-    warns about rather than a case to support.
+    A regex and not a shell, for the reason expand_vars gives.
+
+    A field that still contains `$` after expansion is DROPPED rather than
+    returned literally. Everything downstream turns these three into a
+    filename, and a wrong filename does not fail loudly -- it reports that a
+    package which built perfectly well was never built. Absent is a state the
+    callers already handle ("cannot check"); wrong is not.
     """
-    return {k: v for k, v in _FIELD.findall(text)}
+    assignments = {k: v.strip() for k, v in _ASSIGN.findall(text)}
+    out = {}
+    for key, raw in _FIELD.findall(text):
+        value = expand_vars(raw, assignments).strip()
+        if value and "$" not in value and "`" not in value:
+            out[key] = value
+    return out
 
 
 def static_deps(text: str, var: str) -> set:
@@ -455,7 +361,7 @@ def _build(ctx, args) -> int:
 
     usable, why_not = build._workspace_usable(ctx)
     workdir = _pmb_workdir(ctx, usable)
-    if not args.wait and not _lock_is_free(workdir):
+    if not args.wait and not is_free(workdir):
         raise Bail(f"the buildroot is busy: "
                    f"{lock_holder(workdir) or 'another build'}", EX_LOCK,
                    "two pmbootstrap builds share one buildroot and delete "
@@ -464,7 +370,7 @@ def _build(ctx, args) -> int:
     # directly -- `sandbox shell --command`, a hand-rolled podman exec -- holds
     # nothing, and that is how the build this guard exists to protect was
     # started. So ask the container what is actually running as well.
-    foreign = _foreign_build(ctx, usable)
+    foreign = running_build(ctx, usable)
     if foreign:
         raise Bail(f"a pmbootstrap build is already running: {foreign}",
                    EX_LOCK,
@@ -502,7 +408,7 @@ def _build(ctx, args) -> int:
     # pmbootstrap keeps the real build output in its own log.txt and puts
     # only high-level `=> step` lines on stdout. Following that file is what
     # makes the ninja `[N/M]` fraction reachable at all.
-    with buildroot_lock(workdir, aport, args.wait):
+    with hold(workdir, aport, args.wait):
         rc = build._stream(ctx, cmd, env, args.timeout, f"pkg:{aport}",
                            tracker_cls=progress.PkgTracker, log_prefix="pkg",
                            follow=workdir / "log.txt",

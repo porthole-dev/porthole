@@ -207,77 +207,30 @@ def test_a_subpackage_apk_does_not_invent_an_aport():
         assert dict(pkg.outdated(root, packages, "aarch64")).get("phoc-dev") is None
 
 
-# ---------------------------------------------------------- the buildroot --
-#
-# One workspace, one buildroot per arch, and abuild wipes $srcdir before it
-# unpacks. The cost of getting this wrong is measured: a webkit build died 37
-# minutes in with `clang++: no such file or directory: TextMetrics.idl`,
-# because a second build had replaced the source tree underneath it.
-
-def test_a_second_build_is_refused_while_one_holds_the_buildroot():
-    with tempfile.TemporaryDirectory() as d:
-        with pkg.buildroot_lock(d, "webkit2gtk-6.0"):
-            assert not pkg._lock_is_free(d)
-            try:
-                with pkg.buildroot_lock(d, "gst-plugins-good"):
-                    assert False, "the second build was allowed to start"
-            except Exception as exc:
-                assert "busy" in str(exc)
+def test_a_pkgname_built_from_a_variable_resolves():
+    """Kernel aports almost universally write `pkgname=linux-$_flavor`.
+    Reading that literally makes every downstream filename wrong, and a wrong
+    filename does not fail loudly -- it reports that a package which built
+    perfectly well was never built. Caught on the real taimen kernel aport,
+    where `builds` said not-built while r21 sat in the package dir."""
+    text = ('_flavor="postmarketos-qcom-msm8998-7.2"\n'
+            "pkgname=linux-$_flavor\npkgver=7.2.2\npkgrel=21\n")
+    fields = pkg.apkbuild_fields(text)
+    assert fields["pkgname"] == "linux-postmarketos-qcom-msm8998-7.2"
+    assert pkg.expected_apk(pathlib.Path("/x"), "aarch64", fields).name == \
+        "linux-postmarketos-qcom-msm8998-7.2-7.2.2-r21.apk"
 
 
-def test_the_refusal_names_who_is_building_rather_than_just_saying_busy():
-    """"Someone has it" sends you looking. The holder file is what turns that
-    into an answer -- the same reason tk-device.sh records one."""
-    with tempfile.TemporaryDirectory() as d:
-        with pkg.buildroot_lock(d, "webkit2gtk-6.0"):
-            assert "webkit2gtk-6.0" in pkg.lock_holder(d)
+def test_braced_variables_resolve_too():
+    fields = pkg.apkbuild_fields('_f="x"\npkgname=linux-${_f}\n')
+    assert fields["pkgname"] == "linux-x"
 
 
-def test_the_lock_is_released_and_the_holder_cleared_afterwards():
-    with tempfile.TemporaryDirectory() as d:
-        with pkg.buildroot_lock(d, "phoc"):
-            pass
-        assert pkg.lock_holder(d) == ""
-        assert pkg._lock_is_free(d)
-
-
-def test_waiting_gives_up_with_the_retryable_code_not_a_plain_failure():
-    """75 means "retry"; 1 means "the build failed". An agent that cannot
-    tell them apart reports a busy buildroot as a broken package."""
-    from porthole_cli import EX_LOCK
-
-    with tempfile.TemporaryDirectory() as d:
-        with pkg.buildroot_lock(d, "webkit2gtk-6.0"):
-            try:
-                with pkg.buildroot_lock(d, "phoc", wait=0.2):
-                    assert False, "should not have acquired"
-            except Exception as exc:
-                assert getattr(exc, "code", None) == EX_LOCK, exc
-
-
-def test_a_build_started_outside_the_verb_is_still_detected():
-    """The flock binds only callers who take it. `sandbox shell --command
-    pmbootstrap build ...` takes nothing, and that is exactly how the webkit
-    build that got destroyed had been started."""
-    ps = ("  135565 /usr/bin/python3 /usr/bin/pmbootstrap --as-root --config "
-          "/pmb/pmbootstrap_v3.cfg --details-to-stdout build --lax "
-          "webkit2gtk-6.0 --arch aarch64\n"
-          "  1 /sbin/init\n")
-    assert pkg.foreign_build(ps) == "webkit2gtk-6.0"
-
-
-def test_an_idle_container_reports_no_foreign_build():
-    assert pkg.foreign_build("  1 /sbin/init\n  2 /bin/bash\n") == ""
-
-
-def test_the_guard_cannot_match_its_own_probe():
-    """A `pgrep -f "pmbootstrap.*build"` guard in a shell one-liner puts the
-    pattern into its own command line and matches ITSELF -- an agent waiting
-    that way waits forever on a buildroot that is free. Observed in a real
-    session. Reading ps and filtering here cannot do that, but a pgrep line
-    that somehow appears must still not count."""
-    ps = "  99 sh -c pgrep -af 'pmbootstrap.*build'\n"
-    assert pkg.foreign_build(ps) == ""
+def test_a_field_that_cannot_be_resolved_is_dropped_not_guessed():
+    """Absent is a state the callers handle ("cannot check"). Wrong is not:
+    it reports a built package as unbuilt."""
+    assert "pkgname" not in pkg.apkbuild_fields("pkgname=linux-$undefined\n")
+    assert "pkgname" not in pkg.apkbuild_fields("pkgname=$(uname -r)\n")
 
 
 def main():

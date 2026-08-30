@@ -746,6 +746,53 @@ def _build(ctx, args) -> int:
 _SHELL_CHARS = frozenset(" \t|&;<>()$`\\\"'*?[]{}~#\n")
 
 
+# A raw pmbootstrap call inside the sandbox skips everything the wrapper verbs
+# exist to provide -- the buildroot lock, --lax, the log, the progress bar, the
+# artifact check. Every one of those was paid for:
+#
+#   no lock       two builds share one buildroot and abuild wipes $srcdir, so
+#                 a second build silently deletes the first one's source tree.
+#                 Cost 37 minutes on taimen; cost a whole kernel build on the
+#                 redfin port, where a `checksum` run killed an active build.
+#   no --lax      a non-lax build cannot run in the rootless workspace at all.
+#   no progress   a multi-hour build that reports nothing, which is the exact
+#                 black box `porthole pkg` was built to end.
+#
+# So this is not a style preference, and it is why the redirect is a refusal
+# rather than a hint: a hint printed above four hours of silence is not read.
+_REDIRECT = (
+    ("build", "porthole pkg build <aport>"),
+    ("checksum", "porthole aports checksum <aport>"),
+    ("pkgrel_bump", "porthole aports bump <aport>"),
+)
+
+
+def redirect_for(command) -> tuple:
+    """`(pmbootstrap subcommand, the porthole verb to use)`, or `()`.
+
+    Only the subcommands that MUTATE the buildroot. `pmbootstrap status`,
+    `log`, `config` and `pull` are read-only or cheap and stay available --
+    refusing those would make this guard something people route around.
+    """
+    if not command:
+        return ()
+    text = " ".join(command) if isinstance(command, (list, tuple)) else str(command)
+    if "pmbootstrap" not in text:
+        return ()
+    words = text.replace(";", " ").replace("&&", " ").split()
+    for i, word in enumerate(words):
+        if not word.endswith("pmbootstrap"):
+            continue
+        for candidate in words[i + 1:]:
+            if candidate.startswith("-"):
+                continue
+            for name, verb in _REDIRECT:
+                if candidate == name:
+                    return (name, verb)
+            break
+    return ()
+
+
 def _is_shell_line(text: str) -> bool:
     return any(ch in _SHELL_CHARS for ch in text)
 
@@ -783,6 +830,15 @@ def _shell(ctx, args) -> int:
         raise Bail(f"{CONTAINER} is not running", EX_FAIL,
                    "run `porthole sandbox up` first")
     _assert_lock_matches(ctx)
+
+    hit = () if getattr(args, "raw", False) else redirect_for(args.command)
+    if hit:
+        name, verb = hit
+        raise Bail(
+            f"`pmbootstrap {name}` here takes no buildroot lock", EX_USAGE,
+            f"use `{verb}` instead -- it locks the buildroot, passes --lax, "
+            f"logs, and shows progress. `--raw` overrides this if you really "
+            f"mean to bypass all of that.")
 
     tty = sys.stdin.isatty() and not args.command
     argv = _exec_argv(args.command, tty)
@@ -822,6 +878,9 @@ SPEC = {
         (["--command"], {"nargs": "...", "help": "shell: command instead of a shell"}),
         (["--dry-run"], {"action": "store_true",
                          "help": "shell: print the podman command and stop"}),
+        (["--raw"], {"action": "store_true",
+                     "help": "shell: allow a raw pmbootstrap build/checksum, "
+                             "bypassing the buildroot lock"}),
         (["--force"], {"action": "store_true",
                        "help": "build: rebuild the container image even if "
                                "the tag exists"}),

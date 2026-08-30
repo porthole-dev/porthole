@@ -563,6 +563,58 @@ def test_the_container_is_pointed_at_its_own_pmbootstrap_source():
     assert sb.PMBOOTSTRAP_SRC_IN.startswith("/opt/"), sb.PMBOOTSTRAP_SRC_IN
 
 
+# ------------------------------------------- raw pmbootstrap is redirected --
+#
+# Agents kept reaching past the wrapper verbs and calling pmbootstrap directly
+# through `sandbox shell --command`, which skips the buildroot lock, --lax, the
+# log and the progress bar. Both build-destroying collisions on record were
+# started that way. A hint printed above four hours of silence does not get
+# read, so this is a refusal.
+
+def test_a_raw_pmbootstrap_build_is_redirected_to_the_verb():
+    import porthole_cmd_sandbox as sandbox
+
+    assert sandbox.redirect_for(["pmbootstrap build --lax phoc"])[1] == \
+        "porthole pkg build <aport>"
+    assert sandbox.redirect_for(["pmbootstrap", "build", "phoc"])[0] == "build"
+
+
+def test_checksum_is_redirected_too_because_it_deletes_running_builds():
+    import porthole_cmd_sandbox as sandbox
+
+    assert sandbox.redirect_for(["pmbootstrap checksum phoc"])[0] == "checksum"
+
+
+def test_a_flag_between_pmbootstrap_and_its_verb_does_not_hide_it():
+    import porthole_cmd_sandbox as sandbox
+
+    assert sandbox.redirect_for(["pmbootstrap -y --details build phoc"])[0] == "build"
+
+
+def test_read_only_pmbootstrap_commands_are_left_alone():
+    """Refusing these would make the guard something people route around, and
+    a guard that is routinely bypassed protects nothing."""
+    import porthole_cmd_sandbox as sandbox
+
+    for command in ("pmbootstrap status", "pmbootstrap log",
+                    "pmbootstrap config channel", "pmbootstrap pull"):
+        assert sandbox.redirect_for([command]) == (), command
+
+
+def test_a_command_that_is_not_pmbootstrap_is_left_alone():
+    import porthole_cmd_sandbox as sandbox
+
+    assert sandbox.redirect_for(["ls -la /pmb"]) == ()
+    assert sandbox.redirect_for(None) == ()
+
+
+def test_a_build_hidden_behind_a_cd_is_still_caught():
+    import porthole_cmd_sandbox as sandbox
+
+    assert sandbox.redirect_for(["cd /porthole && pmbootstrap build phoc"])[0] \
+        == "build"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

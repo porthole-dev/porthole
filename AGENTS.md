@@ -105,6 +105,43 @@ porthole build status --json    # rung, phase, progress, elapsed, eta, last line
 this rung took last time on this machine, so the first run of a rung says
 `eta --` rather than inventing a number.
 
+### Userspace packages: `porthole pkg`, never raw pmbootstrap
+
+`porthole build` is the KERNEL loop. For a userspace aport -- phoc, webkit,
+gst-plugins-good -- the verb is `porthole pkg`, and reaching past it to
+`pmbootstrap build` is not a shortcut, it is four separate losses:
+
+```sh
+porthole pkg build webkit2gtk-6.0 --detach   # survives the session
+porthole pkg watch                           # live bar, free to leave open
+porthole pkg status --json                   # one-shot, for you
+porthole pkg outdated                        # what you edited and did not rebuild
+```
+
+- **It takes the buildroot lock.** One workspace has one buildroot per arch and
+  `abuild` wipes `$srcdir` before unpacking, so a second pmbootstrap command
+  deletes the first one's source tree mid-build. This has destroyed a 37-minute
+  webkit build and a full kernel build, and **both failures blamed the
+  compiler.** `pmbootstrap checksum` counts -- it is what killed the kernel one.
+- **It passes `--lax`,** without which a build cannot run in the workspace at all.
+- **It logs, and it reports.** A raw call reports nothing for hours.
+- **It verifies the artifact,** because `pmbootstrap build` can exit 0 having
+  done nothing.
+
+`porthole sandbox shell --command 'pmbootstrap build ...'` is refused for these
+reasons; `--raw` overrides it if you genuinely mean to bypass all of them.
+
+**Run it in the background and let the harness tell you it finished.** Do not
+poll a long build in a loop -- that spends a request per check to re-read a
+number that moved 1%. If you must watch, `porthole pkg watch` costs nothing.
+
+The percentage is real (ninja states its total), but **the ETA is deliberately
+absent during generator steps.** A `[N/M]` counter stalls dead on
+single-threaded codegen -- measured at five steps in four minutes with fifteen
+cores idle, which naively extrapolates to 74 hours on a healthy build. When the
+line says `generating  --/s  eta --`, that is normal and the build is fine.
+**Do not kill a build over a missing ETA.**
+
 `mod` and `boot` are ~15x cheaper than the top rung and were unreachable until
 they were added to the verb table — they existed only as shell functions in
 `tools/ph-build.sh`. If you have been iterating on `kernel`, you are paying ten

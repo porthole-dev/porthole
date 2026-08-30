@@ -381,6 +381,15 @@ def _lint(pmaports, base, ctx) -> list[tuple[str, str]]:
 
 # ------------------------------------------------------------- pmbootstrap --
 
+# pmbootstrap subcommands that touch the shared buildroot. `checksum` is on
+# this list because it is what destroyed a running kernel build on the redfin
+# port: it removed /pmb/chroot_native/home/pmos/build underneath an active
+# compile, and the build then failed naming a missing kernel source file. The
+# two commands look completely independent from the outside, which is exactly
+# why the lock has to be here rather than in the caller's head.
+MUTATES_BUILDROOT = ("build", "checksum", "pkgrel_bump", "install", "zap")
+
+
 def pmb(ctx, *args, timeout=1800, capture=False):
     """Run pmbootstrap, streaming its output by default.
 
@@ -388,9 +397,25 @@ def pmb(ctx, *args, timeout=1800, capture=False):
     see is indistinguishable from a hang. `-y` is passed because every caller
     here has already taken its own confirmation via --yes, and asking twice
     trains people to stop reading prompts.
+
+    Anything that touches the buildroot takes the buildroot mutex first, for
+    the reason MUTATES_BUILDROOT gives.
     """
+    import porthole_buildroot as buildroot
+
     cmd = ["pmbootstrap", "-y", *args]
     ctx.out(ctx.out.paint(f"  $ {' '.join(cmd)}", "grey"))
+    verb = next((a for a in args if not a.startswith("-")), "")
+    if verb in MUTATES_BUILDROOT:
+        workdir = pathlib.Path(
+            ctx.cfg.get("PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
+        ).expanduser()
+        with buildroot.hold(workdir, f"aports {verb}"):
+            return _pmb_run(ctx, cmd, timeout, capture)
+    return _pmb_run(ctx, cmd, timeout, capture)
+
+
+def _pmb_run(ctx, cmd, timeout, capture):
     try:
         if capture:
             proc = subprocess.run(cmd, capture_output=True, text=True,
