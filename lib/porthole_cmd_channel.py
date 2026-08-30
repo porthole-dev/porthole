@@ -14,36 +14,38 @@ from porthole_cli import Bail, EX_FAIL, EX_OK
 import porthole_pmaports as pmap
 
 
-def channel_of_branch(branch: str) -> str:
-    """The channel a pmaports branch represents.
+def channel_of_cfg(text: str) -> str:
+    """The channel pmaports declares in pmaports.cfg, or "".
 
-    pmbootstrap 3.x dropped `channel` as a config key -- asking for it makes
-    argparse reject the name, and porthole rendered that error as
-    `current: unknown` for months. The channel was never really a setting: it
-    is which branch pmaports is on, and `master` is spelled `edge` everywhere
-    a human reads it.
+    Read rather than inferred. `pmbootstrap config channel` stopped being a
+    key in 3.x, and the obvious replacement -- the git branch -- is not the
+    channel either: this checkout sits on `taimen-bringup` while pmaports.cfg
+    declares `channel=edge`. Inferring it from the branch traded "unknown"
+    for a confident wrong answer.
     """
-    if not branch:
-        return ""
-    return "edge" if branch == "master" else branch
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("channel=") and not line.startswith("#"):
+            return line.split("=", 1)[1].strip()
+    return ""
 
 
 def current(cfg) -> str:
-    """Which channel this checkout is on, read from pmaports itself.
+    """Which channel this checkout is on, read from pmaports.cfg.
 
-    No pmbootstrap call: the answer is in the checkout, and asking a tool
-    that no longer knows produced a confident "unknown".
+    `pmbootstrap config channel` is gone in 3.x. The channel lives in
+    pmaports.cfg, not the git branch -- this checkout sits on taimen-bringup
+    while declaring edge, proving the branch is not the channel.
     """
     pmaports = pmap.find_pmaports(cfg)
     if not pmaports:
         return ""
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(pmaports), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=20)
-    except (OSError, subprocess.TimeoutExpired):
+        cfg_file = pmaports / "pmaports.cfg"
+        text = cfg_file.read_text()
+        return channel_of_cfg(text)
+    except (OSError, AttributeError):
         return ""
-    return channel_of_branch(proc.stdout.strip()) if proc.returncode == 0 else ""
 
 
 def cmd_channel(args, ctx) -> int:

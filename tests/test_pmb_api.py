@@ -78,15 +78,21 @@ def test_an_unavailable_subcommand_is_blocked_not_a_finding():
     assert "found problems" not in message.lower()
 
 
-def test_the_channel_comes_from_the_pmaports_branch():
-    """`pmbootstrap config channel` is not a key in 3.x. The channel IS the
-    pmaports branch, which is readable without pmbootstrap at all."""
+def test_the_channel_is_read_from_pmaports_cfg():
+    """Not from the branch. This checkout sits on `taimen-bringup` while
+    pmaports.cfg declares `channel=edge`; deriving it from the branch reported
+    the branch as the channel."""
     import porthole_cmd_channel as channel
 
-    assert channel.channel_of_branch("v24.06") == "v24.06"
-    assert channel.channel_of_branch("master") == "edge"
-    assert channel.channel_of_branch("systemd-edge") == "systemd-edge"
-    assert channel.channel_of_branch("") == ""
+    cfg_text = ("# Reference: https://postmarketos.org/pmaports.cfg\n"
+                "[pmaports]\nversion=7\nchannel=edge\n")
+    assert channel.channel_of_cfg(cfg_text) == "edge"
+
+
+def test_a_pmaports_cfg_without_a_channel_says_so():
+    import porthole_cmd_channel as channel
+
+    assert channel.channel_of_cfg("[pmaports]\nversion=7\n") == ""
 
 
 def main():
