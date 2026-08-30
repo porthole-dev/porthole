@@ -637,31 +637,41 @@ def test_the_image_carries_dtc():
     assert "dtc" in text, "dtc is not installed in the sandbox image"
 
 
+def _dtc_via_container(returncode: int) -> str:
+    """`verify._dtc()` with the host dtc removed and the workspace up.
+
+    Both tests below used to run their assertions only when the host had no
+    dtc -- a state `porthole doctor` tells people to fix -- so on any machine
+    that took that advice they executed nothing and still passed. They guard
+    the two most recent fixes on this branch, so they have to reach the
+    container path whatever the host has.
+    """
+    import porthole_cmd_sandbox as sandbox
+    import porthole_cmd_verify as verify
+
+    class Probe:
+        stdout = "/usr/bin/dtc\n" if returncode == 0 else ""
+
+    Probe.returncode = returncode
+
+    saved = (verify.shutil.which, verify.subprocess.run,
+             sandbox._container_running)
+    verify.shutil.which = lambda *a, **k: None
+    verify.subprocess.run = lambda *a, **k: Probe
+    sandbox._container_running = lambda *a, **k: True
+    try:
+        return verify._dtc()
+    finally:
+        (verify.shutil.which, verify.subprocess.run,
+         sandbox._container_running) = saved
+
+
 def test_a_container_without_dtc_skips_rather_than_failing():
     """A tooling gap must not read as a check failure. With the container up
     but the image predating the dtc change, verify reported
     `fail device tree compiles: executable dtc not found` -- the same
     confusion `aports lint` was fixed for on this branch."""
-    import porthole_cmd_verify as verify
-
-    calls = []
-
-    def fake_run(argv, **kwargs):
-        calls.append(argv)
-
-        class R:
-            returncode = 1
-            stdout = ""
-        return R()
-
-    original = verify.subprocess.run
-    verify.subprocess.run = fake_run
-    try:
-        # No host dtc on this machine, so this exercises the container path.
-        result = verify._dtc()
-    finally:
-        verify.subprocess.run = original
-    assert result == "" or "podman" not in result, result
+    assert _dtc_via_container(1) == "", _dtc_via_container(1)
 
 
 def test_the_containerised_dtc_can_receive_stdin():
@@ -669,11 +679,10 @@ def test_the_containerised_dtc_can_receive_stdin():
     stdin -- so the fallback compiled nothing and reported
     `<stdin>:0.0 syntax error`, which reads as a broken device tree rather
     than as a command that was never given any input."""
-    import porthole_cmd_verify as verify
+    import porthole_cmd_sandbox as sandbox
 
-    found = verify._dtc()
-    if found.startswith("podman"):
-        assert "-i" in found.split(), found
+    found = _dtc_via_container(0)
+    assert found == "podman exec -i {} dtc".format(sandbox.CONTAINER), found
 
 
 def main():

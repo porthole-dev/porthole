@@ -122,10 +122,21 @@ def cmd_brief(args, ctx) -> int:
         pkg_snap = json.loads((rundir / "pkg-status.json").read_text())
     except (OSError, ValueError):
         pkg_snap = {}
-    pmb_workdir = pathlib.Path(
-        cfg.get("PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
-    ).expanduser()
-    builds_line = activity_summary(pkg_snap, buildroot.lock_holder(pmb_workdir))
+    # The HOST pmbootstrap dir is the wrong place to look for the lock on the
+    # default path: a workspace build takes it in sandbox._sandbox_pmb(), so
+    # probing ~/.local/var/pmbootstrap reported "buildroot free" for exactly
+    # the foreign build this line exists to catch. `pkg` already decides this
+    # the right way; reuse its decision rather than a second copy. Never
+    # fatal: brief must not crash because a lock file is unreadable.
+    import porthole_cmd_build as _build
+    import porthole_cmd_pkg as _pkg
+
+    try:
+        pmb_workdir = _pkg._pmb_workdir(ctx, _build._workspace_usable(ctx)[0])
+        holder = buildroot.lock_holder(pmb_workdir)
+    except Exception:  # noqa: BLE001
+        holder = ""
+    builds_line = activity_summary(pkg_snap, holder)
 
     laws = _notes(root, "laws")
     profile_gaps = [k for k in ("PORTHOLE_SOC", "PORTHOLE_ARCH",
