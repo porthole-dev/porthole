@@ -131,9 +131,17 @@ porthole pkg outdated                        # what you edited and did not rebui
 `porthole sandbox shell --command 'pmbootstrap build ...'` is refused for these
 reasons; `--raw` overrides it if you genuinely mean to bypass all of them.
 
-**Run it in the background and let the harness tell you it finished.** Do not
-poll a long build in a loop -- that spends a request per check to re-read a
-number that moved 1%. If you must watch, `porthole pkg watch` costs nothing.
+**Run it in the background and let the harness tell you it finished -- but
+that puts the bar somewhere the HUMAN CANNOT SEE.** A background task's
+stdout is a log file or a buffer the harness reads, not a terminal in front of
+a person. `porthole pkg watch` exists precisely so the developer is never
+blind to a build that is running because you decided not to poll it, and it
+only works if they know to type it. So every time you start a build, you MUST
+put `porthole pkg watch` in your reply to the human as a command they can run
+right now -- not "if you must watch", not only when they ask, every time,
+full stop. Do not poll the status yourself in a loop, though: that still
+spends a request per check to re-read a number that moved 1%. Say the command
+to the human; do not read it back to yourself.
 
 The percentage is real (ninja states its total), but **the ETA is deliberately
 absent during generator steps.** A `[N/M]` counter stalls dead on

@@ -308,6 +308,17 @@ def test_the_brief_says_idle_when_nothing_is_building():
     assert "idle" in brief.activity_summary({}, holder="", alive=lambda _: False)
 
 
+def test_every_build_says_how_to_watch_it_not_only_a_detached_one():
+    """The developer could only watch a build if the agent happened to use
+    --detach. Run as a background task -- which AGENTS.md tells agents to do --
+    the bar goes to a log the human never sees, so nothing ever told them how
+    to look."""
+    assert "porthole pkg watch" in pkg.watch_hint(tty=True)
+    assert "porthole pkg watch" in pkg.watch_hint(tty=False)
+    # Loudest exactly when the human cannot see the bar.
+    assert len(pkg.watch_hint(tty=False)) > len(pkg.watch_hint(tty=True))
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -36,6 +36,7 @@ import pathlib
 import re
 import shlex
 import shutil
+import sys
 import time
 
 from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK
@@ -401,6 +402,15 @@ def _build(ctx, args) -> int:
         raise Bail(f"no workspace and no pmbootstrap on PATH ({why_not})",
                    EX_FAIL, "run `porthole sandbox up` first")
 
+    # Said every time, not only on --detach: an agent running this build as a
+    # background task is the exact case where the bar goes into a log the
+    # human never opens. `porthole pkg watch` is the only way back in.
+    # (--detach prints its own copy below, alongside the pid/log it just
+    # produced, so skip here rather than say it twice in the same run.)
+    tty = sys.stdout.isatty()
+    if args.dry_run or not args.detach:
+        ctx.out(ctx.out.paint(watch_hint(tty), "cyan" if tty else "yellow"))
+
     if args.dry_run:
         print(" ".join(shlex.quote(a) for a in cmd))
         return EX_OK
@@ -445,6 +455,21 @@ def _build(ctx, args) -> int:
         f"  {want.name}  ({want.stat().st_size // 1024} KiB"
         f"{'' if fresh else ', UNCHANGED -- nothing was rebuilt'})", "green"))
     return EX_OK
+
+
+def watch_hint(tty: bool) -> str:
+    """How to watch this build, said every time a build starts.
+
+    Printed in EVERY mode, not just --detach. The bar goes to whatever
+    captured stdout, so when an agent runs the build in a background task the
+    developer sees nothing at all -- which is the whole reason this exists.
+    Loudest exactly when stdout is not a terminal, because that is when the
+    human cannot see the bar.
+    """
+    if tty:
+        return "  porthole pkg watch  -- live bar in another terminal"
+    return ("  >>> HUMAN CAN'T SEE THIS BUILD -- stdout is captured, not a "
+            "terminal. Tell them to run: porthole pkg watch")
 
 
 def _arm_ccache(ctx) -> None:
@@ -529,8 +554,8 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     progress.publish_pending(rundir, f"pkg:{aport}", proc.pid)
     ctx.out.kv("pid", str(proc.pid), 10)
     ctx.out.kv("log", str(spawn_log), 10)
-    ctx.out(ctx.out.paint("  porthole pkg watch          # live bar, costs "
-                          "nothing to leave open", "cyan"))
+    tty = sys.stdout.isatty()
+    ctx.out(ctx.out.paint(watch_hint(tty), "cyan" if tty else "yellow"))
     ctx.out(ctx.out.paint("  porthole pkg status --json  # one-shot, for a "
                           "script or an agent", "cyan"))
     return EX_OK
