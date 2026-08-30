@@ -533,6 +533,39 @@ def test_at_most_two_diagnoses_are_offered():
     assert len(B.diagnose(noisy)) <= 2
 
 
+def test_the_host_branch_names_both_cause_and_fix_with_no_pmbootstrap():
+    """A Pixel 5 porter had no host pmbootstrap and the kernel build path
+    assumed one, failing with an error that named neither cause nor fix."""
+    import shutil
+    import porthole_cmd_build as build
+    from porthole_cli import Bail
+
+    class FakeOut:
+        def __call__(self, *a, **k):
+            pass
+
+        def paint(self, s, _color):
+            return s
+
+    class FakeCtx:
+        root = str(ROOT)
+        cfg = {}
+        out = FakeOut()
+
+    real_which = shutil.which
+    shutil.which = lambda name: None if name == "pmbootstrap" else real_which(name)
+    try:
+        try:
+            build._run(FakeCtx(), "tkbuild", 60, host=True)
+        except Bail as exc:
+            assert "pmbootstrap" in exc.message, exc.message
+            assert "sandbox up" in exc.hint or "install pmbootstrap" in exc.hint, exc.hint
+        else:
+            raise AssertionError("expected Bail with no host pmbootstrap")
+    finally:
+        shutil.which = real_which
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

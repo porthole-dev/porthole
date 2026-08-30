@@ -443,6 +443,14 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
         # attempts before they noticed the tail.
         ctx.out(ctx.out.paint("  building IN THE WORKSPACE (container)", "cyan"))
     else:
+        # A Pixel 5 porter had no workspace and no host pmbootstrap either,
+        # and hit an error that named neither cause nor fix.
+        if not shutil.which("pmbootstrap"):
+            raise Bail(
+                f"no workspace and no host pmbootstrap ({why_not})", EX_FAIL,
+                "run `porthole sandbox up`, or install pmbootstrap on the "
+                "host — the redfin port hit this with neither and got an "
+                "error that named neither")
         cmd = _host_cmd(script, func, extra)
         ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
     return _stream(ctx, cmd, env, timeout, rung or func)
