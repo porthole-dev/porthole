@@ -461,7 +461,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `brief` | everything an agent needs to start a session, in one call | yes | no |
 | `slots` | read A/B slot policy from the device, never guess it | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
-| `pkg` | build a userspace aport, with a real progress bar | yes | no |
+| `pkg` | find, fork and build a userspace aport, with a real progress bar | yes | needs --yes |
 | `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |
 | `verify` | every check that runs with no device attached | yes | no |
 | `tools` | search the toolbox and read a tool's contract | yes | no |

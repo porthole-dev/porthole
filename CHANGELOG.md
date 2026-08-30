@@ -5,6 +5,21 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- `porthole pkg search` and `porthole pkg fork` — pmbootstrap keeps pmaports
+  and Alpine's aports side by side and `pmbootstrap build` reads only the
+  first, so Alpine's twelve thousand packages were present, useful and
+  unbuildable, with nothing to say so. `pkg build posh` answered "no aport
+  named posh" and pointed at `porthole aports`, which lists the packages
+  named after your device and could not have found it under any
+  circumstances. `search` looks in both trees, says which one a name is in,
+  and falls back to `difflib` so `posh` returns `phosh`; `fork` is the
+  missing rung that copies an Alpine aport into pmaports where a build can
+  see it, instead of reaching past porthole to `pmbootstrap aportgen`.
+- `porthole aports status` lists the packages you have forked, not only the
+  ones named after your device. Ten of them were invisible on the taimen
+  port — `temp/gst-plugins-good`, `temp/libcamera`, `temp/phoc`,
+  `temp/webkit2gtk-6.0`, `main/modemmanager` and more — because what makes a
+  package yours is a commit, not a name.
 - `porthole slots` — A/B slot state read from the device by `fastboot getvar`
   rather than from a note somebody wrote down, and the retry counters that
   explain a boot landing in the bootloader by itself.
@@ -77,6 +92,15 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   missing, and refuses (in code) to report a failure without a fix.
 
 ### Fixed
+- `porthole aports` computed its base ref from `pmbootstrap config channel`,
+  a key removed in pmbootstrap 3.x — 150ms spent on a subprocess whose only
+  possible answer was an argparse error, after which every caller fell back
+  to `origin/master`. Where upstream's trunk is `main`, that base spanned
+  1676 commits and 2054 directories instead of the 226 commits the port
+  wrote, so `aports patch` would have written 1676 patch files and called
+  them your series. The channel is now read from `pmaports.cfg`, and the
+  remote-tracking ref is preferred over a stale local branch of the same
+  name.
 - `pkg build --force --detach` built without `--force`, and `--wait N --detach`
   returned success while the child bailed on the busy buildroot: the detached
   argv was rebuilt by hand and dropped both flags.

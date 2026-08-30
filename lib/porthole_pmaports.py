@@ -59,6 +59,23 @@ def find_pmaports(cfg=None) -> pathlib.Path | None:
     return None
 
 
+def find_aports_upstream(pmaports) -> pathlib.Path | None:
+    """Alpine's aports checkout, which pmbootstrap clones beside pmaports.
+
+    Not a config key of its own: pmbootstrap puts both trees in the same
+    cache_git/ directory and nothing downstream would work if they were
+    apart, so a knob here would only be a second place to be wrong.
+
+    Worth having at all because the two trees are not interchangeable.
+    `pmbootstrap build` reads pmaports and nothing else, so Alpine's twelve
+    thousand packages are present, useful, and unbuildable until
+    `aportgen --fork-alpine` copies one across. Which tree a name is in IS
+    the answer to "why did my build say the package does not exist".
+    """
+    path = pathlib.Path(pmaports).parent / "aports_upstream"
+    return path if (path / "main").is_dir() else None
+
+
 class Device:
     """One device package, as pmaports describes it."""
 

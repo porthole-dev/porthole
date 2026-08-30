@@ -39,7 +39,8 @@ import subprocess
 # here.
 PORTHOLE_USES = {
     "subcommands": frozenset({
-        "build", "checksum", "ci", "config", "kconfig", "pkgrel_bump",
+        "aportgen", "build", "checksum", "ci", "config", "kconfig",
+        "pkgrel_bump",
     }),
     "config_keys": frozenset({"ui"}),
 }

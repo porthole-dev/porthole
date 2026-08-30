@@ -78,6 +78,44 @@ def _device_paths(ctx, pmaports) -> list[str]:
     return sorted(set(out))
 
 
+def local_forks(ctx, pmaports, exclude=()) -> list[str]:
+    """Packages THIS branch has changed, which is a different question.
+
+    `_device_paths` answers "named after my phone", and that was the only
+    answer porthole had. It is the wrong one for a fork: temp/gst-plugins-good
+    is this port's work and is named after gstreamer, so it -- along with
+    temp/phoc and temp/webkit2gtk-6.0 -- was invisible in every listing while
+    being the thing under active development.
+
+    What makes a package yours is a commit, not a name. So: every package
+    directory touched since the channel's branch, plus anything dirty in the
+    working tree right now.
+    """
+    base = _channel_branch(ctx, pmaports) or "origin/master"
+    touched = set()
+    rc, _, _ = git(pmaports, "rev-parse", "--verify", "--quiet", base)
+    if rc == 0:
+        rc, out, _ = git(pmaports, "log", "--format=", "--name-only",
+                         f"{base}..HEAD", timeout=120)
+        if rc == 0:
+            touched.update(out.splitlines())
+    rc, out, _ = git(pmaports, "status", "--porcelain")
+    if rc == 0:
+        touched.update(line[3:].strip() for line in out.splitlines()
+                       if line.strip())
+
+    # The package directory is the parent of the changed file -- an APKBUILD,
+    # a patch, a deviceinfo. Kept only when that parent still holds an
+    # APKBUILD, which drops both tree-root files (README, channels.cfg) and
+    # packages deleted since.
+    found = set()
+    for path in touched:
+        parent = path.rsplit("/", 1)[0] if "/" in path else ""
+        if parent and (pmaports / parent / "APKBUILD").is_file():
+            found.add(parent)
+    return sorted(found - set(exclude))
+
+
 # ------------------------------------------------------------------ status --
 
 def cmd_status(args, ctx, pmaports) -> int:
@@ -100,12 +138,13 @@ def cmd_status(args, ctx, pmaports) -> int:
     mine = _device_paths(ctx, pmaports)
     mine_changed = [c for c in changes
                     if any(c[3:].startswith(p) for p in mine)]
+    forks = local_forks(ctx, pmaports, exclude=mine)
 
     payload = {
         "pmaports": str(pmaports), "branch": branch, "upstream": upstream,
         "ahead": ahead, "behind": behind,
         "changes": changes, "device_paths": mine,
-        "device_changes": mine_changed,
+        "device_changes": mine_changed, "forks": forks,
         "clean": not changes,
     }
 
@@ -141,10 +180,16 @@ def cmd_status(args, ctx, pmaports) -> int:
             o.heading("your device's packages")
             for path in mine:
                 o(f"  {path}")
-        o.blank()
+            o.blank()
+        if forks:
+            o.heading("packages you have forked")
+            for path in forks:
+                o(f"  {path}")
+            o.blank()
         o.hint("porthole aports diff            what changed")
         o.hint("porthole aports start <topic>   a branch for a new change")
         o.hint("porthole aports patch           a series ready to send")
+        o.hint("porthole pkg search <text>      what else is buildable")
 
     return ctx.emit(payload, render)
 
@@ -197,14 +242,32 @@ def _channel_branch(ctx, pmaports) -> str:
 
     Branching a fix off whatever happened to be checked out is how a change
     aimed at edge ends up based on a stable release.
+
+    Two things this gets right that the previous version did not.
+
+    The channel is read from pmaports.cfg, not from `pmbootstrap config
+    channel` -- that key is gone in 3.x, so the old call spent 150ms on a
+    subprocess whose only possible answer was an argparse error, and every
+    caller then silently fell back to `origin/master`.
+
+    And the REMOTE-tracking ref is preferred over a local branch of the same
+    name. Nothing updates the local trunk, so on a working checkout
+    `master..HEAD` spanned 1676 commits touching 2054 directories -- all of
+    upstream since March -- where `origin/main..HEAD` is the 226 commits
+    this port actually wrote. A base that wrong does not fail. It answers,
+    which is worse: `aports patch` would have written 1676 patch files and
+    called them your series.
     """
-    try:
-        proc = subprocess.run(["pmbootstrap", "config", "channel"],
-                              capture_output=True, text=True, timeout=20)
-        channel = proc.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return pmap.channels(pmaports).get(channel, {}).get("branch_pmaports", "")
+    import porthole_cmd_channel as channel
+
+    name = channel.current(ctx.cfg)
+    branch = pmap.channels(pmaports).get(name, {}).get("branch_pmaports", "")
+    candidates = [f"origin/{branch}", branch] if branch else []
+    for ref in candidates + ["origin/HEAD"]:
+        rc, _, _ = git(pmaports, "rev-parse", "--verify", "--quiet", ref)
+        if rc == 0:
+            return ref
+    return ""
 
 
 # -------------------------------------------------------------------- diff --

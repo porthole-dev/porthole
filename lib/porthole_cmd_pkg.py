@@ -30,16 +30,18 @@ WHAT IT DOES NOT DO
 from __future__ import annotations
 
 import contextlib
+import difflib
 import json
 import os
 import pathlib
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import time
 
-from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE
+from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE, EX_USAGE
 
 # Four hours. webkit is the reason: it is measured in hours on this hardware,
 # and a timeout that kills it at the default half hour would be a tool that
@@ -105,6 +107,141 @@ def find_aport(pmaports: pathlib.Path, name: str):
         for hit in sorted(pmaports.glob(pattern.format(name))):
             return hit.parent
     return None
+
+
+# How many hits a listing prints before it stops being a listing. `pkg search
+# lib` matches two thousand packages, and a screen of those is not an answer.
+LIST_CAP = 40
+
+
+# ponytail: names only, never subpackages. `libgstreamer` is built by
+# `gstreamer` and is declared inside its APKBUILD, so indexing subpackages
+# means READING 14,000 files instead of stat-ing 14,000 directories -- and
+# the origin package is the one you fork and build regardless. Parse
+# `subpackages=` here if a miss ever costs more than the scan would.
+def scan_tree(root) -> dict:
+    """Every package in an aports-shaped tree, as {name: directory}.
+
+    A directory is a package iff it holds an APKBUILD. Structural, rather
+    than a list of category names to keep current: pmaports has cross/,
+    modem/ and extra-repos/ sitting next to docs/, and Alpine's tree has
+    scripts/ next to community/, so any hand-written list is one upstream
+    reorganisation away from lying.
+
+    Two levels deep, because device aports nest (device/testing/<name>) and
+    everything else does not -- the same shape `_APORT_GLOBS` looks in.
+
+    Both trees together are 14,000 packages and cost ~70ms, so there is no
+    cache here and no staleness bug to go with it.
+    """
+    found: dict = {}
+    if not root:
+        return found
+    try:
+        categories = [e for e in os.scandir(root)
+                      if e.is_dir() and not e.name.startswith(".")]
+    except OSError:
+        return found
+    for category in categories:
+        try:
+            children = [e for e in os.scandir(category.path) if e.is_dir()]
+        except OSError:
+            continue
+        for child in children:
+            if os.path.exists(os.path.join(child.path, "APKBUILD")):
+                found.setdefault(child.name, pathlib.Path(child.path))
+                continue
+            try:
+                nested = [e for e in os.scandir(child.path) if e.is_dir()]
+            except OSError:
+                continue
+            for grandchild in nested:
+                if os.path.exists(os.path.join(grandchild.path, "APKBUILD")):
+                    found.setdefault(grandchild.name,
+                                     pathlib.Path(grandchild.path))
+    return found
+
+
+def search(pmaports, upstream, text: str):
+    """Packages matching `text` across both trees. Returns (hits, guessed).
+
+    Substring first. When nothing contains the text it falls back to
+    difflib, because the search that produced this verb was `posh` for
+    `phosh`: a substring match answers that with silence, and one stdlib
+    call answers it with the package.
+
+    A name in both trees is reported as pmaports', because a pmaports copy
+    shadows Alpine's and is the one `pmbootstrap build` will use.
+    """
+    local, alpine = scan_tree(pmaports), scan_tree(upstream)
+    every = sorted(set(local) | set(alpine))
+    needle = text.lower()
+
+    # Exact match first, then shortest: every hit contains the text, so the
+    # one with least around it is the one that was meant. Alphabetical put
+    # `asteroid-calculator` above `gnome-calculator` for the search
+    # "calculator", and the follow-up hint names the first row.
+    names = sorted((n for n in every if needle in n.lower()),
+                   key=lambda n: (n.lower() != needle, len(n), n))
+    guessed = False
+    if not names:
+        # difflib's own ranking is already best-first; do not re-sort it.
+        names = difflib.get_close_matches(needle, every, n=8)
+        guessed = bool(names)
+
+    hits = []
+    for name in names:
+        in_pmaports = name in local
+        path = local[name] if in_pmaports else alpine[name]
+        root = pmaports if in_pmaports else upstream
+        hits.append({
+            "name": name,
+            "tree": "pmaports" if in_pmaports else "alpine",
+            "where": f"{path.parent.relative_to(root)}/",
+            "path": str(path),
+        })
+    return hits, guessed
+
+
+def apkbuild_version(directory) -> str:
+    """`pkgver-rpkgrel` for one package, or "". Only ever called on a hit."""
+    try:
+        text = (pathlib.Path(directory) / "APKBUILD").read_text(errors="replace")
+    except OSError:
+        return ""
+    fields = apkbuild_fields(text)
+    if "pkgver" not in fields:
+        return ""
+    return f"{fields['pkgver']}-r{fields.get('pkgrel', '?')}"
+
+
+def missing_aport_hint(pmaports, upstream, name):
+    """(message, hint) for a name pmaports does not have. Pure, so testable.
+
+    There are three different reasons a build cannot find an aport and the
+    old code collapsed all of them into one sentence -- "`porthole aports`
+    lists what is there" -- which was not even true: that verb lists the
+    packages named after your device. `porthole pkg build posh` therefore
+    reported a real failure and then pointed at a command which could not
+    have found the package under any circumstances. That dead end is what
+    this whole pair of actions came from, so it is fixed at the source.
+    """
+    if upstream:
+        # The same one-level glob aportgen uses, so a name accepted here is a
+        # name aportgen will also find.
+        hits = sorted(upstream.glob(f"*/{name}"))
+        if hits:
+            return (f"{name} is Alpine's ({hits[0].parent.name}/), not "
+                    f"pmaports' -- `pmbootstrap build` reads pmaports only",
+                    f"porthole pkg fork {name} --yes   then build it")
+    pool = sorted(set(scan_tree(pmaports)) | set(scan_tree(upstream)))
+    close = difflib.get_close_matches(name, pool, n=1)
+    if close:
+        return (f"no aport named {name}",
+                f"did you mean {close[0]}?   "
+                f"`porthole pkg search {name}` for the rest")
+    return (f"no aport named {name}",
+            f"porthole pkg search {name}   searches both aports trees")
 
 
 def expand_vars(value: str, assignments: dict, depth: int = 4) -> str:
@@ -285,16 +422,53 @@ def container_cmd(aport: str, arch: str, force: bool = False) -> list[str]:
             "--arch", shlex.quote(arch)]
     if force:
         argv.append("--force")
-    call = " ".join(argv)
-    # PYTHONUNBUFFERED is not a nicety, it is what makes this verb work at
-    # all. pmbootstrap is Python; writing to a pipe rather than a tty it
-    # switches to block buffering and holds its output until it exits.
-    # Measured: five minutes into a gst-plugins-good build, with cc and lto1
-    # visibly running inside the container, the log file was ZERO BYTES and
-    # the bar had never moved. Every line arrives at the end, which is exactly
-    # the black box this was built to replace.
+    return in_container(" ".join(argv))
+
+
+def in_container(call: str) -> list[str]:
+    """Wrap one pmbootstrap command line for the workspace container.
+
+    PYTHONUNBUFFERED is not a nicety, it is what makes `pkg build` work at
+    all. pmbootstrap is Python; writing to a pipe rather than a tty it
+    switches to block buffering and holds its output until it exits.
+    Measured: five minutes into a gst-plugins-good build, with cc and lto1
+    visibly running inside the container, the log file was ZERO BYTES and
+    the bar had never moved. Every line arrives at the end, which is exactly
+    the black box this was built to replace.
+    """
+    import porthole_cmd_sandbox as sandbox
+
     return ["podman", "exec", "-e", "PYTHONUNBUFFERED=1", sandbox.CONTAINER,
             "/bin/bash", "-lc", f"cd /porthole && {call}"]
+
+
+def container_has_upstream() -> bool:
+    """Whether the workspace can see Alpine's aports.
+
+    ASKED, not assumed. Hardcoding "the container never has it" would mean
+    that adding the mount fixes nothing until somebody also remembers to
+    delete a refusal in here, which is how a guard outlives its reason.
+    """
+    try:
+        return subprocess.run(
+            in_container("test -d /pmb/cache_git/aports_upstream"),
+            capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def fork_cmd(name: str) -> list[str]:
+    """The podman line for a fork. Pure, so WHERE it runs is testable.
+
+    aportgen belongs in the container for the same reason a build does, and
+    it took a real attempt to find out: on the host, `pmbootstrap aportgen`
+    asks the privilege broker to copy an APKINDEX into a cache directory
+    that does not exist yet, ph-sudo refuses the unresolvable destination,
+    and the fork dies at exit 78 having written nothing. Inside the
+    workspace root maps to your own uid and no broker is involved.
+    """
+    return in_container(
+        f"pmbootstrap -y aportgen --fork-alpine {shlex.quote(name)}")
 
 
 def host_cmd(aport: str, arch: str, lax: bool, force: bool = False) -> list[str]:
@@ -353,8 +527,11 @@ def _build(ctx, args) -> int:
     pmaports = _find_pmaports(ctx)
     directory = find_aport(pmaports, aport)
     if directory is None:
-        raise Bail(f"no aport named {aport} under {pmaports}", EX_FAIL,
-                   "`porthole aports` lists what is there")
+        import porthole_pmaports as pmap
+
+        message, hint = missing_aport_hint(
+            pmaports, pmap.find_aports_upstream(pmaports), aport)
+        raise Bail(message, EX_FAIL, hint)
 
     text = (directory / "APKBUILD").read_text(errors="replace")
     fields = apkbuild_fields(text)
@@ -834,6 +1011,197 @@ def _stop(ctx) -> int:
     return ctx.emit({"stopped": pid if action == "kill" else None}, render)
 
 
+def _fork_names(ctx, pmaports) -> set:
+    """Which pmaports packages this branch has actually changed."""
+    import porthole_cmd_aports as aports
+
+    try:
+        return {path.rsplit("/", 1)[-1]
+                for path in aports.local_forks(ctx, pmaports)}
+    except Bail:
+        return set()
+
+
+def _search(ctx, args) -> int:
+    """What is buildable, and out of which tree.
+
+    Nothing answered this before. `porthole aports` lists the packages named
+    after your device, which is a much smaller question and was the only one
+    on offer -- so a name that was not a kernel or a device package looked
+    like a name that did not exist.
+    """
+    import porthole_pmaports as pmap
+
+    text = args.target
+    if not text:
+        raise Bail("search for what?", EX_USAGE,
+                   "porthole pkg search calculator")
+
+    pmaports = _find_pmaports(ctx)
+    upstream = pmap.find_aports_upstream(pmaports)
+    hits, guessed = search(pmaports, upstream, text)
+    forks = _fork_names(ctx, pmaports) if hits else set()
+
+    shown = hits[:LIST_CAP]
+    for hit in shown:
+        hit["version"] = apkbuild_version(hit["path"])
+        hit["state"] = ("forked" if hit["name"] in forks
+                        else "buildable" if hit["tree"] == "pmaports"
+                        else "needs a fork")
+
+    payload = {"query": text, "matched": len(hits), "guessed": guessed,
+               "alpine_tree": str(upstream) if upstream else "",
+               "packages": shown}
+
+    def render():
+        o = ctx.out
+        if not shown:
+            o(f"nothing like {text!r} in either aports tree.")
+            if not upstream:
+                o.blank()
+                o.hint("Alpine's aports checkout is missing, so only pmaports "
+                       "was searched — `pmbootstrap pull` clones it")
+            return
+        if guessed:
+            o(o.paint(f"nothing contains {text!r}. The closest names:",
+                      "yellow"))
+            o.blank()
+
+        name_w = max(len(h["name"]) for h in shown)
+        where_w = max(len(h["where"]) for h in shown)
+        for tree, title in (
+                ("pmaports", "pmaports — buildable now"),
+                ("alpine", "alpine — fork it before you can build it")):
+            rows = [h for h in shown if h["tree"] == tree]
+            if not rows:
+                continue
+            o.heading(title)
+            for hit in rows:
+                mine = (o.paint("   yours", "green")
+                        if hit["state"] == "forked" else "")
+                o(f"  {hit['name']:<{name_w}}  "
+                  f"{o.paint(hit['where'].ljust(where_w), 'grey')}  "
+                  f"{hit['version']}{mine}")
+            o.blank()
+        if len(hits) > len(shown):
+            o(f"  ... and {len(hits) - len(shown)} more; narrow the search.")
+            o.blank()
+
+        first = shown[0]
+        if first["tree"] == "alpine":
+            o.hint(f"porthole pkg fork {first['name']} --yes   "
+                   f"copy it into pmaports, where a build can see it")
+        else:
+            o.hint(f"porthole pkg build {first['name']}")
+
+    return ctx.emit(payload, render)
+
+
+def _fork(ctx, args) -> int:
+    """Copy an Alpine aport into pmaports, which is what makes it buildable.
+
+    The rung that was missing between finding a package and building one.
+    `pmbootstrap build` reads pmaports and nothing else, so every package in
+    Alpine's tree -- phosh, gnome-calculator, gstreamer -- was a dead end
+    whose only exit was to reach past porthole to pmbootstrap, which
+    AGENTS.md section 1 tells you not to do. temp/gst-plugins-good and
+    temp/webkit2gtk-6.0 both got here that way.
+
+    It takes no buildroot lock, deliberately: aportgen writes into pmaports
+    and refreshes an APKINDEX. It never touches a chroot's build directory,
+    so holding the mutex would only block builds that have nothing to fear.
+    """
+    import porthole_cmd_aports as aports
+    import porthole_pmaports as pmap
+
+    name = args.target
+    if not name:
+        raise Bail("fork what?", EX_USAGE,
+                   "porthole pkg fork gnome-calculator --yes")
+
+    pmaports = _find_pmaports(ctx)
+    existing = find_aport(pmaports, name)
+    if existing:
+        ctx.out(f"{name} is already in pmaports, at "
+                f"{existing.relative_to(pmaports)}")
+        ctx.out.hint(f"porthole pkg build {name}")
+        return EX_OK
+
+    upstream = pmap.find_aports_upstream(pmaports)
+    if not upstream:
+        # 69: there is nothing here that could fork, which is not a statement
+        # about the package.
+        raise Bail("Alpine's aports checkout is not beside pmaports",
+                   EX_UNAVAILABLE,
+                   "`pmbootstrap pull` clones it into the same cache_git/")
+
+    hits = sorted(upstream.glob(f"*/{name}"))
+    if not hits:
+        message, hint = missing_aport_hint(pmaports, upstream, name)
+        raise Bail(message, EX_FAIL, hint)
+
+    ctx.out.kv("package", f"{name}   ({hits[0].parent.name}/)", 9)
+    ctx.out.kv("from", str(upstream), 9)
+    ctx.out.kv("into", f"{pmaports}/temp/", 9)
+    if not args.yes:
+        ctx.out.blank()
+        ctx.out.hint(f"porthole pkg fork {name} --yes   to actually do it")
+        return EX_OK
+
+    usable, why_not = build_module()._workspace_usable(ctx)
+    if usable and not container_has_upstream():
+        # 69, not 1: nothing here could fork, which is not a statement about
+        # the package. Checked BEFORE starting, because the alternative is
+        # what actually happened -- aportgen decided the tree was missing and
+        # began a fresh 784 MB clone of Alpine's aports from GitLab.
+        raise Bail("the workspace cannot see Alpine's aports",
+                   EX_UNAVAILABLE,
+                   f"the host has it at {upstream}, but the container mounts "
+                   f"pmaports and nothing else, so aportgen would clone 784 "
+                   f"MB rather than read it. That mount is a change to the "
+                   f"isolation boundary (porthole_cmd_sandbox._mounts), which "
+                   f"is your decision to make and not this verb's")
+    if usable:
+        ctx.out(ctx.out.paint("  forking IN THE WORKSPACE (container)",
+                              "cyan"))
+        cmd = fork_cmd(name)
+        ctx.out(ctx.out.paint(f"  $ {' '.join(cmd)}", "grey"))
+        try:
+            rc = subprocess.run(cmd, timeout=900).returncode
+        except subprocess.TimeoutExpired:
+            raise Bail(f"aportgen timed out forking {name}", EX_FAIL) from None
+    else:
+        ctx.out(ctx.out.paint(f"  forking ON THE HOST ({why_not})", "cyan"))
+        rc, _, _ = aports.pmb(ctx, "aportgen", "--fork-alpine", name,
+                              timeout=900)
+    if rc != 0:
+        # NAMES NO CAUSE. The first version of this line asserted "a
+        # subpackage cannot be forked on its own", and the very first real
+        # fork attempted -- gnome-calculator -- failed for something else
+        # entirely: pmbootstrap could not parse a `devhelp` subpackage split
+        # that abuild has no default implementation for. A confident wrong
+        # diagnosis is worse than none, because it sends the reader to fix a
+        # package that was never the problem. aportgen's own error is on the
+        # screen directly above this; AGENTS.md section 6.
+        raise Bail(f"aportgen could not fork {name}", EX_FAIL,
+                   "its error is printed above, and `pmbootstrap log` has "
+                   "the rest. Two causes are common: the name is a "
+                   "subpackage rather than an origin package, or "
+                   "pmbootstrap cannot parse that particular APKBUILD")
+
+    # aportgen exiting 0 is not proof it wrote anything, and a fork that
+    # silently did not land reads downstream as "the build cannot find it".
+    landed = find_aport(pmaports, name)
+    if not landed:
+        raise Bail(f"aportgen exited 0 but {name} is not in pmaports",
+                   EX_FAIL, "porthole aports status   to see what it did")
+
+    ctx.out.kv("landed", str(landed.relative_to(pmaports)), 9)
+    ctx.out.hint(f"porthole pkg build {name} --detach")
+    ctx.out.hint("porthole pkg watch")
+    return EX_OK
+
+
 def build_module():
     import porthole_cmd_build as build
 
@@ -850,13 +1218,17 @@ def cmd_pkg(args, ctx) -> int:
         return _outdated(ctx)
     if action == "stop":
         return _stop(ctx)
+    if action == "search":
+        return _search(ctx, args)
+    if action == "fork":
+        return _fork(ctx, args)
     return _build(ctx, args)
 
 
 SPEC = {
     "verb": "pkg",
     "order": 21,
-    "help": "build a userspace aport, with a real progress bar",
+    "help": "find, fork and build a userspace aport, with a real progress bar",
     "description": (
         "`porthole build` is the kernel loop; every rung of it produces a\n"
         "kernel artifact. This is the other half: a userspace aport, built\n"
@@ -868,13 +1240,21 @@ SPEC = {
         "the build outlives the session; `watch` follows it with a live bar in\n"
         "any other terminal, and `status --json` is the one-shot an agent\n"
         "reads instead of polling. Nobody has to sit on the output.\n\n"
+        "TWO TREES, AND ONLY ONE OF THEM BUILDS. pmbootstrap keeps pmaports\n"
+        "and Alpine's aports side by side, and `pmbootstrap build` reads\n"
+        "pmaports only -- so Alpine's twelve thousand packages are present,\n"
+        "useful, and unbuildable until `fork` copies one across. `search`\n"
+        "looks in both and says which tree a name is in, which is the actual\n"
+        "answer to \"why does my build say the package does not exist\".\n\n"
         "See docs/HANDOFF-package-builds.md."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["build", "status", "watch", "outdated", "stop"],
-                      "help": "build | status | watch | outdated | stop"}),
+                      "choices": ["build", "search", "fork", "status",
+                                  "watch", "outdated", "stop"],
+                      "help": "build | search | fork | status | watch | "
+                              "outdated | stop"}),
         (["target"], {"nargs": "?", "metavar": "APORT",
-                      "help": "build: the aport to build"}),
+                      "help": "build/fork: the aport. search: text to look for"}),
         (["--arch"], {"metavar": "ARCH",
                       "help": "build: target architecture (default: the profile's)"}),
         (["--timeout"], {"type": int, "default": DEFAULT_TIMEOUT,
@@ -893,10 +1273,15 @@ SPEC = {
         (["--wait"], {"type": float, "default": 0.0, "metavar": "SECONDS",
                       "help": "build: queue this long for the buildroot "
                               "instead of refusing"}),
+        (["--yes"], {"action": "store_true",
+                     "help": "fork: actually write into pmaports"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
+    "escapes_scope": True,
     "run": cmd_pkg,
     "examples": [
+        "porthole pkg search calculator",
+        "porthole pkg fork gnome-calculator --yes",
         "porthole pkg build phoc",
         "porthole pkg build webkit2gtk-6.0 --detach",
         "porthole pkg watch",
