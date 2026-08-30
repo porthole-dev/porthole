@@ -69,3 +69,67 @@ against (with `memory.high` unset it never sheds anything). This is applied but
 **not verified**: reproducing the load needs a real session, and Epiphany
 launched from ssh dies with SIGABRT in GTK4/libepoxy. Measure it with
 `memory full avg10` before and after on the same page.
+
+---
+
+## ADDENDUM 2026-08-30 — the mitigation is VERIFIED, and one claim above is CORRECTED
+
+**CORRECTION.** This note said "It is a GPU fault or the a5xx hang" was ruled
+out, on "no fault, no hangcheck, in dmesg or in a netconsole capture spanning
+the failure." That reading was too strong. Under a heavier session the memory
+ceiling **does** reset the GPU — three times in one boot on 2026-08-30:
+
+    01:44:48  a5xx_irq gpu fault, status EE0011C1, ib1/ib2 BUFSZ=0000
+              recover_worker: hangcheck recover!
+              offending task: WebKitWebProces
+    01:53:30  two more, offending task: SkiaGPUWorker
+    01:44:48.549  phoc: [gles2/pass.c:315] GPU reset (innocent)
+                  phoc: Re-creating renderer after GPU reset
+
+The correct statement is narrower and more useful: **the memory ceiling is the
+cause and the GPU fault is a downstream effect of it.** IB1/IB2 BUFSZ=0 with no
+SMMU fault line means the GPU was busy and not retiring — it choked on the
+working set, it did not chase a bad pointer. The original session simply never
+drove it hard enough to see one.
+
+This matters because the fault is what makes the corruption **session-wide**. An
+a5xx recovery resets the GPU for every client, so phoc — ruled `innocent` by
+GL_KHR_robustness, the guilty context being WebKit's — rebuilds its renderer and
+re-uploads every texture. That is why the artifacts land in phosh's panel and in
+other apps, not only in the browser window.
+
+**The mitigation is now measured, and it works.** `MemoryHigh=1500M` on the
+scope, applied at launch:
+
+    | metric        | unbounded | MemoryHigh=1500M |
+    |---------------|-----------|------------------|
+    | scope         | 2097 M    | ~1400 M          |
+    | scope swap    |  527 M    | **0 M**          |
+    | GEM resident  | 1764 M    | ~670 M           |
+    | MemAvailable  |  353 M    | ~1300 M          |
+    | GPU faults    | 3 / boot  | **0**            |
+
+It now ships in `device-google-taimen` r35 as
+`usr/lib/systemd/user/app-gnome-org.gnome.Epiphany-.scope.d/50-memory.conf`.
+The `~/.config` copy this note originally described was **erased by the fresh
+install** hours after it was written, which is why the symptom came back —
+package it, or it does not survive.
+
+**Confirmed mechanism, not assumed:** `libwebkitgtk-6.0.so.4` contains
+`/sys/fs/cgroup/%s/%s/%s`, `memory.current`, `memory.high` and `memory.max`, and
+one second after the limit was applied three WebKitWebProcesses logged
+`Memory pressure relief: ...` for the first time in 23 minutes of runtime.
+WebKit sheds only when the cgroup gives it a ceiling to read.
+
+**NEW HAZARD — do not apply this limit to a running browser.**
+See [[memory-high-arms-systemd-oomd-against-the-browser]]. Setting it on a scope
+already above the limit forces a reclaim storm that systemd-oomd kills the
+process tree for. Set it at launch.
+
+**Still open after this fix:** transient corruption of *small icons and glyphs*
+inside WebKit only (phosh's own panel stays clean), visible in a `grim` capture
+and therefore rendered that way rather than damaged on the way to the panel. It
+survives with zero GPU faults, so it is NOT this bug. Suspect is WebKit 2.48's
+multithreaded Skia GPU painting on a5xx — note `SkiaGPUWorker` was the task
+blamed for two of the three faults above. Test knob:
+`WEBKIT_SKIA_GPU_PAINTING_THREADS=0`.
