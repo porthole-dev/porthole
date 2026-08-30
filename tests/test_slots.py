@@ -84,6 +84,18 @@ def test_a_new_key_is_appended_rather_than_lost():
     assert 'PORTHOLE_HAS_AB_SLOTS="1"' in after
 
 
+def test_no_device_is_reported_immediately_rather_than_after_a_timeout():
+    """`fastboot getvar all` BLOCKS with no device attached, so probing it
+    first made the verb appear to hang for a minute before admitting there
+    was no phone. `fastboot devices` answers instantly, and the taimen profile
+    records it as the only check that discriminates a real fastboot device."""
+    import inspect
+
+    source = inspect.getsource(slots._probe)
+    assert source.index('"devices"') < source.index('"getvar"'), \
+        "getvar is reached before the devices check"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

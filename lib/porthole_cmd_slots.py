@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE
 
 _PREFIX = "(bootloader) "
 
@@ -91,6 +91,28 @@ def update_env(text: str, values: dict) -> str:
 
 
 def _probe(ctx, args) -> int:
+    # `fastboot getvar all` BLOCKS waiting for a device instead of failing
+    # when nothing is attached, so probing it first made this verb hang for
+    # a full minute before admitting there was no phone -- a verb that
+    # appears to hang is one people ctrl-C and stop trusting. `fastboot
+    # devices` answers instantly, and it is not merely faster: it is the
+    # authoritative check. lsusb mislabels the running gadget as fastboot
+    # (18d1:d001) -- only `fastboot devices` discriminates, per
+    # profiles/google-taimen/device.env.
+    try:
+        listed = subprocess.run(["fastboot", "devices"],
+                                capture_output=True, text=True, timeout=20)
+    except FileNotFoundError:
+        raise Bail("fastboot is not installed", EX_FAIL,
+                   "`porthole doctor` names how to install it") from None
+    except subprocess.SubprocessError as exc:
+        raise Bail(f"fastboot failed: {exc}", EX_FAIL) from None
+    if not (listed.stdout or "").strip():
+        raise Bail("no device is in fastboot", EX_STATE,
+                   "`fastboot devices` lists nothing. Note lsusb mislabels the "
+                   "running gadget as fastboot -- only `fastboot devices` "
+                   "discriminates (profiles/google-taimen/device.env)")
+
     try:
         proc = subprocess.run(["fastboot", "getvar", "all"],
                               capture_output=True, text=True, timeout=60)
