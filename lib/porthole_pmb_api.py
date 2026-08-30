@@ -23,9 +23,16 @@ from __future__ import annotations
 import re
 import subprocess
 
-# Every pmbootstrap call porthole makes. tests/test_pmb_api.py asserts each
-# one exists in the installed pmbootstrap, which is what stops this drifting
-# again silently.
+# Every pmbootstrap call porthole makes UNCONDITIONALLY. tests/test_pmb_api.py
+# asserts each one exists in the installed pmbootstrap, which is what stops
+# this drifting again silently.
+#
+# WHY lint and channel are absent: porthole also calls `lint` and `config
+# channel`, but Tasks 2 and 3 wrap both with missing() first. A call guarded
+# by missing() degrades gracefully (e.g. "lint not available" instead of
+# "lint failed"), so listing it here would fail the guard on every pmbootstrap
+# that dropped it -- which is every one today. Only unconditional calls belong
+# here.
 PORTHOLE_USES = {
     "subcommands": frozenset({
         "build", "checksum", "ci", "config", "kconfig", "pkgrel_bump",
