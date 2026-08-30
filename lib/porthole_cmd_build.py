@@ -582,8 +582,13 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     # -- has no idea a log is worth opening. The last few lines are where the
     # shell says why it refused, every time.
     if rc != 0 and not verbose:
-        for line in failure_tail(logpath.read_text(errors="replace")):
+        text = logpath.read_text(errors="replace")
+        for line in failure_tail(text):
             ctx.out(ctx.out.paint(f"  | {line}", "grey"))
+        # The error text is the one thing every porter has in hand, and for a
+        # known signature the cause is somewhere the message does not mention.
+        for why in diagnose(text):
+            ctx.out(ctx.out.paint(f"  ? {why}", "yellow"))
     return rc
 
 
@@ -617,6 +622,69 @@ def failure_tail(text: str, limit: int = 6) -> list[str]:
     if lines[-1] not in keep:
         keep = keep + [lines[-1]]
     return keep
+
+
+# Build failures whose message names something other than the cause. Each one
+# here cost a real session, most of them reported from the redfin (Pixel 5)
+# port where a small local model lost a cycle to each in turn. The pattern is
+# always the same: the error accuses the compiler, the distro or the kernel,
+# and the fix is somewhere else entirely.
+#
+# This is a lookup table, not cleverness. It earns its place because the
+# alternative is every porter rediscovering the same seven answers, and
+# because the error text is the ONE thing they all have in hand.
+_DIAGNOSES = (
+    (re.compile(r"python: not found|gcc-wrapper\.py|gcc-version\.sh", re.I),
+     "this kernel wraps CC with scripts/gcc-wrapper.py, which is Python 2 and "
+     "will not run on a modern toolchain. Patch the wrapper out "
+     "(`CC = $(CROSS_COMPILE)gcc`) and put the patch in source=, not only in "
+     "patches=. Common on 4.19-era downstream kernels."),
+    (re.compile(r"'-mgeneral-regs-only' is incompatible.*floating-point", re.I),
+     "an arm64 kernel build forbids floating point, and this driver uses it. "
+     "Disable that driver's CONFIG symbol -- but read the headers first: "
+     "disabling a whole subsystem often exposes non-static stubs in the #else "
+     "branch and turns this into `multiple definition of`."),
+    (re.compile(r"multiple definition of", re.I),
+     "a Kconfig symbol was probably turned off whose headers define global "
+     "(non-static) stubs in their #else branch, so several objects now carry "
+     "the same definition. Re-enable the core symbol and disable only the "
+     "leaf driver you actually meant to drop."),
+    (re.compile(r"\blz4: not found|\bImage\.lz4\b", re.I),
+     "the kernel config compresses with LZ4 and the buildroot has no lz4 "
+     "binary. Add `lz4` to makedepends in the kernel APKBUILD."),
+    (re.compile(r"is required for USE_[A-Z0-9_]+", re.I),
+     "a dependency this build needs was probably appended inside a case/esac. "
+     "pmbootstrap parses APKBUILDs line by line and never runs the shell, so "
+     "it never installed it. List the package statically as well."),
+    (re.compile(r"Failed to umount|umount:.*not mounted", re.I),
+     "a non-lax pmbootstrap build cannot run in the rootless workspace: "
+     "zap_buildroots() cannot umount the recursive /dev bind. `porthole pkg "
+     "build` passes --lax for you; a hand-rolled pmbootstrap call does not."),
+    # Either order: clang says "no such file or directory: 'x.idl'" and cc1
+    # says "../fs/configfs/file.c: No such file or directory". Matching only
+    # one of them misses half the real reports.
+    (re.compile(r"No such file or directory[^\n]*\.(?:c|h|S|idl|cpp|cc)\b"
+                r"|\.(?:c|h|S|idl|cpp|cc)\b[^\n]*No such file or directory"
+                r"|generated/autoconf\.h: No such file", re.I),
+     "a source file vanished MID-BUILD, which usually means a second "
+     "pmbootstrap command shared this buildroot and wiped $srcdir -- abuild "
+     "cleans it before unpacking. Check what is staged: "
+     "`ls <workdir>/chroot_buildroot_<arch>/home/pmos/build/src/`. "
+     "`porthole pkg build` and `porthole aports` take a lock; raw pmbootstrap "
+     "does not."),
+)
+
+
+def diagnose(text: str) -> list[str]:
+    """Known causes for a failure whose message names something else.
+
+    Returns at most two: the point is to shorten the search, and a wall of
+    maybes is the same as no help. Ordered by the table, which is ordered by
+    how specific the signature is.
+    """
+    stripped = _strip_ansi(text)
+    hits = [why for pattern, why in _DIAGNOSES if pattern.search(stripped)]
+    return hits[:2]
 
 
 _ANSI = re.compile(r"\033\[[0-9;]*m")

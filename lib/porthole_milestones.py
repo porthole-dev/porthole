@@ -349,6 +349,69 @@ def probe_device_pkg(ctx):
                          or f"device-{_cfg(ctx, 'PORTHOLE_DEVICE')}")
 
 
+def probe_builds(ctx):
+    """Did the packages actually build? Look for the apks, not for a tick.
+
+    Reported from the redfin port: `builds` was the one packaging milestone
+    with no probe, so a session that had genuinely produced both apks still
+    had to hand-tick a checklist -- and the design rule here is that a probe
+    always outranks a tick. The evidence is sitting in the package dir at a
+    filename that states the exact pkgver-pkgrel, which is a stronger claim
+    than "someone ticked a box" and cannot go stale after a pkgrel bump.
+    """
+    device = _cfg(ctx, "PORTHOLE_DEVICE_PKG")
+    kernel = _cfg(ctx, "PORTHOLE_KERNEL_PKG")
+    wanted = [name for name in (device, kernel) if name and name != "device-"]
+    if not wanted:
+        return todo("no device or kernel package named in the profile")
+    try:
+        import porthole_cmd_pkg as pkgverb
+        import porthole_pmaports as pmap
+
+        pmaports = pmap.find_pmaports(ctx.cfg)
+        if not pmaports:
+            return blocked("no pmaports checkout found")
+        arch = _cfg(ctx, "PORTHOLE_ARCH") or "aarch64"
+        # Both package dirs: a build may have run in the workspace or on the
+        # host, and the milestone is about whether the apk exists, not about
+        # which of the two produced it.
+        found, missing = [], []
+        for name in wanted:
+            directory = pkgverb.find_aport(pmaports, name)
+            if directory is None:
+                missing.append(f"{name} (no aport)")
+                continue
+            fields = pkgverb.apkbuild_fields(
+                (directory / "APKBUILD").read_text(errors="replace"))
+            hit = None
+            for packages in _package_dirs(ctx):
+                candidate = pkgverb.expected_apk(packages, arch, fields)
+                if candidate is not None and candidate.exists():
+                    hit = candidate
+                    break
+            (found if hit else missing).append(hit.name if hit else name)
+        if missing:
+            return todo(f"not built: {', '.join(missing)}")
+        return done(", ".join(found))
+    except Exception as exc:  # noqa: BLE001
+        return blocked(f"could not read the package dir: {exc}")
+
+
+def _package_dirs(ctx):
+    """Where a built apk can land: the workspace's work dir and the host's."""
+    import pathlib as _p
+
+    out = []
+    try:
+        import porthole_cmd_sandbox as sandbox
+        out.append(sandbox._sandbox_pmb(ctx.cfg) / "packages")
+    except Exception:  # noqa: BLE001
+        pass
+    host = _cfg(ctx, "PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
+    out.append(_p.Path(host).expanduser() / "packages")
+    return [d for d in out if d.is_dir()]
+
+
 def probe_kernel_pkg(ctx):
     name = _cfg(ctx, "PORTHOLE_KERNEL_PKG")
     if not name:
@@ -600,7 +663,7 @@ MILESTONES = [
         "builds", "packaging", "The packages build",
         why="A package that builds on your host is the first thing anyone else "
             "can reproduce.",
-        how="porthole aports build", safe=False),
+        how="porthole pkg build <aport>", probe=probe_builds, safe=False),
 
     # -- 4. subsystems -------------------------------------------------------
     Milestone(

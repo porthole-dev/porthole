@@ -474,6 +474,65 @@ def test_a_log_with_no_error_line_still_gets_a_tail():
     assert tail == [f"line {n}" for n in range(14, 20)]
 
 
+# ------------------------------------------------ failures that mislead ----
+#
+# Every case here is a real reported failure whose message names something
+# other than the cause. Most come from the redfin (Pixel 5) port, where a
+# small local model lost a cycle to each in turn.
+
+def _why(text):
+    import porthole_cmd_build as B
+
+    return " ".join(B.diagnose(text))
+
+
+def test_a_python2_gcc_wrapper_is_named_rather_than_the_missing_python():
+    assert "gcc-wrapper" in _why(
+        "../scripts/gcc-version.sh: line 26: python: not found")
+
+
+def test_a_floating_point_driver_is_named_rather_than_the_compiler_flag():
+    assert "floating point" in _why(
+        "error: '-mgeneral-regs-only' is incompatible with the use of "
+        "floating-point types")
+
+
+def test_multiple_definition_points_at_the_kconfig_that_was_turned_off():
+    assert "else" in _why("ld: multiple definition of `logbuffer_log'")
+
+
+def test_a_missing_lz4_is_named_as_a_makedepends_gap():
+    assert "makedepends" in _why("/bin/sh: line 0: lz4: not found")
+
+
+def test_a_vanished_source_file_is_named_as_a_buildroot_collision():
+    """Both real spellings. clang puts the filename after the phrase and cc1
+    puts it before; matching one order misses half the reports."""
+    for text in (
+            "cc1: fatal error: ../fs/configfs/file.c: No such file or directory",
+            "clang++: error: no such file or directory: '.../TextMetrics.idl'",
+            "fatal error: generated/autoconf.h: No such file or directory"):
+        assert "buildroot" in _why(text), text
+
+
+def test_a_failed_umount_is_named_as_the_missing_lax_flag():
+    assert "--lax" in _why("ERROR: Failed to umount: /pmb/chroot_native/dev/shm")
+
+
+def test_an_ordinary_warning_gets_no_diagnosis():
+    """A table that fires on everything is the same as no table."""
+    assert _why("warning: unused variable 'x' [-Wunused-variable]") == ""
+
+
+def test_at_most_two_diagnoses_are_offered():
+    """A wall of maybes is the same as no help."""
+    import porthole_cmd_build as B
+
+    noisy = ("python: not found\nlz4: not found\nmultiple definition of `x'\n"
+             "ERROR: Failed to umount: /pmb/chroot_native/dev/shm\n")
+    assert len(B.diagnose(noisy)) <= 2
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
