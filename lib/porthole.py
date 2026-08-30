@@ -276,13 +276,23 @@ def find_root(start: str | os.PathLike | None = None) -> pathlib.Path:
 
 
 def list_profiles(root: str | os.PathLike | None = None) -> list[str]:
-    """Device profiles, sorted. `_template` and dotfiles are not devices."""
+    """Device profiles, sorted. `_template` and dotfiles are not devices.
+
+    A profile is a directory holding a `device.env`, not merely a directory.
+    Listing bare directories made this function contradict itself one line
+    later: `porthole aports worktree -d zzz-ruletest2` answered "no profile
+    for device 'zzz-ruletest2': .../device.env does not exist. Known
+    devices: google-cheetah, google-taimen, zzz-ruletest2" -- naming the
+    device as known and missing in the same breath, because `new-device`
+    had created the directory and not yet written the file.
+    """
     base = pathlib.Path(root or find_root()) / "profiles"
     if not base.is_dir():
         return []
     return sorted(
         p.name for p in base.iterdir()
         if p.is_dir() and not p.name.startswith(("_", "."))
+        and (p / "device.env").is_file()
     )
 
 

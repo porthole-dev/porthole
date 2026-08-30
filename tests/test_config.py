@@ -151,6 +151,19 @@ def test_profiles_dir_lists_devices():
     assert names == ["google-taimen"], names   # _template is not a device
 
 
+def test_a_directory_without_a_device_env_is_not_a_device():
+    """`new-device` makes the directory before it writes device.env, and for
+    that instant a bare directory was reported as a known device -- so
+    `aports worktree -d zzz-ruletest2` answered "no profile ... device.env
+    does not exist. Known devices: ..., zzz-ruletest2", naming it missing
+    and known in one sentence. It also made the parallel suites flaky, since
+    test_cli_rules.py scaffolds such profiles while test_isolation.py is
+    iterating them."""
+    tmp, _ = sandbox(device="google-taimen")
+    (tmp / "profiles" / "zzz-half-written").mkdir(parents=True)
+    assert porthole.list_profiles(tmp) == ["google-taimen"]
+
+
 # ------------------------------------------------------- legacy alias table --
 # One test per row of spec section 4.3. These are the never-break-taimen tests.
 

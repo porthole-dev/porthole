@@ -73,7 +73,16 @@ def with_config(text):
     return d
 
 
-DEVICES = porthole.list_profiles(ROOT)
+# Scratch profiles that test_cli_rules.py creates under `profiles/` and
+# deletes again. The suites run in PARALLEL (tests/run-suites.sh, xargs -P),
+# so a snapshot taken here can name a profile that is gone by the time the
+# loops below use it -- which is exactly what happened: `aports worktree -d
+# zzz-ruletest2` failed in a run where nothing was wrong with the code.
+# These loops assert a property of real device profiles; a fixture that
+# appears and vanishes is not one.
+SCRATCH = "zzz-"
+
+DEVICES = [d for d in porthole.list_profiles(ROOT) if not d.startswith(SCRATCH)]
 A, B = (DEVICES + ["google-taimen", "google-cheetah"])[:2]
 
 
