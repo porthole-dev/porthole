@@ -63,6 +63,7 @@ generic notes as well.
 
 | id | scope | title |
 |---|---|---|
+| [a-444-test-clip-makes-working-hardware-decode-look-broken](traps/a-444-test-clip-makes-working-hardware-decode-look-broken.md) | `generic` | A 4:4:4 test clip makes working hardware decode look broken |
 | [a-board-name-is-not-a-soc-name](traps/a-board-name-is-not-a-soc-name.md) | `generic` | A vendor's reference board is not the SoC, and tools will accept it silently |
 | [a-fresh-kernel-cannot-ram-boot-against-installed-modules](traps/a-fresh-kernel-cannot-ram-boot-against-installed-modules.md) | `generic` | A freshly built kernel cannot RAM-boot against the modules already on the device |
 | [a-full-zap-inside-the-workspace-unmounts-it](traps/a-full-zap-inside-the-workspace-unmounts-it.md) | `generic` | pmbootstrap zap inside the workspace tears down porthole's own bind mounts, and the build then refuses about a version |
@@ -146,7 +147,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 13
-- `generic` — 80
+- `generic` — 81
 - `soc:gs201` — 1
 - `soc:msm8998` — 13
 - `soc:qcom` — 1
