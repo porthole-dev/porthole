@@ -200,6 +200,30 @@ webkit took ~1.7 h for 8233 objects this way; native cross-compilation should
 be several times faster, and this is the single biggest lever on the iteration
 loop for userspace packages.
 
+**Quantified on the rebuild, and it is worse than "somewhat slower".** The
+emulation cost is not spread evenly across compilation -- it is concentrated in
+interpreter-driven code generation, which crossdirect does not cover at all:
+
+    [2668/8233] Generating .../JavaScriptCore/DerivedSources/LLIntAssembly.h
+      one qemu-aarch64 ruby process, 289s and counting, load 1.2 on 16 cores
+
+    [2784/8233] Generating .../JavaScriptCore/PrivateHeaders/WasmOps.h
+      +11 objects in 120s = 5.5/min, load 5.0
+
+WebKit spends hundreds of ninja steps in JavaScriptCore's DerivedSources phase
+running Ruby and Perl generators. Natively each is trivial. Emulated, they
+dominate the wall clock while the machine sits idle, and they are invisible as
+"slow compilation" because no compiler is involved.
+
+**The likely large win:** these generators are architecture-independent. A Ruby
+script that emits a header produces the same header whichever CPU runs it, so
+the HOST interpreter can execute them against the same inputs at native speed.
+crossdirect already establishes the pattern for compilers; extending the same
+idea to ruby/perl/python for pure-codegen steps is the difference between a
+WebKit that builds in minutes and one that takes most of a day. Worth measuring
+which of a package's ninja steps are interpreter-driven before optimising the
+compiler path any further.
+
 ccache IS active (15 processes), so repeat builds get the existing cache win --
 this is specifically about the first build of a package.
 
