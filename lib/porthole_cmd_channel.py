@@ -14,13 +14,36 @@ from porthole_cli import Bail, EX_FAIL, EX_OK
 import porthole_pmaports as pmap
 
 
+def channel_of_branch(branch: str) -> str:
+    """The channel a pmaports branch represents.
+
+    pmbootstrap 3.x dropped `channel` as a config key -- asking for it makes
+    argparse reject the name, and porthole rendered that error as
+    `current: unknown` for months. The channel was never really a setting: it
+    is which branch pmaports is on, and `master` is spelled `edge` everywhere
+    a human reads it.
+    """
+    if not branch:
+        return ""
+    return "edge" if branch == "master" else branch
+
+
 def current(cfg) -> str:
+    """Which channel this checkout is on, read from pmaports itself.
+
+    No pmbootstrap call: the answer is in the checkout, and asking a tool
+    that no longer knows produced a confident "unknown".
+    """
+    pmaports = pmap.find_pmaports(cfg)
+    if not pmaports:
+        return ""
     try:
-        proc = subprocess.run(["pmbootstrap", "config", "channel"],
-                              capture_output=True, text=True, timeout=20)
-        return proc.stdout.strip()
+        proc = subprocess.run(
+            ["git", "-C", str(pmaports), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired):
         return ""
+    return channel_of_branch(proc.stdout.strip()) if proc.returncode == 0 else ""
 
 
 def cmd_channel(args, ctx) -> int:
