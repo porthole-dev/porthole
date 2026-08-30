@@ -287,6 +287,27 @@ def test_a_patch_missing_from_source_is_named():
         assert missing == ["other.patch"], missing
 
 
+def test_the_brief_can_say_whether_a_build_is_running():
+    """The first question when picking up a handoff, and the one two agents
+    collided over in this repo. Answering it used to mean hand-rolling
+    `podman exec ps` and a lock probe."""
+    import porthole_cmd_brief as brief
+
+    summary = brief.activity_summary(
+        {"state": "running", "rung": "pkg:webkit2gtk-6.0", "pid": 1,
+         "elapsed": 900.0, "progress": 0.32, "eta": None, "started": 0.0},
+        holder="webkit2gtk-6.0 pid=123 since=13:52:27",
+        alive=lambda _: True)
+    assert "webkit2gtk-6.0" in summary
+    assert "running" in summary
+
+
+def test_the_brief_says_idle_when_nothing_is_building():
+    import porthole_cmd_brief as brief
+
+    assert "idle" in brief.activity_summary({}, holder="", alive=lambda _: False)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
