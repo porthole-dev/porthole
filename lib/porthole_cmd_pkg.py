@@ -606,6 +606,73 @@ def _status(ctx) -> int:
     return ctx.emit(snap, render)
 
 
+def stop_plan(snap) -> tuple:
+    """`("kill", pid)` or `("none", 0)`. Pure, so the decision is testable.
+
+    Only a run that is still marked running is worth killing; signalling a pid
+    from a finished snapshot risks hitting whatever inherited that number.
+    """
+    if not snap or snap.get("state") != "running":
+        return ("none", 0)
+    pid = snap.get("pid")
+    return ("kill", pid) if isinstance(pid, int) and pid > 0 else ("none", 0)
+
+
+def _stop(ctx) -> int:
+    """Cancel a running package build, both sides of the container boundary.
+
+    Killing the `podman exec` client does NOT kill what it exec'd: the build
+    keeps compiling inside, still holding the buildroot, and the next build
+    then deletes its source tree. Cancelling used to mean doing both by hand.
+    """
+    import signal
+
+    import porthole_buildroot as buildroot
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    try:
+        snap = json.loads((rundir / "pkg-status.json").read_text())
+    except (OSError, ValueError):
+        snap = {}
+
+    action, pid = stop_plan(snap)
+    if action == "kill":
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    # Always sweep the container side: a build started outside this verb holds
+    # the buildroot just as hard, and that is how the collisions happened.
+    _kill_inside()
+
+    workdir = _pmb_workdir(ctx, build_module()._workspace_usable(ctx)[0])
+    holder = buildroot.lock_holder(workdir)
+    snap["state"] = "failed"
+    try:
+        (rundir / "pkg-status.json").write_text(json.dumps(snap, indent=2))
+    except OSError:
+        pass
+
+    def render():
+        if action == "kill":
+            ctx.out(ctx.out.paint(f"  stopped pid {pid}", "green"))
+        else:
+            ctx.out("no package build was running here")
+        ctx.out(ctx.out.paint("  container-side pmbootstrap swept", "grey"))
+        if holder:
+            ctx.out(ctx.out.paint(f"  lock was held by: {holder}", "grey"))
+        _ = progress  # rendering only
+
+    return ctx.emit({"stopped": pid if action == "kill" else None}, render)
+
+
+def build_module():
+    import porthole_cmd_build as build
+
+    return build
+
+
 def cmd_pkg(args, ctx) -> int:
     action = args.action or "status"
     if action == "status":
@@ -614,6 +681,8 @@ def cmd_pkg(args, ctx) -> int:
         return _watch(ctx, args)
     if action == "outdated":
         return _outdated(ctx)
+    if action == "stop":
+        return _stop(ctx)
     return _build(ctx, args)
 
 
@@ -635,8 +704,8 @@ SPEC = {
         "See docs/HANDOFF-package-builds.md."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["build", "status", "watch", "outdated"],
-                      "help": "build | status | watch | outdated"}),
+                      "choices": ["build", "status", "watch", "outdated", "stop"],
+                      "help": "build | status | watch | outdated | stop"}),
         (["target"], {"nargs": "?", "metavar": "APORT",
                       "help": "build: the aport to build"}),
         (["--arch"], {"metavar": "ARCH",
@@ -664,5 +733,6 @@ SPEC = {
         "porthole pkg watch",
         "porthole pkg outdated",
         "porthole pkg status --json",
+        "porthole pkg stop",
     ],
 }

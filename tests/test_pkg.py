@@ -233,6 +233,20 @@ def test_a_field_that_cannot_be_resolved_is_dropped_not_guessed():
     assert "pkgname" not in pkg.apkbuild_fields("pkgname=$(uname -r)\n")
 
 
+def test_stopping_kills_both_sides_not_just_the_client():
+    """`podman exec` and the process it exec'd are different processes.
+    Killing only the client leaves pmbootstrap compiling inside, still holding
+    the buildroot -- which is precisely the state that destroys the next
+    build. Cancelling had to be done by hand, twice, in one session."""
+    class FakeSnap(dict):
+        pass
+
+    result = pkg.stop_plan(FakeSnap({"state": "running", "pid": 4242}))
+    assert result == ("kill", 4242), result
+    assert pkg.stop_plan(FakeSnap({"state": "done", "pid": 4242})) == ("none", 0)
+    assert pkg.stop_plan(FakeSnap({})) == ("none", 0)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
