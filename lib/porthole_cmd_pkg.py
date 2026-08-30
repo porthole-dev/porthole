@@ -159,6 +159,53 @@ def buildroot_lock(workdir, aport: str, wait: float = 0.0):
             handle.close()
 
 
+def foreign_build(ps_output: str) -> str:
+    """A pmbootstrap build running that did NOT come through this verb, or "".
+
+    The flock only binds callers who take it. `porthole sandbox shell
+    --command 'pmbootstrap build ...'` is a bare command runner and takes
+    nothing, and that is exactly how the webkit build that got destroyed was
+    started -- so a lock alone still lets `porthole pkg build` walk into one.
+
+    Reads `ps -eo pid=,args=` and filters HERE rather than asking pgrep to
+    match a pattern. A `pgrep -f "pmbootstrap.*build"` run through `sh -c`
+    puts that pattern into its own command line and matches ITSELF, so a
+    guard written that way reports "busy" forever and never starts -- observed
+    in a real session, waiting on a buildroot that had been free for minutes.
+    A ps line cannot contain the filter, because the filter never reaches it.
+    """
+    for line in ps_output.splitlines():
+        if "pmbootstrap" in line and " build" in line and "pgrep" not in line:
+            # Name the package if it is on the command line; a pid alone sends
+            # the reader back to ps to find out what they are waiting for.
+            words = line.split()
+            for i, word in enumerate(words):
+                if word == "build" and i + 1 < len(words):
+                    tail = [w for w in words[i + 1:] if not w.startswith("-")]
+                    if tail:
+                        return tail[0]
+            return "another pmbootstrap build"
+    return ""
+
+
+def _foreign_build(ctx, in_container: bool) -> str:
+    """Ask the container what is running. Never raises: refusing to build is
+    a safety measure, and it must not itself become a way to fail."""
+    import subprocess
+
+    if not in_container:
+        return ""
+    import porthole_cmd_sandbox as sandbox
+
+    try:
+        done = subprocess.run(
+            ["podman", "exec", sandbox.CONTAINER, "ps", "-eo", "pid=,args="],
+            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return foreign_build(done.stdout)
+
+
 def _find_pmaports(ctx):
     import porthole_pmaports as pmaports
 
@@ -413,6 +460,17 @@ def _build(ctx, args) -> int:
                    f"{lock_holder(workdir) or 'another build'}", EX_LOCK,
                    "two pmbootstrap builds share one buildroot and delete "
                    "each other's source tree. Wait, or --wait SECONDS.")
+    # The lock binds only callers who take it. Anything driving pmbootstrap
+    # directly -- `sandbox shell --command`, a hand-rolled podman exec -- holds
+    # nothing, and that is how the build this guard exists to protect was
+    # started. So ask the container what is actually running as well.
+    foreign = _foreign_build(ctx, usable)
+    if foreign:
+        raise Bail(f"a pmbootstrap build is already running: {foreign}",
+                   EX_LOCK,
+                   "it holds no lock (started outside `porthole pkg`), but it "
+                   "owns the buildroot all the same -- starting now deletes "
+                   "its source tree")
     env = dict(os.environ)
     for key, value in ctx.cfg.items():
         if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):

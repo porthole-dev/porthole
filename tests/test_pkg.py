@@ -255,6 +255,31 @@ def test_waiting_gives_up_with_the_retryable_code_not_a_plain_failure():
                 assert getattr(exc, "code", None) == EX_LOCK, exc
 
 
+def test_a_build_started_outside_the_verb_is_still_detected():
+    """The flock binds only callers who take it. `sandbox shell --command
+    pmbootstrap build ...` takes nothing, and that is exactly how the webkit
+    build that got destroyed had been started."""
+    ps = ("  135565 /usr/bin/python3 /usr/bin/pmbootstrap --as-root --config "
+          "/pmb/pmbootstrap_v3.cfg --details-to-stdout build --lax "
+          "webkit2gtk-6.0 --arch aarch64\n"
+          "  1 /sbin/init\n")
+    assert pkg.foreign_build(ps) == "webkit2gtk-6.0"
+
+
+def test_an_idle_container_reports_no_foreign_build():
+    assert pkg.foreign_build("  1 /sbin/init\n  2 /bin/bash\n") == ""
+
+
+def test_the_guard_cannot_match_its_own_probe():
+    """A `pgrep -f "pmbootstrap.*build"` guard in a shell one-liner puts the
+    pattern into its own command line and matches ITSELF -- an agent waiting
+    that way waits forever on a buildroot that is free. Observed in a real
+    session. Reading ps and filtering here cannot do that, but a pgrep line
+    that somehow appears must still not count."""
+    ps = "  99 sh -c pgrep -af 'pmbootstrap.*build'\n"
+    assert pkg.foreign_build(ps) == ""
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
