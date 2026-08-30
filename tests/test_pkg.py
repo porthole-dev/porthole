@@ -426,5 +426,157 @@ def main():
     return 1 if failed else 0
 
 
+
+# ---------------------------------------------------------- two trees --
+
+def _two_trees(tmp: pathlib.Path):
+    """A pmaports and an aports_upstream, laid out as pmbootstrap clones them.
+
+    `phoc` lives in BOTH, which is what a fork looks like on disk and the one
+    case where the two trees disagree about the answer.
+    """
+    pm = tmp / "cache_git" / "pmaports"
+    up = tmp / "cache_git" / "aports_upstream"
+    for rel in ("temp/phoc", "main/hello", "device/testing/device-x",
+                "extra-repos/systemd/phosh"):
+        (pm / rel).mkdir(parents=True)
+        (pm / rel / "APKBUILD").write_text(f"pkgname={rel.rsplit('/', 1)[1]}\n"
+                                           f"pkgver=1.0\npkgrel=7\n")
+    (pm / "docs").mkdir()                      # a category-shaped non-category
+    (pm / "docs" / "notes.md").write_text("x")
+    for rel in ("community/phoc", "community/phosh", "main/hello",
+                "community/gnome-calculator", "testing/calculator-x"):
+        (up / rel).mkdir(parents=True)
+        (up / rel / "APKBUILD").write_text(f"pkgname={rel.split('/')[1]}\n"
+                                           f"pkgver=2.0\npkgrel=1\n")
+    return pm, up
+
+
+def test_a_tree_is_scanned_at_both_depths_and_docs_is_not_a_package():
+    """A package is a directory holding an APKBUILD -- not a directory sitting
+    under something that looked like a category. pmaports keeps docs/ beside
+    temp/, and Alpine keeps scripts/ beside community/."""
+    with tempfile.TemporaryDirectory() as d:
+        pm, _ = _two_trees(pathlib.Path(d))
+        found = pkg.scan_tree(pm)
+        assert set(found) == {"phoc", "hello", "device-x", "phosh"}
+        assert found["device-x"].parent.name == "testing"     # two deep
+        assert found["phosh"].parent.name == "systemd"        # two deep
+
+
+def test_scanning_nothing_is_empty_not_an_error():
+    """`find_aports_upstream` returns None on a host that never cloned it, and
+    a search must still answer for pmaports rather than raise."""
+    assert pkg.scan_tree(None) == {}
+
+
+def test_a_package_in_both_trees_is_reported_as_pmaports():
+    """pmaports shadows Alpine, and pmaports is the tree `pmbootstrap build`
+    reads -- so saying `phoc` is Alpine's would send someone to fork a package
+    they have already forked."""
+    with tempfile.TemporaryDirectory() as d:
+        pm, up = _two_trees(pathlib.Path(d))
+        hits, guessed = pkg.search(pm, up, "phoc")
+        assert not guessed
+        assert [(h["name"], h["tree"]) for h in hits] == [("phoc", "pmaports")]
+        assert hits[0]["where"] == "temp/"
+
+
+def test_a_near_miss_answers_with_the_package_rather_than_silence():
+    """`porthole pkg build posh` is the search this verb came from. `posh` is
+    not a substring of `phosh`, so a substring match answers a real question
+    with nothing at all."""
+    with tempfile.TemporaryDirectory() as d:
+        pm, up = _two_trees(pathlib.Path(d))
+        hits, guessed = pkg.search(pm, up, "posh")
+        assert guessed
+        assert hits[0]["name"] == "phosh"
+
+
+def test_the_closest_hit_is_first_because_the_hint_names_it():
+    """Alphabetical put `calculator-x` above `gnome-calculator` for the search
+    `calculator`, and the follow-up hint offers to fork whatever is first."""
+    with tempfile.TemporaryDirectory() as d:
+        pm, up = _two_trees(pathlib.Path(d))
+        hits, _ = pkg.search(pm, up, "hello")
+        assert hits[0]["name"] == "hello" and hits[0]["tree"] == "pmaports"
+        names = [h["name"] for h in pkg.search(pm, up, "calculator")[0]]
+        assert names == ["calculator-x", "gnome-calculator"]
+
+
+def test_version_is_read_from_the_apkbuild_of_a_hit():
+    with tempfile.TemporaryDirectory() as d:
+        pm, _ = _two_trees(pathlib.Path(d))
+        assert pkg.apkbuild_version(pm / "temp" / "phoc") == "1.0-r7"
+        assert pkg.apkbuild_version(pm / "temp" / "nope") == ""
+
+
+# ------------------------------------------------- the failure message --
+
+def test_an_alpine_package_is_named_as_alpines_not_as_absent():
+    """The whole dead end: `pkg build gnome-calculator` reported a real failure
+    and then pointed at `porthole aports`, which lists the packages named after
+    your device and could never have found it."""
+    with tempfile.TemporaryDirectory() as d:
+        pm, up = _two_trees(pathlib.Path(d))
+        message, hint = pkg.missing_aport_hint(pm, up, "gnome-calculator")
+        assert "Alpine's (community/)" in message
+        assert hint.startswith("porthole pkg fork gnome-calculator --yes")
+
+
+def test_a_typo_is_answered_with_the_name_that_was_meant():
+    with tempfile.TemporaryDirectory() as d:
+        pm, up = _two_trees(pathlib.Path(d))
+        message, hint = pkg.missing_aport_hint(pm, up, "posh")
+        assert message == "no aport named posh"
+        assert "did you mean phosh?" in hint
+
+
+def test_a_name_in_neither_tree_still_points_somewhere_real():
+    """Never a dead end: the fallback names a command that searches both
+    trees, rather than one that searches this device's packages."""
+    with tempfile.TemporaryDirectory() as d:
+        pm, up = _two_trees(pathlib.Path(d))
+        message, hint = pkg.missing_aport_hint(pm, up, "zzzqqq")
+        assert message == "no aport named zzzqqq"
+        assert "porthole pkg search zzzqqq" in hint
+
+
+def test_the_upstream_tree_is_found_beside_pmaports():
+    """Derived, not configured: pmbootstrap puts both in one cache_git/."""
+    import porthole_pmaports as pmap
+
+    with tempfile.TemporaryDirectory() as d:
+        pm, up = _two_trees(pathlib.Path(d))
+        assert pmap.find_aports_upstream(pm) == up
+        assert pmap.find_aports_upstream(pathlib.Path(d) / "nowhere") is None
+
+
+# ------------------------------------------------------- where fork runs --
+
+def test_a_fork_runs_in_the_workspace_not_on_the_host():
+    """aportgen belongs in the container for the same reason a build does,
+    and it took a real attempt to find out: on the host it asks the privilege
+    broker to copy an APKINDEX into a cache directory that does not exist
+    yet, ph-sudo refuses the unresolvable destination, and the fork dies at
+    exit 78 having written nothing."""
+    cmd = pkg.fork_cmd("gnome-calculator")
+    assert cmd[0] == "podman" and cmd[1] == "exec"
+    assert "aportgen --fork-alpine gnome-calculator" in cmd[-1]
+    assert "PYTHONUNBUFFERED=1" in cmd
+
+
+def test_a_fork_of_an_odd_name_is_quoted():
+    """The name reaches a `bash -lc` line, so it is the one argument that
+    must never be pasted in raw."""
+    assert "'a b'" in pkg.fork_cmd("a b")[-1]
+
+
+def test_build_and_fork_share_one_container_wrapper():
+    """Two podman lines that drift apart is two places to fix the buffering
+    bug that `in_container` exists to document."""
+    assert pkg.in_container("x")[:-1] == pkg.container_cmd("p", "aarch64")[:-1]
+
+
 if __name__ == "__main__":
     sys.exit(main())

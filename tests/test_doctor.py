@@ -137,9 +137,6 @@ def main():
     return 1 if failed else 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 
 def test_a_profile_that_disagrees_with_itself_about_the_kernel_is_caught():
     """The exact 2026-08-29 state: the 6.18 -> 7.2 move updated the two keys a
@@ -184,3 +181,7 @@ def test_a_soc_number_is_not_read_as_a_kernel_version():
         "PORTHOLE_KERNEL_BRANCH": "",
     })
     assert ch.rows == [], ch.rows
+
+
+if __name__ == "__main__":
+    sys.exit(main())

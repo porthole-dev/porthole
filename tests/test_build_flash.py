@@ -584,9 +584,6 @@ def main():
     return 1 if failed else 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 
 def test_upgrade_swaps_the_kernel_flavor_in_one_apk_transaction():
     """The half-applied state is the whole reason `upgrade` exists.
@@ -669,7 +666,16 @@ def test_mod_refuses_a_tree_that_has_never_been_built():
     assert '"$_PH_OUT/.config"' in body, (
         "tkmod does not preflight .output/.config; kbuild's menuconfig advice "
         "leaks through instead")
-    build, envk = body.find("$_PH_OUT/.config"), body.find("_ph_find_envkernel")
+    # envkernel is sourced by `_ph_activate`, not by tkmod itself -- tkmod
+    # called `_ph_find_envkernel` directly when this was written. Both
+    # positions are asserted to be REAL: `str.find` returns -1 for a name
+    # that has moved, and `preflight < -1` is a false comparison that reads
+    # exactly like a caught bug. This test spent its whole life after the
+    # `__main__` block and had never once run, so nothing noticed.
+    build, envk = body.find("$_PH_OUT/.config"), body.find("_ph_activate")
+    assert build != -1 and envk != -1, (
+        "tkmod no longer preflights or no longer activates envkernel — this "
+        "test names the steps by hand and one of them has been renamed")
     assert build < envk, "the preflight must run before envkernel is sourced"
 
 
@@ -726,3 +732,7 @@ def test_no_host_path_setting_crosses_by_accident():
     import porthole_cmd_build as build
     for key in build.KNOBS_THAT_CROSS:
         assert not any(w in key for w in ("DIR", "TREE", "PATH", "WORKDIR")), key
+
+
+if __name__ == "__main__":
+    sys.exit(main())
