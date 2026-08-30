@@ -615,6 +615,16 @@ def test_a_build_hidden_behind_a_cd_is_still_caught():
         == "build"
 
 
+def test_the_workspace_runs_an_init_that_reaps():
+    """PID 1 is `sleep infinity`, which reaps nothing. One interrupted webkit
+    build left four zombie clang++ processes behind, and a workspace that
+    lives for weeks accumulates them."""
+    import porthole_cmd_sandbox as sandbox
+
+    argv = sandbox._up_argv("/root", "img", [], "google-taimen")
+    assert "--init" in argv, argv
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
