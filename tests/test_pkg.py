@@ -241,10 +241,79 @@ def test_stopping_kills_both_sides_not_just_the_client():
     class FakeSnap(dict):
         pass
 
-    result = pkg.stop_plan(FakeSnap({"state": "running", "pid": 4242}))
+    alive = lambda pid: pid == 4242  # noqa: E731
+    result = pkg.stop_plan(FakeSnap({"state": "running", "pid": 4242}), alive)
     assert result == ("kill", 4242), result
-    assert pkg.stop_plan(FakeSnap({"state": "done", "pid": 4242})) == ("none", 0)
-    assert pkg.stop_plan(FakeSnap({})) == ("none", 0)
+    assert pkg.stop_plan(FakeSnap({"state": "done", "pid": 4242}), alive) == ("none", 0)
+    assert pkg.stop_plan(FakeSnap({}), alive) == ("none", 0)
+
+
+def test_stopping_does_not_signal_a_recycled_pid():
+    """`state: running` is a claim, not a fact: a SIGKILLed build or a reboot
+    leaves it set with a pid the OS is then free to reuse, and stop_plan
+    trusted it -- so `pkg stop` could SIGTERM an unrelated process. The
+    docstring promised the protection the code did not implement."""
+    dead = {"state": "running", "pid": 4242}
+    assert pkg.stop_plan(dead, lambda pid: False) == ("none", 0)
+    assert pkg.stop_plan(dead, lambda pid: True) == ("kill", 4242)
+
+
+def test_stopping_with_no_status_file_writes_nothing():
+    """With no status file snap is {}, and _stop wrote it back anyway --
+    publishing `{"state": "failed"}` for a build that never ran, which
+    `pkg status` and `brief` then reported as the answer."""
+    class Out:
+        def __call__(self, *a):
+            pass
+
+        def paint(self, text, _colour=""):
+            return text
+
+    class Ctx:
+        out = Out()
+
+        def __init__(self, rundir):
+            self.cfg = {"PORTHOLE_RUNDIR": str(rundir)}
+            self.root = rundir
+
+        def emit(self, payload, render):
+            render()
+            return payload
+
+    with tempfile.TemporaryDirectory() as d:
+        rundir = pathlib.Path(d)
+        # Stubbed so the assertion is about the status file and not about
+        # whether this machine happens to have podman up.
+        saved = (pkg._kill_inside, pkg._pmb_workdir, pkg.build_module)
+        pkg._kill_inside = lambda: None
+        pkg._pmb_workdir = lambda ctx, usable: rundir
+        pkg.build_module = lambda: type(
+            "B", (), {"_workspace_usable": staticmethod(lambda ctx: (False, "test"))})
+        try:
+            pkg._stop(Ctx(rundir))
+        finally:
+            pkg._kill_inside, pkg._pmb_workdir, pkg.build_module = saved
+        assert not (rundir / "pkg-status.json").exists(), \
+            "_stop invented a failed build that never ran"
+
+
+def test_detach_forwards_the_flags_that_change_the_build():
+    """`--detach` rebuilds the argv by hand, so anything not listed is
+    silently dropped. It dropped `--force` (a declared flag doing nothing) and
+    `--wait` (the child then bailed EX_LOCK into the spawn log while the
+    parent had already returned EX_OK and armed `pkg watch`)."""
+    class Args:
+        timeout, force, wait = 3600, True, 600.0
+
+    argv = pkg.detach_argv("/w/bin/porthole", "webkit2gtk-6.0", "aarch64", Args())
+    assert "--force" in argv, argv
+    assert argv[argv.index("--wait") + 1] == "600.0", argv
+
+    class Plain:
+        timeout, force, wait = 3600, False, 0.0
+
+    bare = pkg.detach_argv("/w/bin/porthole", "phoc", "aarch64", Plain())
+    assert "--force" not in bare and "--wait" not in bare, bare
 
 
 def test_there_is_one_package_build_implementation():

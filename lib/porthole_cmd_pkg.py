@@ -39,7 +39,7 @@ import shutil
 import sys
 import time
 
-from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE
 
 # Four hours. webkit is the reason: it is measured in hours on this hardware,
 # and a timeout that kills it at the default half hour would be a tool that
@@ -399,8 +399,10 @@ def _build(ctx, args) -> int:
                        force=force)
         ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
     else:
+        # 69, not 1: there is nothing here that could build, so this is not
+        # a statement about the package.
         raise Bail(f"no workspace and no pmbootstrap on PATH ({why_not})",
-                   EX_FAIL, "run `porthole sandbox up` first")
+                   EX_UNAVAILABLE, "run `porthole sandbox up` first")
 
     # Said every time, not only on --detach: an agent running this build as a
     # background task is the exact case where the bar goes into a log the
@@ -521,6 +523,28 @@ def _kill_inside() -> None:
         pass
 
 
+def detach_argv(porthole, aport: str, arch: str, args) -> list:
+    """The argv a detached build re-invokes itself with. Pure, so the
+    forwarding is testable without spawning anything.
+
+    Rebuilt by hand, so every flag that changes what the build DOES has to be
+    listed here or it is silently dropped. Two were: `--force`, which made
+    `pkg build X --force --detach` build without force -- the declared flag
+    that does nothing, already ruled unacceptable once on this branch -- and
+    `--wait`, which made `pkg build X --wait 600 --detach` return EX_OK after
+    publish_pending while the child hit the busy-buildroot check with wait=0,
+    bailed EX_LOCK into the spawn log, and left `pkg watch` following a
+    "running" snapshot for a build that never started.
+    """
+    argv = [str(porthole), "pkg", "build", aport, "--arch", arch,
+            "--timeout", str(args.timeout)]
+    if getattr(args, "force", False):
+        argv.append("--force")
+    if getattr(args, "wait", 0):
+        argv += ["--wait", str(args.wait)]
+    return argv
+
+
 def _detach(ctx, args, aport: str, arch: str) -> int:
     """Start the build in its own session and return immediately.
 
@@ -540,8 +564,7 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
     rundir.mkdir(parents=True, exist_ok=True)
     spawn_log = rundir / f"pkg-{aport}-detached.log"
-    argv = [str(ctx.root / "bin" / "porthole"), "pkg", "build", aport,
-            "--arch", arch, "--timeout", str(args.timeout)]
+    argv = detach_argv(ctx.root / "bin" / "porthole", aport, arch, args)
     with open(spawn_log, "w") as handle:
         proc = subprocess.Popen(argv, cwd=str(ctx.root), stdout=handle,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -717,15 +740,22 @@ def _status(ctx) -> int:
     return ctx.emit(snap, render)
 
 
-def stop_plan(snap) -> tuple:
+def stop_plan(snap, alive=None) -> tuple:
     """`("kill", pid)` or `("none", 0)`. Pure, so the decision is testable.
 
-    Only a run that is still marked running is worth killing; signalling a pid
-    from a finished snapshot risks hitting whatever inherited that number.
+    `state: running` is not evidence that anything is running -- a SIGKILLed
+    build, a reboot, a terminal that went away all leave that field set with
+    no one to clear it, and the pid in it is a number the OS has since been
+    free to hand to something else. progress.liveness() exists for exactly
+    that, and trusting the field instead is how this could signal an unrelated
+    process. `alive` is a parameter rather than a lookup inside so the
+    decision stays pure and testable with no clock and no /proc.
     """
-    if not snap or snap.get("state") != "running":
+    import porthole_progress as progress
+
+    if progress.liveness(snap, alive) != "running":
         return ("none", 0)
-    pid = snap.get("pid")
+    pid = (snap or {}).get("pid")
     return ("kill", pid) if isinstance(pid, int) and pid > 0 else ("none", 0)
 
 
@@ -759,11 +789,16 @@ def _stop(ctx) -> int:
 
     workdir = _pmb_workdir(ctx, build_module()._workspace_usable(ctx)[0])
     holder = buildroot.lock_holder(workdir)
-    snap["state"] = "failed"
-    try:
-        (rundir / "pkg-status.json").write_text(json.dumps(snap, indent=2))
-    except OSError:
-        pass
+    # Only UPDATE a snapshot; never invent one. With no status file at all
+    # snap is {}, and writing it back published `{"state": "failed"}` -- a
+    # failed build that never existed, which `pkg status` and `brief` then
+    # reported as the answer.
+    if snap:
+        snap["state"] = "failed"
+        try:
+            (rundir / "pkg-status.json").write_text(json.dumps(snap, indent=2))
+        except OSError:
+            pass
 
     def render():
         if action == "kill":
