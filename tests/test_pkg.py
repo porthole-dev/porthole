@@ -400,6 +400,15 @@ def test_watch_never_starts_with_a_blank_screen():
     assert pkg.waiting_line(None, now=2000.0), "no status file must still say something"
 
 
+def test_watch_can_be_left_open_on_a_terminal_but_not_on_a_pipe():
+    """`watch` is advertised as costing nothing to leave open, and a 30s
+    ceiling defeated that: opened in a second terminal before an agent starts
+    a build, it exited before the build began. A person can Ctrl-C; a pipe
+    cannot, and an agent that ran this by accident would hang forever."""
+    assert pkg.wait_ceiling(tty=True, now=1000.0) is None
+    assert pkg.wait_ceiling(tty=False, now=1000.0) == 1030.0
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -77,6 +77,12 @@ _STAMP = re.compile(r"^\[\d\d:\d\d:\d\d\]\s*")
 # Reverse chronological, same rule as _MARKERS: the first pattern that matches
 # wins, so a line mentioning two phases resolves to the later one.
 _PKG_MARKERS = (
+    # pmbootstrap says outright when there was nothing to do. Recording it
+    # is what makes a two-second build coherent: without this the status read
+    # `elapsed 2s, phase none reached, last DONE!` and left you to work out
+    # why it was two seconds, while the log's FIRST line had already said so
+    # and only the last line was kept.
+    ("up-to-date", re.compile(r"\bis up to date\b|\bNothing to do\b", re.I)),
     ("index", re.compile(r">>>.*\bindex\b|Updating the index", re.I)),
     ("package", re.compile(
         r">>>.*\b(fakeroot|split function|subpackage|tracing dependencies|"
@@ -327,7 +333,12 @@ class Tracker:
 
     def snapshot(self) -> dict:
         frac = self._fraction()
-        return {"rung": self.rung, "phase": self.phase or "starting",
+        # The RAW phase, which may be "". "starting" is a rendering default
+        # and storing it made a finished run carry `phase: starting` forever:
+        # a two-second build whose only output was `DONE!` matched no phase
+        # marker, so the field never advanced, and `state: done` was printed
+        # next to `phase: starting`. Data stays honest; renderers default.
+        return {"rung": self.rung, "phase": self.phase,
                 "state": self.state, "pid": os.getpid(),
                 "elapsed": round(self.elapsed, 1),
                 "progress": None if frac is None else round(frac, 3),
@@ -535,7 +546,7 @@ def publish_pending(rundir, rung: str, pid: int,
     The child overwrites this within a second or two. It only has to be true
     for that window, and `running` with the child's pid is true.
     """
-    snap = {"rung": rung, "phase": "starting", "state": "running", "pid": pid,
+    snap = {"rung": rung, "phase": "", "state": "running", "pid": pid,
             "elapsed": 0.0, "progress": None, "eta": None,
             "compile_lines": 0, "last": "", "started": round(time.time(), 1)}
     path = pathlib.Path(rundir) / name
@@ -622,7 +633,18 @@ def status_report(snap, alive=None, now=None):
         started = snap.get("started")
         if isinstance(started, (int, float)) and isinstance(elapsed, (int, float)):
             head += "  {} ago".format(fmt_dur(now - (started + elapsed)))
-        rows.append(("phase", snap.get("phase") or "?"))
+        # Not "starting": this run is over. A build that reached no phase at
+        # all -- because it had nothing to do -- says so, rather than claiming
+        # it is about to begin.
+        #
+        # A literal "starting" is treated the same way, because status files
+        # written before snapshot() stopped storing that default still carry
+        # it, and "starting" on a finished run is meaningless however it got
+        # there. Without this the fix would only take effect on the NEXT
+        # build, and the reported symptom would still be on screen.
+        reached = snap.get("phase") or ""
+        rows.append(("phase", "none reached" if reached in ("", "starting")
+                     else reached))
     if snap.get("last"):
         rows.append(("last", str(snap["last"])[:100]))
     return head, rows

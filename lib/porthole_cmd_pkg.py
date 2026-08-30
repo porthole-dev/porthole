@@ -584,6 +584,17 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     return EX_OK
 
 
+def wait_ceiling(tty: bool, now: float, seconds: float = 30.0):
+    """When to stop waiting for a build to start, or None for never.
+
+    None on a terminal: `watch` is advertised as free to leave open, and a
+    ceiling defeats that -- opened before an agent starts a build, it would
+    exit before the build began. A person can Ctrl-C. A pipe cannot, and an
+    agent that ran this by accident would hang forever, so it keeps a ceiling.
+    """
+    return None if tty else now + seconds
+
+
 def waiting_line(snap, now=None) -> str:
     """What `watch` is doing while there is nothing live to attach to.
 
@@ -635,7 +646,16 @@ def _watch(ctx, args) -> int:
             return None
 
     started_watching = time.time()
-    appear = started_watching + 30
+    # How long to wait for a build to START, and it depends on who is
+    # watching. `watch` is advertised as "costs nothing to leave open", and a
+    # ceiling breaks exactly that use: open it in a second terminal BEFORE the
+    # agent kicks off a build and it gives up before the build begins.
+    #
+    # So on a terminal there is no ceiling -- a person left it open on purpose
+    # and can Ctrl-C. Off a terminal there is one, because a pipe cannot be
+    # interrupted meaningfully and an agent that ran this by mistake would
+    # hang forever; it gets the previous run and an exit instead.
+    appear = wait_ceiling(tty, started_watching)
 
     def is_stale(snap):
         # A run that had already finished before this watch began is
@@ -653,7 +673,8 @@ def _watch(ctx, args) -> int:
     # long as there is nothing live -- instead of the old bare `continue`.
     last_note = 0.0
     snap = snapshot()
-    while (snap is None or is_stale(snap)) and time.time() < appear:
+    while (snap is None or is_stale(snap)) and (appear is None
+                                                or time.time() < appear):
         line = waiting_line(snap)
         if tty:
             print("\r\033[2K" + line, end="", flush=True)

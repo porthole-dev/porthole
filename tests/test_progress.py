@@ -386,6 +386,59 @@ def test_a_kernel_rung_falls_back_to_history_when_the_window_is_too_thin():
         assert abs(tracker._eta(0.2) - 1200.0) < 0.01, tracker._eta(0.2)
 
 
+def test_a_build_with_nothing_to_do_says_so():
+    """`elapsed 2s` looked incoherent because nothing explained it. The log's
+    FIRST line said `Package 'gst-plugins-good' is up to date` and status kept
+    only the last (`DONE!`), which carries no information. pmbootstrap states
+    the reason outright, so record it rather than leave it to be inferred."""
+    phase = progress.pkg_phase_of(
+        "[16:00:07] NOTE: Package 'gst-plugins-good' is up to date", "")
+    assert phase == "up-to-date"
+    _, rows = progress.status_report(
+        {"rung": "pkg:gst-plugins-good", "phase": "up-to-date", "state": "done",
+         "pid": 1, "elapsed": 2.5, "started": 1000.0}, now=1003.0)
+    assert dict(rows)["phase"] == "up-to-date"
+
+
+def test_a_finished_run_does_not_claim_to_be_starting():
+    """Reported from a real status: `state done` printed next to `phase
+    starting`. The two-second build's only output was `DONE!`, which matched
+    no phase marker, so the field never advanced -- and snapshot() had baked
+    the RENDERING default "starting" into the stored data, where it then
+    outlived the run."""
+    done = {"rung": "pkg:gst-plugins-good", "phase": "", "state": "done",
+            "pid": 1, "elapsed": 2.0, "started": 1000.0, "last": "DONE!"}
+    _, rows = progress.status_report(done, now=1002.0)
+    phase = dict(rows)["phase"]
+    assert phase == "none reached", phase
+    assert "starting" not in phase
+
+
+def test_a_status_file_written_before_the_fix_reads_correctly_too():
+    """The reported symptom was in a status file already on disk. Fixing only
+    what snapshot() writes would leave it on screen until the next build."""
+    done = {"rung": "pkg:gst-plugins-good", "phase": "starting",
+            "state": "done", "pid": 1, "elapsed": 2.0, "started": 1000.0}
+    _, rows = progress.status_report(done, now=1002.0)
+    assert dict(rows)["phase"] == "none reached"
+
+
+def test_the_snapshot_stores_the_raw_phase_not_the_display_default():
+    """Presentation defaults belong in renderers. Storing "starting" is what
+    made it survive the run that never left it."""
+    with tempfile.TemporaryDirectory() as run:
+        assert progress.Tracker(run, "auto").snapshot()["phase"] == ""
+
+
+def test_a_live_run_still_reads_as_starting_before_any_phase_lands():
+    """The default is still right where it belongs -- on the live view."""
+    live = {"rung": "auto", "phase": "", "state": "running", "pid": 1,
+            "elapsed": 1.0, "progress": None, "eta": None, "started": 1000.0}
+    head, _ = progress.status_report(live, alive=lambda _: True)
+    assert "starting" in head
+    assert "starting" in progress.line_of(live)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
