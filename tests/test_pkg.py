@@ -270,6 +270,23 @@ def test_force_reaches_pmbootstrap():
     assert "--force" not in pkg.host_cmd("phoc", "aarch64", lax=False)
 
 
+def test_a_patch_missing_from_source_is_named():
+    """E3 from the redfin report: a patch listed only in patches= gets no
+    checksum, because pmbootstrap checksums what is in source=. The fix
+    already existed as `porthole aports patch` and was never found, so the
+    session hand-edited and lost time. Name it where the mistake happens."""
+    import porthole_cmd_aports as aports
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        directory = pathlib.Path(d)
+        (directory / "fix.patch").write_text("diff")
+        (directory / "other.patch").write_text("diff")
+        apkbuild = 'source="foo.tar.gz\n\tfix.patch\n\t"\n'
+        missing = aports.untracked_patches(directory, apkbuild)
+        assert missing == ["other.patch"], missing
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

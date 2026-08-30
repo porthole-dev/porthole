@@ -711,6 +711,19 @@ def cmd_checksum(args, ctx, pmaports) -> int:
                    "a source in the APKBUILD could not be fetched — check the "
                    "URL, and that every local file listed actually exists")
     ctx.out(ctx.out.paint("  checksums updated", "green"))
+    for name in _resolve_pkgs(args, ctx, pmaports):
+        directory = _pkg_dir(pmaports, name)
+        if directory is None:
+            continue
+        stray = untracked_patches(
+            directory, (directory / "APKBUILD").read_text(errors="replace"))
+        if stray:
+            ctx.out(ctx.out.paint(
+                f"  {name}: {', '.join(stray)} sit beside the APKBUILD but are "
+                f"not in source=, so they get no checksum and will not apply",
+                "yellow"))
+            ctx.out(ctx.out.paint(
+                f"  porthole aports patch {name}   adds them properly", "cyan"))
     return EX_OK
 
 
@@ -909,6 +922,20 @@ def cmd_patches(args, ctx, pmaports) -> int:
 
 
 SOURCE_BLOCK = re.compile(r'^(source=")(.*?)(")', re.M | re.S)
+
+
+def untracked_patches(directory, apkbuild_text: str) -> list:
+    """`.patch` files beside the APKBUILD that `source=` does not list.
+
+    pmbootstrap checksums what is in source=, so a patch listed only in
+    patches= silently gets no checksum and the build fails later complaining
+    about something else. `porthole aports patch` has always handled this
+    correctly; the redfin session did it by hand because nothing said so.
+    """
+    match = SOURCE_BLOCK.search(apkbuild_text)
+    listed = set(match.group(2).split()) if match else set()
+    return sorted(path.name for path in directory.glob("*.patch")
+                  if path.name not in listed)
 
 
 def _rewrite_source(apkbuild: pathlib.Path, patches: list[str]) -> bool:
