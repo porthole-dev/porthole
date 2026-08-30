@@ -247,6 +247,20 @@ def test_stopping_kills_both_sides_not_just_the_client():
     assert pkg.stop_plan(FakeSnap({})) == ("none", 0)
 
 
+def test_there_is_one_package_build_implementation():
+    """`aports build` and `pkg build` both built packages, but aports build
+    called raw pmbootstrap: no progress bar, no --lax handling, no artifact
+    check, no detach. Two doors and only one of them good is worse than one
+    door, and the redfin developer used neither."""
+    import inspect
+
+    import porthole_cmd_aports as aports
+
+    source = inspect.getsource(aports.cmd_build)
+    assert "porthole_cmd_pkg" in source or "_delegate_to_pkg" in source, \
+        "aports build still has its own build implementation"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

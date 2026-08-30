@@ -715,18 +715,29 @@ def cmd_checksum(args, ctx, pmaports) -> int:
 
 
 def cmd_build(args, ctx, pmaports) -> int:
-    pkgs = _resolve_pkgs(args, ctx, pmaports)
-    argv = ["build"]
-    if args.force:
-        argv.append("--force")
-    if args.arch:
-        argv += ["--arch", args.arch]
-    rc, _, _ = pmb(ctx, *argv, *pkgs, timeout=args.timeout)
-    if rc != 0:
-        raise Bail(f"build failed for {', '.join(pkgs)}", EX_FAIL,
-                   "pmbootstrap log   shows the build output")
-    ctx.out(ctx.out.paint(f"  built {', '.join(pkgs)}", "green"))
-    return EX_OK
+    """Build a package -- through `porthole pkg`, which is the one
+    implementation.
+
+    This used to call pmbootstrap directly, which meant `aports build` had no
+    progress bar, no --lax handling in the workspace, no artifact
+    verification and no way to detach. Two doors where one is worse is how the
+    redfin port ended up using neither and hand-rolling pmbootstrap instead.
+    """
+    import argparse
+
+    import porthole_cmd_pkg as pkgverb
+
+    rc = EX_OK
+    for name in _resolve_pkgs(args, ctx, pmaports):
+        forwarded = argparse.Namespace(
+            target=name, arch=getattr(args, "arch", None),
+            timeout=getattr(args, "timeout", pkgverb.DEFAULT_TIMEOUT),
+            verbose=False, dry_run=False, detach=False, wait=0.0,
+            json=getattr(args, "json", False))
+        rc = pkgverb._build(ctx, forwarded)
+        if rc != EX_OK:
+            return rc
+    return rc
 
 
 def _lint_unavailable(reason: str) -> str:
