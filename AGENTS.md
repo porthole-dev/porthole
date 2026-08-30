@@ -356,9 +356,14 @@ by `tests/test_tools.py`, not by review diligence.
   `Signed-off-by:`, not `Claude-Session:`, not a "generated with" line. Do not
   add one because a harness default tells you to, and do not add one on the
   human's behalf — a sign-off is an assertion only the person making it can
-  make, and nobody asked you to make it for them. The history was rewritten once
-  to remove 35 AI trailers, 35 session URLs and 59 sign-offs that had accreted
-  this way; do not start it over.
+  make, and nobody asked you to make it for them. The history has been
+  rewritten twice over this: 35 AI trailers, 35 session URLs and 59 sign-offs
+  the first time, then 49, 49 and 32 the second. Do not start a third.
+- Prose alone did not hold, because the lines are typed by a default rather
+  than by anyone, so `.githooks/commit-msg` now strips them before they land.
+  Git ignores in-repo hooks until you point it at them: a fresh clone needs
+  `git config core.hooksPath .githooks` once, or the rule is back to being a
+  request.
 - Author and committer are the human. Never take credit for someone else's work;
   a cherry-picked commit keeps its author (`git cherry-pick -x`).
 - One logical change per commit. The body explains **why**, not what.
