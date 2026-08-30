@@ -80,6 +80,34 @@ Requirements that are not obvious and were each paid for:
    file nobody was watching. Whatever this verb does, a dead build must be
    visible from `status`.
 
+## Third: package builds run emulated, not cross-compiled
+
+Measured during the webkit build on a 16-core host, fully loaded (92% user,
+load 32):
+
+```
+19 qemu-aarch64 -> clang++
+17 qemu-aarch64 -> perl
+15 qemu-aarch64 -> ccache
+ 1 qemu-aarch64 -> ninja
+```
+
+The compiler itself is running under qemu-user emulation. `crossdirect` appears
+in the build log ten times, so it is being set up, but clang is still reached
+through `qemu-aarch64` rather than run natively against an aarch64 sysroot.
+webkit took ~1.7 h for 8233 objects this way; native cross-compilation should
+be several times faster, and this is the single biggest lever on the iteration
+loop for userspace packages.
+
+ccache IS active (15 processes), so repeat builds get the existing cache win --
+this is specifically about the first build of a package.
+
+Worth checking whether `PORTHOLE_*` or pmbootstrap's crossdirect is silently
+falling back, and whether a package verb should assert "compiles are native"
+the way the kernel rungs assert their artifacts. A build that is 5x slower than
+it needs to be, with nothing saying so, is the same class of silent-wrong as
+the missing progress bar.
+
 ## Second defect, cheap to fix, found alongside
 
 `porthole build status` reports a **stale run as though it were live**. After
