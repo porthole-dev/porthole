@@ -309,8 +309,20 @@ class Tracker:
         return fraction(self.history, self.rung, self.elapsed, self.compile_seen)
 
     def _eta(self, frac):
-        """Seconds remaining. A seam, like _fraction: a package build has a
-        real step count to divide and a kernel build does not."""
+        """Seconds remaining, from a measured rate where one exists.
+
+        A seam, like _fraction. The windowed rate comes first because the
+        history path extrapolates elapsed-against-last-total, and that grows
+        without bound through a long single-threaded step -- the package
+        builds measured it producing a 74-hour estimate on a healthy build.
+        When there are too few samples to divide by, the history path is
+        still the best available answer, so it remains the fallback rather
+        than being replaced.
+        """
+        recent = window_rate(self._samples, time.time())
+        total = (self.history or {}).get(self.rung, {}).get("compile_lines")
+        if recent and isinstance(total, int) and total > self.compile_seen:
+            return (total - self.compile_seen) / recent
         return eta(self.history, self.rung, self.elapsed, frac)
 
     def snapshot(self) -> dict:

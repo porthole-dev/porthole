@@ -340,20 +340,41 @@ def test_a_window_too_short_to_mean_anything_is_refused():
     assert progress.window_rate([(now - 5, 0), (now, 40)], now) is None
 
 
-def test_the_kernel_rungs_refuse_an_eta_during_a_stall_too():
-    """Package builds got an honest windowed rate; kernel rungs still
-    extrapolated from history. Two arithmetics for one question is how they
-    drift apart, and kbuild has real compile lines to measure."""
+def test_a_kernel_rung_refuses_an_eta_when_its_compile_rate_stalls():
+    """Kernel rungs used to extrapolate elapsed against the last total, which
+    grows without bound through a long single-threaded step -- the package
+    path measured that producing a 74-hour estimate on a healthy build. With
+    a real compile-line count and a stalled window, the honest answer is that
+    we do not know."""
+    import time as _t
+
+    with tempfile.TemporaryDirectory() as run:
+        tracker = progress.Tracker(run, "kernel")
+        tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
+        tracker.started = _t.time() - 4000        # long overrun of the baseline
+        tracker.compile_seen = 40
+        # Four compiles across four minutes: below RATE_MIN_STEPS, so the
+        # window is discarded rather than divided by.
+        now = _t.time()
+        tracker._samples.clear()
+        tracker._samples.extend([(now - 240, 37), (now - 160, 38),
+                                 (now - 80, 39), (now, 40)])
+        assert tracker._eta(0.008) is None
+
+
+def test_a_kernel_rung_with_a_healthy_rate_still_gets_an_eta():
+    """The refusal must not be so broad that the field is never populated."""
     import time as _t
 
     with tempfile.TemporaryDirectory() as run:
         tracker = progress.Tracker(run, "kernel")
         tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
         tracker.started = _t.time() - 300
-        tracker.compile_seen = 10
-        tracker._samples = getattr(tracker, "_samples", None)
-        assert hasattr(tracker, "_samples"), \
-            "Tracker has no sample window; kernel rungs still extrapolate"
+        tracker.compile_seen = 1000
+        now = _t.time()
+        tracker._samples.clear()
+        tracker._samples.extend([(now - 120 + i, 800 + i * 2) for i in range(0, 120, 4)])
+        assert tracker._eta(0.2) is not None
 
 
 def main():
