@@ -76,14 +76,19 @@ def running(dev, kpkg: str = "") -> dict:
         return {}
     parts = (out.split("<<>>") + ["", "", ""])[:3]
     version, installed, modules = (p.strip() for p in parts)
+    # Match by NAME, exactly. The grep above also lets linux-firmware-* and
+    # linux-pam-* through, and a first-line-wins fallback would silently
+    # attribute another package's pkgrel as the kernel's -- a guess dressed as
+    # a measurement, worse than reporting nothing. Without a kpkg to match,
+    # apk_pkgrel stays empty; compare()'s apk_rel.isdigit() guard then skips
+    # the desync branch instead of inventing one.
     apk_pkgrel = ""
-    for line in installed.splitlines():
-        name = line.strip()
-        if kpkg and not name.startswith(kpkg + "-"):
-            continue
-        if "-r" in name:
-            apk_pkgrel = name.rsplit("-r", 1)[-1]
-            break
+    if kpkg:
+        for line in installed.splitlines():
+            name = line.strip()
+            if name.startswith(kpkg + "-") and "-r" in name:
+                apk_pkgrel = name.rsplit("-r", 1)[-1]
+                break
     # /proc/version holds utsname.version after the compiler string; the `#`
     # is where it starts.
     stamp = version[version.index("#"):] if "#" in version else ""
