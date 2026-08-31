@@ -30,7 +30,7 @@ import threading
 import time
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_UNAVAILABLE, EX_USAGE
 
 # Each verb maps to a shell function ph-build.sh defines. The names are kept
 # from the taimen toolbox because they are what every runbook prints and what
@@ -113,12 +113,43 @@ def _script(ctx) -> pathlib.Path:
     return path
 
 
-def _preflight(ctx) -> list[str]:
+# The rungs that end in `pmbootstrap export`, which builds boot.img out of the
+# rootfs chroot and therefore needs one a full `pmbootstrap install` has
+# populated. `mod` and `boot` never reach it.
+EXPORT_RUNGS = ("fast", "kernel", "upgrade")
+
+
+def export_problems(workdir, device: str) -> list:
+    """Can `pmbootstrap export` run in this work dir? Pure, given a path.
+
+    `fast` is advertised at ~6m and is what the ladder steers you to for a
+    config or series change. On a work dir whose rootfs chroot has never been
+    installed it CANNOT succeed, and it discovered that only after a full
+    kernel compile -- 20m35s, measured. deviceinfo is the file mkinitfs names
+    when it fails, so it is the file to test for.
+    """
+    if not device:
+        return []
+    chroot = pathlib.Path(workdir) / f"chroot_rootfs_{device}"
+    if (chroot / "usr" / "share" / "deviceinfo" / "deviceinfo").is_file():
+        return []
+    return [f"the rootfs chroot in {workdir} has never been installed, so "
+            f"`pmbootstrap export` cannot build a boot.img "
+            f"(no {chroot}/usr/share/deviceinfo/deviceinfo). "
+            f"Run `porthole build kernel --yes` once against this work dir."]
+
+
+def _preflight(ctx, action: str = "") -> list[str]:
     """What must be true before a build can even start.
 
     Reported together rather than one failure at a time: an envkernel build is
     minutes long, and finding out about the second missing value after the
     first one is fixed is how an afternoon goes.
+
+    `action` is optional: the `auto` guard calls this with none, asking
+    "could this profile build at all"; the real call site passes the rung it
+    is about to run, which is what lets the export-rung check below know
+    whether it applies.
     """
     problems = []
     cfg = ctx.cfg
@@ -132,6 +163,10 @@ def _preflight(ctx) -> list[str]:
     if not shutil.which("pmbootstrap"):
         problems.append("pmbootstrap is not on PATH")
     problems += _space_problems(cfg)
+    if action in EXPORT_RUNGS:
+        problems += export_problems(
+            pmb_workdir(ctx, _workspace_usable(ctx)[0]),
+            cfg.get("PORTHOLE_DEVICE", ""))
     return problems
 
 
@@ -625,6 +660,14 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                 "dependencies),", "grey"))
             ctx.out(ctx.out.paint(
                 "  which is what the workspace exists to avoid needing", "grey"))
+    # WHERE a build ran is the first thing you need when it fails in a way
+    # that makes no sense, and WHICH WORK DIR is the second. The
+    # workspace/host split is documented and was invisible at build time,
+    # which is how `fast` came to find both apks present and still fail in
+    # export against a chroot that had never been installed.
+    ctx.out(ctx.out.paint(
+        f"  work dir: {pmb_workdir(ctx, usable)}"
+        f"  ({'workspace' if usable else 'host'})", "grey"))
     # pmbootstrap keeps the real build output in its own log.txt and puts only
     # `=> step` lines on stdout. `pkg` has followed it since the bar was
     # written; the kernel rungs never did, so build-history.json recorded
@@ -1177,7 +1220,7 @@ def cmd_build(args, ctx) -> int:
         func, what = ACTIONS[action]
         extra = _rung_args(args, action)
 
-    problems = _preflight(ctx)
+    problems = _preflight(ctx, action)
     tight = _space_warning(ctx.cfg)
     if tight and not problems:
         ctx.out.warn(tight)
@@ -1222,7 +1265,13 @@ def cmd_build(args, ctx) -> int:
                         render)
 
     if problems and action in BUILD_ACTIONS:
-        raise Bail("this profile cannot build yet", EX_FAIL,
+        # 76 ("wrong device state, do not retry"), not 1, when the profile
+        # itself is otherwise ready and the only thing standing in the way is
+        # the rootfs chroot: that is not a usage mistake, it is `porthole
+        # build kernel --yes` away, and the exit code should say so.
+        code = EX_STATE if action in EXPORT_RUNGS and not _preflight(ctx) \
+            else EX_FAIL
+        raise Bail("this profile cannot build yet", code,
                    "; ".join(problems))
 
     if not func:

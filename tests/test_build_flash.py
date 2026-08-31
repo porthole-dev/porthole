@@ -121,6 +121,54 @@ def test_build_reports_every_missing_value_at_once():
     assert "cannot build yet" in (out + err)
 
 
+def _fake_workdir(populated: bool):
+    import tempfile
+    root = pathlib.Path(tempfile.mkdtemp(prefix="porthole-pmb-"))
+    chroot = root / "chroot_rootfs_google-taimen"
+    if populated:
+        info = chroot / "usr" / "share" / "deviceinfo"
+        info.mkdir(parents=True)
+        (info / "deviceinfo").write_text("deviceinfo_format_version=0\n")
+    else:
+        chroot.mkdir(parents=True)
+    return root
+
+
+def test_export_rungs_refuse_an_uninstalled_rootfs_chroot():
+    """One is_file() instead of twenty minutes.
+
+    `fast` compiled a kernel for 20m35s and then died in `pmbootstrap export`
+    because the workspace's rootfs chroot had never had a full install. The
+    workspace keeps its own pmbootstrap work dir; installs done on the host do
+    not populate it.
+    """
+    import porthole_cmd_build as build
+
+    problems = build.export_problems(_fake_workdir(populated=False),
+                                     "google-taimen")
+    assert problems, "an empty rootfs chroot must be refused"
+    assert "install" in problems[0], problems
+
+
+def test_export_rungs_accept_a_populated_rootfs_chroot():
+    import porthole_cmd_build as build
+
+    assert build.export_problems(_fake_workdir(populated=True),
+                                 "google-taimen") == []
+
+
+def test_only_the_export_rungs_are_checked():
+    # `mod` and `boot` never call pmbootstrap export, so an empty rootfs
+    # chroot is irrelevant to them and refusing would be a false stop.
+    import porthole_cmd_build as build
+
+    assert "fast" in build.EXPORT_RUNGS
+    assert "kernel" in build.EXPORT_RUNGS
+    assert "upgrade" in build.EXPORT_RUNGS
+    assert "mod" not in build.EXPORT_RUNGS
+    assert "boot" not in build.EXPORT_RUNGS
+
+
 # -------------------------------------------------------- no taimen values --
 
 def test_the_build_script_carries_no_device_specific_values():
