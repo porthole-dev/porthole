@@ -27,6 +27,7 @@ generic notes as well.
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
 | [lax-build-buys-nothing-measurable](findings/lax-build-buys-nothing-measurable.md) | `generic` | PORTHOLE_LAX_BUILD=1 saves no measurable time, and the zap it skips is not the wall clock |
 | [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
+| [nothing-polls-an-idle-link-on-ath10k](findings/nothing-polls-an-idle-link-on-ath10k.md) | `generic` | ath10k turns off mac80211's idle connection polling, then disables the firmware keepalive too |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
@@ -157,7 +158,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 17
-- `generic` — 86
+- `generic` — 87
 - `soc:gs201` — 1
 - `soc:msm8998` — 14
 - `soc:qcom` — 1
