@@ -508,13 +508,52 @@ def test_stall_note_is_silent_when_output_is_recent():
     assert progress.stall_note("  CC  drivers/media/x.o", silence=3.0) == ""
 
 
-def test_snapshot_carries_last_at():
-    tracker = progress.Tracker(
-        pathlib.Path(tempfile.mkdtemp(prefix="porthole-t-")), "fast")
-    tracker.feed("  CC  drivers/x.o\n")
-    snap = tracker.snapshot()
-    assert isinstance(snap.get("last_at"), float), snap
-    assert snap.get("last_age") is not None, snap
+def test_feed_advances_last_at():
+    """`__init__` already sets `last_at = started`, so a test that only
+    checks the field's PRESENCE (its previous shape) passes whether or not
+    `feed()` ever touches it -- proven by deleting `self.last_at =
+    time.time()` from `feed()` and re-running: 59/59 still passed. Prove the
+    UPDATE instead: hold the clock at a fixed instant, snapshot, advance it,
+    `feed()` a line, snapshot again, and check the value moved to the new
+    instant, not merely that it is a float.
+    """
+    real_time = progress.time.time
+    now = [1000.0]
+    progress.time.time = lambda: now[0]
+    try:
+        tracker = progress.Tracker(
+            pathlib.Path(tempfile.mkdtemp(prefix="porthole-t-")), "fast")
+        before = tracker.snapshot()["last_at"]
+        assert before == 1000.0, before
+        now[0] = 1090.0
+        tracker.feed("  CC  drivers/x.o\n")
+        after = tracker.snapshot()
+        assert after["last_at"] == 1090.0, after
+        assert after["last_age"] == 0.0, after
+    finally:
+        progress.time.time = real_time
+
+
+def test_status_report_pairs_a_stall_pattern_with_its_why_row():
+    """The deliverable is "a `[??????]` bar always comes with a reason" --
+    `stall_note` and `status_report` tested in isolation does not prove they
+    are actually wired together. This is the join: a RUNNING snapshot whose
+    `last` matches a stall pattern and is old enough gets a `why` row, and
+    the same snapshot with a FRESH `last` gets none -- so the row cannot be
+    unconditional."""
+    now = 5000.0
+    stale = {"rung": "fast", "state": "running", "pid": os.getpid(),
+             "elapsed": 1300.0, "progress": None, "eta": None,
+             "compile_lines": 0, "last": "[14:49:08] DONE!",
+             "last_at": now - 1200, "started": now - 1300}
+    _head, rows = progress.status_report(stale, alive=lambda _: True, now=now)
+    rows = dict(rows)
+    assert "why" in rows, rows
+    assert "packag" in rows["why"].lower() or "compress" in rows["why"].lower()
+
+    fresh = dict(stale, last="  CC  drivers/media/x.o", last_at=now - 3)
+    _head, rows = progress.status_report(fresh, alive=lambda _: True, now=now)
+    assert "why" not in dict(rows), dict(rows)
 
 
 # --------------------------------------------------------- watch() (Task 13) --
@@ -589,8 +628,15 @@ def test_watch_detects_a_dead_pid_as_stale_instead_of_polling_forever():
 # of the same defect, missed the first time because this constant did not
 # name every key the contract promises. A constant that omits a key pins
 # nothing about that key.
+#
+# `last_at`/`last_age` (Task 16 fix round 1) are in it for the same reason:
+# they are the newest keys `snapshot()` grows, so they are the most likely
+# pair to drift between the live and waiting branches next, and the only
+# thing that had been checking they matched was a one-off script run by
+# hand. Adding them here forced the two hand-written fixtures below to carry
+# them too -- that churn is this constant doing its job.
 NDJSON_KEYS_AN_AGENT_READS = ("rung", "phase", "state", "elapsed", "progress",
-                              "eta", "note")
+                              "eta", "last_at", "last_age", "note")
 
 
 def test_watch_ndjson_streams_json_and_skips_the_summary_block():
@@ -613,7 +659,8 @@ def test_watch_ndjson_streams_json_and_skips_the_summary_block():
         now = time.time()
         snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
                 "pid": 1, "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
-                "compile_lines": 42, "last": "DONE!", "started": now}
+                "compile_lines": 42, "last": "DONE!", "last_at": now,
+                "last_age": 0.0, "started": now}
         (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
         lines = []
         rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
@@ -652,8 +699,8 @@ def test_watch_ndjson_waiting_path_carries_the_same_keys():
             finished = time.time() - 120  # long before this watch begins
             snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
                     "pid": 1, "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
-                    "compile_lines": 42, "last": "DONE!",
-                    "started": finished - 5.0}
+                    "compile_lines": 42, "last": "DONE!", "last_at": finished,
+                    "last_age": 0.0, "started": finished - 5.0}
             (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
             lines = []
             rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
