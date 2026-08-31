@@ -220,7 +220,39 @@ def test_a_broken_shebang_does_not_pass_as_ok():
 
 
 def test_a_working_tool_reports_no_reason():
-    assert doctor._runs(shutil.which("sh")) == ""
+    """A hermetic stand-in rather than a real tool: /bin/sh is dash on some
+    hosts and dash has no --version, so probing it would fail this test on a
+    perfectly good box. The contract under test is "exit 0 means usable"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "worksfine"
+        fake.write_text("#!/bin/sh\necho 'worksfine 1.0'\n")
+        os.chmod(fake, 0o755)
+        assert doctor._runs(str(fake)) == ""
+
+
+def test_a_tool_that_answers_the_wrong_flag_is_a_reason():
+    """`ssh --version` exits 255 with a usage block. Asking a tool the wrong
+    question must read as broken, which is why the flag is per-tool."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "picky"
+        fake.write_text("#!/bin/sh\necho 'unknown option' >&2\nexit 255\n")
+        os.chmod(fake, 0o755)
+        why = doctor._runs(str(fake))
+        assert "255" in why and "unknown option" in why, why
+
+
+def test_an_env_form_shebang_with_a_dead_target_is_caught():
+    """The case reported from a NixOS host in PR #2: a pip-generated
+    `#!/usr/bin/env <python>` outliving the python it names. env EXISTS, so
+    exec succeeds and env itself fails with 127 -- a different path from a
+    direct shebang, which fails at exec with ENOENT. Both must be caught."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "pmbootstrap"
+        fake.write_text("#!/usr/bin/env /no/such/python3\nprint(1)\n")
+        os.chmod(fake, 0o755)
+        why = doctor._runs(str(fake))
+        assert why, "an env-form dead interpreter must not read as ok"
+        assert "/no/such/python3" in why, why
 
 
 def test_ssh_is_probed_with_the_flag_ssh_actually_takes():
