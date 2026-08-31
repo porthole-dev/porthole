@@ -332,6 +332,34 @@ def test_series_problems_still_reports_orphans():
     assert "orphan" in kinds, aports._series_problems(pkg)
 
 
+def test_lint_reports_a_bad_series_even_when_apkbuild_lint_is_gone():
+    """The local check runs whether or not pmbootstrap can lint.
+
+    `aports lint` could previously only decline. A verb whose only outcome is
+    "I cannot" is one nobody runs, and the series defect it would have caught
+    cost the taimen port a subsystem.
+    """
+    import porthole_cmd_aports as aports
+
+    problems = [("malformed", "0199-x.patch: header says -7/+9, body has -7/+8")]
+    assert aports.lint_verdict(problems, apkbuild_lint_rc=None) == 1
+
+
+def test_lint_missing_apkbuild_lint_alone_is_not_a_finding():
+    # 69, never 1: the tool did not run, so the answer is not "no".
+    import porthole_cmd_aports as aports
+
+    assert aports.lint_verdict([], apkbuild_lint_rc=None) == 69
+
+
+def test_lint_a_stripped_patch_alone_does_not_fail_the_verb():
+    # 16 real patches carry this and build. Reported, not fatal.
+    import porthole_cmd_aports as aports
+
+    problems = [("stripped", "1000-drm.patch: line 12: ... leading space")]
+    assert aports.lint_verdict(problems, apkbuild_lint_rc=0) == 0
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -844,27 +844,68 @@ def _lint_unavailable(reason: str) -> str:
             f"a problem with your package")
 
 
-def cmd_lint(args, ctx, pmaports) -> int:
-    """apkbuild-lint, on your packages by default.
+def lint_verdict(problems, apkbuild_lint_rc) -> int:
+    """The exit code for a lint run. Pure, so the 1/69 split is testable.
 
-    The same check pmaports CI runs, so a clean run here is the difference
-    between a merge request that gets reviewed and one bounced before anybody
-    reads it -- WHEN the installed pmbootstrap still has it. 3.11.1 does not,
-    and reporting that as "lint found problems" is the exact confusion
-    AGENTS.md section 6 forbids: the tool broke, the answer is not "no".
+    `apkbuild_lint_rc` is None when the subcommand is absent.
+
+    The split is the contract, not a detail: 1 means the measurement says no,
+    69 means no measurement happened. `aports lint` used to report "lint found
+    problems" for a subcommand pmbootstrap had removed, which is exit 1 lying
+    about the user's packages -- the exact confusion AGENTS.md section 6
+    forbids.
+    """
+    if any(kind not in ("duplicate", "stripped") for kind, _ in problems):
+        return EX_FAIL
+    if apkbuild_lint_rc is None:
+        return EX_UNAVAILABLE
+    return EX_FAIL if apkbuild_lint_rc != 0 else EX_OK
+
+
+def cmd_lint(args, ctx, pmaports) -> int:
+    """The local series check always; apkbuild-lint when pmbootstrap has it.
+
+    Two checks with two provenances, reported separately. The series check is
+    ours and always runs. apkbuild-lint is pmbootstrap's, moved out in 3.11.1,
+    and its absence is a gap in local checking rather than a problem with
+    anyone's package -- pmaports CI still runs it.
     """
     import porthole_pmb_api as pmb_api
 
+    names = _resolve_pkgs(args, ctx, pmaports)
+    problems = []
+    for name in names:
+        directory = _pkg_dir(pmaports, name)
+        if directory is None:
+            continue
+        for kind, message in _series_problems(directory):
+            problems.append((kind, "{}: {}".format(name, message)))
+
+    for kind, message in problems:
+        colour = "yellow" if kind in ("duplicate", "stripped") else "red"
+        ctx.out(ctx.out.paint("  {:<9} {}".format(kind, message), colour))
+    if not problems:
+        ctx.out(ctx.out.paint("  series clean", "green"))
+
     gone = pmb_api.missing("subcommands", "lint")
+    rc = None
     if gone:
+        ctx.out(ctx.out.paint("  " + _lint_unavailable(gone), "grey"))
+    else:
+        rc, _, _ = pmb(ctx, "lint", *names, timeout=900)
+        ctx.out(ctx.out.paint(
+            "  apkbuild-lint clean" if rc == 0 else "  apkbuild-lint found problems",
+            "green" if rc == 0 else "red"))
+
+    verdict = lint_verdict(problems, rc)
+    if verdict == EX_UNAVAILABLE:
         raise Bail(_lint_unavailable(gone), EX_UNAVAILABLE,
-                   "pmaports CI lints the merge request; nothing local to fix")
-    rc, _, _ = pmb(ctx, "lint", *_resolve_pkgs(args, ctx, pmaports), timeout=900)
-    if rc != 0:
+                   "the series check above ran and was clean; pmaports CI "
+                   "lints the merge request")
+    if verdict != EX_OK:
         raise Bail("lint found problems", EX_FAIL,
-                   "fix them before opening a merge request — pmaports CI runs "
-                   "this too")
-    ctx.out(ctx.out.paint("  lint clean", "green"))
+                   "fix them before opening a merge request — pmaports CI "
+                   "runs this too")
     return EX_OK
 
 
