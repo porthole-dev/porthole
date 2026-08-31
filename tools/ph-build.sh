@@ -1443,7 +1443,7 @@ tkpush-modules() {
 
 	# While the phone is still up, record the UUIDs its initramfs actually needs.
 	# tkflash-boot patches them into the export; see the comment there.
-	ssh "$phone" 'cat /proc/cmdline' 2>/dev/null | tr ' ' '\n' |
+	ssh "${TK_SSH_OPTS[@]}" "$phone" 'cat /proc/cmdline' 2>/dev/null | tr ' ' '\n' |
 		grep -E '^pmos_(boot|root)_uuid=' > "$_PH_REPO/.device-uuids"
 	[ -s "$_PH_REPO/.device-uuids" ] &&
 		echo ">> recorded device UUIDs: $(tr '\n' ' ' < "$_PH_REPO/.device-uuids")"
@@ -1485,7 +1485,15 @@ tkmod() {
 	local ko="$_PH_OUT/$rel"
 	[ -f "$ko" ] || { echo ">> no module at $ko"; return 1; }
 
-	scp -q "$ko" "$phone:/tmp/$name.ko" || return 1
+	# TK_SSH_OPTS, like every other device call in this file. It carries
+	# -i "$PORTHOLE_SSH_KEY" -o IdentitiesOnly=yes (lib/porthole.sh:188), and
+	# in the workspace that key is /run/porthole/device_key -- the ONLY key the
+	# container has. Without it these three calls offered no key at all, so
+	# every `porthole build mod --yes` ended `scp: Connection closed`, which
+	# reads like a network fault and sent a session looking at the ssh mux.
+	# They also lost ConnectTimeout, BatchMode (a prompt instead of a fast
+	# failure) and the multiplexing that makes every other device call ~15ms.
+	scp -q "${TK_SSH_OPTS[@]}" "$ko" "$phone:/tmp/$name.ko" || return 1
 
 	# ALSO replace the installed module, not just the hot-loaded one.
 	#
@@ -1497,14 +1505,14 @@ tkmod() {
 	# Modules on the device are xz-compressed; a plain .ko next to the .ko.xz
 	# is ignored (TODO section 3), so compress and overwrite in place.
 	xz -cf "$ko" > "/tmp/$name.ko.xz" || return 1
-	scp -q "/tmp/$name.ko.xz" "$phone:/tmp/$name.ko.xz" || return 1
+	scp -q "${TK_SSH_OPTS[@]}" "/tmp/$name.ko.xz" "$phone:/tmp/$name.ko.xz" || return 1
 
 	# rmmod alone is not enough once something holds the driver -- camss keeps a
 	# reference to a sensor subdev, so the module refcount never reaches zero and
 	# insmod then fails with "File exists", which reads like a stale file rather
 	# than a busy module. Unbind every device first, then reload and let it
 	# re-probe (camss re-registers its media device when the subdev comes back).
-	ssh "$phone" "set -e
+	ssh "${TK_SSH_OPTS[@]}" "$phone" "set -e
 		d=/sys/bus/i2c/drivers/$name
 		[ -d \$d ] || d=/sys/bus/platform/drivers/$name
 		if [ -d \$d ]; then
