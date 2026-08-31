@@ -85,6 +85,17 @@ def test_phases_come_from_the_lines_the_script_already_prints():
     assert progress.phase_of("some unrelated noise", "make") == "make"
 
 
+def test_the_install_step_ph_build_announces_resolves_to_install():
+    """ph-build.sh's `pmbootstrap install` runs as a plain shell command and
+    is never echoed, so `_MARKERS`' `pmbootstrap install` alternative never
+    fires on it -- only the `>>` announcement tkbuild() prints right before
+    it does. Coupled to the exact string in tools/ph-build.sh's tkbuild() so
+    this breaks if one is reworded without the other."""
+    assert progress.phase_of(
+        ">> installing the kernel into the rootfs chroot (pmbootstrap install) --",
+        "package") == "install"
+
+
 def test_a_later_phase_wins_when_a_line_mentions_two():
     """`>> verifying the exported image` names both export and verify, and the
     true phase is the later one."""
