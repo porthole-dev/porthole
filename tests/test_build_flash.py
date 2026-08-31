@@ -1193,6 +1193,42 @@ def test_run_follows_pmbootstraps_own_log():
     assert str(seen["follow"]).endswith("log.txt"), seen["follow"]
 
 
+def test_a_non_export_rung_keeps_its_bare_rung_as_the_history_key():
+    """`mod` and `boot` are not bimodal on the apk-present axis `fast`,
+    `kernel` and `upgrade` are -- fix round 1 gated the history-bucket split
+    on EXPORT_RUNGS so those two rungs keep matching an EXISTING unkeyed
+    history entry (`{"mod": {...}}`) instead of losing it to a `mod|cached` /
+    `mod|rebuild` split nothing about them needs. That property has no other
+    test pinning it: without the gate this passes with `key="mod|cached"` just
+    as easily as with the intended `key="mod"`.
+    """
+    import shutil
+    import porthole_cmd_build as build
+
+    seen = {}
+
+    def fake_stream(ctx, cmd, env, timeout, rung, **kw):
+        seen.update(kw)
+        seen["rung"] = rung
+        return 0
+
+    real_stream = build._stream
+    real_which = shutil.which
+    build._stream = fake_stream
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
+    try:
+        ctx = _FakeCtx({"PORTHOLE_DEVICE": "google-taimen",
+                        "PORTHOLE_WORKDIR": "/nonexistent",
+                        "PORTHOLE_KERNEL_PKG": "linux-google-taimen"})
+        build._run(ctx, "tkmod", 60, host=True, rung="mod")
+    finally:
+        build._stream = real_stream
+        shutil.which = real_which
+
+    assert seen.get("key") == "mod", seen
+
+
 PMB_LOG_TAIL = """\
 (rootfs_google-taimen) install postmarketos-mkinitfs
 * mkinitfs: skipping (no deviceinfo file found)

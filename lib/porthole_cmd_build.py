@@ -526,12 +526,22 @@ def aport_version(ctx):
     return pkgver, pkgrel
 
 
-def _release_apk_present(ctx) -> bool:
+def _release_apk_present(ctx, usable: bool) -> bool:
     """Is the kernel apk this rung will install already built?
 
     The same question _ph_install_kernel_release asks in shell before it
     decides whether to build the aport. Asked here, BEFORE the run starts, it
     is what lets the ETA know which of two very different builds this is.
+
+    `usable` is `_run`'s own workspace-vs-host decision, passed in rather than
+    re-derived. A second call to `_workspace_usable` here disagreed with the
+    first whenever `--host` forced a host build with a workspace still up: the
+    build ran on the host while this unforced re-query still read the
+    WORKSPACE's packages/edge, silently reintroducing the very
+    averaging-two-populations bug this module exists to remove, for exactly
+    those builds, and printing a message that could contradict where the
+    build was about to run. Threading the value through cannot disagree with
+    it by construction.
 
     Unknown counts as "present": an ETA that under-promises is a pleasant
     surprise, and refusing to guess is already what `eta unknown` is for.
@@ -540,7 +550,7 @@ def _release_apk_present(ctx) -> bool:
     if not pkgver or not pkgrel:
         return True
     return apk_is_current(
-        pmb_workdir(ctx, _workspace_usable(ctx)[0]) / "packages" / "edge",
+        pmb_workdir(ctx, usable) / "packages" / "edge",
         ctx.cfg.get("PORTHOLE_KERNEL_PKG", ""), pkgver, pkgrel,
         ctx.cfg.get("PORTHOLE_ARCH") or "aarch64")
 
@@ -753,8 +763,19 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     # this is before it starts, the same way _ph_install_kernel_release does
     # in shell, so say it rather than let a "~6m" advertisement stand while a
     # 21-minute compile runs silently underneath it.
-    rebuilding = not _release_apk_present(ctx)
+    #
+    # Gated on EXPORT_RUNGS -- the same table that already answers "is this
+    # rung bimodal on this axis" for `_preflight`'s chroot check. `mod` and
+    # `boot` are not: the apk-present lookup would cost them a pmaports glob
+    # and an APKBUILD read on every run for nothing, and splitting their
+    # history key would halve the sample pool of the two rungs an agent hits
+    # hardest, doubling how often THEY report "eta unknown". Keeping their key
+    # as the bare rung name has a pleasant side effect too: an existing
+    # unkeyed `{"mod": {...}}` entry keeps matching, because only the rungs
+    # that were actually being averaged wrongly lose their old history.
+    key = effective_rung
     if effective_rung in EXPORT_RUNGS:
+        rebuilding = not _release_apk_present(ctx, usable)
         if rebuilding:
             ctx.out(ctx.out.paint(
                 f"  the {effective_rung} rung must build the kernel package "
@@ -765,10 +786,11 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                 "  the kernel package is already built — install, export "
                 "and flash only", "grey"))
 
-    import porthole_progress as progress
+        import porthole_progress as progress
 
-    return _stream(ctx, cmd, env, timeout, effective_rung,
-                   key=progress.history_key(effective_rung, rebuilding),
+        key = progress.history_key(effective_rung, rebuilding)
+
+    return _stream(ctx, cmd, env, timeout, effective_rung, key=key,
                    follow=pmb_workdir(ctx, usable) / "log.txt")
 
 
