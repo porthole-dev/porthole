@@ -496,7 +496,24 @@ def probe_kernel_provenance(ctx):
                                   blob.get("evidence", ""))
 
 
-def verdict_from_matrix(blob, names, age):
+# How old a cached device state may be and still be reported as a fact. Past
+# this the honest answer is that nobody has looked recently.
+STATE_MAX_AGE_S = 300.0
+
+# How old a cached MATRIX reading may be and still let a milestone report
+# DONE. Past this, a DONE reverts to TODO -- the age is rendered inline
+# either way, but that is not enough on its own: a claim that renders
+# identically at 30 seconds and three weeks old is a claim that stands
+# forever. 24h, not 300s like STATE_MAX_AGE_S: a device's reachability
+# changes minute to minute, but active porting reflashes at most once a day,
+# so a day-old matrix on an idle port is still roughly true. Past a day the
+# claim should be re-earned by running `porthole matrix` again, not
+# inherited. Override with PORTHOLE_MATRIX_MAX_AGE_S, same as
+# PORTHOLE_STATE_MAX_AGE_S overrides STATE_MAX_AGE_S.
+MATRIX_MAX_AGE_S = 86400.0
+
+
+def verdict_from_matrix(blob, names, age, max_age=MATRIX_MAX_AGE_S):
     """A milestone verdict from cached matrix cells. Pure.
 
     `?` is NEVER done. It means no probe is defined or the probe did not run,
@@ -504,24 +521,43 @@ def verdict_from_matrix(blob, names, age):
     module exists because a display that trusts a stale tick is confidently
     wrong in the direction of "you are further along than you are".
 
+    A requested capability the matrix does not MENTION is not evidence of
+    success either -- it is treated exactly like `?`, by name, the same as a
+    cell whose `works` is missing or holds anything other than "yes"/"no".
+    Silently dropping an unmentioned name (and only refusing when NONE of
+    the names appear) was the same optimistic mistake as trusting `?`: a
+    `radios` matrix with wifi and bluetooth profiled and modem never touched
+    reported DONE on two radios out of three.
+
     No matrix at all returns UNKNOWN, which preserves the pre-matrix
     behaviour exactly -- a tick still counts. Landing this must not un-tick a
     box somebody earned.
+
+    A malformed cache (capabilities missing, null, the wrong type, or full of
+    non-dict entries) degrades to UNKNOWN rather than raising -- a corrupt
+    file must read as "nobody has looked", never as a crash in `next` or
+    `brief`.
     """
-    cells = {c.get("name"): c for c in (blob or {}).get("capabilities", [])}
-    have = [cells[n] for n in names if n in cells]
-    if not have:
+    caps = blob.get("capabilities") if isinstance(blob, dict) else None
+    if not isinstance(caps, list):
+        caps = []
+    cells = {c.get("name"): c for c in caps if isinstance(c, dict)}
+    if not any(n in cells for n in names):
         return unknown()
     when = " (probed {} ago)".format(_ago(age)) if age is not None else ""
-    failing = [c["name"] for c in have if c.get("works") == "no"]
-    untested = [c["name"] for c in have if c.get("works") == "?"]
+    failing = [n for n in names if cells.get(n, {}).get("works") == "no"]
+    untested = [n for n in names
+                if n not in failing and cells.get(n, {}).get("works") != "yes"]
     if failing:
         return todo("not working: " + ", ".join(failing) + when)
     if untested:
         return todo("not tested: " + ", ".join(untested)
                     + " — `porthole matrix` says nothing about "
                       "these" + when)
-    return done("working: " + ", ".join(c["name"] for c in have) + when)
+    if age is not None and age > max_age:
+        return todo("matrix is stale (probed {} ago, cap {}) — re-run "
+                    "`porthole matrix`".format(_ago(age), _ago(max_age)))
+    return done("working: " + ", ".join(names) + when)
 
 
 def probe_from_matrix(*names):
@@ -532,9 +568,14 @@ def probe_from_matrix(*names):
     """
     def probe(ctx):
         blob = _read_run_json(ctx, "matrix.json")
-        at = (blob or {}).get("at")
+        at = blob.get("at") if isinstance(blob, dict) else None
         age = (time.time() - at) if isinstance(at, (int, float)) else None
-        return verdict_from_matrix(blob, list(names), age)
+        try:
+            max_age = float(_cfg(ctx, "PORTHOLE_MATRIX_MAX_AGE_S")
+                            or MATRIX_MAX_AGE_S)
+        except (TypeError, ValueError):
+            max_age = MATRIX_MAX_AGE_S
+        return verdict_from_matrix(blob, list(names), age, max_age)
     return probe
 
 
@@ -596,11 +637,6 @@ def probe_identity(ctx):
         import porthole
         return done(porthole.resolve_phone(ctx.cfg))
     return todo("porthole init has not been run")
-
-
-# How old a cached device state may be and still be reported as a fact. Past
-# this the honest answer is that nobody has looked recently.
-STATE_MAX_AGE_S = 300.0
 
 
 def reachable_verdict(forced: str, cached):

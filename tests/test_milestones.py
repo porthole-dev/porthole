@@ -509,10 +509,53 @@ def test_no_matrix_at_all_is_unknown_so_a_tick_still_counts():
 
 
 def test_a_stale_matrix_says_so_rather_than_being_believed():
+    """A DONE verdict must not stand forever. `?` in ago beside DONE at 30s
+    and DONE at three weeks old would look identical -- so the age has to
+    change the STATE, not just decorate the evidence string. Past the cap
+    (24h, ms.MATRIX_MAX_AGE_S) a would-be DONE reverts to TODO."""
     blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
                                        "works": "yes"}]}
-    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=99999.0)
-    assert "ago" in verdict.evidence, verdict.evidence
+    fresh = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert fresh.state == ms.DONE, fresh
+    stale = ms.verdict_from_matrix(blob, ["wifi"],
+                                   age=ms.MATRIX_MAX_AGE_S + 1)
+    assert stale.state != ms.DONE, stale
+    assert "ago" in stale.evidence, stale.evidence
+
+
+def test_a_null_capabilities_matrix_does_not_raise():
+    """A corrupt cache must degrade to a verdict, never a traceback -- that
+    is the difference between `porthole next` reporting "nobody has looked"
+    and `porthole next` crashing every session until someone deletes the
+    file by hand."""
+    for capabilities in (None, "not a list", [1, 2, "x"], 42):
+        blob = {"at": 0, "capabilities": capabilities}
+        verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+        assert verdict.state != ms.DONE, (capabilities, verdict)
+
+
+def test_radios_with_an_unprofiled_capability_is_not_done():
+    """A name the matrix never mentions is not evidence of success -- it is
+    exactly as unproven as `?`. Dropping it silently (the old
+    `if n in cells` filter) let `radios` report done with modem never
+    touched."""
+    blob = {"at": 0, "capabilities": [
+        {"name": "wifi", "present": "yes", "works": "yes"},
+        {"name": "bluetooth", "present": "yes", "works": "yes"}]}
+    verdict = ms.verdict_from_matrix(
+        blob, ["wifi", "bluetooth", "modem"], age=30.0)
+    assert verdict.state != ms.DONE, verdict
+    assert "modem" in verdict.evidence, verdict.evidence
+
+
+def test_a_cell_missing_works_is_treated_as_untested():
+    """`works` absent from a cell is not "yes" and must not be read as one --
+    `c.get("works") == "no"` and `== "?"` both silently pass a bare
+    `{"name": "wifi"}` cell straight to DONE."""
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert verdict.state != ms.DONE, verdict
+    assert "wifi" in verdict.evidence, verdict.evidence
 
 
 def main():

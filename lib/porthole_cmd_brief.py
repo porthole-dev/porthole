@@ -278,9 +278,10 @@ def cmd_brief(args, ctx) -> int:
             if port["next"]["command"]:
                 ctx.out.kv("", ctx.out.paint(port["next"]["command"], "cyan"), w)
             m = port.get("matrix")
-            if m:
-                ctx.out.kv("works", f"{m['works']}/{m['total']} capabilities "
-                                    f"({m['untested']} untested)", w)
+            if isinstance(m, dict) and m:
+                ctx.out.kv("works", f"{m.get('works', 0)}/{m.get('total', 0)} "
+                                    f"capabilities "
+                                    f"({m.get('untested', 0)} untested)", w)
             for item in port.get("stale", [])[:3]:
                 ctx.out.warn(f"{item['title']}: {item['detail']}")
             ctx.out.blank()
@@ -379,7 +380,8 @@ def _port_state(ctx, device: str) -> dict:
         import porthole_cmd_next as nxt
         import porthole_milestones as ms
         _, summary, has_markers = nxt.collect(ctx)
-        matrix = ms._read_run_json(ctx, "matrix.json").get("summary") or {}
+        matrix = ms._read_run_json(ctx, "matrix.json").get("summary")
+        matrix = matrix if isinstance(matrix, dict) else {}
         return {**summary, "checklist_has_markers": has_markers,
                 "matrix": matrix}
     except Exception:  # noqa: BLE001
