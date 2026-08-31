@@ -77,8 +77,40 @@ is itself a keepalive.** The first version of `tools/tk-wifi-soak.sh` pinged
 the gateway every 60 s and would have prevented the bug it was watching for;
 it now samples passively and probes only every tenth sample.
 
-**The fix, when it is time.** Keep `CONNECTION_MONITOR` -- firmware beacon-miss
-genuinely works and mac80211 polling would duplicate it and cost power. Arm the
-firmware keepalive rather than disabling it, which is the combination the
-vendor ships. That is a change to `interval` at the one call site, plus a
-reason in the comment that is true.
+**The fix, landed 2026-08-31** -- `linux-ws` commit `db8d7d6b5897`,
+"wifi: ath10k: keep the firmware station keepalive armed". `CONNECTION_MONITOR`
+is kept, because firmware beacon-miss genuinely works and mac80211 polling
+would duplicate it and cost power; the keepalive is armed at the vendor's
+interval instead of disabled, and the helper is renamed so it no longer
+describes the opposite of what it does.
+
+**How to prove it is actually armed**, because "no error in dmesg" is not
+proof and this is exactly where a session convinces itself of a null.
+`CONFIG_ATH10K_DEBUG` is on (`kconfig debug 1` in the probe banner), and
+`wmi-tlv.c` logs the command at `ATH10K_DBG_WMI`. The keepalive is armed in
+`ath10k_add_interface()`, i.e. at interface-up, so the mask has to be set
+before the module loads:
+
+```sh
+echo 'options ath10k_core debug_mask=0x2' > /etc/modprobe.d/ath10k-debug.conf
+# reboot, then:
+dmesg | grep -i 'sta keepalive'
+```
+
+Armed reads `interval 60`; the old behaviour read `interval 0`
+(`WMI_STA_KEEPALIVE_INTERVAL_DISABLE`):
+
+```
+ath10k_snoc 18800000.wifi: wmi tlv sta keepalive vdev 0 enabled 1 method 1 interval 60
+```
+
+Remove the drop-in and set `debug_mask` back to 0 afterwards; at 0x2 every WMI
+command is logged.
+
+**Still not proven: that this fixes the reported failures.** The mechanism is
+certain and the fix restores vendor parity, but no reproduction has been caught
+either before or after. The baseline worth comparing against is not a short
+soak -- it is the 8 days of journal already on the device, which contain 92
+associations against 31 key negotiations and one 36-minute dead link. The
+question to answer over comparable real usage is whether that ratio and that
+outage recur. `/var/log/tk-wifi-soak-BASELINE.jsonl` holds the pre-fix samples.
