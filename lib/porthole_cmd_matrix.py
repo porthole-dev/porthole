@@ -75,13 +75,8 @@ def cmd_matrix(args, ctx) -> int:
         o.blank()
         o("  {:<16}{:<9}{:<7}{}".format("capability", "present", "works",
                                         "evidence"))
-        mark = {"yes": "green", "no": "red", "?": "grey"}
         for row in table:
-            o("  {:<16}{:<9}{:<7}{}".format(
-                row["name"],
-                o.paint(row["present"], mark[row["present"]]),
-                o.paint(row["works"], mark[row["works"]]),
-                o.paint(row["evidence"][:44], "grey")))
+            o(format_row(o, row))
         o.blank()
         o(o.paint("  `?` means no probe ran -- it is not a pass and not a "
                   "failure", "grey"))
@@ -90,6 +85,29 @@ def cmd_matrix(args, ctx) -> int:
 
     ctx.emit(blob, render)
     return EX_OK
+
+
+MARK = {"yes": "green", "no": "red", "?": "grey"}
+
+
+def format_row(o, row) -> str:
+    """One rendered table row, colour and all -- pulled out of render() so it
+    can be exercised directly by a test without a device or a real ctx.
+
+    Pad FIRST, then paint. o.paint() wraps text in ANSI escapes -- "yes"
+    becomes '\\x1b[32myes\\x1b[0m', 12 characters for 3 visible ones -- and a
+    format width counts characters, not visible columns. Painting before
+    padding let the escapes eat the width budget and the columns ran
+    together on a real tty; tests never caught it because paint() is a
+    no-op without one (see test_matrix.py's colour-on/colour-off check).
+    """
+    present = "{:<9}".format(row["present"])
+    works = "{:<7}".format(row["works"])
+    return "  {:<16}{}{}{}".format(
+        row["name"],
+        o.paint(present, MARK[row["present"]]),
+        o.paint(works, MARK[row["works"]]),
+        o.paint(row["evidence"][:44], "grey"))
 
 
 def rows(merged, results) -> list:

@@ -319,5 +319,39 @@ def test_the_boot_refusal_comes_before_any_cache_write():
         "nothing")
 
 
+def test_a_rendered_row_lines_up_with_colour_on_or_off():
+    """The bug: `o.paint("yes", "green")` returns 12 characters for 3 visible
+    ones, and `{:<9}` pads to CHARACTERS -- so painting before padding ate
+    the column budget and wifi/gps/video-decode ran together on a real tty.
+    Invisible in the suite, because paint() is a no-op without a tty and
+    every test ran without one.
+
+    The invariant that would have caught it: with colour on or off, the
+    VISIBLE text of a rendered row must be identical. Assert exactly that,
+    by stripping ANSI escapes from the coloured render and comparing.
+    """
+    import io
+    import re
+
+    import porthole_cmd_matrix as matrix
+    from porthole_cli import Out
+
+    row = {"name": "video-decode", "present": "yes", "works": "no",
+          "evidence": "no works: probe defined"}
+
+    plain = Out(stream=io.StringIO(), force_colour=False)
+    coloured = Out(stream=io.StringIO(), force_colour=True)
+
+    plain_line = matrix.format_row(plain, row)
+    coloured_line = matrix.format_row(coloured, row)
+
+    assert "\033[" in coloured_line, "the coloured render carries no escapes"
+    stripped = re.sub(r"\033\[[0-9;]*m", "", coloured_line)
+    assert stripped == plain_line, (stripped, plain_line)
+    # And the columns are where the header says they are: "works" starts at
+    # visible offset 2 + 16 + 9 = 27.
+    assert plain_line[27:29] == "no", plain_line
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
