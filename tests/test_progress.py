@@ -13,6 +13,7 @@ import json
 import pathlib
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
@@ -437,6 +438,106 @@ def test_a_live_run_still_reads_as_starting_before_any_phase_lands():
     head, _ = progress.status_report(live, alive=lambda _: True)
     assert "starting" in head
     assert "starting" in progress.line_of(live)
+
+
+# --------------------------------------------------------- watch() (Task 13) --
+#
+# Moved here from `porthole_cmd_pkg._watch` so `porthole build watch` (Task
+# 14) can be the same implementation. Every fixture below uses a FRESH
+# timestamp (finished a few seconds after `now`, not before) -- a snapshot
+# timestamped before the watch began is deliberately treated as somebody
+# else's earlier run (decision 3) and left waiting for a NEW one, which is
+# correct but would make these tests wait out the 30s ceiling. A fixture
+# timestamped moments after "now" models watching a run that finished while
+# we were attached to it, which is the case these tests are about.
+
+
+def test_watch_returns_promptly_for_a_run_that_finished_moments_ago():
+    """A `done` run discovered the instant `watch` starts must not be mistaken
+    for a stale run left over from a previous watch session (decision 3) --
+    it finished AFTER this watch began, so the report is immediate, not a
+    30-second wait for a "new" run that will never come."""
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "state": "done", "pid": 1,
+                "started": now, "elapsed": 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        lines = []
+        rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                            tty=False)
+        assert rc == progress.EX_OK
+        assert any("phoc" in line for line in lines)
+
+
+def test_watch_reports_a_failed_run_as_nonzero():
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "state": "failed", "pid": 1,
+                "started": now, "elapsed": 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        rc = progress.watch(rundir, "x-status.json", 0.01, [].append,
+                            tty=False)
+        assert rc == progress.EX_FAIL
+
+
+def test_watch_detects_a_dead_pid_as_stale_instead_of_polling_forever():
+    """A `running` snapshot whose process has already died must be caught by
+    `liveness()` and reported, not polled at `interval` forever waiting for a
+    pid that will never move again. Regression guard: real time spent here
+    must stay well under a second."""
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "state": "running", "pid": 999999,
+                "started": now, "elapsed": 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        started = time.time()
+        rc = progress.watch(rundir, "x-status.json", 0.01, [].append,
+                            tty=False)
+        assert time.time() - started < 2.0, (
+            "watch polled a dead pid instead of detecting it as stale")
+        assert rc == progress.EX_FAIL
+
+
+def test_watch_ndjson_streams_json_and_skips_the_summary_block():
+    """An agent can consume a stream; it cannot consume a redrawn terminal
+    (this is what `ndjson=True` is for). One JSON object per update, and none
+    of the plain-text kv summary a human-facing watch prints at the end --
+    proven by every emitted line parsing as JSON, which that summary does
+    not."""
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "state": "done", "pid": 1,
+                "started": now, "elapsed": 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        lines = []
+        rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                            ndjson=True, tty=False)
+        assert rc == progress.EX_OK
+        assert lines, "ndjson mode must not be silent"
+        for line in lines:
+            json.loads(line)
+
+
+def test_watch_says_something_before_the_first_sleep_and_gives_up_on_a_ceiling():
+    """No status file has ever been written. Off a tty this must not hang --
+    the real ceiling default is 30s, patched down here so the test stays
+    fast -- and it must have said SOMETHING before giving up, never the old
+    bare `continue`'s blank screen."""
+    real_ceiling = progress.wait_ceiling
+    progress.wait_ceiling = lambda tty, now, seconds=30.0: now + 0.05
+    try:
+        with tempfile.TemporaryDirectory() as rundir:
+            lines = []
+            try:
+                progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                               tty=False)
+                raise AssertionError("expected Bail: nothing ever published")
+            except progress.Bail as exc:
+                assert exc.message == "no x run has published a status here"
+                assert "porthole x watch" in exc.hint
+        assert lines, "must say something before the ceiling, never silent"
+    finally:
+        progress.wait_ceiling = real_ceiling
 
 
 def main():

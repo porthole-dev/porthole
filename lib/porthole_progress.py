@@ -31,6 +31,8 @@ import pathlib
 import re
 import time
 
+from porthole_cli import Bail, EX_FAIL, EX_OK
+
 # The phases the shell already announces, in the order they happen. Not every
 # rung runs all of them -- `mod` stops after push -- and a phase that never
 # arrives simply never contributes.
@@ -648,3 +650,178 @@ def status_report(snap, alive=None, now=None):
     if snap.get("last"):
         rows.append(("last", str(snap["last"])[:100]))
     return head, rows
+
+
+# --------------------------------------------------------------- watching --
+#
+# Moved here from `porthole_cmd_pkg` (Task 13) so `porthole build watch`
+# (Task 14) can be the SAME implementation rather than a second one that
+# drifts. `porthole pkg watch` carries four decisions, each paid for in a
+# real session, and every one survives the move:
+#   1. No ceiling on a tty, a ceiling off one (`wait_ceiling`).
+#   2. Never silent -- it says what it found BEFORE the first sleep and
+#      keeps saying it, never the old bare `continue`'s blank screen.
+#   3. A run that finished before this watch began is somebody else's, and
+#      is reported as the PREVIOUS run, not as the answer (`is_stale`).
+#   4. It polls a real signal rather than sleeping through the build --
+#      brain/laws/poll-never-sleep.md.
+
+
+def wait_ceiling(tty: bool, now: float, seconds: float = 30.0):
+    """When to stop waiting for a run to start, or None for never.
+
+    None on a terminal: `watch` is advertised as free to leave open, and a
+    ceiling defeats that -- opened before an agent starts a build, it would
+    exit before the build began. A person can Ctrl-C. A pipe cannot, and an
+    agent that ran this by accident would hang forever, so it keeps a ceiling.
+    """
+    return None if tty else now + seconds
+
+
+def waiting_line(snap, now=None) -> str:
+    """What `watch` is doing while there is nothing live to attach to.
+
+    Said once immediately and then repeated, never left to silence. Measured:
+    `timeout 5 porthole pkg watch` against an already-finished build printed
+    NOTHING, because the old code's grace window was a bare `continue` --
+    thirty seconds of blank screen that reads as a hang, not as "waiting".
+    Pure (a snapshot and a clock, no file, no sleep) so the wording is
+    testable without driving the loop.
+    """
+    now = time.time() if now is None else now
+    if not snap:
+        return "  nothing has built in this checkout yet -- waiting for a build to start"
+    stopped = finished_at(snap)
+    ago = fmt_dur(now - stopped) if stopped is not None else "a while"
+    return (f"  {snap.get('rung', '?')} finished {ago} ago -- "
+            f"waiting for a new build to start")
+
+
+def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
+          tty=None) -> int:
+    """Follow a status file until the run stops. Returns EX_OK when the run
+    finished `done`, non-zero otherwise.
+
+    This exists so that watching a run costs NOTHING. A human leaves this
+    open in a second terminal and gets the same bar the run prints; an agent
+    never has to poll, because it can start the run as a background job and
+    be told when it exits. The failure mode this replaces is an agent burning
+    a request every thirty seconds to re-read a number that changed by 1%.
+
+    `out` is a LINE SINK (one positional argument, e.g. `print`) rather than
+    a terminal, so this loop is testable without a tty and reusable by any
+    verb that publishes a status file shaped like `porthole_progress`'s.
+    Every line this function emits carries its own line ending -- a bare
+    `\\r\\033[2K` prefix (no trailing newline) for a tty redraw-in-place, a
+    trailing `\\n` for everything else -- so `out` itself never has to know
+    which mode is active.
+
+    `ndjson=True` emits one JSON object per update instead of a bar, and
+    skips the final `status_report` block: an agent can consume a stream: it
+    cannot consume a redrawn terminal.
+
+    Polling a file, not sleeping through the run: the sleep here is between
+    reads of a real signal, which is what brain/laws/poll-never-sleep.md asks
+    for rather than what it forbids.
+    """
+    path = pathlib.Path(rundir) / status_name
+    if tty is None:
+        tty = os.isatty(1)
+
+    def snapshot():
+        # Absent, or read mid-rename: both are "nothing to attach to yet",
+        # not an error -- the writer is atomic, so the next read succeeds.
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):
+            return None
+
+    started_watching = time.time()
+    # How long to wait for a run to START, and it depends on who is
+    # watching. `watch` is advertised as "costs nothing to leave open", and a
+    # ceiling breaks exactly that use: open it in a second terminal BEFORE the
+    # agent kicks off a run and it gives up before the run begins.
+    #
+    # So on a terminal there is no ceiling -- a person left it open on purpose
+    # and can Ctrl-C. Off a terminal there is one, because a pipe cannot be
+    # interrupted meaningfully and an agent that ran this by mistake would
+    # hang forever; it gets the previous run and an exit instead.
+    appear = wait_ceiling(tty, started_watching)
+
+    def is_stale(snap):
+        # A run that had already finished before this watch began is
+        # somebody else's run. Keep waiting for ours rather than reporting
+        # theirs -- belt and braces behind publish_pending, for a `watch`
+        # started by hand rather than straight after `--detach`.
+        if not snap:
+            return False
+        stopped = finished_at(snap)
+        return (liveness(snap) != "running" and stopped is not None
+                and stopped < started_watching)
+
+    # Never silent: say what was found BEFORE the first sleep, then keep
+    # saying it (repainted in place on a tty, throttled on a pipe or as
+    # ndjson) for as long as there is nothing live -- instead of the old bare
+    # `continue`.
+    last_note = 0.0
+    snap = snapshot()
+    while (snap is None or is_stale(snap)) and (appear is None
+                                                or time.time() < appear):
+        line = waiting_line(snap)
+        if ndjson:
+            if last_note == 0.0 or time.time() - last_note > max(interval, 15):
+                last_note = time.time()
+                out(json.dumps({"state": "waiting", "note": line,
+                                "previous": snap}) + "\n")
+        elif tty:
+            out("\r\033[2K" + line)
+        elif last_note == 0.0 or time.time() - last_note > max(interval, 15):
+            last_note = time.time()
+            out(line + "\n")
+        time.sleep(0.25 if snap is None else interval)
+        snap = snapshot()
+    if tty and not ndjson:
+        out("\r\033[2K")
+
+    if snap is None:
+        # Generic on purpose: this function has no verb of its own, only a
+        # status filename ("pkg-status.json", "build-status.json", ...).
+        verb = status_name.split("-status", 1)[0] or "run"
+        raise Bail(f"no {verb} run has published a status here", EX_FAIL,
+                   f"start one, then `porthole {verb} watch` finds it")
+
+    # The grace window ran out with nothing new. Say so plainly, then fall
+    # through and render the stale run -- clearly labelled as the PREVIOUS
+    # run, not left to look current the way the silent version did.
+    if is_stale(snap):
+        if not ndjson:
+            # ponytail: plain text, not `ctx.out.paint(..., "yellow")` --
+            # colouring one line is not worth carrying an Out dependency into
+            # a module that stays pure and reusable. Add it back here if a
+            # colourless staleness notice ever costs someone real time.
+            out("  no new build started -- showing the previous run:\n")
+    else:
+        while True:
+            live = liveness(snap)
+            if ndjson:
+                out(json.dumps(snap) + "\n")
+            elif tty:
+                out("\r\033[2K  " + line_of(snap))
+            elif time.time() - last_note > max(interval, 15):
+                last_note = time.time()
+                out("  " + line_of(snap) + "\n")
+            if live != "running":
+                break
+            time.sleep(interval)
+            snap = snapshot() or snap
+        if tty and not ndjson:
+            out("\r\033[2K")
+
+    if not ndjson:
+        head, rows = status_report(snap)
+        out("  " + head + "\n")
+        for label, value in rows:
+            out(f"  {label:<10}  {value}\n")
+    return EX_OK if liveness(snap) == "done" else EX_FAIL
