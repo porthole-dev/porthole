@@ -10,6 +10,7 @@ test: an unknown total says unknown, and an ETA is refused rather than
 extrapolated from noise.
 """
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -478,6 +479,42 @@ def test_a_live_run_still_reads_as_starting_before_any_phase_lands():
     head, _ = progress.status_report(live, alive=lambda _: True)
     assert "starting" in head
     assert "starting" in progress.line_of(live)
+
+
+def test_status_report_labels_a_stale_last_line_with_its_age():
+    """`last DONE!` beside a stalled bar read as "finished and hung".
+
+    It was pmbootstrap finishing a sub-step twenty minutes earlier, and the
+    build was healthy. A stale line labelled stale is informative; unlabelled
+    it is a lie.
+    """
+    now = 2000.0
+    snap = {"rung": "fast", "state": "running", "pid": os.getpid(),
+            "elapsed": 719.0, "progress": None, "eta": None,
+            "compile_lines": 0, "last": "[14:49:08] DONE!",
+            "last_at": now - 1200, "started": now - 719}
+    _head, rows = progress.status_report(snap, now=now)
+    last = dict(rows)["last"]
+    assert "20m" in last, last
+
+
+def test_stall_note_names_packaging_as_the_reason_for_no_signal():
+    note = progress.stall_note("[14:49:08] DONE!", silence=1200.0)
+    assert note, "a silent packaging phase must say why"
+    assert "packag" in note.lower() or "compress" in note.lower(), note
+
+
+def test_stall_note_is_silent_when_output_is_recent():
+    assert progress.stall_note("  CC  drivers/media/x.o", silence=3.0) == ""
+
+
+def test_snapshot_carries_last_at():
+    tracker = progress.Tracker(
+        pathlib.Path(tempfile.mkdtemp(prefix="porthole-t-")), "fast")
+    tracker.feed("  CC  drivers/x.o\n")
+    snap = tracker.snapshot()
+    assert isinstance(snap.get("last_at"), float), snap
+    assert snap.get("last_age") is not None, snap
 
 
 # --------------------------------------------------------- watch() (Task 13) --

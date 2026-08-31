@@ -305,6 +305,7 @@ class Tracker:
         self.phase = ""
         self.compile_seen = 0
         self.last = ""
+        self.last_at = self.started
         self.state = "running"
         self._written = 0.0
         # (when, compile_seen) so BOTH trackers can measure a real rate. The
@@ -326,6 +327,7 @@ class Tracker:
             self.compile_seen += 1
             self._samples.append((time.time(), self.compile_seen))
         self.last = line[:200]
+        self.last_at = time.time()
 
     def _fraction(self):
         """Where this tracker's percentage comes from.
@@ -368,6 +370,8 @@ class Tracker:
                 "eta": self._eta(frac),
                 "compile_lines": self.compile_seen,
                 "last": self.last,
+                "last_at": round(self.last_at, 1),
+                "last_age": round(time.time() - self.last_at, 1),
                 "started": round(self.started, 1)}
 
     def publish(self, force: bool = False) -> None:
@@ -466,6 +470,7 @@ class PkgTracker(Tracker):
                 self.compiles += 1
                 self._samples.append((time.time(), self.compiles))
         self.last = line[:200]
+        self.last_at = time.time()
 
     def rate(self):
         """Compiles per second right now, or None when nothing supports one."""
@@ -569,9 +574,11 @@ def publish_pending(rundir, rung: str, pid: int,
     The child overwrites this within a second or two. It only has to be true
     for that window, and `running` with the child's pid is true.
     """
+    now = round(time.time(), 1)
     snap = {"rung": rung, "phase": "", "state": "running", "pid": pid,
             "elapsed": 0.0, "progress": None, "eta": None,
-            "compile_lines": 0, "last": "", "started": round(time.time(), 1)}
+            "compile_lines": 0, "last": "", "last_at": now, "last_age": 0.0,
+            "started": now}
     path = pathlib.Path(rundir) / name
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -634,6 +641,50 @@ _HEADLINE = {"done": "finished", "failed": "FAILED",
              "stale": "no longer running -- its process is gone"}
 
 
+# How long a build may say nothing before the display owes the reader a
+# reason. Packaging a kernel is legitimately silent for minutes; a reader who
+# is not told that concludes it has hung, and kills a healthy build.
+STALL_AFTER_S = 90.0
+
+# What a long silence MEANS, keyed on the last thing that was said. Same shape
+# as _DIAGNOSES in porthole_cmd_build: a lookup table, because the alternative
+# is every porter rediscovering the same three answers, and the last line is
+# the one thing they all have in hand.
+_STALL_NOTES = (
+    (re.compile(r"\bDONE!|\bBuilding package\b|\bfakeroot\b|\bcompress",
+                re.I),
+     "no progress signal during packaging -- abuild is compressing the kernel "
+     "and its modules, which is normally several minutes and prints nothing"),
+    (re.compile(r"\bmodules_install\b|\bstrip\b|\bMODPOST\b", re.I),
+     "no progress signal while modules are installed and stripped; this step "
+     "is quiet and long on a kernel with many modules"),
+    (re.compile(r"\bapk add\b|\binstalling\b|\bdependenc", re.I),
+     "no progress signal while build dependencies install"),
+)
+
+
+def stall_note(last: str, silence: float) -> str:
+    """Why nothing has been said for a while, or "" if it is too soon to ask.
+
+    Never renders a bar as [??????] with `eta --` and no explanation. The
+    report is explicit that this one line removes the entire "why is this
+    taking so long" anxiety, and the anxiety is what makes people kill builds
+    that were working.
+    """
+    if silence < STALL_AFTER_S:
+        return ""
+    for pattern, note in _STALL_NOTES:
+        if pattern.search(last or ""):
+            return note
+    # ponytail: no CPU sampling, so "quiet and working" and "quiet and wedged"
+    # still read the same here. Upgrade path: read the container's cgroup
+    # cpu.stat (or the child's descendants for a host build) on the heartbeat
+    # and say which it is. Deferred because following pmbootstrap's log.txt
+    # shrank the silent window to the compression tail.
+    return "no output for {} -- the process is still running".format(
+        fmt_dur(silence))
+
+
 def status_report(snap, alive=None, now=None):
     """`(headline, rows)` for a `status` verb. Pure, so the staleness rule is
     testable without running a build.
@@ -669,7 +720,16 @@ def status_report(snap, alive=None, now=None):
         rows.append(("phase", "none reached" if reached in ("", "starting")
                      else reached))
     if snap.get("last"):
-        rows.append(("last", str(snap["last"])[:100]))
+        age = snap.get("last_age")
+        if age is None and snap.get("last_at"):
+            age = now - snap["last_at"]
+        label = str(snap["last"])[:100]
+        if age is not None and age >= STALL_AFTER_S:
+            label = "({} ago) {}".format(fmt_dur(age), label)
+        rows.append(("last", label))
+        note = stall_note(snap.get("last", ""), age or 0.0)
+        if note and live == "running":
+            rows.append(("why", note))
     return head, rows
 
 
@@ -726,7 +786,8 @@ def waiting_line(snap, now=None) -> str:
 # fallback -- all `None`, `note` included -- so the emitted object's key set
 # never depends on which branch, or how much history, produced it.
 NDJSON_KEYS = ("rung", "phase", "state", "pid", "elapsed", "progress", "eta",
-              "compile_lines", "last", "started", "note")
+              "compile_lines", "last", "last_at", "last_age", "started",
+              "note")
 
 
 def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
