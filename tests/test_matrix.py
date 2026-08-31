@@ -183,5 +183,56 @@ def test_a_syntax_error_in_one_probe_does_not_abort_later_capabilities():
     assert got[("wifi", "works")]["rc"] == 1, got
 
 
+def test_rows_pair_the_two_questions_and_carry_their_commands():
+    import porthole_cmd_matrix as matrix
+
+    merged = [("wifi", {"present": "iw dev", "works": "ip -4 addr"})]
+    results = {("wifi", "present"): {"rc": 0, "out": "phy0"},
+               ("wifi", "works"): {"rc": 0, "out": "inet 172.16.42.1"}}
+    row, = matrix.rows(merged, results)
+
+    assert row["name"] == "wifi"
+    assert row["present"] == "yes" and row["works"] == "yes"
+    assert row["present_cmd"] == "iw dev", row
+    assert "172.16.42.1" in row["evidence"], row
+
+
+def test_a_capability_present_but_not_working_reports_both_honestly():
+    """The taimen wifi case: phy0 exists, association never happens.
+
+    A matrix that collapses these two into one column is the matrix that lied
+    for four sessions.
+    """
+    import porthole_cmd_matrix as matrix
+
+    merged = [("wifi", {"present": "iw dev", "works": "ip -4 addr"})]
+    results = {("wifi", "present"): {"rc": 0, "out": "phy0"},
+               ("wifi", "works"): {"rc": 1, "out": ""}}
+    row, = matrix.rows(merged, results)
+    assert row["present"] == "yes" and row["works"] == "no", row
+
+
+def test_an_untested_capability_is_question_mark_not_no():
+    import porthole_cmd_matrix as matrix
+
+    merged = [("bluetooth", {"present": "test -d /sys/class/bluetooth/hci0"})]
+    results = {("bluetooth", "present"): {"rc": 0, "out": ""}}
+    row, = matrix.rows(merged, results)
+    assert row["present"] == "yes", row
+    assert row["works"] == "?", row
+
+
+def test_the_summary_never_counts_a_question_mark_as_working():
+    import porthole_cmd_matrix as matrix
+
+    rows = [{"name": "a", "present": "yes", "works": "yes"},
+            {"name": "b", "present": "yes", "works": "?"},
+            {"name": "c", "present": "no", "works": "no"}]
+    summary = matrix.summarise(rows)
+    assert summary["works"] == 1, summary
+    assert summary["untested"] == 1, summary
+    assert summary["total"] == 3, summary
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

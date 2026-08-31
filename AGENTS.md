@@ -541,6 +541,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `next` | where am I in this port, and what is the one next thing | yes | no |
 | `brief` | everything an agent needs to start a session, in one call | yes | no |
 | `slots` | read A/B slot policy from the device, never guess it | yes | no |
+| `matrix` | what works on this device, tested separately from what exists | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
 | `pkg` | find, fork and build a userspace aport, with a real progress bar | yes | needs --yes |
 | `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |
