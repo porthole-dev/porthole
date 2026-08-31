@@ -508,6 +508,30 @@ def test_stall_note_is_silent_when_output_is_recent():
     assert progress.stall_note("  CC  drivers/media/x.o", silence=3.0) == ""
 
 
+def test_line_of_carries_the_stall_note_watch_actually_renders():
+    """`stall_note` had exactly one caller -- `status_report` -- reached only
+    after a run has already stopped. `watch` renders `line_of` while the run
+    is still live, so a healthy multi-minute `pmbootstrap install` looked
+    identical to a hang there. The note belongs on the line `watch` draws."""
+    stale = {"rung": "kernel", "phase": "install", "state": "running",
+             "pid": 1, "elapsed": 133.0, "progress": None, "eta": None,
+             "last": "Executing postmarketos-base-systemd-91-r1.trigger",
+             "last_age": 133.0, "last_at": 1000.0}
+    line = progress.line_of(stale)
+    assert "\n" not in line
+    assert "no output for" in line or "install" in line.lower(), line
+
+
+def test_line_of_stays_quiet_on_a_healthy_fast_moving_build():
+    fresh = {"rung": "kernel", "phase": "make", "state": "running",
+             "pid": 1, "elapsed": 133.0, "progress": 0.4, "eta": 10.0,
+             "last": "  CC  drivers/gpu/drm/msm/msm_drv.o",
+             "last_age": 2.0, "last_at": 1000.0}
+    line = progress.line_of(fresh)
+    assert "\n" not in line
+    assert line == progress.line_of(dict(fresh, last=""))
+
+
 def test_feed_advances_last_at():
     """`__init__` already sets `last_at = started`, so a test that only
     checks the field's PRESENCE (its previous shape) passes whether or not
