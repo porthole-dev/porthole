@@ -418,6 +418,22 @@ Legacy names still win, so every command line in the older taimen docs works
 unchanged: `PHONE`, `HOST`, `TK_HOST`, `FASTBOOT`, `TK_POLL`, `TK_FORCE`,
 `TK_AGENT`, `TK_DEVICE_*`.
 
+### Build passwords
+
+`porthole build kernel` and `porthole build upgrade` require `TK_PMOS_PASSWORD`,
+the postmarketOS rootfs user password (set by `pmbootstrap install` on the
+device's user account). Export it once per shell:
+
+```sh
+export TK_PMOS_PASSWORD=<the rootfs user password>
+```
+
+It must stay an environment variable, not a flag: `porthole` passes it to the
+workspace container as `-e NAME` with no value on the command line, so it never
+appears in `ps` where every user on the box could read it. A flag would undo
+that security. `porthole doctor` warns when it is unset. The cheaper rungs
+(`mod`, `boot`, `fast`) do not need it.
+
 ---
 
 ## 4. When you learn something
