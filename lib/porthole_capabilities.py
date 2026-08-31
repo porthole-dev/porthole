@@ -28,6 +28,18 @@ WHY THE PROBES ARE READ-ONLY
     device or re-associates a radio: a matrix that can leave the phone
     somewhere you did not find it breaks AGENTS.md section 9's closing rule.
     Where the honest answer is "nobody tested that", the cell says so.
+
+    Four capabilities have no `works:` for exactly that reason: audio-out,
+    audio-in, sensors, and camera. There is no read-only way to tell whether
+    playback, capture, a sensor reading, or a camera frame actually WORKS --
+    the only way to know is to play something, record something, sample a
+    reading, or capture a frame, and every one of those induces state this
+    verb is not allowed to induce. `arecord -l` / `aplay -l` / `v4l2-ctl
+    --list-devices` only re-confirm the node exists, which `present` already
+    says; reading an IIO raw attribute can itself trigger a live I2C/SPI
+    transaction and wake the chip, which is sampling hardware, not reading
+    what is already there. Leaving `works:` absent for these is the correct,
+    permanent answer -- not a gap for someone to "fill in" later.
 """
 from __future__ import annotations
 
@@ -55,14 +67,10 @@ GENERIC = [
     ("nfc", {"present": "test -d /sys/class/nfc/nfc0"}),
     ("display", {"present": "test -e /sys/class/drm/card0",
                  "works": "grep -qx 'connected' "
-                          "/sys/class/drm/card0-DSI-1/status 2>/dev/null"}),
+                          "/sys/class/drm/card0-*/status 2>/dev/null"}),
     ("touchscreen", {"present": "grep -qi touch /proc/bus/input/devices"}),
-    ("audio-out", {"present": "test -e /dev/snd/pcmC0D0p",
-                   "works": "grep -q RUNNING /proc/asound/card0/pcm0p/sub0/status "
-                            "2>/dev/null || "
-                            "aplay -l 2>/dev/null | grep -q '^card '"}),
-    ("audio-in", {"present": "test -e /dev/snd/pcmC0D0c",
-                  "works": "arecord -l 2>/dev/null | grep -q '^card '"}),
+    ("audio-out", {"present": "test -e /dev/snd/pcmC0D0p"}),
+    ("audio-in", {"present": "test -e /dev/snd/pcmC0D0c"}),
     ("battery", {"present": "ls /sys/class/power_supply/*/capacity >/dev/null 2>&1",
                  "works": "cat /sys/class/power_supply/*/capacity 2>/dev/null | "
                           "grep -qE '^[0-9]+$'"}),
@@ -71,11 +79,8 @@ GENERIC = [
                            "/sys/class/power_supply/*/status 2>/dev/null"}),
     ("suspend", {"present": "grep -q mem /sys/power/state"}),
     ("sensors", {"present": "ls -d /sys/bus/iio/devices/iio:device* "
-                            ">/dev/null 2>&1",
-                 "works": "cat /sys/bus/iio/devices/iio:device*/in_*_raw "
-                          "2>/dev/null | grep -qE '^-?[0-9]+$'"}),
-    ("camera", {"present": "ls /dev/video* >/dev/null 2>&1",
-                "works": "v4l2-ctl --list-devices 2>/dev/null | grep -qi cam"}),
+                            ">/dev/null 2>&1"}),
+    ("camera", {"present": "ls /dev/video* >/dev/null 2>&1"}),
     ("video-decode", {"present": "v4l2-ctl --list-devices 2>/dev/null | "
                                  "grep -qiE 'venus|vidc|hantro|rkvdec'"}),
 ]
