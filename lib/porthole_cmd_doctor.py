@@ -239,6 +239,17 @@ def _runs(path: str, flag: str = "--version") -> str:
     existed, and the first symptom was a build failing much later for reasons
     that named neither doctor nor the interpreter.
 
+    The failure this catches was found and first fixed by Alessandro Ianne in
+    PR #2, which probed it by parsing the shebang and checking the interpreter
+    exists. That probe catches strictly less than running the tool -- it passes
+    a live interpreter whose venv is broken, which is the more common pipx
+    failure -- and its stated reason for avoiding execution ("a pmbootstrap
+    without a config file exits non-zero on every invocation") does not hold
+    for --version, which argparse answers before any config is read. Both are
+    measured in brain/findings/a-shebang-probe-is-a-subset-of-running-the-tool.md,
+    which keeps that implementation as the reference it deserves to be. Naming
+    the interpreter, in _shebang() below, is its idea and a good one.
+
     Deliberately NOT porthole_cmd_version's cached tool_version(): doctor must
     work when the build path is broken -- see _envkernel_candidates, which
     duplicates ph-build.sh's search for the same reason -- and a cache is one

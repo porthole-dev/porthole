@@ -13,6 +13,7 @@ generic notes as well.
 | [a-comment-cannot-unset-an-inherited-dt-property](findings/a-comment-cannot-unset-an-inherited-dt-property.md) | `soc:msm8998` | A board file that declines to mention a DT property does not unset it, and a comment is not a revert |
 | [a-created-mvm-carries-call-audio](findings/a-created-mvm-carries-call-audio.md) | `soc:msm8998` | A (created) MVM carries call audio: what matters is whether the modem had a call, not the joined flag |
 | [a-level-irq-with-a-pull-up-storms-when-its-chip-is-off](findings/a-level-irq-with-a-pull-up-storms-when-its-chip-is-off.md) | `device:google-taimen` | The NFC interrupt storm was a devicetree pull-up, not a driver bug |
+| [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
@@ -159,7 +160,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 17
-- `generic` — 87
+- `generic` — 88
 - `soc:gs201` — 1
 - `soc:msm8998` — 15
 - `soc:qcom` — 1
