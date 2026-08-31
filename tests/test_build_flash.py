@@ -1012,6 +1012,24 @@ def test_autoselect_never_picks_the_default_itself():
                                   branch_of, lister) == ""
 
 
+def test_the_tree_banner_says_the_tree_is_unused_on_the_flashing_rungs():
+    """`fast` announced a tree it then does not use.
+
+    The rung installs and flashes the APORT apk -- the source comments say so
+    outright -- so a banner naming a tree reads as "this is what you are
+    building" for something that cannot affect the result.
+    """
+    import porthole_cmd_build as build
+
+    for rung in ("fast", "upgrade"):
+        line = build.tree_banner(rung, "/x/linux-ws", "r22")
+        assert "not used" in line, (rung, line)
+        assert "r22" in line, (rung, line)
+    # On the rungs that DO build the tree, it still names the tree.
+    line = build.tree_banner("kernel", "/x/linux-ws", "r22")
+    assert "linux-ws" in line, line
+
+
 def test_a_detached_head_reads_as_no_branch():
     """git prints the literal word HEAD for a detached checkout, and treating
     that as a branch name would let it match a branch called HEAD."""

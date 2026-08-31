@@ -1364,7 +1364,22 @@ def _watch(ctx, args) -> int:
                                      "--yes` or `--detach`")
 
 
-def _maybe_autoselect_tree(ctx) -> None:
+def tree_banner(rung: str, tree, release: str) -> str:
+    """What to say about the tree, for THIS rung. Pure.
+
+    `fast` and `upgrade` install and flash the APORT apk -- the rung's own
+    source comments say the tree cannot affect what lands on the phone -- and
+    both printed a banner naming a tree immediately before doing so. Keyed on
+    the rung and not on whether the tree matches, because the tree is inert on
+    these rungs either way.
+    """
+    if rung in ("fast", "upgrade"):
+        return ("flashing the APORT release {} — the tree is not used by this "
+                "rung".format(release or "(unknown release)"))
+    return "building {}".format(tree)
+
+
+def _maybe_autoselect_tree(ctx, action: str = "") -> None:
     """Point the build at the tree holding the product branch, if exactly one
     does. Runs before anything reads the tree, and says so loudly when it
     fires -- a build that silently switched trees would be worse than the bug.
@@ -1383,10 +1398,12 @@ def _maybe_autoselect_tree(ctx) -> None:
     # one of the two is how the host and the container end up building
     # different trees.
     os.environ["PORTHOLE_KERNEL_TREE"] = chosen
+    _, pkgrel = aport_version(ctx)
+    release = f"r{pkgrel}" if pkgrel else ""
     ctx.out(ctx.out.paint(
         f"  tree: the default is not on the product branch {want}", "yellow"))
     ctx.out(ctx.out.paint(
-        f"        building {chosen} -- the one tree that is", "yellow"))
+        f"        {tree_banner(action, chosen, release)}", "yellow"))
 
 
 def cmd_build(args, ctx) -> int:
@@ -1403,7 +1420,7 @@ def cmd_build(args, ctx) -> int:
                    f"actions: auto, status, watch, {', '.join(ACTIONS)}")
 
     _assert_no_drift(ctx, args)
-    _maybe_autoselect_tree(ctx)
+    _maybe_autoselect_tree(ctx, action)
 
     if action == "auto":
         # Measuring needs a tree to make in. Without one -- a new port, or a

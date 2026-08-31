@@ -455,6 +455,46 @@ def probe_series_applies(ctx):
     return verdict_for_series(aports._series_problems(pkg_dir), count)
 
 
+_PROVENANCE_STATES = {"done": done, "todo": todo, "blocked": blocked}
+
+
+def verdict_for_provenance(state: str, evidence: str):
+    """Map porthole_provenance's plain state to a Verdict. Pure."""
+    return _PROVENANCE_STATES.get(state, lambda _e: unknown())(evidence)
+
+
+def _read_run_json(ctx, name: str) -> dict:
+    """A blob `brief` left in the run dir, or {}.
+
+    The seam that lets a milestone probe report something only the DEVICE can
+    answer without the probe itself touching the device. `brief` fetches once,
+    under its own device probe; the probes read what it left.
+    """
+    import json
+
+    try:
+        rundir = pathlib.Path(_cfg(ctx, "PORTHOLE_RUNDIR")
+                              or (pathlib.Path(ctx.root) / ".run"))
+        return json.loads((rundir / name).read_text())
+    except Exception:  # noqa: BLE001 -- a missing blob is "nobody looked yet"
+        return {}
+
+
+def probe_kernel_provenance(ctx):
+    """What the device is running, from what `brief` already fetched.
+
+    Reads a cache rather than probing, for the same reason probe_reachable
+    does: `brief --no-device` must work offline and a probe that hangs on a
+    dead phone would make the first command an agent runs the one that hangs.
+    `brief` fetches this once, under its own device probe, and writes it here.
+    """
+    blob = _read_run_json(ctx, "kernel-provenance.json")
+    if not blob:
+        return unknown()
+    return verdict_for_provenance(blob.get("state", ""),
+                                  blob.get("evidence", ""))
+
+
 def probe_kernel_pkg(ctx):
     name = _cfg(ctx, "PORTHOLE_KERNEL_PKG")
     if not name:
@@ -752,6 +792,14 @@ MILESTONES = [
             "reason nothing surfaces, and work drifts to a tree that does not "
             "carry the patches. taimen lost a whole subsystem this way.",
         how="porthole aports lint", probe=probe_series_applies, safe=True),
+    Milestone(
+        "kernel-provenance", "packaging",
+        "The kernel on the device is the one the checkout builds",
+        why="A tree build carries none of the aport's patches, and their "
+            "absence is silent -- no module, no /dev node, nothing in dmesg. "
+            "taimen lost venus this way and the only symptom was a missing "
+            "/dev/video7.",
+        how="porthole brief", probe=probe_kernel_provenance, safe=True),
     Milestone(
         "builds", "packaging", "The packages build",
         why="A package that builds on your host is the first thing anyone else "

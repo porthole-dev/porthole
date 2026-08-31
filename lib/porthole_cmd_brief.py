@@ -15,6 +15,7 @@ session, including on a host with no device attached.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 
 import porthole
@@ -93,12 +94,28 @@ def cmd_brief(args, ctx) -> int:
     drifts = _porthole.drift(cfg)
 
     state = "not probed"
+    kernel = {}
     if not args.no_device:
         try:
             # A display verdict: 30s stale is fine, 6.3s of waiting is not.
             state = ctx.device().state(max_age=30)
         except Exception as exc:  # noqa: BLE001
             state = f"probe failed: {exc}"
+        # Fetched HERE, once, beside the device probe, and written to the run
+        # dir for the milestone probe to read. Milestone probes must not touch
+        # the device: `brief --no-device` has to work offline.
+        if state == "BOOTED":
+            try:
+                import porthole_cmd_build as _build
+                import porthole_provenance as prov
+
+                info = prov.running(ctx.device(), cfg.get("PORTHOLE_KERNEL_PKG", ""))
+                verdict, evidence = prov.compare(info, *_build.aport_version(ctx))
+                kernel = {"state": verdict, "evidence": evidence,
+                          "build_version": info.get("build_version", "")}
+                _write_run_json(ctx, "kernel-provenance.json", kernel)
+            except Exception:  # noqa: BLE001 -- brief must never fail on this
+                kernel = {}
 
     # The first question anyone picking up a handoff asks: is a build
     # running, and who holds the buildroot. Two agents collided in this repo
@@ -149,6 +166,7 @@ def cmd_brief(args, ctx) -> int:
             "name": cfg.get("PORTHOLE_DEVICE_NAME", ""),
             "soc": cfg.get("PORTHOLE_SOC", ""),
             "state": state,
+            "kernel": kernel,
             # Redacted here and NOT in the human output below: this is the
             # half that gets pasted into a note or a PR. See
             # porthole_secrets.redact_login.
@@ -213,6 +231,8 @@ def cmd_brief(args, ctx) -> int:
                   "FROZEN": "yellow", "INITRAMFS": "yellow",
                   "ABSENT": "grey"}.get(state, "grey")
         ctx.out.kv("state", ctx.out.paint(state, colour), w)
+        if payload["device"].get("kernel", {}).get("evidence"):
+            ctx.out.kv("kernel", payload["device"]["kernel"]["evidence"], w)
         ctx.out.kv("tools", str(len(tools)), w)
         ctx.out.kv("builds", builds_line, w)
         if payload["device"]["traps"]:
@@ -286,6 +306,19 @@ def cmd_brief(args, ctx) -> int:
             ctx.out.hint(step)
 
     return ctx.emit(payload, render)
+
+
+def _write_run_json(ctx, name: str, blob) -> None:
+    """Leave a blob in the run dir for the milestone probes. Best effort:
+    `brief` must never fail because bookkeeping did."""
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    try:
+        rundir.mkdir(parents=True, exist_ok=True)
+        tmp = rundir / (name + ".tmp")
+        tmp.write_text(json.dumps(blob, indent=2))
+        os.replace(tmp, rundir / name)
+    except OSError:
+        pass
 
 
 def _notes(root: pathlib.Path, section: str) -> list[dict]:
