@@ -454,6 +454,26 @@ def _workspace_usable(ctx):
     return True, ""
 
 
+def pmb_workdir(ctx, in_container: bool) -> pathlib.Path:
+    """pmbootstrap's own work dir, on the HOST filesystem either way.
+
+    Lives here rather than in `pkg` because the decision it depends on --
+    _workspace_usable -- lives here, and because BOTH build paths need it now:
+    the kernel rungs to follow log.txt, and the export rungs to check whether
+    the rootfs chroot has ever been installed.
+
+    The workspace deliberately keeps its own pmbootstrap work dir, separate
+    from the host's. That split is the whole reason `fast` can find both apks
+    and still fail in export: the two dirs have different chroots.
+    """
+    import porthole_cmd_sandbox as sandbox
+
+    if in_container:
+        return sandbox._sandbox_pmb(ctx.cfg)
+    host = ctx.cfg.get("PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
+    return pathlib.Path(host).expanduser()
+
+
 def _tree_inside(tree, workdir) -> str:
     """PORTHOLE_KERNEL_TREE as the CONTAINER sees it, or "" if it cannot.
 
@@ -605,7 +625,13 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                 "dependencies),", "grey"))
             ctx.out(ctx.out.paint(
                 "  which is what the workspace exists to avoid needing", "grey"))
-    return _stream(ctx, cmd, env, timeout, rung or func)
+    # pmbootstrap keeps the real build output in its own log.txt and puts only
+    # `=> step` lines on stdout. `pkg` has followed it since the bar was
+    # written; the kernel rungs never did, so build-history.json recorded
+    # `compile_lines: 0` for every kernel build ever run and `fast` rendered
+    # [??????] for the 20 minutes that dominate it.
+    return _stream(ctx, cmd, env, timeout, rung or func,
+                   follow=pmb_workdir(ctx, usable) / "log.txt")
 
 
 # How often the bar repaints and the status file is written while the child

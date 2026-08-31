@@ -38,6 +38,23 @@ def run(*args, env=None):
 DEV = "google-taimen"
 
 
+class _FakeCtx:
+    """A ctx good enough to drive `_run`/`_stream` without a real profile:
+    cfg, out, root. Shared here so each test does not hand-roll its own."""
+
+    class _FakeOut:
+        def __call__(self, *a, **k):
+            pass
+
+        def paint(self, s, _color):
+            return s
+
+    def __init__(self, cfg=None):
+        self.cfg = cfg or {}
+        self.out = _FakeCtx._FakeOut()
+        self.root = ROOT
+
+
 # ----------------------------------------------------------------- refusals --
 
 def test_flash_refuses_a_forbidden_slot():
@@ -1085,6 +1102,37 @@ def test_the_host_branch_says_what_host_building_actually_needs():
     the exact precondition is not cheaply checkable from here."""
     src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
     assert "chroots and " in src and "workspace exists to avoid needing" in src
+
+
+def test_run_follows_pmbootstraps_own_log():
+    """The kernel rungs must read log.txt, not only pmbootstrap's stdout.
+
+    pmbootstrap relays `=> step` lines to stdout and writes the actual build
+    output -- every CC, every LD -- to its own log.txt. `porthole pkg` has
+    always followed it; `porthole build` never did, so build-history.json
+    recorded compile_lines 0 for every kernel rung ever run and the bar had
+    nothing to move on.
+    """
+    import porthole_cmd_build as build
+
+    seen = {}
+
+    def fake_stream(ctx, cmd, env, timeout, rung, **kw):
+        seen.update(kw)
+        seen["rung"] = rung
+        return 0
+
+    real = build._stream
+    build._stream = fake_stream
+    try:
+        ctx = _FakeCtx({"PORTHOLE_DEVICE": "google-taimen",
+                        "PORTHOLE_WORKDIR": "/nonexistent"})
+        build._run(ctx, "tkbuild-kernel", 60, host=True, rung="fast")
+    finally:
+        build._stream = real
+
+    assert seen.get("follow"), "no follow= was passed"
+    assert str(seen["follow"]).endswith("log.txt"), seen["follow"]
 
 
 if __name__ == "__main__":
