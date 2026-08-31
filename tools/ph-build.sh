@@ -49,6 +49,12 @@ _PH_REPO=${PORTHOLE_WORKDIR:?set PORTHOLE_WORKDIR to the device working repo (ke
 # be sitting on -- it is often a worktree -- and switching the main checkout to
 # reach it is how a half-finished branch gets built and flashed.
 _PH_TREE=${PORTHOLE_KERNEL_TREE:-$_PH_REPO/linux}
+# A RELATIVE value resolves against the device working repo, never against
+# whatever pwd this happens to be sourced with. `PORTHOLE_KERNEL_TREE=linux-ws`
+# built fine in the workspace and died on --host with `pushd: linux-ws: No such
+# file or directory` -- one variable, two meanings, decided by the caller's cwd.
+# lib/porthole_cmd_build.py:_tree applies the same rule, and must.
+case $_PH_TREE in /*) ;; *) _PH_TREE=$_PH_REPO/$_PH_TREE ;; esac
 _PH_PMB=${PORTHOLE_PMB_DIR:-$_PH_PMB}
 # pmaports. The device repo normally symlinks it, but that symlink names an
 # ABSOLUTE host path, and inside the workspace container the pmbootstrap work
@@ -882,6 +888,33 @@ _ph_wait_up() {
 # (see tkflash).
 _PH_STAMP="$_PH_REPO/.last-build"
 
+# Record that the DEVICE now has what this tree built.
+#
+# `porthole build auto` routes on what make has produced SINCE this moment, so
+# it is written after a push or flash SUCCEEDS and never before. That is what
+# makes the preview idempotent: a preview compiles but pushes nothing, so it
+# cannot move this stamp, so the run that follows still sees the same work.
+#
+# Before this, `auto` routed on what one `make` invocation happened to touch --
+# and the preview runs a real make, so it consumed the very evidence it was
+# about to route on. `porthole build` followed by `porthole build auto --yes`
+# reported "make rebuilt nothing -- there is nothing to push" about a tree with
+# a real change in it, and the documented preview-then-run flow was therefore
+# self-defeating.
+#
+# cksum of the tree path, matching lib/porthole_cmd_build.py:_pushed_stamp.
+# A test compares the two implementations, because a stamp written under one
+# name and read under another fails SILENTLY: a missing stamp is a legal state
+# meaning "never pushed".
+_ph_pushed_write() {
+	local rundir stamp
+	rundir=${PORTHOLE_RUNDIR:-$_PH_REPO_ROOT/.run}
+	mkdir -p "$rundir" 2>/dev/null || return 0
+	stamp="$rundir/pushed-$(printf '%s' "$_PH_TREE" | cksum | cut -d' ' -f1)"
+	: > "$stamp" 2>/dev/null || return 0
+	return 0
+}
+
 _ph_stamp_write() {
 	{
 		printf 'tree=%s\n' "$_PH_TREE"
@@ -1173,7 +1206,8 @@ tkbuild-kernel() {
 		echo ">> refusing to flash a stale image"; return 1; }
 
 	tkpush-modules || return 1
-	tkflash-boot
+	tkflash-boot || return 1
+	_ph_pushed_write
 }
 
 # Move the device to a DIFFERENT kernel flavor -- a major version bump.
@@ -1309,7 +1343,8 @@ tkupgrade-kernel() {
 
 	# Modules first, while the phone is still up on the outgoing kernel.
 	tkpush-modules || return 1
-	tkflash-boot
+	tkflash-boot || return 1
+	_ph_pushed_write
 }
 
 # Put the freshly built modules on the phone.
@@ -1408,7 +1443,7 @@ tkpush-modules() {
 
 	# While the phone is still up, record the UUIDs its initramfs actually needs.
 	# tkflash-boot patches them into the export; see the comment there.
-	ssh "$phone" 'cat /proc/cmdline' 2>/dev/null | tr ' ' '\n' |
+	ssh "${TK_SSH_OPTS[@]}" "$phone" 'cat /proc/cmdline' 2>/dev/null | tr ' ' '\n' |
 		grep -E '^pmos_(boot|root)_uuid=' > "$_PH_REPO/.device-uuids"
 	[ -s "$_PH_REPO/.device-uuids" ] &&
 		echo ">> recorded device UUIDs: $(tr '\n' ' ' < "$_PH_REPO/.device-uuids")"
@@ -1422,6 +1457,35 @@ tkpush-modules() {
 # session if you are chasing a sensor bring-up.
 #
 #   tkmod drivers/media/i2c/imx179.ko imx179
+# Say what an ssh/scp failure to the device actually was.
+#
+# `scp: Connection closed` names nothing, and the first guess is a stale ssh
+# control master -- a real hazard after a reboot, and the wrong one here. It
+# cost a session to learn the answer was that the phone does not have this key.
+#
+# One probe, on the failure path only, so a working push pays nothing.
+# ControlMaster=no because a dead master is one of the answers this has to be
+# able to distinguish, and reusing it would hide the very thing being asked.
+_ph_ssh_diagnose() {
+	local phone=$1 err
+	err=$(ssh "${TK_SSH_OPTS[@]}" -o ControlMaster=no -o ControlPath=none \
+		"$phone" true 2>&1)
+	case $err in
+	*"Permission denied"*)
+		echo ">> the device refuses this key: ${PORTHOLE_SSH_KEY:-(your default ssh keys)}" >&2
+		echo ">> in the workspace that is the ONLY key the container has, so" >&2
+		echo ">> every push fails until the phone is told about it. Once, by hand:" >&2
+		echo ">>   ssh-keygen -y -f ${PORTHOLE_SSH_KEY:-~/.ssh/id_ed25519}" >&2
+		echo ">>   # add that one line to ~/.ssh/authorized_keys ON THE PHONE" >&2
+		echo ">> \`porthole doctor\` reports this as workspace: device key." >&2 ;;
+	"")
+		echo ">> ssh answers now, so the failure was transient or the mux was stale" >&2
+		echo ">>   ph_ssh_mux_reset   # if it recurs" >&2 ;;
+	*)
+		echo ">> ssh to $phone failed: $err" >&2 ;;
+	esac
+}
+
 tkmod() {
 	local rel=$1 name=$2 phone=${PHONE:-$PORTHOLE_USER@$HOST}
 	[ -n "$rel" ] && [ -n "$name" ] || { echo ">> usage: tkmod <path/to/mod.ko> <modname>"; return 1; }
@@ -1450,7 +1514,16 @@ tkmod() {
 	local ko="$_PH_OUT/$rel"
 	[ -f "$ko" ] || { echo ">> no module at $ko"; return 1; }
 
-	scp -q "$ko" "$phone:/tmp/$name.ko" || return 1
+	# TK_SSH_OPTS, like every other device call in this file. It carries
+	# -i "$PORTHOLE_SSH_KEY" -o IdentitiesOnly=yes (lib/porthole.sh:188), and
+	# in the workspace that key is /run/porthole/device_key -- the ONLY key the
+	# container has. Without it these three calls offered no key at all, so
+	# every `porthole build mod --yes` ended `scp: Connection closed`, which
+	# reads like a network fault and sent a session looking at the ssh mux.
+	# They also lost ConnectTimeout, BatchMode (a prompt instead of a fast
+	# failure) and the multiplexing that makes every other device call ~15ms.
+	scp -q "${TK_SSH_OPTS[@]}" "$ko" "$phone:/tmp/$name.ko" || {
+		_ph_ssh_diagnose "$phone"; return 1; }
 
 	# ALSO replace the installed module, not just the hot-loaded one.
 	#
@@ -1462,14 +1535,15 @@ tkmod() {
 	# Modules on the device are xz-compressed; a plain .ko next to the .ko.xz
 	# is ignored (TODO section 3), so compress and overwrite in place.
 	xz -cf "$ko" > "/tmp/$name.ko.xz" || return 1
-	scp -q "/tmp/$name.ko.xz" "$phone:/tmp/$name.ko.xz" || return 1
+	scp -q "${TK_SSH_OPTS[@]}" "/tmp/$name.ko.xz" "$phone:/tmp/$name.ko.xz" || {
+		_ph_ssh_diagnose "$phone"; return 1; }
 
 	# rmmod alone is not enough once something holds the driver -- camss keeps a
 	# reference to a sensor subdev, so the module refcount never reaches zero and
 	# insmod then fails with "File exists", which reads like a stale file rather
 	# than a busy module. Unbind every device first, then reload and let it
 	# re-probe (camss re-registers its media device when the subdev comes back).
-	ssh "$phone" "set -e
+	ssh "${TK_SSH_OPTS[@]}" "$phone" "set -e
 		d=/sys/bus/i2c/drivers/$name
 		[ -d \$d ] || d=/sys/bus/platform/drivers/$name
 		if [ -d \$d ]; then
@@ -1549,6 +1623,7 @@ tkmod() {
 	sysname=${name//-/_}
 	if [ -z "$want" ]; then
 		echo ">> WARNING: built $name.ko has no srcversion -- cannot verify the load"
+		_ph_pushed_write   # it did reach the device; only the proof is missing
 		return 0
 	fi
 	ssh "${TK_SSH_OPTS[@]}" "$phone" "
@@ -1560,6 +1635,7 @@ tkmod() {
 			echo '>> the old module never unloaded -- something still holds it'
 			exit 1; fi
 		echo '>> verified: running $name is the build just pushed ($want)'" || return 1
+	_ph_pushed_write
 }
 
 # FAST loop for DTS and built-in code: make, repack, RAM-boot. No pmbootstrap.
@@ -1575,7 +1651,81 @@ tkmod() {
 #
 #   tkboot                 # make dtbs only, repack, boot
 #   tkboot --kernel        # built-in code changed too: make Image.gz as well
-_PH_BASEIMG=${TK_BASEIMG:-/tmp/tk-base-boot.img}
+# The base image the dtb is spliced into.
+#
+# The old default was /tmp/tk-base-boot.img, with "seed it once from a
+# known-good UUID-patched boot.img" printed when it was absent. That
+# instruction cannot be followed from where the build runs: the workspace
+# container does not mount the host's /tmp, so seeding the named path on the
+# host changed nothing, and pointing TK_BASEIMG at a scratch path failed the
+# same way for the same reason.
+#
+# Left EMPTY by default and resolved inside tkboot against the device's own
+# kernel release. TK_BASEIMG still overrides, for a base image you have and the
+# device cannot supply.
+_PH_BASEIMG=${TK_BASEIMG:-}
+
+# Which partition holds a known-good boot image.
+#
+# Derived, never hardcoded: this file is `scope: generic`, and a device without
+# A/B slots has a plain `boot`. TK_BOOT_PARTLABEL is the escape hatch for a
+# bootloader that names it something else.
+_ph_boot_partlabel() {
+	if [ -n "${TK_BOOT_PARTLABEL:-}" ]; then
+		printf '%s\n' "$TK_BOOT_PARTLABEL"
+	elif [ "${PORTHOLE_HAS_AB_SLOTS:-0}" = "1" ] && [ -n "${PORTHOLE_ACTIVE_SLOT:-}" ]; then
+		printf 'boot_%s\n' "$PORTHOLE_ACTIVE_SLOT"
+	else
+		printf 'boot\n'
+	fi
+}
+
+# Pull a known-good base image off the device.
+#
+# The active slot's boot partition IS a known-good, UUID-patched image by
+# definition, so there is nothing for a human to find and nothing to seed by
+# hand. Cached under .run, which the container DOES mount.
+#
+# Keyed on the device's kernel release by the caller, and that is what makes
+# the cache safe rather than merely convenient: after a `fast` flash the key
+# changes and the image re-seeds, so a DTS-only RAM boot can never carry a
+# stale kernel behind a fresh dtb -- a failure that would present as a bad
+# devicetree and cost a boot to diagnose.
+#
+# Verify the artifact, not the exit code: a truncated read is still a file, and
+# a repack from a truncated base produces an image the bootloader rejects with
+# nothing here having complained. bootimg-cmdline.py already answers exactly
+# "is this an Android boot image" and refuses with a sentence that says so.
+_ph_seed_baseimg() {
+	local part tmp
+	[ -s "$_PH_BASEIMG" ] && return 0
+	part=$(_ph_boot_partlabel)
+	echo ">> no base image yet -- seeding from the device's $part"
+	mkdir -p "$(dirname "$_PH_BASEIMG")" || return 1
+	tmp="$_PH_BASEIMG.partial"
+	if ! TK_RUN_TIMEOUT=15 tk_run "test -e /dev/disk/by-partlabel/$part" >/dev/null 2>&1; then
+		echo ">> the device has no /dev/disk/by-partlabel/$part" >&2
+		echo ">> set TK_BOOT_PARTLABEL to the partition holding a good boot image," >&2
+		echo ">> or TK_BASEIMG to a known-good UUID-patched boot.img you already have" >&2
+		return 1
+	fi
+	# `cat`, not `dd`: dd's count/bs would have to be guessed per device, and
+	# the partition is exactly the image. sudo because the block device is not
+	# world-readable.
+	if ! TK_RUN_TIMEOUT=180 tk_run "sudo cat /dev/disk/by-partlabel/$part" > "$tmp" 2>/dev/null; then
+		rm -f "$tmp"
+		echo ">> could not read $part from the device" >&2
+		return 1
+	fi
+	if ! "$_PH_REPO_ROOT/tools/bootimg-cmdline.py" show "$tmp" >/dev/null 2>&1; then
+		rm -f "$tmp"
+		echo ">> what came off $part is not a boot image -- refusing to cache it" >&2
+		echo ">> (a truncated read is still a file; the repack would not say so)" >&2
+		return 1
+	fi
+	mv "$tmp" "$_PH_BASEIMG" || return 1
+	echo ">> base image cached at $_PH_BASEIMG"
+}
 
 tkboot() {
 	local with_kernel=""
@@ -1608,12 +1758,21 @@ tkboot() {
 		echo ">>       userspace without them; use \`fast\` if it does not."
 	fi
 
-	[ -f "$_PH_BASEIMG" ] || {
-		echo ">> no base image at $_PH_BASEIMG"
-		echo "   seed it once from a known-good UUID-patched boot.img:"
-		echo "     cp <good>.img $_PH_BASEIMG"
-		return 1
-	}
+	# BEFORE the compile, not after. `auto` routes to `boot` without checking
+	# the rung can run, so a missing base image used to surface minutes into a
+	# make -- the cost paid before the news.
+	if [ -z "$_PH_BASEIMG" ]; then
+		local _rel _rundir
+		_rundir=${PORTHOLE_RUNDIR:-$_PH_REPO_ROOT/.run}
+		_rel=$(TK_RUN_TIMEOUT=8 tk_run 'uname -r' 2>/dev/null | tr -d '\r\n')
+		[ -n "$_rel" ] || {
+			echo ">> cannot reach the device, so no base image can be seeded" >&2
+			echo ">> boot the phone, or set TK_BASEIMG to a known-good" >&2
+			echo ">> UUID-patched boot.img" >&2
+			return 1; }
+		_PH_BASEIMG="$_rundir/base-boot-$_rel.img"
+	fi
+	_ph_seed_baseimg || return 1
 
 	_ph_activate || return 1
 	shopt -s expand_aliases
@@ -1638,5 +1797,6 @@ tkboot() {
 	local old_id; old_id=$(tk_boot_id 2>/dev/null || true)
 	"$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
 	"$FASTBOOT" boot "$out" || return 1
-	_ph_wait_up "$old_id"
+	_ph_wait_up "$old_id" || return 1
+	_ph_pushed_write
 }

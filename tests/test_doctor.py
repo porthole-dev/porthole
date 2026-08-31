@@ -9,7 +9,9 @@ against four real distros; these are the fast checks that do not need podman.
 """
 import os
 import pathlib
+import shutil
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
@@ -181,6 +183,182 @@ def test_a_soc_number_is_not_read_as_a_kernel_version():
         "PORTHOLE_KERNEL_BRANCH": "",
     })
     assert ch.rows == [], ch.rows
+
+
+def test_a_non_executable_fastboot_is_not_reported_ok():
+    """_resolve's isfile fallback accepted any file that EXISTS. FASTBOOT is a
+    required row, so a config naming a non-executable file rendered green on
+    the one check whose whole purpose is to hard-fail."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "fastboot"
+        fake.write_text("not executable\n")
+        os.chmod(fake, 0o644)
+        assert doctor._resolve({"FASTBOOT": str(fake)}, "FASTBOOT",
+                               "fastboot") is None
+
+
+def test_an_executable_fastboot_still_resolves():
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "fastboot"
+        fake.write_text("#!/bin/sh\nexit 0\n")
+        os.chmod(fake, 0o755)
+        assert doctor._resolve({"FASTBOOT": str(fake)}, "FASTBOOT",
+                               "fastboot") == str(fake)
+
+
+def test_a_broken_shebang_does_not_pass_as_ok():
+    """A +x script whose interpreter is gone passes shutil.which and dies at
+    exec with 126. That is the ordinary pipx failure -- a venv whose base
+    python was removed -- and doctor called it ok for as long as it existed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "pmbootstrap"
+        fake.write_text("#!/nonexistent/python\nprint(1)\n")
+        os.chmod(fake, 0o755)
+        why = doctor._runs(str(fake))
+        assert why, "a broken shebang must not read as ok"
+        assert "bad interpreter" in why and "nonexistent" in why, why
+
+
+def test_a_working_tool_reports_no_reason():
+    """A hermetic stand-in rather than a real tool: /bin/sh is dash on some
+    hosts and dash has no --version, so probing it would fail this test on a
+    perfectly good box. The contract under test is "exit 0 means usable"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "worksfine"
+        fake.write_text("#!/bin/sh\necho 'worksfine 1.0'\n")
+        os.chmod(fake, 0o755)
+        assert doctor._runs(str(fake)) == ""
+
+
+def test_a_tool_that_answers_the_wrong_flag_is_a_reason():
+    """`ssh --version` exits 255 with a usage block. Asking a tool the wrong
+    question must read as broken, which is why the flag is per-tool."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "picky"
+        fake.write_text("#!/bin/sh\necho 'unknown option' >&2\nexit 255\n")
+        os.chmod(fake, 0o755)
+        why = doctor._runs(str(fake))
+        assert "255" in why and "unknown option" in why, why
+
+
+def test_an_env_form_shebang_with_a_dead_target_is_caught():
+    """The case reported from a NixOS host in PR #2: a pip-generated
+    `#!/usr/bin/env <python>` outliving the python it names. env EXISTS, so
+    exec succeeds and env itself fails with 127 -- a different path from a
+    direct shebang, which fails at exec with ENOENT. Both must be caught."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "pmbootstrap"
+        fake.write_text("#!/usr/bin/env /no/such/python3\nprint(1)\n")
+        os.chmod(fake, 0o755)
+        why = doctor._runs(str(fake))
+        assert why, "an env-form dead interpreter must not read as ok"
+        assert "/no/such/python3" in why, why
+
+
+def test_ssh_is_probed_with_the_flag_ssh_actually_takes():
+    """`ssh --version` is not a thing -- it exits 255 with a usage block. A
+    uniform --version probe reported a working ssh as FAIL on the very first
+    host this ran on, which is the same false-confidence bug in reverse."""
+    ssh = shutil.which("ssh")
+    if ssh:
+        assert doctor._runs(ssh, "-V") == ""
+    flags = {t: f for t, _k, _r, _w, f in doctor.HOST_TOOLS}
+    assert flags["ssh"] == "-V", flags
+
+
+def test_a_tool_that_is_absent_is_a_reason_not_a_crash():
+    """_runs is handed a resolved path, but a tool can vanish between the
+    resolve and the exec. That must be a row, not a traceback."""
+    assert doctor._runs("/nonexistent/tool")
+
+
+def test_check_host_fails_a_required_row_whose_tool_cannot_run():
+    """The whole point: `ok host: fastboot /usr/bin/fastboot` for something
+    that cannot start is worse than no check, because it converts "the tools
+    do nothing" into "the tools do nothing and doctor says they are fine"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in ("ssh", "fastboot", "adb", "pmbootstrap", "shellcheck"):
+            fake = pathlib.Path(tmp) / name
+            fake.write_text("#!/nonexistent/python\n")
+            os.chmod(fake, 0o755)
+        old = os.environ["PATH"]
+        os.environ["PATH"] = tmp
+        try:
+            ch = doctor.Checks()
+            doctor.check_host(ch, {}, "fedora")
+        finally:
+            os.environ["PATH"] = old
+        rows = {r["name"]: r for r in ch.rows}
+        assert rows["host: fastboot"]["status"] == "fail", rows["host: fastboot"]
+        assert rows["host: ssh"]["status"] == "fail", rows["host: ssh"]
+        # Optional tools warn rather than fail: pmbootstrap is not needed to
+        # probe a device, and a broken one must not stop doctor reporting.
+        assert rows["host: pmbootstrap"]["status"] == "warn", rows["host: pmbootstrap"]
+        assert rows["host: fastboot"]["fix"], "a failing row must name a fix"
+
+
+# ------------------------------------------------------- the device key ---
+# doctor printed a green device key for a key the phone had never been told
+# about, because it checked that the FILE exists. So doctor was ok while every
+# workspace push failed with `scp: Connection closed`.
+
+def test_the_device_key_row_reports_three_states():
+    """Three, not two. An unreachable device is not evidence the key is bad,
+    and a check that cries failure when it does not know is one people learn
+    to scroll past."""
+    seen = {}
+    for value in (True, False, None):
+        ch = doctor.Checks()
+        doctor._device_key_row(ch, {"device_key": "/k",
+                                    "device_key_authorized": value})
+        seen[value] = ch.rows[-1]["status"]
+    assert seen == {True: "ok", False: "fail", None: "warn"}, seen
+
+
+def test_a_missing_key_is_not_reported_as_refused():
+    ch = doctor.Checks()
+    doctor._device_key_row(ch, {"device_key": "", "device_key_authorized": None})
+    assert ch.rows[-1]["status"] == "warn", ch.rows[-1]
+    assert "not created" in ch.rows[-1]["detail"], ch.rows[-1]
+
+
+def test_a_refused_key_names_the_command_that_fixes_it():
+    ch = doctor.Checks()
+    doctor._device_key_row(ch, {"device_key": "/k", "device_key_authorized": False})
+    fix = ch.rows[-1]["fix"]
+    assert "ssh-keygen -y" in fix and "authorized_keys" in fix, fix
+
+
+def test_doctor_prints_the_key_fix_and_does_not_perform_it():
+    """Installing a key is a privileged write to the device. doctor names
+    fixes it will not run, and this is not the place to make an exception."""
+    src = (ROOT / "lib" / "porthole_cmd_doctor.py").read_text()
+    body = src.split("def _device_key_row")[1].split("\ndef ")[0]
+    for verb in ("subprocess.run", "os.system", "tee "):
+        assert verb not in body, verb
+
+
+def test_an_agent_key_cannot_mask_an_uninstalled_device_key():
+    """Without IdentitiesOnly a working key in the user's agent answers for the
+    device key, and the check passes for the wrong reason."""
+    import porthole_cmd_sandbox as sandbox
+    src = (ROOT / "lib" / "porthole_cmd_sandbox.py").read_text()
+    body = src.split("def _device_key_authorized")[1].split("\ndef ")[0]
+    assert "IdentitiesOnly" in body and "BatchMode" in body
+
+
+def test_only_a_refusal_counts_as_unauthorized():
+    """A device that is off, or a name that does not resolve, is unknown."""
+    import porthole_cmd_sandbox as sandbox
+    with tempfile.TemporaryDirectory() as tmp:
+        key = pathlib.Path(tmp) / "k"
+        key.write_text("x")
+        # No PHONE configured at all: nothing to ask, so nothing is claimed.
+        assert sandbox._device_key_authorized({}, key) is None
+        # A host that cannot resolve is unknown, never False.
+        got = sandbox._device_key_authorized(
+            {"PHONE": "porthole-nonexistent.invalid"}, key)
+        assert got is None, got
 
 
 if __name__ == "__main__":

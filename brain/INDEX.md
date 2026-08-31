@@ -10,11 +10,14 @@ generic notes as well.
 
 | id | scope | title |
 |---|---|---|
+| [a-comment-cannot-unset-an-inherited-dt-property](findings/a-comment-cannot-unset-an-inherited-dt-property.md) | `soc:msm8998` | A board file that declines to mention a DT property does not unset it, and a comment is not a revert |
 | [a-created-mvm-carries-call-audio](findings/a-created-mvm-carries-call-audio.md) | `soc:msm8998` | A (created) MVM carries call audio: what matters is whether the modem had a call, not the joined flag |
 | [a-level-irq-with-a-pull-up-storms-when-its-chip-is-off](findings/a-level-irq-with-a-pull-up-storms-when-its-chip-is-off.md) | `device:google-taimen` | The NFC interrupt storm was a devicetree pull-up, not a driver bug |
+| [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
+| [ap-refuses-us-our-assocreq-is-clean](findings/ap-refuses-us-our-assocreq-is-clean.md) | `device:google-taimen` | TEST-SSID refuses this client, and our association request is not the reason |
 | [crossdirect-hands-the-linker-to-qemu-on-purpose](findings/crossdirect-hands-the-linker-to-qemu-on-purpose.md) | `generic` | Crossdirect hands every link step to qemu on purpose, not just compile |
 | [envkernel-activation-is-cheap-once-the-chroot-is-warm](findings/envkernel-activation-is-cheap-once-the-chroot-is-warm.md) | `generic` | envkernel activation costs 0.8 s, not 14 s -- the 14 s is a one-off apk add |
 | [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
@@ -26,9 +29,11 @@ generic notes as well.
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
 | [lax-build-buys-nothing-measurable](findings/lax-build-buys-nothing-measurable.md) | `generic` | PORTHOLE_LAX_BUILD=1 saves no measurable time, and the zap it skips is not the wall clock |
 | [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
+| [nothing-polls-an-idle-link-on-ath10k](findings/nothing-polls-an-idle-link-on-ath10k.md) | `generic` | ath10k turns off mac80211's idle connection polling, then disables the firmware keepalive too |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
+| [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
@@ -39,6 +44,7 @@ generic notes as well.
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
 | [the-workspace-caches-kernel-compiles](findings/the-workspace-caches-kernel-compiles.md) | `generic` | The workspace caches kernel compiles now: 18% dearer the first time, 2.5x faster every repeat |
 | [the-workspace-loop-is-seconds-and-still-uncached](findings/the-workspace-loop-is-seconds-and-still-uncached.md) | `generic` | The workspace edit-build loop is 6-8 s, and ccache is still hit zero times |
+| [two-thirds-of-associations-never-get-keys](findings/two-thirds-of-associations-never-get-keys.md) | `device:google-taimen` | Two thirds of successful associations never complete the 4-way handshake, and ath10k says nothing |
 | [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
 | [venus-wedges-on-the-first-vbif-write](findings/venus-wedges-on-the-first-vbif-write.md) | `device:google-taimen` | msm8998 TZ refuses venus resume with -EINVAL, mainline swallows it, and the whole block stays dark |
@@ -80,6 +86,7 @@ generic notes as well.
 | [a-sideloaded-device-apk-can-eat-the-radio-stack](traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md) | `generic` | A sideloaded device apk can eat the radio stack |
 | [a-stale-inherited-env-outbuilds-the-profile](traps/a-stale-inherited-env-outbuilds-the-profile.md) | `generic` | A stale inherited env outbuilds the profile |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
+| [a-tree-built-module-carries-btf-the-running-kernel-rejects](traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md) | `generic` | A tree-built module carries BTF the running kernel rejects, and modprobe blames a symlink loop |
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
@@ -95,6 +102,7 @@ generic notes as well.
 | [initramfs-is-not-frozen](traps/initramfs-is-not-frozen.md) | `generic` | A device stopped in the initramfs looks exactly like a frozen one, and is nothing like it |
 | [installing-firmware-can-flash-the-boot-partition](traps/installing-firmware-can-flash-the-boot-partition.md) | `generic` | apk add <firmware-pkg> (and apk fix) can FLASH the boot partition |
 | [memory-high-arms-systemd-oomd-against-the-browser](traps/memory-high-arms-systemd-oomd-against-the-browser.md) | `generic` | MemoryHigh= on an app scope arms systemd-oomd against that app |
+| [monitor-mode-alongside-managed-captures-no-rx](traps/monitor-mode-alongside-managed-captures-no-rx.md) | `soc:msm8998` | A monitor vif on ath10k can be added alongside managed but receives nothing |
 | [never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport](traps/never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport.md) | `generic` | Never flash a kernel built from the source tree when the device ships from an aport series |
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
@@ -151,8 +159,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 14
-- `generic` — 85
+- `device:google-taimen` — 17
+- `generic` — 88
 - `soc:gs201` — 1
-- `soc:msm8998` — 13
+- `soc:msm8998` — 15
 - `soc:qcom` — 1
