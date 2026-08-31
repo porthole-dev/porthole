@@ -458,10 +458,38 @@ def probe_series_applies(ctx):
 
 _PROVENANCE_STATES = {"done": done, "todo": todo, "blocked": blocked}
 
+# How old a cached kernel-provenance reading may be and still let the
+# `kernel-provenance` milestone report DONE. Same reasoning and same 24h as
+# MATRIX_MAX_AGE_S: both caches describe device state that a flash
+# invalidates, and `brief` writing the blob once does not mean it is still
+# true after the device was reflashed since. Without this, flashing the
+# phone left `next`/`brief` repeating a provenance verdict from before the
+# flash forever, until someone happened to re-run `brief`. Override with
+# PORTHOLE_PROVENANCE_MAX_AGE_S, same shape as PORTHOLE_MATRIX_MAX_AGE_S.
+PROVENANCE_MAX_AGE_S = 86400.0
 
-def verdict_for_provenance(state: str, evidence: str):
-    """Map porthole_provenance's plain state to a Verdict. Pure."""
-    return _PROVENANCE_STATES.get(state, lambda _e: unknown())(evidence)
+
+def verdict_for_provenance(state: str, evidence: str, age=None,
+                            max_age=PROVENANCE_MAX_AGE_S):
+    """Map porthole_provenance's plain state to a Verdict, dated. Pure.
+
+    Same asymmetry as verdict_from_matrix: only the DONE claim needs a
+    verifiable, fresh age to stand on. An unknown or expired age downgrades a
+    would-be DONE to TODO; it never upgrades a TODO or BLOCKED the cache
+    already reported -- a broken timestamp does not make a bad reading MORE
+    true.
+    """
+    when = " (probed {} ago)".format(_ago(age)) if age is not None else ""
+    if state == "done":
+        if age is None:
+            return todo(evidence + " — no usable timestamp for this "
+                        "reading, re-run `porthole brief`")
+        if age > max_age:
+            return todo("{} (stale: probed {} ago, cap {}) — re-run "
+                        "`porthole brief`".format(evidence, _ago(age),
+                                                  _ago(max_age)))
+        return done(evidence + when)
+    return _PROVENANCE_STATES.get(state, lambda _e: unknown())(evidence + when)
 
 
 def _read_run_json(ctx, name: str) -> dict:
@@ -492,8 +520,15 @@ def probe_kernel_provenance(ctx):
     blob = _read_run_json(ctx, "kernel-provenance.json")
     if not blob:
         return unknown()
+    at = blob.get("at")
+    age = (time.time() - at) if isinstance(at, (int, float)) else None
+    try:
+        max_age = float(_cfg(ctx, "PORTHOLE_PROVENANCE_MAX_AGE_S")
+                        or PROVENANCE_MAX_AGE_S)
+    except (TypeError, ValueError):
+        max_age = PROVENANCE_MAX_AGE_S
     return verdict_for_provenance(blob.get("state", ""),
-                                  blob.get("evidence", ""))
+                                  blob.get("evidence", ""), age, max_age)
 
 
 # How old a cached device state may be and still be reported as a fact. Past
@@ -521,6 +556,20 @@ def verdict_from_matrix(blob, names, age, max_age=MATRIX_MAX_AGE_S):
     module exists because a display that trusts a stale tick is confidently
     wrong in the direction of "you are further along than you are".
 
+    But `?` is also NEVER a manufactured TODO on its own. `suspend` has no
+    `works:` probe and BY DESIGN never can -- the spec forbids a probe that
+    induces a suspend -- so its matrix row is `works: ?` forever, on every
+    device, from the moment `matrix.json` first exists. Reporting that as
+    TODO would report a negative finding nobody made, and would un-tick a box
+    a human earned on every future evaluation: `evaluate()` demotes a ticked
+    milestone to "stale" exactly when the probe says TODO. So when EVERY
+    requested name is untested (`?`, missing `works`, or absent from the
+    matrix entirely) this returns UNKNOWN -- nobody looked, so a tick still
+    counts, same as the no-matrix-at-all case below. TODO is reserved for
+    when the matrix actually SAYS something: a real "no", or a genuine mix of
+    some names passing and others not (that mix is actionable in a way "we
+    haven't tried any of them yet" is not).
+
     A requested capability the matrix does not MENTION is not evidence of
     success either -- it is treated exactly like `?`, by name, the same as a
     cell whose `works` is missing or holds anything other than "yes"/"no".
@@ -546,14 +595,31 @@ def verdict_from_matrix(blob, names, age, max_age=MATRIX_MAX_AGE_S):
         return unknown()
     when = " (probed {} ago)".format(_ago(age)) if age is not None else ""
     failing = [n for n in names if cells.get(n, {}).get("works") == "no"]
-    untested = [n for n in names
-                if n not in failing and cells.get(n, {}).get("works") != "yes"]
+    passing = [n for n in names
+               if n not in failing and cells.get(n, {}).get("works") == "yes"]
+    untested = [n for n in names if n not in failing and n not in passing]
     if failing:
         return todo("not working: " + ", ".join(failing) + when)
     if untested:
-        return todo("not tested: " + ", ".join(untested)
-                    + " — `porthole matrix` says nothing about "
-                      "these" + when)
+        if not passing:
+            # Nobody has a proven answer for ANY of the requested names --
+            # see the docstring. This is what lets `suspend` (no probe, ever)
+            # leave TODO on a tick instead of being stuck there forever.
+            return unknown()
+        # A genuine mix: some names pass, some don't have a proven answer.
+        # That IS actionable, unlike the all-untested case above.
+        no_probe = [n for n in untested if n in cells]
+        unmentioned = [n for n in untested if n not in cells]
+        bits = []
+        if no_probe:
+            # The row exists but nothing measured it -- either there is no
+            # read-only probe for it (suspend, by design) or one hasn't run
+            # yet. Either way the matrix does NOT "say nothing" -- it has an
+            # opinion, just not a yes/no one.
+            bits.append("no read-only probe: " + ", ".join(no_probe))
+        if unmentioned:
+            bits.append("not in the matrix: " + ", ".join(unmentioned))
+        return todo("not tested (" + "; ".join(bits) + ")" + when)
     # age is None means `at` was missing, null, or not a number -- we
     # cannot establish when this was measured. A DONE we cannot date is
     # exactly the confidently-wrong-in-the-optimistic-direction claim this
