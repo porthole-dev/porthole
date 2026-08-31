@@ -277,6 +277,10 @@ def cmd_brief(args, ctx) -> int:
             ctx.out.kv("next", port["next"]["title"], w)
             if port["next"]["command"]:
                 ctx.out.kv("", ctx.out.paint(port["next"]["command"], "cyan"), w)
+            m = port.get("matrix")
+            if m:
+                ctx.out.kv("works", f"{m['works']}/{m['total']} capabilities "
+                                    f"({m['untested']} untested)", w)
             for item in port.get("stale", [])[:3]:
                 ctx.out.warn(f"{item['title']}: {item['detail']}")
             ctx.out.blank()
@@ -373,8 +377,11 @@ def _port_state(ctx, device: str) -> dict:
         return {}
     try:
         import porthole_cmd_next as nxt
+        import porthole_milestones as ms
         _, summary, has_markers = nxt.collect(ctx)
-        return {**summary, "checklist_has_markers": has_markers}
+        matrix = ms._read_run_json(ctx, "matrix.json").get("summary") or {}
+        return {**summary, "checklist_has_markers": has_markers,
+                "matrix": matrix}
     except Exception:  # noqa: BLE001
         return {}
 

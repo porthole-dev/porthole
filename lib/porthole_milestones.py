@@ -27,6 +27,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import time
 
 # Verdict states, in the order `next` cares about them.
 DONE, TODO, BLOCKED, UNKNOWN = "done", "todo", "blocked", "unknown"
@@ -495,6 +496,48 @@ def probe_kernel_provenance(ctx):
                                   blob.get("evidence", ""))
 
 
+def verdict_from_matrix(blob, names, age):
+    """A milestone verdict from cached matrix cells. Pure.
+
+    `?` is NEVER done. It means no probe is defined or the probe did not run,
+    and reading it as a pass would make the matrix worse than no matrix: this
+    module exists because a display that trusts a stale tick is confidently
+    wrong in the direction of "you are further along than you are".
+
+    No matrix at all returns UNKNOWN, which preserves the pre-matrix
+    behaviour exactly -- a tick still counts. Landing this must not un-tick a
+    box somebody earned.
+    """
+    cells = {c.get("name"): c for c in (blob or {}).get("capabilities", [])}
+    have = [cells[n] for n in names if n in cells]
+    if not have:
+        return unknown()
+    when = " (probed {} ago)".format(_ago(age)) if age is not None else ""
+    failing = [c["name"] for c in have if c.get("works") == "no"]
+    untested = [c["name"] for c in have if c.get("works") == "?"]
+    if failing:
+        return todo("not working: " + ", ".join(failing) + when)
+    if untested:
+        return todo("not tested: " + ", ".join(untested)
+                    + " — `porthole matrix` says nothing about "
+                      "these" + when)
+    return done("working: " + ", ".join(c["name"] for c in have) + when)
+
+
+def probe_from_matrix(*names):
+    """A milestone probe over one or more matrix capabilities.
+
+    Reads the CACHE, never the device: `brief --no-device` must work offline,
+    and `porthole matrix` is what refreshes it.
+    """
+    def probe(ctx):
+        blob = _read_run_json(ctx, "matrix.json")
+        at = (blob or {}).get("at")
+        age = (time.time() - at) if isinstance(at, (int, float)) else None
+        return verdict_from_matrix(blob, list(names), age)
+    return probe
+
+
 def probe_kernel_pkg(ctx):
     name = _cfg(ctx, "PORTHOLE_KERNEL_PKG")
     if not name:
@@ -812,17 +855,20 @@ MILESTONES = [
         why="Until it does, every boot verdict comes from a log rather than a "
             "screen — and a screen can lie either way.",
         how="porthole brain search display",
-        playbook="brain/playbooks/30-display.md", safe=True),
+        playbook="brain/playbooks/30-display.md",
+        probe=probe_from_matrix("display"), safe=True),
     Milestone(
         "suspend", "subsystems", "Suspend and resume survive a cycle",
         why="This dominates whether the port is a daily driver.",
         how="porthole run --lock tk-suspend-cycle.sh",
-        playbook="brain/playbooks/40-suspend.md", safe=False),
+        playbook="brain/playbooks/40-suspend.md",
+        probe=probe_from_matrix("suspend"), safe=False),
     Milestone(
         "radios", "subsystems", "Wifi, bluetooth, modem",
         why="The last things that make a phone a phone.",
         how="porthole brain search wifi",
-        playbook="brain/playbooks/50-wifi-bt-modem.md", safe=True),
+        playbook="brain/playbooks/50-wifi-bt-modem.md",
+        probe=probe_from_matrix("wifi", "bluetooth", "modem"), safe=True),
 
     # -- 5. give it back -----------------------------------------------------
     Milestone(

@@ -465,6 +465,56 @@ def test_brief_probes_the_device_before_it_evaluates_milestones():
         "the probe warms the cache the milestone probes read")
 
 
+def test_a_matrix_question_mark_never_advances_a_milestone():
+    """The rule the whole matrix rests on.
+
+    `?` means nobody looked. Reading it as done is confidently wrong in the
+    direction of "you are further along than you are", which is what
+    `porthole next` exists to stop.
+    """
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "?"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert verdict.state != ms.DONE, verdict
+
+
+def test_a_matrix_cell_that_works_makes_the_milestone_done():
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "yes"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert verdict.state == ms.DONE, verdict
+    assert "30s ago" in verdict.evidence, verdict.evidence
+
+
+def test_a_milestone_over_several_capabilities_needs_all_of_them():
+    # `radios` is wifi AND bluetooth AND modem. Two out of three is not done.
+    blob = {"at": 0, "capabilities": [
+        {"name": "wifi", "present": "yes", "works": "yes"},
+        {"name": "bluetooth", "present": "yes", "works": "yes"},
+        {"name": "modem", "present": "yes", "works": "no"}]}
+    verdict = ms.verdict_from_matrix(
+        blob, ["wifi", "bluetooth", "modem"], age=30.0)
+    assert verdict.state != ms.DONE, verdict
+    assert "modem" in verdict.evidence, verdict.evidence
+
+
+def test_no_matrix_at_all_is_unknown_so_a_tick_still_counts():
+    """Before anyone runs `porthole matrix` the tick is the only signal.
+
+    UNKNOWN keeps the previous behaviour exactly, so landing the matrix does
+    not un-tick a box somebody earned.
+    """
+    verdict = ms.verdict_from_matrix({}, ["wifi"], age=None)
+    assert verdict.state == ms.UNKNOWN, verdict
+
+
+def test_a_stale_matrix_says_so_rather_than_being_believed():
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "yes"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=99999.0)
+    assert "ago" in verdict.evidence, verdict.evidence
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
