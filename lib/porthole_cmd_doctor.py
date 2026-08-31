@@ -9,6 +9,7 @@ nothing and something red happened".
 """
 from __future__ import annotations
 
+import errno
 import os
 import pathlib
 import platform
@@ -178,9 +179,83 @@ class Checks:
         return out
 
 
+def _first_line(text: str) -> str:
+    lines = (text or "").strip().splitlines()
+    return lines[0][:120] if lines else ""
+
+
 def _resolve(cfg, key, default):
+    """Where a host tool is, or None.
+
+    The isfile fallback used to accept any file that EXISTS. shutil.which
+    enforces X_OK; this branch did not -- so a config naming a non-executable
+    file rendered `ok` on FASTBOOT, a REQUIRED row whose entire purpose is to
+    fail when the bootloader is unreachable.
+    """
     value = cfg.get(key) or default
-    return shutil.which(value) or (value if os.path.isfile(value) else None)
+    if not value:
+        return None
+    found = shutil.which(value)
+    if found:
+        return found
+    return value if (os.path.isfile(value)
+                     and os.access(value, os.X_OK)) else None
+
+
+def _runs(path: str) -> str:
+    """"" if the tool actually executes, else a one-line reason it did not.
+
+    Presence is not the question doctor is asked. A +x script whose shebang
+    interpreter no longer exists passes shutil.which and dies at exec with 126
+    -- the ordinary pipx failure, a venv whose base python was removed or
+    version-bumped, and routine on an rpm-ostree host like the reference one.
+    Doctor printed `ok` for such a pmbootstrap for as long as the check
+    existed, and the first symptom was a build failing much later for reasons
+    that named neither doctor nor the interpreter.
+
+    Deliberately NOT porthole_cmd_version's cached tool_version(): doctor must
+    work when the build path is broken -- see _envkernel_candidates, which
+    duplicates ph-build.sh's search for the same reason -- and a cache is one
+    more thing that can be stale exactly when doctor is asked. The cost is
+    ~223ms, dominated by pmbootstrap starting a second interpreter (the repo's
+    own measurement, in porthole_cmd_version), against device rows that
+    already spend 8s apiece.
+    """
+    try:
+        proc = subprocess.run([path, "--version"], capture_output=True,
+                              text=True, timeout=10)
+    except OSError as exc:
+        # A broken shebang reaches us as ENOENT, because the kernel resolves
+        # the INTERPRETER and cannot find it. Reported raw, that is "no such
+        # file" about a file the user can plainly see -- the same misleading
+        # shape this check exists to remove. A shell prints 126 here and says
+        # `bad interpreter`; say the same thing, and name the interpreter.
+        if exc.errno == errno.ENOENT and os.path.exists(path):
+            return "{} has a bad interpreter{}".format(
+                path, _shebang(path)) + " -- it cannot start"
+        return "{} does not run: {}".format(path, exc.strerror or exc)
+    except subprocess.TimeoutExpired:
+        return "{} did not answer --version within 10s".format(path)
+    if proc.returncode == 0:
+        return ""
+    tail = _first_line(proc.stderr) or _first_line(proc.stdout)
+    return "{} exited {}".format(path, proc.returncode) + (
+        ": " + tail if tail else "")
+
+
+def _shebang(path: str) -> str:
+    """ " (#!/usr/bin/python3.11)" if the file names an interpreter, else "".
+
+    Named because it is the actionable half: "pmbootstrap has a bad
+    interpreter" sends you looking at pmbootstrap, and the fix is to the venv
+    whose python was removed.
+    """
+    try:
+        with open(path, "rb") as fh:
+            first = fh.readline(256).decode("utf-8", "replace").strip()
+    except OSError:
+        return ""
+    return " ({})".format(first) if first.startswith("#!") else ""
 
 
 def check_host(ch: Checks, cfg, family: str) -> None:
@@ -198,7 +273,17 @@ def check_host(ch: Checks, cfg, family: str) -> None:
     ):
         found = _resolve(cfg, key, tool) if key else shutil.which(tool)
         if found:
-            ch.add(f"host: {tool}", "ok", found)
+            # Found is not the same as usable, and every row here reports on
+            # something a later command will actually invoke. See _runs.
+            broken = _runs(found)
+            if not broken:
+                ch.add(f"host: {tool}", "ok", found)
+            elif required:
+                ch.add(f"host: {tool}", "fail", broken,
+                       install_hint(tool, family))
+            else:
+                ch.add(f"host: {tool}", "warn", broken,
+                       doc=install_hint(tool, family))
         elif required:
             ch.add(f"host: {tool}", "fail", f"not found -- {why}",
                    install_hint(tool, family))

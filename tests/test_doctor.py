@@ -9,7 +9,9 @@ against four real distros; these are the fast checks that do not need podman.
 """
 import os
 import pathlib
+import shutil
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
@@ -181,6 +183,75 @@ def test_a_soc_number_is_not_read_as_a_kernel_version():
         "PORTHOLE_KERNEL_BRANCH": "",
     })
     assert ch.rows == [], ch.rows
+
+
+def test_a_non_executable_fastboot_is_not_reported_ok():
+    """_resolve's isfile fallback accepted any file that EXISTS. FASTBOOT is a
+    required row, so a config naming a non-executable file rendered green on
+    the one check whose whole purpose is to hard-fail."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "fastboot"
+        fake.write_text("not executable\n")
+        os.chmod(fake, 0o644)
+        assert doctor._resolve({"FASTBOOT": str(fake)}, "FASTBOOT",
+                               "fastboot") is None
+
+
+def test_an_executable_fastboot_still_resolves():
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "fastboot"
+        fake.write_text("#!/bin/sh\nexit 0\n")
+        os.chmod(fake, 0o755)
+        assert doctor._resolve({"FASTBOOT": str(fake)}, "FASTBOOT",
+                               "fastboot") == str(fake)
+
+
+def test_a_broken_shebang_does_not_pass_as_ok():
+    """A +x script whose interpreter is gone passes shutil.which and dies at
+    exec with 126. That is the ordinary pipx failure -- a venv whose base
+    python was removed -- and doctor called it ok for as long as it existed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "pmbootstrap"
+        fake.write_text("#!/nonexistent/python\nprint(1)\n")
+        os.chmod(fake, 0o755)
+        why = doctor._runs(str(fake))
+        assert why, "a broken shebang must not read as ok"
+        assert "bad interpreter" in why and "nonexistent" in why, why
+
+
+def test_a_working_tool_reports_no_reason():
+    assert doctor._runs(shutil.which("sh")) == ""
+
+
+def test_a_tool_that_is_absent_is_a_reason_not_a_crash():
+    """_runs is handed a resolved path, but a tool can vanish between the
+    resolve and the exec. That must be a row, not a traceback."""
+    assert doctor._runs("/nonexistent/tool")
+
+
+def test_check_host_fails_a_required_row_whose_tool_cannot_run():
+    """The whole point: `ok host: fastboot /usr/bin/fastboot` for something
+    that cannot start is worse than no check, because it converts "the tools
+    do nothing" into "the tools do nothing and doctor says they are fine"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in ("ssh", "fastboot", "adb", "pmbootstrap", "shellcheck"):
+            fake = pathlib.Path(tmp) / name
+            fake.write_text("#!/nonexistent/python\n")
+            os.chmod(fake, 0o755)
+        old = os.environ["PATH"]
+        os.environ["PATH"] = tmp
+        try:
+            ch = doctor.Checks()
+            doctor.check_host(ch, {}, "fedora")
+        finally:
+            os.environ["PATH"] = old
+        rows = {r["name"]: r for r in ch.rows}
+        assert rows["host: fastboot"]["status"] == "fail", rows["host: fastboot"]
+        assert rows["host: ssh"]["status"] == "fail", rows["host: ssh"]
+        # Optional tools warn rather than fail: pmbootstrap is not needed to
+        # probe a device, and a broken one must not stop doctor reporting.
+        assert rows["host: pmbootstrap"]["status"] == "warn", rows["host: pmbootstrap"]
+        assert rows["host: fastboot"]["fix"], "a failing row must name a fix"
 
 
 if __name__ == "__main__":
