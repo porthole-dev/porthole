@@ -515,24 +515,68 @@ def probe_identity(ctx):
     return todo("porthole init has not been run")
 
 
-def probe_reachable(ctx):
-    """Is the device answering? Never probed here -- see the note above.
+# How old a cached device state may be and still be reported as a fact. Past
+# this the honest answer is that nobody has looked recently.
+STATE_MAX_AGE_S = 300.0
 
-    State comes from TK_DEVICE_STATE / PORTHOLE_DEVICE_STATE, which a human or
-    a tool SETS to skip the real probe. So a positive reading is an assertion,
-    not a measurement, and the evidence string says so: this milestone is at
-    most as trustworthy as whoever exported that variable.
 
-    If nothing knows, BLOCKED rather than todo -- an unreachable device is not
-    a task you can pick up, it is a precondition.
+def reachable_verdict(forced: str, cached):
+    """Is the device answering, from evidence that already exists? Pure.
+
+    `forced` is TK_DEVICE_STATE / PORTHOLE_DEVICE_STATE -- a value a human or
+    a tool SET, so a positive reading is an assertion and the evidence says
+    so. `cached` is `(state, age)` from Device.cached_state, or None.
+
+    Never probes. `brief --no-device` has to work offline and a probe that
+    hangs on a dead phone would make the one command every agent runs first
+    the one that hangs. A cache read is not a probe.
     """
-    state = (_cfg(ctx, "TK_DEVICE_STATE") or _cfg(ctx, "PORTHOLE_DEVICE_STATE"))
+    if forced:
+        if forced.upper() in ("BOOTED", "SSH"):
+            return done("declared {} (asserted, not probed — "
+                        "`porthole doctor` measures it)".format(forced))
+        return blocked("device state is {}, not BOOTED".format(forced))
+    if cached is None:
+        return blocked("device state not probed in the last "
+                       "{:.0f}m — run `porthole doctor`".format(
+                           STATE_MAX_AGE_S / 60))
+    state, age = cached
     if state.upper() in ("BOOTED", "SSH"):
-        return done(f"declared {state} (asserted, not probed — "
-                    f"`porthole doctor` measures it)")
-    if state:
-        return blocked(f"device state is {state}, not BOOTED")
-    return blocked("device state not probed (run `porthole doctor`)")
+        return done("{} (probed {} ago)".format(state, _ago(age)))
+    return blocked("device was {} when last probed, {} ago".format(
+        state, _ago(age)))
+
+
+def _ago(seconds: float) -> str:
+    """`62s`, `14m`, `3h` -- short enough to sit inside an evidence string."""
+    seconds = int(max(0, seconds))
+    if seconds < 90:
+        return "{}s".format(seconds)
+    if seconds < 5400:
+        return "{}m".format(seconds // 60)
+    return "{}h".format(seconds // 3600)
+
+
+def probe_reachable(ctx):
+    """Is the device answering? Read from the cache doctor and brief write.
+
+    Never probes -- see the note above. `forced` is a human's or a tool's
+    assertion; absent that, the last measured state comes from the cache
+    `Device.state()` writes on every real probe. A cache read is a file
+    read, not a probe: it never touches the device.
+    """
+    forced = _cfg(ctx, "TK_DEVICE_STATE") or _cfg(ctx, "PORTHOLE_DEVICE_STATE")
+    cached = None
+    if not forced:
+        try:
+            max_age = float(_cfg(ctx, "PORTHOLE_STATE_MAX_AGE_S")
+                            or STATE_MAX_AGE_S)
+            import porthole
+
+            cached = porthole.Device(ctx.cfg).cached_state(max_age)
+        except Exception:  # noqa: BLE001 -- a bad cache must not break `next`
+            cached = None
+    return reachable_verdict(forced, cached)
 
 
 def probe_measured_budget(ctx):
