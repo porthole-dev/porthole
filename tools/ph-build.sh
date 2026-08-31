@@ -677,7 +677,7 @@ _ph_assert_no_devpkgs() {
 	if [ "$stale" -ne 0 ]; then
 		echo "REFUSING: $stale envkernel (_p) kernel apks are in the local repo." >&2
 		echo "apk sorts _p<timestamp> ABOVE -rNN, so one of those would be installed" >&2
-		echo "instead of what you just built. Run tkpurge-devpkgs first." >&2
+		echo "instead of what you just built. Run 'porthole build purge' first." >&2
 		return 1
 	fi
 
