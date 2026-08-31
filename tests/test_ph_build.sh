@@ -379,5 +379,30 @@ is "the module name reached the payload" \
    "$(grep -c 'ms_stack ath10k_core' "$TMP/payload.sh")" "1"
 
 
+# --- tkbuild purges the envkernel _p apk before install --------------------
+#
+# _ph_make ends with `pmbootstrap build --envkernel`, which packages the tree
+# under a dev version (<ver>_p<timestamp>-r0) and apk sorts _p<timestamp>
+# ABOVE -rNN. _ph_assert_no_devpkgs at the top of tkbuild only proves the repo
+# was clean BEFORE _ph_make ran; it says nothing about after. Reproduced on a
+# real build 2026-08-31: `pmbootstrap install` refused with "unable to select
+# packages" against a _p apk the same build had produced three minutes
+# earlier. tkbuild must call tkpurge-devpkgs (which re-indexes) strictly
+# between _ph_make and `pmbootstrap install`, or the rung poisons its own repo
+# on every run. Source-order check, same technique as `before()` above.
+tkbuild_body=$(sed -n "$(grep -n '^tkbuild() {' tools/ph-build.sh | cut -d: -f1),\
+$(awk '/^tkbuild\(\) \{/{f=1;next} f&&/^}/{print NR;exit}' tools/ph-build.sh)p" \
+    tools/ph-build.sh)
+tb_before() { # tb_before A B -> "ok" when A appears before B in tkbuild()
+    local a b
+    a=$(printf '%s\n' "$tkbuild_body" | grep -n -- "$1" | head -1 | cut -d: -f1)
+    b=$(printf '%s\n' "$tkbuild_body" | grep -n -- "$2" | head -1 | cut -d: -f1)
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && echo ok
+}
+is "tkbuild purges after _ph_make" \
+   "$(tb_before '_ph_make || return 1' 'tkpurge-devpkgs || return 1')" "ok"
+is "tkbuild purges before pmbootstrap install" \
+   "$(tb_before 'tkpurge-devpkgs || return 1' 'pmbootstrap install --password')" "ok"
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
