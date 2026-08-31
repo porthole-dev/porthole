@@ -16,6 +16,23 @@ UniFi network, while every other AP works. The AP answers
 my BSSBasicRateSet"). Two sessions in a row read that literally and went
 looking for a rate, regulatory or 802.11h defect on our side.
 
+> **SUPERSEDED IN PART (2026-08-31, same day).** Two claims below are now
+> refuted by [[ap-accepts-us-intermittently]]: that it "has never once
+> associated", and the framing that the AP simply refuses us. The kernel has
+> since logged `RX AssocResp ... status=0 aid=2` from `<ap-ch36>` with the
+> **stock, unmodified** frame. Everything else here stands, and the central
+> conclusion stands harder than before: the refusal does not track the frame.
+
+> **SUPERSEDED 2026-08-31 by [[the-reserved-vht-width-pair-is-why-the-ap-refused]].**
+> The central conclusion here -- that our association request is clean and the
+> refusal is the AP's -- is **wrong**. ath10k was advertising a VHT Supported
+> Channel Width Set / Extended NSS BW pair that 802.11 marks reserved; clamping
+> it in the driver gives 8/8 cold associations and a real DHCP lease. VHT looked
+> exonerated only because the wpa_supplicant knob used to test it does nothing
+> ([[vht-capa-overrides-cannot-touch-channel-width]]). Keep this note for its
+> method -- the BSSID pin, the beacon decode, the counterbalancing -- not for
+> its verdict.
+
 **The answer** — **our association request is clean, and status 18 is a lie.**
 Everything the AssocReq contains has been varied and none of it changes the
 outcome. The refusal tracks the AP, not the frame.
