@@ -1112,7 +1112,13 @@ def test_run_follows_pmbootstraps_own_log():
     always followed it; `porthole build` never did, so build-history.json
     recorded compile_lines 0 for every kernel rung ever run and the bar had
     nothing to move on.
+
+    `_run` bails out before ever reaching `_stream` if `pmbootstrap` is not
+    on PATH (see `test_the_host_branch_names_both_cause_and_fix_with_no_pmbootstrap`
+    above), and CI has no pmbootstrap installed -- so `shutil.which` is
+    stubbed here too, to report it present regardless of the real machine.
     """
+    import shutil
     import porthole_cmd_build as build
 
     seen = {}
@@ -1122,14 +1128,18 @@ def test_run_follows_pmbootstraps_own_log():
         seen["rung"] = rung
         return 0
 
-    real = build._stream
+    real_stream = build._stream
+    real_which = shutil.which
     build._stream = fake_stream
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
     try:
         ctx = _FakeCtx({"PORTHOLE_DEVICE": "google-taimen",
                         "PORTHOLE_WORKDIR": "/nonexistent"})
         build._run(ctx, "tkbuild-kernel", 60, host=True, rung="fast")
     finally:
-        build._stream = real
+        build._stream = real_stream
+        shutil.which = real_which
 
     assert seen.get("follow"), "no follow= was passed"
     assert str(seen["follow"]).endswith("log.txt"), seen["follow"]
