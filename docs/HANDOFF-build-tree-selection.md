@@ -151,3 +151,104 @@ module is *refused* by the loader, loudly, not silently accepted". That is true
 and it is not the whole story: BTF is a second gate, it is not mentioned
 anywhere, and its refusal is loud but names the wrong thing entirely. Worth a
 line in the ladder docs alongside the fix.
+
+---
+
+## 4. `build auto` cannot actually run the rung it recommends (2026-08-31, second session)
+
+The owner's question was "why do you keep avoiding `porthole build auto`". The
+honest answer is that it was tried, repeatedly, and each attempt hit a
+different wall. All four are reproducible on the taimen repo with a DTS-only
+change in `linux-ws`.
+
+### 4a. A preview run consumes the evidence `auto` routes on
+
+This is the important one, because it makes the documented workflow
+self-defeating.
+
+`porthole build` (no `--yes`) does not just plan -- it runs an incremental
+`make` and routes on what got rebuilt. So the preview *builds the artefact*.
+The next invocation measures again, finds everything up to date, and concludes
+there is nothing to do:
+
+```
+$ porthole build                      # preview
+  what make rebuilt
+    arch/arm64/boot/dts/qcom/msm8998-google-taimen.dtb
+  cheapest rung that covers it: boot
+
+$ porthole build auto --yes           # now actually do it
+  what make rebuilt
+    nothing
+  make rebuilt nothing -- there is nothing to push
+```
+
+Nothing was wrong with the tree; the dtb had simply already been built by the
+preview. An agent that follows the documented "preview, then run" flow ends up
+with a build that refuses to do anything, and the natural next move is to type
+the rung by hand -- which the skill explicitly warns against. The routing needs
+to be based on something durable (artefact mtime against what is on the device,
+or a recorded stamp) rather than on what one `make` invocation happened to
+touch.
+
+### 4b. The `boot` rung needs a base image that nothing seeds
+
+```
+>> no base image at /tmp/tk-base-boot.img
+   seed it once from a known-good UUID-patched boot.img:
+     cp <good>.img /tmp/tk-base-boot.img
+```
+
+`auto` routes to `boot` without checking that it can run, so the failure lands
+after the compile rather than before it. Worse, the instruction is not
+followable as written from an agent's position: the build runs **in the
+workspace container**, which does not mount the host's `/tmp`, so seeding the
+named path on the host changes nothing. Pointing `TK_BASEIMG` at a scratchpad
+path fails the same way, for the same reason.
+
+The obvious source is the device itself -- the active slot's boot partition is
+by definition a known-good, UUID-patched image:
+
+```sh
+dd if=/dev/disk/by-partlabel/boot_$(slot) of=/tmp/boot.img
+```
+
+That is four lines and removes the manual step entirely. Doing it by hand plus
+`tools/bootimg-repack-dtb.py` and `fastboot boot` worked first try, which is
+what this session ended up doing.
+
+### 4c. `--host` is offered as the escape hatch and is not viable
+
+```
+$ porthole build boot --yes --host
+  building ON THE HOST (--host)
+  Failed to install all dependencies, see the error above for details.
+```
+
+The host pmbootstrap has no dependencies installed -- which is the entire
+reason the workspace exists. Notably the `boot` rung's own description says it
+needs "no pmbootstrap", so it is being dragged through an environment check it
+does not require.
+
+### 4d. `PORTHOLE_KERNEL_TREE` resolves differently for host and workspace
+
+A relative value works for the workspace build and breaks `--host`:
+
+```
+ph-build.sh: line 414: pushd: linux-ws: No such file or directory
+```
+
+It should be resolved to an absolute path once, early, against the device
+working repo, rather than being interpreted by whatever `pwd` each path
+happens to have.
+
+### 4e. Minor: `tk_expired` called with no argument
+
+`tools/tk-to-fastboot.sh` into `tk_wait_fastboot` prints this five times:
+
+```
+tools/tk-lib.sh: line 230: [: : integer expected
+```
+
+Harmless, but it is noise in exactly the window where a human is watching for
+whether the device moved.
