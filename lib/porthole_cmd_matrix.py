@@ -15,6 +15,7 @@ phone somewhere you did not find it is not one you can run whenever, and
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import time
 
@@ -55,7 +56,14 @@ def cmd_matrix(args, ctx) -> int:
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
     try:
         rundir.mkdir(parents=True, exist_ok=True)
-        (rundir / "matrix.json").write_text(json.dumps(blob, indent=2))
+        # tmp + os.replace, matching brief's _write_run_json: Task 26's
+        # milestone probes read this file, and a kill or a full disk
+        # mid-write must never leave them a truncated matrix.json -- a half
+        # a file is worse than no file, which correctly reads as "nobody
+        # has looked yet".
+        tmp = rundir / "matrix.json.tmp"
+        tmp.write_text(json.dumps(blob, indent=2))
+        os.replace(tmp, rundir / "matrix.json")
     except OSError:
         pass          # a matrix that could not be cached is still a matrix
 

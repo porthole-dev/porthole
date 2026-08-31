@@ -195,6 +195,9 @@ def test_rows_pair_the_two_questions_and_carry_their_commands():
     assert row["present"] == "yes" and row["works"] == "yes"
     assert row["present_cmd"] == "iw dev", row
     assert "172.16.42.1" in row["evidence"], row
+    # rc IS rule 2's evidence -- "cites its probe" means the command AND
+    # what it returned, not just the command.
+    assert row["present_rc"] == 0 and row["works_rc"] == 0, row
 
 
 def test_a_capability_present_but_not_working_reports_both_honestly():
@@ -232,6 +235,54 @@ def test_the_summary_never_counts_a_question_mark_as_working():
     assert summary["works"] == 1, summary
     assert summary["untested"] == 1, summary
     assert summary["total"] == 3, summary
+
+
+def test_the_boot_refusal_comes_before_any_cache_write():
+    """No stale cache from a refusal.
+
+    A `?`-everywhere matrix cached from a not-BOOTED refusal would later read
+    as "we looked and found nothing" -- exactly the lie this branch exists to
+    prevent. Pinned via AST on the actual nodes, not by driving the verb
+    (which would need a real or faked device): find the earliest `Bail(...)`
+    call and the earliest `matrix.json` write, and assert the Bail comes
+    first in the source.
+    """
+    import ast
+    import inspect
+    import textwrap
+    import porthole_cmd_matrix as matrix
+
+    source = inspect.getsource(matrix.cmd_matrix)
+    tree = ast.parse(textwrap.dedent(source))
+
+    bail_lines = []
+    write_lines = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == "Bail":
+            bail_lines.append(node.lineno)
+        elif (isinstance(node.func, ast.Attribute)
+              and node.func.attr == "replace"):
+            # os.replace(tmp, rundir / "matrix.json") -- the atomic
+            # publish of the cache, not the tmp-file write itself.
+            write_lines.append(node.lineno)
+
+    # ast.walk is breadth-first, not source order, so the last node visited
+    # is not the last in the file -- min() finds the EARLIEST occurrence of
+    # each, which is the right question: does the first refusal happen
+    # before the first cache write?
+    bail_lineno = min(bail_lines) if bail_lines else None
+    write_lineno = min(write_lines) if write_lines else None
+
+    assert bail_lineno is not None, (
+        "cmd_matrix must Bail() on a device that is not BOOTED")
+    assert write_lineno is not None, (
+        "cmd_matrix must publish matrix.json via os.replace()")
+    assert bail_lineno < write_lineno, (
+        "cmd_matrix must refuse a not-BOOTED device before writing "
+        "matrix.json; a cache from a refusal reads as a look that found "
+        "nothing")
 
 
 if __name__ == "__main__":
