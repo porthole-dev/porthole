@@ -697,6 +697,15 @@ def waiting_line(snap, now=None) -> str:
             f"waiting for a new build to start")
 
 
+# The key set every `snapshot()` (Tracker's and PkgTracker's on-disk shape,
+# and `publish_pending`'s) always includes. Used as the ndjson "waiting"
+# object's baseline: copy a previous snapshot's own keys when there is one,
+# fall back to this -- all `None` -- when nothing has EVER published here, so
+# the emitted object's key set never depends on which branch produced it.
+NDJSON_KEYS = ("rung", "phase", "state", "pid", "elapsed", "progress", "eta",
+              "compile_lines", "last", "started")
+
+
 def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
           tty=None, start_hint: str = "") -> int:
     """Follow a status file until the run stops. Returns EX_OK when the run
@@ -719,6 +728,21 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     `ndjson=True` emits one JSON object per update instead of a bar, and
     skips the final `status_report` block: an agent can consume a stream: it
     cannot consume a redrawn terminal.
+
+    ONE SHAPE, always -- this was a discriminated union (a waiting object with
+    only `state`/`note`/`previous`, a live object with the full snapshot) and
+    an agent doing `json.loads(line)["rung"]` KeyErrored on line one, in
+    exactly the "somebody else's run just finished" case this feature exists
+    to handle. Every emitted object now carries the same key set --
+    `rung`, `phase`, `state`, `pid`, `elapsed`, `progress`, `eta`,
+    `compile_lines`, `last`, `started` (plus `rate` when the tracker reports
+    one) -- so `obj["rung"]`, `obj["progress"]`, `obj["state"]` are always
+    safe to read. `state` is still the discriminator: `"waiting"` means no
+    run is live right now (a `note` key carries the human sentence, and the
+    rest of the fields are the PREVIOUS run's, or all `None` if nothing has
+    ever published here); anything else is a real snapshot's own `state`
+    (`"running"`, `"done"`, `"failed"`, ...). A `None` value means genuinely
+    not known yet, never a missing key.
 
     `start_hint`, if given, is the exact command that starts a run of this
     kind (e.g. "porthole pkg build <aport>") -- only the CALLER knows that,
@@ -778,8 +802,13 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
         if ndjson:
             if last_note == 0.0 or time.time() - last_note > max(interval, 15):
                 last_note = time.time()
-                out(json.dumps({"state": "waiting", "note": line,
-                                "previous": snap}) + "\n")
+                # Same key set a live object has (copied from the previous
+                # run's own snapshot when there is one), not a bare
+                # {state, note} pair -- see the ONE SHAPE note above.
+                obj = dict(snap) if snap else dict.fromkeys(NDJSON_KEYS)
+                obj["state"] = "waiting"
+                obj["note"] = line
+                out(json.dumps(obj) + "\n")
         elif tty:
             out("\r\033[2K" + line)
         elif last_note == 0.0 or time.time() - last_note > max(interval, 15):

@@ -1254,15 +1254,22 @@ def test_detach_argv_forwards_every_flag_that_changes_the_build():
     import argparse
     import porthole_cmd_build as build
 
+    # verbose and allow_env_override are True too -- both flags previously
+    # went untested (the brief's own fixture set them False), which is
+    # exactly the shape of gap that let `pkg` lose --force and --wait
+    # unnoticed: a flag can be dropped from detach_argv and a test asserting
+    # only the False default would never see it missing.
     args = argparse.Namespace(timeout=5400, kernel=True, host=True,
-                              verbose=False, yes=True, rest=[], detach=True,
-                              allow_env_override=False)
+                              verbose=True, yes=True, rest=[], detach=True,
+                              allow_env_override=True)
     argv = build.detach_argv("/x/bin/porthole", "boot", args)
 
     assert argv[:3] == ["/x/bin/porthole", "build", "boot"], argv
     assert "--yes" in argv, "a detached build that does not build is useless"
     assert "--kernel" in argv, argv
     assert "--host" in argv, argv
+    assert "--verbose" in argv, argv
+    assert "--allow-env-override" in argv, argv
     assert "--timeout" in argv and "5400" in argv, argv
     # The one flag that must NOT be forwarded, or the child detaches again.
     assert "--detach" not in argv, argv

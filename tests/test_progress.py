@@ -498,6 +498,18 @@ def test_watch_detects_a_dead_pid_as_stale_instead_of_polling_forever():
         assert rc == progress.EX_FAIL
 
 
+# Keys an agent actually consumes from an ndjson line, regardless of which
+# branch of `watch` produced it. Shared between the live-path and the
+# waiting-path test below ON PURPOSE: Task 14's review found the two
+# branches emitting two different shapes ({rung, phase, ...} live vs.
+# {state, note, previous} waiting), so `obj["rung"]` KeyErrored on line one
+# in exactly the "somebody else's run just finished" case this feature
+# exists to handle. If these two tests ever assert different key tuples, the
+# union is back and neither test would catch it.
+NDJSON_KEYS_AN_AGENT_READS = ("rung", "phase", "state", "elapsed", "progress",
+                              "eta")
+
+
 def test_watch_ndjson_streams_json_and_skips_the_summary_block():
     """An agent can consume a stream; it cannot consume a redrawn terminal
     (this is what `ndjson=True` is for). One JSON object per update, and none
@@ -508,7 +520,12 @@ def test_watch_ndjson_streams_json_and_skips_the_summary_block():
     The fixture is shaped like `Tracker.snapshot()` actually writes it
     (porthole_progress.py Tracker.snapshot), not a hand-picked subset of
     keys -- the ndjson object is the agent-facing contract Task 14 depends
-    on, so the schema has to come from production, not from the test."""
+    on, so the schema has to come from production, not from the test.
+
+    This is the LIVE branch: `started + elapsed` lands AFTER this watch
+    began, so the run is not stale and `watch` reports it directly rather
+    than waiting. See `test_watch_ndjson_waiting_path_carries_the_same_keys`
+    for the other branch."""
     with tempfile.TemporaryDirectory() as rundir:
         now = time.time()
         snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
@@ -522,12 +539,74 @@ def test_watch_ndjson_streams_json_and_skips_the_summary_block():
         assert lines, "ndjson mode must not be silent"
         for line in lines:
             obj = json.loads(line)
-        # Keys an agent actually consumes. Every one of these is set
-        # unconditionally in Tracker.snapshot() -- "progress"/"eta" can be
-        # None there (an honest "unknown", not a missing key), so only their
-        # PRESENCE is asserted, not their type.
-        for key in ("rung", "phase", "state", "elapsed", "progress", "eta"):
+        # "progress"/"eta" can be None there (an honest "unknown", not a
+        # missing key), so only PRESENCE is asserted, not type.
+        for key in NDJSON_KEYS_AN_AGENT_READS:
             assert key in obj, f"{key!r} missing from the ndjson object"
+
+
+def test_watch_ndjson_waiting_path_carries_the_same_keys():
+    """The branch that used to be the discriminated union's other shape.
+
+    A snapshot that finished well BEFORE this watch began is stale --
+    `is_stale` -- so `watch` never reports it as live; it emits "waiting"
+    objects instead and (off a tty, ceiling patched down like the ceiling
+    test below) gives up once the ceiling passes, still reporting the stale
+    run's own exit code. Before this fix those waiting objects were
+    `{"state": ..., "note": ..., "previous": {...}}` -- a consumer doing
+    `json.loads(line)["rung"]` KeyErrored on line one, in precisely this
+    "somebody else's run just finished" scenario. Now every field a
+    snapshot carries is copied up to the top level, so the same key check as
+    the live-path test above passes here too.
+    """
+    real_ceiling = progress.wait_ceiling
+    progress.wait_ceiling = lambda tty, now, seconds=30.0: now + 0.05
+    try:
+        with tempfile.TemporaryDirectory() as rundir:
+            finished = time.time() - 120  # long before this watch begins
+            snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
+                    "pid": 1, "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
+                    "compile_lines": 42, "last": "DONE!",
+                    "started": finished - 5.0}
+            (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+            lines = []
+            rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                                ndjson=True, tty=False)
+    finally:
+        progress.wait_ceiling = real_ceiling
+    assert rc == progress.EX_OK, "the stale run's own state still decides the exit code"
+    assert lines, "ndjson mode must not be silent while waiting either"
+    for line in lines:
+        obj = json.loads(line)
+        assert obj["state"] == "waiting", obj
+        assert "note" in obj, "the human sentence must still be reachable"
+        for key in NDJSON_KEYS_AN_AGENT_READS:
+            assert key in obj, f"{key!r} missing from the waiting ndjson object"
+
+
+def test_watch_ndjson_waiting_path_is_all_none_when_nothing_ever_published():
+    """No file has EVER been written -- there is no previous snapshot to copy
+    fields from at all. The key set must still hold, with `None` in every
+    slot rather than the keys simply being absent."""
+    real_ceiling = progress.wait_ceiling
+    progress.wait_ceiling = lambda tty, now, seconds=30.0: now + 0.05
+    try:
+        with tempfile.TemporaryDirectory() as rundir:
+            lines = []
+            try:
+                progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                               ndjson=True, tty=False)
+            except progress.Bail:
+                pass  # expected once the ceiling passes; the point is `lines`
+    finally:
+        progress.wait_ceiling = real_ceiling
+    assert lines, "ndjson mode must not be silent while waiting"
+    for line in lines:
+        obj = json.loads(line)
+        assert obj["state"] == "waiting", obj
+        for key in NDJSON_KEYS_AN_AGENT_READS:
+            assert key in obj, f"{key!r} missing from the waiting ndjson object"
+        assert obj["rung"] is None, "nothing has ever published -- must be null, not guessed"
 
 
 def test_watch_says_something_before_the_first_sleep_and_gives_up_on_a_ceiling():
