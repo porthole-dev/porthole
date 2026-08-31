@@ -237,6 +237,23 @@ def eta(history: dict, rung: str, elapsed: float, frac):
     return None
 
 
+def history_key(rung: str, rebuilding: bool) -> str:
+    """The bucket a run's timing is remembered under.
+
+    A rung's cost can be BIMODAL and the predictor was unimodal. `fast` is
+    install + export + flash when the target apk already exists, and a full
+    199-patch compile plus module strip plus compression when it does not --
+    measured at 6m43s against 21m24s. One bucket learns the mean of both and
+    is wrong by 3.5x whenever the package changed.
+
+    Legacy unkeyed entries stop matching, which is deliberate: the stored
+    403.4 IS that mean, so seeding either bucket with it reintroduces the
+    error in the bucket nobody would look in. No history is honest, and
+    `eta unknown` on a first run is already what this module does.
+    """
+    return "{}|{}".format(rung, "rebuild" if rebuilding else "cached")
+
+
 def load_history(rundir) -> dict:
     try:
         return json.loads((pathlib.Path(rundir) / "build-history.json").read_text())
@@ -276,9 +293,13 @@ class Tracker:
     # a build nobody asked about.
     status_name = "build-status.json"
 
-    def __init__(self, rundir, rung: str):
+    def __init__(self, rundir, rung: str, key: str = ""):
         self.rundir = pathlib.Path(rundir)
         self.rung = rung
+        # The history bucket, which may differ from the rung -- see
+        # `history_key`. Defaults to the rung itself, so every existing
+        # caller (one bucket per rung) keeps behaving exactly as before.
+        self.key = key or rung
         self.history = load_history(rundir)
         self.started = time.time()
         self.phase = ""
@@ -314,7 +335,7 @@ class Tracker:
         ONLY thing that differs between them. Overriding one method keeps the
         publish/history/log path a single implementation.
         """
-        return fraction(self.history, self.rung, self.elapsed, self.compile_seen)
+        return fraction(self.history, self.key, self.elapsed, self.compile_seen)
 
     def _eta(self, frac):
         """Seconds remaining, from a measured rate where one exists.
@@ -328,10 +349,10 @@ class Tracker:
         than being replaced.
         """
         recent = window_rate(self._samples, time.time())
-        total = (self.history or {}).get(self.rung, {}).get("compile_lines")
+        total = (self.history or {}).get(self.key, {}).get("compile_lines")
         if recent and isinstance(total, int) and total > self.compile_seen:
             return (total - self.compile_seen) / recent
-        return eta(self.history, self.rung, self.elapsed, frac)
+        return eta(self.history, self.key, self.elapsed, frac)
 
     def snapshot(self) -> dict:
         frac = self._fraction()
@@ -368,7 +389,7 @@ class Tracker:
         self.state = "done" if ok else "failed"
         self.publish(force=True)
         if ok:
-            record(self.rundir, self.rung, self.elapsed, self.compile_seen)
+            record(self.rundir, self.key, self.elapsed, self.compile_seen)
 
     def line(self, width: int = 18) -> str:
         """The one-line human view."""
@@ -426,8 +447,8 @@ class PkgTracker(Tracker):
 
     status_name = "pkg-status.json"
 
-    def __init__(self, rundir, rung: str):
-        super().__init__(rundir, rung)
+    def __init__(self, rundir, rung: str, key: str = ""):
+        super().__init__(rundir, rung, key=key)
         self.ninja_total = 0
         self.step = ""
         self.compiles = 0
@@ -505,7 +526,7 @@ class PkgTracker(Tracker):
         # there is no denominator. If this aport has been built here before,
         # elapsed-against-last-total is honest; otherwise it stays unknown and
         # the bar says so rather than sitting at 0%.
-        return fraction(self.history, self.rung, self.elapsed, 0)
+        return fraction(self.history, self.key, self.elapsed, 0)
 
 
 def line_of(snap, width: int = 18) -> str:

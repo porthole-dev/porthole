@@ -489,6 +489,62 @@ def _workspace_usable(ctx):
     return True, ""
 
 
+def apk_is_current(packages_dir, pkgname: str, pkgver: str, pkgrel: str,
+                   arch: str) -> bool:
+    """Is the release apk this rung will install already built? Pure.
+
+    The same question _ph_install_kernel_release asks in shell before deciding
+    whether to build the aport. Asking it in Python BEFORE the run starts is
+    what lets the ETA know which of two very different builds this is.
+    """
+    apk = pathlib.Path(packages_dir) / arch / \
+        f"{pkgname}-{pkgver}-r{pkgrel}.apk"
+    return apk.is_file()
+
+
+def aport_version(ctx):
+    """`(pkgver, pkgrel)` for the configured kernel aport, or ("", "").
+
+    One parser, reused: porthole_cmd_pkg.apkbuild_version already reads an
+    APKBUILD and a second reader of the same file is a second thing to be
+    wrong about `pkgrel`.
+    """
+    import porthole_cmd_aports as aports
+    import porthole_cmd_pkg as pkg
+
+    name = ctx.cfg.get("PORTHOLE_KERNEL_PKG", "")
+    if not name:
+        return "", ""
+    try:
+        directory = aports._pkg_dir(aports._pmaports(ctx), name)
+    except Exception:  # noqa: BLE001 -- no pmaports is not a build failure
+        return "", ""
+    if directory is None:
+        return "", ""
+    version = pkg.apkbuild_version(directory)      # "7.2.2-r22"
+    pkgver, _, pkgrel = version.partition("-r")
+    return pkgver, pkgrel
+
+
+def _release_apk_present(ctx) -> bool:
+    """Is the kernel apk this rung will install already built?
+
+    The same question _ph_install_kernel_release asks in shell before it
+    decides whether to build the aport. Asked here, BEFORE the run starts, it
+    is what lets the ETA know which of two very different builds this is.
+
+    Unknown counts as "present": an ETA that under-promises is a pleasant
+    surprise, and refusing to guess is already what `eta unknown` is for.
+    """
+    pkgver, pkgrel = aport_version(ctx)
+    if not pkgver or not pkgrel:
+        return True
+    return apk_is_current(
+        pmb_workdir(ctx, _workspace_usable(ctx)[0]) / "packages" / "edge",
+        ctx.cfg.get("PORTHOLE_KERNEL_PKG", ""), pkgver, pkgrel,
+        ctx.cfg.get("PORTHOLE_ARCH") or "aarch64")
+
+
 def pmb_workdir(ctx, in_container: bool) -> pathlib.Path:
     """pmbootstrap's own work dir, on the HOST filesystem either way.
 
@@ -688,7 +744,31 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     # written; the kernel rungs never did, so build-history.json recorded
     # `compile_lines: 0` for every kernel build ever run and `fast` rendered
     # [??????] for the 20 minutes that dominate it.
-    return _stream(ctx, cmd, env, timeout, rung or func,
+    effective_rung = rung or func
+
+    # `fast` (and every export rung) is two very different builds wearing one
+    # name: install + export + flash when the release apk already exists, and
+    # a full compile plus package plus that same install/export/flash when it
+    # does not -- measured at 6m43s against 21m24s. porthole knows which one
+    # this is before it starts, the same way _ph_install_kernel_release does
+    # in shell, so say it rather than let a "~6m" advertisement stand while a
+    # 21-minute compile runs silently underneath it.
+    rebuilding = not _release_apk_present(ctx)
+    if effective_rung in EXPORT_RUNGS:
+        if rebuilding:
+            ctx.out(ctx.out.paint(
+                f"  the {effective_rung} rung must build the kernel package "
+                f"first — this is the full-compile path, not the "
+                f"install-and-flash one", "yellow"))
+        else:
+            ctx.out(ctx.out.paint(
+                "  the kernel package is already built — install, export "
+                "and flash only", "grey"))
+
+    import porthole_progress as progress
+
+    return _stream(ctx, cmd, env, timeout, effective_rung,
+                   key=progress.history_key(effective_rung, rebuilding),
                    follow=pmb_workdir(ctx, usable) / "log.txt")
 
 
@@ -700,7 +780,7 @@ BEAT = 1.0
 
 def _stream(ctx, cmd, env, timeout: int, rung: str,
             tracker_cls=None, log_prefix: str = "build", follow=None,
-            on_kill=None) -> int:
+            on_kill=None, key: str = "") -> int:
     """Run the build, publishing where it is the whole time.
 
     Every line goes to a log file unconditionally, so "quiet by default" never
@@ -734,7 +814,10 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     verbose = getattr(getattr(ctx, "args", None), "verbose", False)
     tty = sys.stdout.isatty()
 
-    tracker = (tracker_cls or progress.Tracker)(rundir, rung)
+    # `key`, when given, is the history bucket (see progress.history_key) --
+    # a rung whose cost is bimodal needs to learn each case separately, and
+    # the rung itself stays what a reader (snapshot's own "rung" field) sees.
+    tracker = (tracker_cls or progress.Tracker)(rundir, rung, key=key)
     tracker.publish(force=True)
     ctx.out(ctx.out.paint(f"  log: {logpath}", "grey"))
 

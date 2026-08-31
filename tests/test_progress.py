@@ -114,6 +114,46 @@ def test_a_missing_history_file_is_not_an_error():
     assert progress.load_history("/nonexistent/porthole/rundir") == {}
 
 
+def test_history_key_separates_a_rebuild_from_a_cached_run():
+    assert progress.history_key("fast", True) != progress.history_key("fast", False)
+    assert "fast" in progress.history_key("fast", True)
+
+
+def test_an_unkeyed_legacy_entry_is_not_read_as_either_bucket():
+    """The old `fast: 403.4` is the mean of a 6m path and a 21m one.
+
+    Seeding either bucket with it reintroduces the exact error this removes,
+    once, in the bucket where nobody would look for it. No history is the
+    honest answer, and `eta unknown` on a first run is already how this module
+    behaves for a rung it has never seen.
+    """
+    history = {"fast": {"total": 403.4, "compile_lines": 0}}
+    assert progress.estimate_total(history, progress.history_key("fast", True)) is None
+    assert progress.estimate_total(history, progress.history_key("fast", False)) is None
+
+
+def test_each_bucket_learns_its_own_total():
+    rundir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-hist-"))
+    progress.record(rundir, progress.history_key("fast", True), 1284.0, 8100)
+    progress.record(rundir, progress.history_key("fast", False), 403.4, 0)
+    history = progress.load_history(rundir)
+
+    assert progress.estimate_total(history, progress.history_key("fast", True)) == 1284.0
+    assert progress.estimate_total(history, progress.history_key("fast", False)) == 403.4
+
+
+def test_apk_is_current_is_false_when_the_release_apk_is_absent():
+    import porthole_cmd_build as build
+
+    packages = pathlib.Path(tempfile.mkdtemp(prefix="porthole-pkgs-")) / "aarch64"
+    packages.mkdir(parents=True)
+    assert not build.apk_is_current(packages.parent, "linux-x", "7.2.2", "22",
+                                    "aarch64")
+    (packages / "linux-x-7.2.2-r22.apk").write_text("")
+    assert build.apk_is_current(packages.parent, "linux-x", "7.2.2", "22",
+                               "aarch64")
+
+
 def test_the_tracker_publishes_something_an_agent_can_poll():
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="porthole-progress-"))
     tracker = progress.Tracker(tmp, "fast")
