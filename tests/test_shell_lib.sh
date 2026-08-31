@@ -180,5 +180,26 @@ has  "tk_pkill needs a name"      "$out" "rc=64"
 out=$(phsh '' 'type tk_pkill 2>&1')
 hasnt "tk_pkill never uses -f"    "$out" "pkill -f"
 
+# tk_expired with an empty deadline printed `[: : integer expected` five times
+# during tk-to-fastboot -- in exactly the window where a human is watching for
+# whether the device moved. The message named a line inside this library, not
+# the caller that passed nothing, so it was unattributable: the handoff that
+# reported it blamed tk_wait_fastboot, and nothing in the repo calls that.
+out=$(phsh '' 'tk_expired "" 2>&1; echo "rc=$?"')
+hasnt "an empty deadline prints no raw test noise" "$out" "integer expected"
+has   "an empty deadline names the helper"         "$out" "tk_expired: bad deadline"
+# NOT expired. A wait loop that treats an unknown deadline as expired gives up
+# instantly on a device that was fine -- worse than the noise it replaces.
+has   "an unknown deadline is not treated as expired" "$out" "rc=1"
+
+out=$(phsh '' 'tk_expired abc 2>&1; echo "rc=$?"')
+has   "a non-numeric deadline is rejected too" "$out" "bad deadline 'abc'"
+
+# The happy paths must be untouched: this helper is polled in every wait loop.
+out=$(phsh '' 'tk_expired 1 && echo EXPIRED')
+is    "a past deadline is still expired" "$out" "EXPIRED"
+out=$(phsh '' 'tk_expired $(( $(date +%s%3N) + 60000 )) || echo PENDING')
+is    "a future deadline is still pending" "$out" "PENDING"
+
 echo "$PASS/$((PASS+FAIL)) passed"
 [ "$FAIL" -eq 0 ]
