@@ -11,8 +11,18 @@ first-learned: 2026-08-31
 
 
 **Do not push a tree-built module without dropping its `.BTF` first.**
-`tools/tk-push-module.sh` now does this for you via `tools/tk-strip-btf.py`;
-this note is why, and what it looks like when something bypasses it.
+`tools/tk-push-module.sh` and `porthole build mod` both do this for you via
+`tools/tk-strip-btf.py`; this note is why, and what it looks like when
+something bypasses it.
+
+`mod` did not, for the whole life of the verb. This note said the fix was
+handled and it was -- in one of the two push paths. `tkmod()` pushed the raw
+`.ko`, so the cheapest rung on the ladder, the one this very note tells you to
+try first, walked straight into the trap: on 2026-08-31 a `porthole build mod`
+on `ath10k_core` unloaded the old driver, failed to load the new one, and left
+taimen with no wifi driver at all. Believing a fix is universal because one
+caller has it is the shape of this mistake; `tests/test_strip_btf.py` now
+asserts `tkmod` stages the module before its first `scp`.
 
 A device that ships from an aport runs a kernel built in the aport chroot,
 while `porthole build mod` builds the module from your tree. **MODVERSIONS is

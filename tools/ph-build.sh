@@ -1451,6 +1451,37 @@ tkpush-modules() {
 
 # FAST loop for driver-only changes: build the module, push it, reload it.
 #
+# Stage one built module somewhere writable, drop its .BTF, echo the new path.
+#
+# A module built from the TREE carries a .BTF that references the aport
+# kernel's BTF by type id. The ids do not line up, the module notifier fails
+# the load with -40, and modprobe reports "Symbolic link loop" -- see
+# brain/traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md.
+# That trap says the fix is handled, and it was, in tools/tk-push-module.sh.
+# `mod` -- the rung the ladder tells you to try FIRST -- never went through
+# that script and pushed the module raw, so on 2026-08-31 a `porthole build
+# mod` on ath10k_core left taimen with no wifi driver at all: the old module
+# unloaded, the new one would not load, and the fix the repo had already
+# written sat one code path away.
+#
+# Staged rather than rewritten in place: build output under .output belongs to
+# the workspace container's uid and is not ours to edit -- the same reason
+# tk-push-module.sh copies first. `chmod u+w` because `cp -p` brings a
+# read-only mode with it and the strip opens the file "r+b".
+#
+# Split out of tkmod because everything else in that function needs a
+# container, a kernel build and a phone; this step needs none of the three,
+# and it is the one whose absence has already cost a wifi driver.
+_ph_stage_module() {
+	local ko=$1 name=$2
+	local staged="/tmp/$name.ko"   # $name is not set until the local above ends
+	cp -p "$ko" "$staged" || return 1
+	chmod u+w "$staged" || return 1
+	# stdout is the staged path; the tool's own report goes to stderr.
+	"$_PH_REPO_ROOT/tools/tk-strip-btf.py" "$staged" >&2 || return 1
+	echo "$staged"
+}
+
 # A .ko change needs `make` and an insmod -- not a package, not a boot.img, not
 # a reboot. tkbuild-kernel is for CONFIG and DTS changes; using it to iterate on
 # one driver costs ~6 minutes a cycle instead of ~40 seconds, which is most of a
@@ -1513,6 +1544,10 @@ tkmod() {
 
 	local ko="$_PH_OUT/$rel"
 	[ -f "$ko" ] || { echo ">> no module at $ko"; return 1; }
+
+	# Every copy that leaves here is staged and stripped -- the hot insmod one
+	# AND the .ko.xz written over the installed module below.
+	ko=$(_ph_stage_module "$ko" "$name") || return 1
 
 	# TK_SSH_OPTS, like every other device call in this file. It carries
 	# -i "$PORTHOLE_SSH_KEY" -o IdentitiesOnly=yes (lib/porthole.sh:188), and

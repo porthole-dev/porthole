@@ -14,11 +14,17 @@ properties the fix depends on:
   - a section whose name merely *starts with* .BTF (.BTF.ext) survives, which
     is the obvious way to get this wrong with a prefix match.
 
+It also pins the thing a correct tool cannot pin about itself: that the rung
+which pushes a module actually CALLS it. tk-push-module.sh has since the trap
+was written; `porthole build mod` did not, for the whole life of the verb.
+
 Needs no device, no root, no cross toolchain and no real module.
 """
 import importlib.util
+import os
 import pathlib
 import struct
+import subprocess
 import sys
 import tempfile
 
@@ -87,6 +93,32 @@ def check(label, cond):
         raise SystemExit(1)
 
 
+def stage_via_shell(ko, name="stagetest"):
+    """ph-build.sh's own `_ph_stage_module`, called for real.
+
+    A near-empty environment on purpose: PORTHOLE_* leaking in from the
+    developer's shell is how this class of bug reaches a phone.
+    """
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
+           "PORTHOLE_ROOT": str(ROOT), "PORTHOLE_DEVICE": "google-taimen",
+           "PORTHOLE_WORKDIR": str(TMP / "repo"),
+           "PORTHOLE_KERNEL_TREE": str(TMP / "tree")}
+    (TMP / "repo").mkdir(exist_ok=True)
+    (TMP / "tree").mkdir(exist_ok=True)
+    done = subprocess.run(
+        ["bash", "-c",
+         'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1\n'
+         '_ph_stage_module "$1" "$2" 2>/dev/null', "_", str(ko), name],
+        env=env, capture_output=True, text=True)
+    return done.returncode, done.stdout.strip()
+
+
+def tkmod_body(text):
+    """tkmod() as written, up to the closing brace at column 0."""
+    start = text.index("\ntkmod() {")
+    return text[start:text.index("\n}\n", start)]
+
+
 def main():
     # 1. the ordinary case
     p = write("mod.ko", build_elf([".BTF", ".text"]))
@@ -125,6 +157,47 @@ def main():
     except SystemExit as exc:
         check("a non-ELF file is refused, not rewritten",
               exc.code not in (0, None) and p4.read_bytes().startswith(b"MZ"))
+
+    # 6. the rung that pushes a module must actually call the strip.
+    #
+    # Observed 2026-08-31 on taimen: `porthole build mod` on ath10k_core
+    # unloaded the old driver and could not load the new one, leaving the
+    # phone with no wifi at all. tk-push-module.sh had neutered .BTF since the
+    # trap was written; tkmod pushed the raw .ko and nothing said so. A tool
+    # that is correct and never called is not a fix.
+    src = (ROOT / "tools" / "ph-build.sh").read_text()
+    body = tkmod_body(src)
+    staged = body.find("_ph_stage_module")
+    check("tkmod stages the module before the first scp",
+          0 <= staged < body.find("scp "))
+    # Both copies: the hot insmod one and the .ko.xz written over the
+    # installed module. Pushing a stripped .ko beside an unstripped .ko.xz
+    # would survive the insmod and fail the next modprobe.
+    check("nothing after the staging reaches for the raw build path",
+          staged >= 0 and "$_PH_OUT/$rel" not in body[staged:])
+
+    # The other path that puts a tree-built .ko on the device. It has always
+    # stripped; nothing asserted it, which is how tkmod's copy went missing.
+    push = (ROOT / "tools" / "tk-push-module.sh").read_text()
+    check("tk-push-module.sh still strips before its scp",
+          0 <= push.find("tk-strip-btf.py") < push.find("scp "))
+
+    # 7. and it does what it says, called for real.
+    mod = write("staged.ko", build_elf([".BTF", ".text"]))
+    rc, out = stage_via_shell(mod)
+    check("_ph_stage_module succeeds", rc == 0 and out)
+    # Named after the module, or every module stages over the same /tmp/.ko --
+    # which is what one `local` for both $name and $staged silently does.
+    check("the staged copy is named after the module",
+          out.endswith("/stagetest.ko"))
+    check("what it hands back has no named .BTF",
+          ".BTF" not in section_names(pathlib.Path(out).read_bytes()))
+    check(".text survives the staging",
+          ".text" in section_names(pathlib.Path(out).read_bytes()))
+    # .output belongs to the workspace container's uid; rewriting it in place
+    # is both a permission error and not ours to do.
+    check("the built module itself is left alone",
+          ".BTF" in section_names(mod.read_bytes()))
 
     print("test_strip_btf.py: all checks passed")
 
