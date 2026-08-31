@@ -554,7 +554,20 @@ def verdict_from_matrix(blob, names, age, max_age=MATRIX_MAX_AGE_S):
         return todo("not tested: " + ", ".join(untested)
                     + " — `porthole matrix` says nothing about "
                       "these" + when)
-    if age is not None and age > max_age:
+    # age is None means `at` was missing, null, or not a number -- we
+    # cannot establish when this was measured. A DONE we cannot date is
+    # exactly the confidently-wrong-in-the-optimistic-direction claim this
+    # module exists to delete, so an unknown age is treated as STALE, not
+    # as fresh: never invent an age or assume "probably recent". This is
+    # deliberately asymmetric -- `failing`/`untested` above still report as
+    # they do with an unknown age, because a broken timestamp does not make
+    # an untested or failing capability MORE true. Only the positive claim
+    # needs a verifiable age to stand on, same as Task 5's device state: no
+    # usable cache reading means never done.
+    if age is None:
+        return todo("matrix has no usable timestamp for " + ", ".join(names)
+                    + " — re-run `porthole matrix`")
+    if age > max_age:
         return todo("matrix is stale (probed {} ago, cap {}) — re-run "
                     "`porthole matrix`".format(_ago(age), _ago(max_age)))
     return done("working: " + ", ".join(names) + when)

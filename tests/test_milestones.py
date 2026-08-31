@@ -523,6 +523,52 @@ def test_a_stale_matrix_says_so_rather_than_being_believed():
     assert "ago" in stale.evidence, stale.evidence
 
 
+def test_an_unknown_age_is_treated_as_stale_not_fresh():
+    """An `at` that is missing, null, or not a number means the age cannot
+    be established -- and a DONE that cannot be dated is the same
+    confidently-wrong-in-the-optimistic-direction claim `?` and a missing
+    cell already are. `probe_from_matrix` passes `age=None` in exactly this
+    case; asserting only that some evidence string appears would repeat
+    round 1's weak-test problem, so this checks the STATE."""
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "yes"}]}
+    fresh = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert fresh.state == ms.DONE, fresh
+    for bad_age in (None,):
+        verdict = ms.verdict_from_matrix(blob, ["wifi"], age=bad_age)
+        assert verdict.state != ms.DONE, (bad_age, verdict)
+
+
+def test_probe_from_matrix_does_not_invent_an_age_from_a_bad_at():
+    """End-to-end through `probe_from_matrix`, not just the pure function:
+    `at` missing or the wrong type must reach `verdict_from_matrix` as
+    `age=None`, never as an invented 0 (which would read as "just now" --
+    the most optimistic reading possible)."""
+    import json
+
+    working = {"capabilities": [{"name": "wifi", "present": "yes",
+                                 "works": "yes"}]}
+    for at in (None, "soon"):
+        with tempfile.TemporaryDirectory() as tmp:
+            rundir = pathlib.Path(tmp) / ".run"
+            rundir.mkdir()
+            (rundir / "matrix.json").write_text(
+                json.dumps({**working, "at": at}))
+            verdict = ms.probe_from_matrix("wifi")(FakeCtx(root=tmp))
+        assert verdict.state != ms.DONE, (at, verdict)
+    # Control: the same matrix with a real, fresh timestamp IS done -- so
+    # the assertion above is about the bad `at`, not about this matrix
+    # being unable to be done at all.
+    with tempfile.TemporaryDirectory() as tmp:
+        import time
+        rundir = pathlib.Path(tmp) / ".run"
+        rundir.mkdir()
+        (rundir / "matrix.json").write_text(
+            json.dumps({**working, "at": time.time()}))
+        verdict = ms.probe_from_matrix("wifi")(FakeCtx(root=tmp))
+    assert verdict.state == ms.DONE, verdict
+
+
 def test_a_null_capabilities_matrix_does_not_raise():
     """A corrupt cache must degrade to a verdict, never a traceback -- that
     is the difference between `porthole next` reporting "nobody has looked"
