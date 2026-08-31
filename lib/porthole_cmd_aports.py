@@ -18,6 +18,7 @@ import subprocess
 
 from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
 import porthole_pmaports as pmap
+import porthole_series
 
 
 def git(pmaports, *args, check=False, timeout=60):
@@ -745,6 +746,19 @@ def _series_problems(pkg_dir: pathlib.Path) -> list:
                              f"{num} is used by {len(names)} patches: "
                              + ", ".join(names)))
 
+    # The series may be complete and correctly listed and STILL not apply.
+    # taimen's 0199 was listed, on disk, uniquely numbered -- and one
+    # insertion short of its own hunk header, so `patch` refused the whole
+    # series and no aport kernel could build. See lib/porthole_series.py for
+    # why this is arithmetic rather than `patch --dry-run`.
+    for name in sorted(listed & on_disk):
+        try:
+            text = (pkg_dir / name).read_text(errors="replace")
+        except OSError:
+            continue
+        for kind, message in porthole_series.scan(text):
+            problems.append((kind, "{}: {}".format(name, message)))
+
     return problems
 
 
@@ -752,9 +766,11 @@ def cmd_checksum(args, ctx, pmaports) -> int:
     """`pmbootstrap checksum` -- mandatory after touching any listed source."""
     for pkg in _resolve_pkgs(args, ctx, pmaports) if not args.changed else []:
         problems = _series_problems(_pkg_dir(pmaports, pkg))
-        # A duplicate number is untidy; an orphan or a missing file changes
-        # what gets BUILT, which is the thing that has to stop a build.
-        fatal = [x for x in problems if x[0] != "duplicate"]
+        # `duplicate` is untidy and `stripped` is damage that GNU patch
+        # usually still applies -- two ACTIVE pmaports patches carry it and
+        # build. Neither stops a build. `orphan`, `missing` and `malformed`
+        # all change what gets built, and that is what has to stop one.
+        fatal = [x for x in problems if x[0] not in ("duplicate", "stripped")]
         for kind, msg in problems:
             ctx.out(ctx.out.paint(f"  {kind:<9} {msg}",
                                   "red" if kind != "duplicate" else "yellow"))

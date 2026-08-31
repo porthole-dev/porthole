@@ -303,6 +303,35 @@ def test_docs_index_drops_the_readme_table_of_contents():
     assert "Real section" in out and "body" in out
 
 
+def test_series_problems_reports_a_malformed_patch():
+    import tempfile
+    import porthole_cmd_aports as aports
+
+    pkg = pathlib.Path(tempfile.mkdtemp(prefix="porthole-series-"))
+    (pkg / "APKBUILD").write_text(
+        'pkgname=linux-test\nsource="\n\tlinux-1.0.tar.xz\n\t0001-a.patch\n"\n')
+    # Header promises two insertions; the body has one.
+    (pkg / "0001-a.patch").write_text(
+        "--- a/f.c\n+++ b/f.c\n@@ -1,2 +1,3 @@\n ctx\n-gone\n+new\n")
+
+    kinds = [kind for kind, _ in aports._series_problems(pkg)]
+    assert "malformed" in kinds, aports._series_problems(pkg)
+
+
+def test_series_problems_still_reports_orphans():
+    # The pre-existing kinds must survive the refactor.
+    import tempfile
+    import porthole_cmd_aports as aports
+
+    pkg = pathlib.Path(tempfile.mkdtemp(prefix="porthole-series-"))
+    (pkg / "APKBUILD").write_text('pkgname=linux-test\nsource="\n\tlinux.tar.xz\n"\n')
+    (pkg / "0001-orphan.patch").write_text(
+        "--- a/f.c\n+++ b/f.c\n@@ -1,1 +1,1 @@\n-a\n+b\n")
+
+    kinds = [kind for kind, _ in aports._series_problems(pkg)]
+    assert "orphan" in kinds, aports._series_problems(pkg)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
