@@ -174,11 +174,23 @@ def script(capabilities) -> str:
 def demux(text: str) -> dict:
     """Framed output -> {(capability, field): {rc, out}}.
 
-    Anything before the first record separator is dropped: a login banner, an
-    MOTD or an ssh warning is not a cell.
+    Every chunk produced by splitting on RS is a candidate record, including
+    chunk[0]. Do NOT drop chunk[0] on the theory that "text before the first
+    separator is a banner" -- `Device.run()` returns `proc.stdout.strip()`,
+    and `\x1e`.isspace() is True in Python, so `.strip()` eats a genuine
+    leading record separator on every real run. Dropping chunk[0]
+    unconditionally then throws away the FIRST capability's FIRST probe,
+    silently, on every single run -- it rendered as `?` and looked like a
+    probe that never ran rather than the wifi-present success it actually
+    was. A login banner, an MOTD or an ssh warning has no `\x1f` fields in
+    it, so the per-record validation below (need >= 3 US-separated bits, a
+    known field name, an integer rc) already drops it without needing a
+    separate "skip the first chunk" guard -- and that guard only worked
+    when a leading separator happened to survive, which `.strip()` does not
+    let it do.
     """
     found = {}
-    for chunk in (text or "").split(RS)[1:]:
+    for chunk in (text or "").split(RS):
         bits = chunk.split(US)
         if len(bits) < 3:
             continue

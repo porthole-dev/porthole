@@ -122,6 +122,40 @@ def test_demux_ignores_anything_before_the_first_record():
     assert list(got) == [("wifi", "present")], got
 
 
+def test_demux_keeps_the_first_record_when_the_leading_rs_was_stripped():
+    """This is what Device.run() actually hands demux().
+
+    `Device.run()` returns `proc.stdout.strip()`, and RS (`\\x1e`) is
+    whitespace as far as `str.strip()` is concerned -- so on a real run the
+    leading separator is gone before demux ever sees the text. A demux that
+    assumed chunk[0] is always banner text threw away the first
+    capability's first probe on every single run, silently: it rendered as
+    `?`, indistinguishable from a probe that never ran.
+    """
+    stream = ("wifi" + US + "present" + US + "0" + US + "phy0"
+              + RS + "wifi" + US + "works" + US + "1" + US + "")
+    got = caps.demux(stream)
+    assert len(got) == 2, got
+    assert got[("wifi", "present")]["rc"] == 0, got
+
+
+def test_demux_keeps_the_first_record_when_a_leading_rs_survives():
+    stream = (RS + "wifi" + US + "present" + US + "0" + US + "phy0"
+              + RS + "wifi" + US + "works" + US + "1" + US + "")
+    got = caps.demux(stream)
+    assert len(got) == 2, got
+    assert got[("wifi", "present")]["rc"] == 0, got
+
+
+def test_demux_drops_a_banner_but_keeps_every_record_including_the_first():
+    stream = ("Welcome to postmarketOS\n" + RS + "wifi" + US + "present"
+              + US + "0" + US + "phy0"
+              + RS + "wifi" + US + "works" + US + "1" + US + "")
+    got = caps.demux(stream)
+    assert len(got) == 2, got
+    assert got[("wifi", "present")]["rc"] == 0, got
+
+
 def test_verdict_maps_rc_to_yes_and_no():
     assert caps.verdict({"rc": 0, "out": ""}) == "yes"
     assert caps.verdict({"rc": 1, "out": ""}) == "no"
