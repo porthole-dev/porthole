@@ -1182,6 +1182,83 @@ def _status(ctx) -> int:
     return ctx.emit(snap, render)
 
 
+def detach_argv(porthole, action: str, args) -> list:
+    """The argv a detached build re-invokes itself with. Pure.
+
+    Rebuilt by hand, so every flag that changes what the build DOES must be
+    listed here or it is silently dropped -- `pkg` lost --force and --wait
+    exactly that way. `--detach` is deliberately absent: forwarding it would
+    make the child detach again and orphan the run.
+    """
+    argv = [str(porthole), "build", action, "--timeout", str(args.timeout)]
+    if getattr(args, "kernel", False):
+        argv.append("--kernel")
+    if getattr(args, "host", False):
+        argv.append("--host")
+    if getattr(args, "verbose", False):
+        argv.append("--verbose")
+    if getattr(args, "allow_env_override", False):
+        argv.append("--allow-env-override")
+    if getattr(args, "yes", False):
+        argv.append("--yes")
+    return argv + list(getattr(args, "rest", None) or [])
+
+
+def _detach(ctx, args, action: str) -> int:
+    """Start the build in its own session and return immediately.
+
+    Re-invokes this same verb rather than duplicating the run path, so a
+    detached build is byte-for-byte the foreground one: same tracker, same
+    status file, same log, same artifact check.
+
+    Available on the flashing rungs too. The irreversible-action boundary is
+    `--yes`, which was given at launch; detaching does not make a confirmed
+    flash less confirmed, and `fast` and `upgrade` are the two rungs an agent
+    most needs to detach.
+    """
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    rundir.mkdir(parents=True, exist_ok=True)
+    spawn_log = rundir / f"build-{action}-detached.log"
+    argv = detach_argv(ctx.root / "bin" / "porthole", action, args)
+    with open(spawn_log, "w") as handle:
+        proc = subprocess.Popen(argv, cwd=str(ctx.root), stdout=handle,
+                                stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL,
+                                start_new_session=True)
+    # Claim the status file for THIS run before returning, or a `watch` in the
+    # next second reads the PREVIOUS build's final snapshot and reports it.
+    progress.publish_pending(rundir, action, proc.pid, "build-status.json")
+    ctx.out.kv("pid", str(proc.pid), 10)
+    ctx.out.kv("log", str(spawn_log), 10)
+    ctx.out(ctx.out.paint("  porthole build watch          # live, exits with "
+                          "the build", "cyan"))
+    ctx.out(ctx.out.paint("  porthole build watch --json   # one JSON object "
+                          "per update, for an agent", "cyan"))
+    return EX_OK
+
+
+def _watch(ctx, args) -> int:
+    """Follow the kernel build's status file until it stops."""
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+
+    # A raw sink, not `ctx.out`: `progress.watch` bakes its own line ending
+    # into every string it emits (a bare `\r\033[2K` prefix for a tty
+    # redraw-in-place, a trailing `\n` otherwise), matching `pkg`'s `_watch`.
+    def out(line):
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    return progress.watch(rundir, "build-status.json",
+                          getattr(args, "interval", 1.0), out,
+                          ndjson=getattr(args, "json", False),
+                          start_hint="start one with `porthole build <action> "
+                                     "--yes` or `--detach`")
+
+
 def _maybe_autoselect_tree(ctx) -> None:
     """Point the build at the tree holding the product branch, if exactly one
     does. Runs before anything reads the tree, and says so loudly when it
@@ -1214,9 +1291,11 @@ def cmd_build(args, ctx) -> int:
     # is what tests/test_cli_rules.py forbids repo-wide.
     if action == "status":
         return _status(ctx)
+    if action == "watch":
+        return _watch(ctx, args)
     if action != "auto" and action not in ACTIONS:
         raise Bail(f"unknown action {action!r}", EX_USAGE,
-                   f"actions: auto, status, {', '.join(ACTIONS)}")
+                   f"actions: auto, status, watch, {', '.join(ACTIONS)}")
 
     _assert_no_drift(ctx, args)
     _maybe_autoselect_tree(ctx)
@@ -1291,6 +1370,11 @@ def cmd_build(args, ctx) -> int:
                    f"expected {_tree(ctx.cfg)}/Makefile -- set "
                    f"PORTHOLE_KERNEL_TREE, or name an explicit rung")
 
+    # After the `--yes` gate, so a detached build is still a confirmed one --
+    # `--detach` changes WHERE the build runs, not whether it was confirmed.
+    if getattr(args, "detach", False):
+        return _detach(ctx, args, action)
+
     rc = _run(ctx, func, args.timeout, extra,
               host=getattr(args, "host", False), rung=action)
     if rc != 0:
@@ -1314,8 +1398,10 @@ SPEC = {
         "release build. Artifacts are verified rather than exit codes trusted."),
     "escapes_scope": True,
     "args": [
-        (["action"], {"nargs": "?", "metavar": "ACTION", "choices": ["auto", "status"] + list(ACTIONS),
-                      "help": "auto | status | " + " | ".join(ACTIONS) + "  (default: auto)"}),
+        (["action"], {"nargs": "?", "metavar": "ACTION",
+                      "choices": ["auto", "status", "watch"] + list(ACTIONS),
+                      "help": "auto | status | watch | " + " | ".join(ACTIONS)
+                              + "  (default: auto)"}),
         (["rest"], {"nargs": "*", "metavar": "ARG",
                     "help": "mod: MODULE.ko NAME"}),
         (["--kernel"], {"action": "store_true",
@@ -1331,6 +1417,11 @@ SPEC = {
         (["--host"], {"action": "store_true",
                       "help": "build on the host, not in the workspace"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),
+        (["--detach"], {"action": "store_true",
+                        "help": "start the build in its own session and "
+                                "return; follow it with `build watch`"}),
+        (["--interval"], {"type": float, "default": 1.0, "metavar": "SEC",
+                          "help": "watch: seconds between reads (default 1)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_build,
@@ -1340,6 +1431,9 @@ SPEC = {
         "porthole build boot --yes",
         "porthole build boot --kernel --yes",
         "porthole build fast --yes",
+        "porthole build fast --yes --detach",
+        "porthole build watch",
+        "porthole build watch --json",
         "porthole build kernel --yes",
         "porthole build clean",
     ],

@@ -1233,5 +1233,52 @@ def test_tail_text_reads_the_end_of_a_large_file():
     assert len(got) <= 5000, len(got)
 
 
+def test_watch_is_an_action_not_a_flag():
+    # A store_true --watch would be a MODE encoded as a boolean, which permits
+    # nonsense combinations; tests/test_cli_rules.py forbids that repo-wide,
+    # and `status` is already an action for the same reason.
+    import porthole_cmd_build as build
+
+    action_arg = [a for a in build.SPEC["args"] if a[0] == ["action"]][0]
+    assert "watch" in action_arg[1]["choices"], action_arg[1]["choices"]
+
+
+def test_detach_argv_forwards_every_flag_that_changes_the_build():
+    """A flag dropped here is a declared flag that silently does nothing.
+
+    `pkg` lost --force and --wait this way: `pkg build X --force --detach`
+    built without force, and --wait leaking made the parent return OK while
+    the child bailed on a busy buildroot. Rebuilt by hand, so every flag has
+    to be listed.
+    """
+    import argparse
+    import porthole_cmd_build as build
+
+    args = argparse.Namespace(timeout=5400, kernel=True, host=True,
+                              verbose=False, yes=True, rest=[], detach=True,
+                              allow_env_override=False)
+    argv = build.detach_argv("/x/bin/porthole", "boot", args)
+
+    assert argv[:3] == ["/x/bin/porthole", "build", "boot"], argv
+    assert "--yes" in argv, "a detached build that does not build is useless"
+    assert "--kernel" in argv, argv
+    assert "--host" in argv, argv
+    assert "--timeout" in argv and "5400" in argv, argv
+    # The one flag that must NOT be forwarded, or the child detaches again.
+    assert "--detach" not in argv, argv
+
+
+def test_detach_argv_forwards_the_mod_arguments():
+    import argparse
+    import porthole_cmd_build as build
+
+    args = argparse.Namespace(timeout=5400, kernel=False, host=False,
+                              verbose=False, yes=True, detach=True,
+                              allow_env_override=False,
+                              rest=["drivers/media/i2c/imx179.ko", "imx179"])
+    argv = build.detach_argv("/x/bin/porthole", "mod", args)
+    assert argv[-2:] == ["drivers/media/i2c/imx179.ko", "imx179"], argv
+
+
 if __name__ == "__main__":
     sys.exit(main())
