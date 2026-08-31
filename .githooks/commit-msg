@@ -17,3 +17,10 @@ sed -E \
 	{if ($0 ~ /^[[:space:]]*$/) n++; else {while (n-->0) print ""; n=0; print}}' \
 > "$f.tmp"
 mv "$f.tmp" "$f"
+
+# Then the message is scanned. The serial that produced
+# docs/HANDOFF-contribution-rules.md reached a commit message, and no check in
+# this repo had ever read one. Reject rather than strip, unlike the trailers
+# above: a trailer is a harness default and stripping it is uncontroversial,
+# but only a human can decide what a secret should be redacted TO.
+exec python3 "$(git rev-parse --show-toplevel)/lib/porthole_secrets.py" "$f"

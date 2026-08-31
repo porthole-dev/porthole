@@ -25,7 +25,7 @@ They are written down. It is "give every rule that matters a thing that runs".
   did.
 - CI runs seven jobs (`tests` × 3.8/3.11/3.13, `console`, `lint`, `build`,
   `fresh-clone smoke`). **None of them runs the hook, and none scans for
-  secrets.**
+  secrets.** The second half of that is what §4.5 has since fixed.
 - `CONTRIBUTING.md` is **not in git**. It was an untracked file in the working
   tree at the start of this session and is gone now; `git log --all --
   CONTRIBUTING.md` is empty. Whatever it said was never a rule anyone could
@@ -37,7 +37,8 @@ They are written down. It is "give every rule that matters a thing that runs".
 ## 2. What was proven this session
 
 **The secrets check does not scan the places secrets landed.** `PERSONAL` in
-`tests/test_tools.py:28` matches `/home/…`, `/var/home/…` and `user@1.2.3.4`.
+`tests/test_tools.py:28` matches `/home/…`, `/var/home/…` and a
+`<user>@<ipv4>` pair.
 Measured:
 
 ```python
@@ -65,10 +66,11 @@ push.** Every rule in §6 follows from that sentence.
 
 ## 3. What was NOT proven
 
-- Whether a serial is worth protecting at all. Nobody has decided; it was
-  treated as sensitive because the author redacted it in their own PR
-  description, which is evidence of intent, not policy. **§6 needs a human
-  decision on what counts as sensitive before it can be implemented.**
+- Whether a serial is worth protecting at all. It was treated as sensitive
+  because the author redacted it in their own PR description, which is
+  evidence of intent, not policy. **Now decided — see §4.5.** Not by
+  quantifying the harm: by noting that a serial has no documentary value and
+  that publication is irreversible, which settles it without a threat model.
 - Whether the other rules in `AGENTS.md` are being followed. Only the two
   above were tested. A survey is part of the work, not an assumption.
 - Whether contributors would accept a pre-push hook. It is proposed below
@@ -173,46 +175,189 @@ Binding, no exceptions, in this order:
    not in the PR template, and it is the rule that would have caught the
    `key: value` fixture holding the parser bug in place.
 
-Add a CI job — `secrets` — for §4.5. It is the only new job, and it belongs in
-CI rather than only in a hook because a hook cannot be relied on to exist.
+No new CI job for §4.5, which the proposal had asked for. `make test` globs
+`tests/test_*.py`, so `tests/test_secrets.py` is picked up and runs in all three
+matrix jobs already. The requirement was "it runs in CI regardless of anyone's
+hook config", and the glob meets it. A hand-added job would be a fourth copy of
+the step list the Makefile's own header warns about, and `tests/test_tools.py`
+fails on a job naming a target `make ci` does not reach.
 
 ### 4.5 What must never be published
 
-**The decision this needs from a human first:** what counts as sensitive here.
-The proposed list, to accept or cut:
+**Decided 2026-08-31**, after measuring the proposed list against the repo.
+Two of its rows were claims about code that do not hold, and the one class
+this repo has actually had to redact was missing from it.
 
-| class | example | verdict |
+**The rule is one sentence, because a list gets argued row by row and a
+principle decides the rows nobody thought of:**
+
+> Never publish a value that is **stable** and ties an artifact to one
+> physical device, one person, one private network or one account, and that
+> the note does not need in order to stay reproducible. Publish what is
+> random, ephemeral, public by design, or load-bearing evidence.
+
+That is why the serial needed no threat model. An evidence line needs
+`taimen, 2026-08-31`; it has never needed the serial. The documentary value is
+zero, publication is irreversible, redaction is free — an asymmetry that
+lopsided settles the case without anyone ruling on how bad a leaked serial
+actually is.
+
+| class | verdict | caught by |
 |---|---|---|
-| host paths and usernames | `/home/<user>/…` | already banned, already enforced in `tools/` |
-| user@IP | `<user>@172.16.42.1` | already banned, already enforced in `tools/` |
-| device serials | `fastboot devices` output, `getvar serialno` | **proposed: banned** — this session's leak |
-| IMEI, MEID, ICCID, MAC addresses | modem and wifi probes print these freely | **proposed: banned** — stronger case than serials |
-| keys and tokens | ssh private keys, `gh` tokens, `PORTHOLE_*_PASSWORD` | **proposed: banned**, obviously |
-| GPS fixes from a real device | sensor probe output | **proposed: banned** |
-| the pmOS gadget IP `172.16.42.1` | | **not** sensitive — a documented default, already handled |
+| host paths and usernames (`/home/<user>/…`) | banned | `PERSONAL`, widened to every tracked file |
+| `<user>@<ipv4>` | banned | `PERSONAL` |
+| device serials | banned | the label, not the value — see below |
+| IMEI, MEID, ICCID, IMSI | banned | the label |
+| private keys, tokens, passwords | banned | `BEGIN … PRIVATE KEY`, `gh[pousr]_…`, `*_PASSWORD=<literal>` |
+| MAC addresses **whose locally-administered bit is clear** | banned | exact, and zero false positives today |
+| the SSID and BSSIDs of a network you do not own | banned | BSSID by the MAC rule; the SSID is manual |
+| GPS or any other location fix | banned | manual |
+| screenshots, screen and camera captures of a booted device | banned | manual — no scanner will ever read one |
 
-Implementation:
+**Explicitly not sensitive**, and this half of the list carries as much weight
+as the other. A scanner that cries wolf teaches people `--no-verify`, and a
+rule set that over-reaches loses exactly the authority §4.6 is trying to
+build:
 
-- Widen `PERSONAL` and move it out of `tests/test_tools.py`, which scans
-  `tools()` only, into its own `tests/test_secrets.py` that scans **everything
-  git tracks** — `tools/`, `lib/`, `tests/`, `profiles/`, `brain/`, `docs/`,
-  `.github/`.
-- Add a `commit-msg` hook stage that scans the **message**, since the serial
-  reached a commit message and no check has ever looked at one.
-- Add a `pre-push` hook that scans the range being pushed. This is the last
-  cheap moment; after the push, only GitHub Support can help.
-- Every pattern needs a positive control, per `brain/laws/`. A secrets scanner
-  that matches nothing passes silently, which is the failure mode it exists to
-  prevent.
-- **Redaction guidance, not just prohibition.** A brain note's evidence line
-  needs the device model and the date, not the serial — that keeps the note
-  reproducible without identifying the hardware. Say so where people write
-  notes, or they will strip the evidence instead of the identifier.
+- the pmOS gadget IP `172.16.42.1` — a documented default, already carved out
+- **randomised MAC addresses** — see below
+- the contributor's own name and email in authorship. They are in every commit
+  by design, and `SECURITY.md` tells reporters to find the maintainer's
+  address in the git history. Scrubbing them is the over-correction to guard
+  against, not a fix.
+- device codenames, SoC names, kernel and commit hashes, package versions
 
-Also worth deciding: whether `profiles/*/device.env` may ever carry a serial as
-a *functional* value (multi-device selection). Today none do, and the ban is
-free. If that changes, the scanner needs an allowlisted key rather than an
-exception per file.
+**The MAC rule, and why the proposed blanket ban was cut.** Seven MAC-shaped
+strings are already tracked:
+
+```
+brain/findings/taimen-has-no-factory-wlan-mac.md      56:61:bd…  86:c6:a5…  02:00:B6…
+brain/traps/usb-gadget-rerandomises-the-host-mac.md   92:fe:35…  b2:c4:15…  36:31:25…
+```
+
+Every one is a **randomly generated** address, and both notes are *about* the
+randomisation — the MAC is the evidence, not a leak. A blanket ban deletes two
+findings to protect nothing.
+
+The discriminator is free and already in the bytes. A locally-administered
+address has bit 1 of its first octet set — second hex digit in `2367abef` — and
+a factory-burned address from an OUI never does, by definition, nor does a
+real AP's BSSID. All seven tracked MACs have it set. So the rule is **ban a MAC
+whose locally-administered bit is clear**: it passes the entire existing tree
+with no exceptions and no allowlist, and catches every address that identifies
+real hardware.
+
+**The class the proposed list missed: a private network's identity.** A BSSID
+is a key into commercial wifi geolocation databases — Google, Apple and Mozilla
+resolve one to a street address. Publishing `TEST-SSID`'s three BSSIDs would
+pin a contributor's workplace to a building, a stronger location leak than any
+GPS fix this repo can currently produce. Someone already understood that and
+hand-redacted them to `<ap-ch36>`, `<ap-ch140>` and `<ap-ch1>`;
+the convention was never written down, and `tools/tk-wifi-soak.sh:108` emits
+`"bssid":"%s"` into every heartbeat line by construction.
+
+**Two rows kept, with their justification corrected.** The proposal said modem
+and wifi probes "print these freely". They do not:
+`grep -riE "imei|meid|iccid|imsi"` over the whole repo hits exactly one line,
+this table's own earlier draft. `tools/tk-daily-audit.sh` runs `mmcli -L` and
+`mmcli -m any | grep -iE 'state:|lock'`, neither of which prints an equipment
+id. GPS is the same — no NMEA, no coordinates, only `unit geoclue.service`.
+Both stay banned, because the cost is nothing and an IMEI is the strongest
+identifier in the phone, but the **real vector is pasting full `mmcli -m any`
+output**, and saying so is what keeps the rule from rotting. §4.6's test asks
+what enforces every MUST; a MUST defended by a false claim about the code is
+the first one to be quietly dropped.
+
+**Serials: banned outright, no functional exception.** No `device.env` carries
+one and there is no `PORTHOLE_SERIAL`, so the ban costs nothing today. If
+multi-device selection ever needs one, that change adds an allowlisted key and
+its own positive control, decided with the real requirement in hand rather
+than as a guessed-at exception sitting there waiting to be used.
+
+**Match the label, not the value.** `git grep -IoE "\b[0-9A-Za-z]{12,20}\b"`
+returns 1,889 hits — register dumps, apk checksums, commit hashes. A shape
+check for "a serial" is unshippable and always will be. But pasted probe
+output arrives with its label attached, every time: `serialno:`,
+`getvar:serialno`, a `fastboot devices` line, `imei:`. Match those. It covers
+the way these values actually reach a file, at a false-positive cost of zero.
+
+**Say what is not covered.** A bare serial with no label, an SSID string, a
+screenshot: no regex catches any of them. §4.3 is right that a checklist
+claiming machine backing it does not have is worse than one admitting it is
+manual — that overpromise is precisely what let this leak through. The PR line
+must name what is scanned and what is a human's job.
+
+**Redact, do not delete.** The convention already exists in the tree and only
+needs writing down: replace the identifier with a stable angle-bracket
+pseudonym — `<ap-ch36>`, `TEST-SSID` — so the note stays readable and the
+analysis stays reproducible. *Stable* is the load-bearing word: collapsing
+three BSSIDs into one token would have destroyed the finding that the three
+are not interchangeable. Say this where people write notes, or they will strip
+the evidence instead of the identifier.
+
+**Implemented 2026-08-31.** `lib/porthole_secrets.py` holds the rules;
+`tests/test_secrets.py` runs them over everything `git ls-files` returns and is
+picked up by `make test`'s glob, so it runs in all three CI matrix jobs with no
+new job and no new Makefile target. `.githooks/commit-msg` scans the message —
+the surface no check in this repo had ever read — and `.githooks/pre-push`
+scans the range being pushed, which is the last cheap moment. `logs/` is in
+`.gitignore`: `tools/tk-capture.sh` writes there by default and brain notes
+cite it as evidence, so it fills up constantly, and it was untracked but not
+ignored — one `git add -A` from publication.
+
+**What it found on its first clean run.** Three real leaks, none of them the
+one everybody was looking at:
+
+- `docs/HANDOFF-build-tree-selection.md:156` carried the maintainer's actual
+  home path, in a line quoting `porthole doctor` output.
+- `docs/SANDBOX-PROVISIONING.md:197` carried the same login as `<user>@<ipv4>`.
+- `tests/test_slots.py:36` still held the redfin serial that caused this
+  document — 8 of its 14 characters, masked with `XXXXXX` and left in the
+  fixture. Nothing asserts on it; it is now `<serial>`, and the comment above
+  it carries the model and the date, which is what an evidence line actually
+  needs.
+
+All three are redacted. The first two had been public for weeks and no review
+caught either, which is the argument for the scanner compressed into one line.
+
+**The first draft flagged 43 things and 40 were noise** — `/home/pmos` (a fixed
+account inside the pmbootstrap chroot, not anyone's desk), `NOPASSWD: ALL` (a
+sudoers directive, not a credential), `olduser@172.16.42.1` across six test
+fixtures. That run is worth recording, because a scanner at that signal ratio
+is *worse* than none: people learn to reach for `--no-verify`, and then the
+real hit goes through with the noise. The fix came from re-reading the
+principle above — what both path rules protect is the **login**, never the path
+or the address, since `172.16.42.1` is a documented default either way. So the
+rules capture the username and check it against a closed `PLACEHOLDER_NAMES`
+set of the stand-ins this tree already uses. Adding your own login to that set
+is a visible line in a diff, which is exactly what the sentence version of this
+rule never made anyone do.
+
+**The pre-push hook refused this change's own first push**, and was right to.
+A diff is a flat list of added lines with no idea which file any of them came
+from, so every one of the scanner's own controls read as a leak on the way out.
+Grouping the added lines by file is what carries the single exemption to the
+push surface, and it is a pure function with its own test, because it is the
+only place a push is decided — `_classify`'s docstring says why in §4.7: a pure
+function is one that can be wrong in a test instead of on a device.
+
+**Two classes were upgraded from manual while implementing:**
+
+- **Screenshots.** No regex reads an image, but the extension is exact. Raster
+  formats are refused outright; SVG is not, because a diagram is not a
+  photograph of someone's device. Zero are tracked today, so the rule is free
+  and stays green until the day it matters.
+- **Both directions, on every rule.** `brain/laws/every-test-needs-a-positive-control.md`
+  is read strictly here: each rule must match its own positive control *and*
+  stay silent on a counter-example. For the MAC rule that counter-example is a
+  randomised address out of `taimen-has-no-factory-wlan-mac.md`, so the suite
+  fails the moment the rule widens into eating the evidence in the two findings
+  it was written around. A one-directional test would have let exactly that
+  happen.
+
+**Still manual**, and the PR template now says so rather than overpromising a
+second time: a bare serial with no label, an SSID, a location, and anything
+inside an image.
 
 ### 4.6 Reorganising the rules so agents run them
 
@@ -374,34 +519,39 @@ certifies the bug.
   does, his local clone still holds the serial and will re-publish it on his
   next push.
 - **The hook is opt-in.** Any clone that has not run
-  `git config core.hooksPath .githooks` has no governance at all. §4.4's CI job
-  is what makes this safe; until it exists, the trailer ban depends on every
-  contributor having run one command nobody checks.
+  `git config core.hooksPath .githooks` runs no hook at all. For secrets that
+  no longer matters: `tests/test_secrets.py` applies the same rules in CI
+  whatever the local config says. The trailer ban still depends on every
+  contributor having run one command nobody checks, which is why it is now the
+  first item in §6.
 - `CONTRIBUTING.md` is absent from git entirely. Anyone who onboards from a
   clone gets `AGENTS.md` or nothing.
 
 ## 6. The next concrete step
 
-Decide §4.5's sensitive list — it is the only item blocked on a human, and
-§4.5's implementation and §4.6's manifest both encode the answer. Then build in
-this order, because each step's enforcer is what makes the previous step's rule
-real:
+§4.5's sensitive list is decided and **built** (2026-08-31): `logs/` is
+ignored, `lib/porthole_secrets.py` and `tests/test_secrets.py` exist and reach
+CI through `make test`'s glob, both hooks are wired, and the three leaks the
+scanner found on its first run are redacted. The hole this session opened is
+closed.
 
-1. `tests/test_secrets.py`, scanning everything tracked, with a positive
-   control per pattern.
-2. The `secrets` CI job, plus `commit-msg` and `pre-push` hook stages.
-3. A CI check that the trailer ban holds regardless of local hook config.
-4. The rules manifest and `tests/test_rules.py`.
-5. `AGENTS.md` shrunk to narrative plus rule ids; `CONTRIBUTING.md` written and
+What is left, in order, because each step's enforcer is what makes the previous
+step's rule real:
+
+1. A CI check that the trailer ban holds regardless of local hook config. It is
+   the same defect the secrets rule just had — an opt-in hook — and it is now
+   the only rule left standing on a command nobody checks was run.
+2. The rules manifest and `tests/test_rules.py`.
+3. `AGENTS.md` shrunk to narrative plus rule ids; `CONTRIBUTING.md` written and
    committed, pointing at the manifest rather than restating it.
-6. Branch-name advisory, PR template additions, and the review-comment rules
-   in §4.3.
-7. Coding conventions (§4.7): the stdlib-only test and the exit-code-table
+4. Branch-name advisory, PR template additions beyond the secrets line, and the
+   review-comment rules in §4.3.
+5. Coding conventions (§4.7): the stdlib-only test and the exit-code-table
    test first, since both are green today and cheap; then the written
    conventions, cited by rule id rather than restated.
 
-Steps 1–3 close the hole this session opened. Steps 4–7 are what stop the next
-one, and they are the ones that will get skipped if the list is worked from the
+Step 1 closes the last opt-in-hook hole. Steps 2–5 are what stop the next one,
+and they are the ones that will get skipped if the list is worked from the
 bottom.
 
 **One caution for whoever implements this.** Do not let the manifest become a

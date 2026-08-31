@@ -153,7 +153,7 @@ debug1: Offering public key: /run/porthole/device_key ED25519 SHA256:Ap+c...
 The container reaches the phone fine; **the sandbox's device key is simply not
 in the phone's `~/.ssh/authorized_keys`**, most likely lost in the fresh install
 noted in a recent taimen handoff. `porthole doctor` reports
-`✓ device key /home/user/.porthole/device_key` — it checks the key *exists*,
+`✓ device key /var/home/<user>/.porthole/device_key` — it checks the key *exists*,
 not that the device accepts it, so doctor is green while every workspace push
 fails.
 

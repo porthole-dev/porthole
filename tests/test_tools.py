@@ -24,10 +24,11 @@ VALID_SCOPE = re.compile(r"^(generic|soc:[a-z0-9_-]+|device:[a-z0-9-]+)$")
 VALID_NEEDS = re.compile(
     r"^(-(\s|$)|BOOTED\b|FASTBOOT\b|FROZEN\b|INITRAMFS\b|any\b|on-device\b)")
 
-# Anything that would make a tool work only for its original author.
-PERSONAL = re.compile(
-    r"(/home/[a-z][a-z0-9_-]*|/var/home/[a-z][a-z0-9_-]*|"
-    r"\b[a-z][a-z0-9_-]*@\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})")
+# Personal paths and hosts moved to lib/porthole_secrets.py, scanned over
+# everything git tracks by tests/test_secrets.py. Scanning tools() was the
+# defect: the serial that prompted it landed in tests/, profiles/, brain/ and a
+# commit message, none of which this file has ever looked at. Do not re-add a
+# copy here -- duplication with drift is worse than either copy alone.
 
 # The pmOS USB-gadget address is a real default, not a personal one. It is
 # legitimate in lib/ and in a profile; in a tool it should come from config.
@@ -105,17 +106,6 @@ def test_device_scoped_tools_live_in_a_profile():
         if scope.startswith("device:") and not in_profile:
             bad.append(f"{path.name}: {scope} but lives in tools/")
     assert not bad, "\n  ".join(bad)
-
-
-def test_no_personal_paths_or_hosts():
-    """The whole point of the config layer. A home directory or a user@ip in a
-    tool means it works on exactly one desk."""
-    bad = []
-    for path in tools():
-        for m in PERSONAL.finditer(path.read_text(errors="replace")):
-            bad.append(f"{path.name}: {m.group(0)!r}")
-    assert not bad, ("personal paths/hosts must come from config:\n  "
-                     + "\n  ".join(bad))
 
 
 def test_no_hardcoded_gadget_ip_outside_config():

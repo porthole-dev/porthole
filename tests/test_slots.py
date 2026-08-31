@@ -28,12 +28,12 @@ GETVAR = """\
 all: Done!!
 """
 
-# A redfin (Pixel 5) in fastboot, 2026-08-31, serial 0A31XXXXXX068X. fastboot
+# A redfin (Pixel 5) in fastboot, 2026-08-31. fastboot
 # writes `key:value` with no space after the colon; this is the spelling the
 # parser has to live on, not a variant of it.
 GETVAR_REAL = """\
 (bootloader) product:redfin
-(bootloader) serialno:0A31XXXXXX068X
+(bootloader) serialno:<serial>
 (bootloader) slot-count:2
 (bootloader) current-slot:a
 (bootloader) slot-unbootable:a:no

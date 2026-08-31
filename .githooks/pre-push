@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Scan what is about to be published: the added lines of the range, and the
+# commit messages in it.
+#
+# This is the last cheap moment, and that is the entire reason the hook exists
+# rather than an audit afterwards. Once pushed, the commits resolve by SHA
+# through the GitHub API forever -- rewriting the branch and deleting it
+# removes the reachable copies and nothing else, and only GitHub Support can
+# purge the rest. That was measured, not assumed. See
+# docs/HANDOFF-contribution-rules.md section 2.
+#
+# Opt-in, like every hook here: git config core.hooksPath .githooks
+# Which is why tests/test_secrets.py runs the same scanner over the whole
+# tracked tree, where CI reaches it no matter what anyone's local config says.
+set -e
+exec python3 "$(git rev-parse --show-toplevel)/lib/porthole_secrets.py" --push
