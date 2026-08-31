@@ -260,5 +260,124 @@ if grep -q 'TK_BASEIMG:-/tmp' "$ROOT/tools/ph-build.sh"; then
         "the container does not mount the host's /tmp"
 else ok; fi
 
+# --- the module stack: what `mod` has to take off before it can reload ------
+#
+# `porthole build mod ath10k_core` compiled, pushed, and gave up: "loaded and
+# still held". tkmod looked for /sys/bus/{i2c,platform}/drivers/<the module it
+# is replacing>, which is the camera sensor it was written for and nothing
+# stacked -- ath10k_core has no devices of its own, ath10k_snoc holds it, and
+# unbinding a directory that does not exist unbinds nothing. Measured on
+# taimen 2026-08-31: 78 of 286 loaded modules have holders.
+#
+# tools/tk-modstack.sh is a FILE so that this can run it. The alternative is
+# finding out whether the script that unloads a wifi driver is correct by
+# unloading a wifi driver.
+
+# A fixture sysfs shaped like the real one, two levels deep and with the
+# diamond that matters: cfg80211 reaches ath10k_core directly AND through
+# mac80211.
+mkdir -p "$TMP/sys/module"/{ath,ath10k_snoc,ath10k_core,mac80211,cfg80211,imx179}/holders
+: > "$TMP/sys/module/ath10k_core/holders/ath10k_snoc"
+: > "$TMP/sys/module/mac80211/holders/ath10k_core"
+for h in ath ath10k_core mac80211; do : > "$TMP/sys/module/cfg80211/holders/$h"; done
+rmdir "$TMP/sys/module/imx179/holders"   # a module with no holders at all
+
+ms() { SYS="$TMP/sys" bash -c '. tools/tk-modstack.sh; "$@"' _ "$@"; }
+
+is "a module nothing stacks on has an empty stack" "$(ms ms_stack imx179)" ""
+is "the one-level case is the module that holds it" \
+   "$(ms ms_stack ath10k_core)" "ath10k_snoc"
+
+# Removal order, not merely membership: rmmod fails on a module that is still
+# held, so ath10k_snoc must precede ath10k_core and ath10k_core must precede
+# mac80211. Listing cfg80211's holders in the order sysfs reports them --
+# ath, ath10k_core, mac80211 -- fails on the second one.
+stack=$(ms ms_stack cfg80211)
+is "every holder appears once, however many ways it is reached" \
+   "$(echo "$stack" | tr ' ' '\n' | sort | tr '\n' ' ')" \
+   "ath ath10k_core ath10k_snoc mac80211 "
+deepest_first() { # deepest_first LIST A B -> "ok" when A comes before B
+    local i=0 a=0 b=0
+    for m in $1; do i=$((i+1)); [ "$m" = "$2" ] && a=$i; [ "$m" = "$3" ] && b=$i; done
+    [ "$a" -gt 0 ] && [ "$b" -gt 0 ] && [ "$a" -lt "$b" ] && echo ok
+}
+is "the holder of a holder comes off first" \
+   "$(deepest_first "$stack" ath10k_snoc ath10k_core)" "ok"
+is "a module comes off before the one it holds" \
+   "$(deepest_first "$stack" ath10k_core mac80211)" "ok"
+is "the stack goes back together in the other order" \
+   "$(ms ms_reverse 'a b c')" "c b a"
+
+# --- the guardrail --------------------------------------------------------
+#
+# Unloading the driver you are reaching the device over does not fail, it
+# strands: the rmmod succeeds, the link drops, and nothing is left to run the
+# modprobe that would bring it back. Over usb0 an ath10k reload is safe, which
+# is why this must not simply refuse everything stacked.
+mkdir -p "$TMP/sys/class/net/wlan0/device/driver" \
+         "$TMP/sys/class/net/usb0/device/driver" "$TMP/bin"
+ln -sf "$TMP/sys/module/ath10k_snoc" "$TMP/sys/class/net/wlan0/device/driver/module"
+ln -sf "$TMP/sys/module/libcomposite" "$TMP/sys/class/net/usb0/device/driver/module"
+mkdir -p "$TMP/sys/module/libcomposite/holders"
+printf '#!/bin/sh\necho "$3 dev $IFACE src 172.16.42.1"\n' > "$TMP/bin/ip"
+chmod +x "$TMP/bin/ip"
+
+conflict() { # conflict IFACE MODULE -> what it refuses to unload, if anything
+    IFACE=$1 SYS="$TMP/sys" PATH="$TMP/bin:$PATH" SSH_CONNECTION="172.16.42.2 1 172.16.42.1 22" \
+        bash -c '. tools/tk-modstack.sh; ms_conflict "$1"' _ "$2"
+}
+is "reloading over wifi refuses, and names what carries the session" \
+   "$(conflict wlan0 ath10k_core)" "ath10k_snoc"
+is "the transport module itself is refused too" \
+   "$(conflict wlan0 ath10k_snoc)" "ath10k_snoc"
+is "the same reload over usb0 is allowed" "$(conflict usb0 ath10k_core)" ""
+is "an unrelated module over wifi is allowed" "$(conflict wlan0 imx179)" ""
+# Refusing because the transport could not be identified would block the rung
+# far more often than the hazard it guards.
+is "no ssh session to reason about fails open" \
+   "$(SYS="$TMP/sys" bash -c '. tools/tk-modstack.sh; ms_conflict ath10k_core')" ""
+
+# --- unbind, on whatever bus the module actually sits on -------------------
+d="$TMP/sys/bus/platform/drivers/ath10k_snoc"
+mkdir -p "$d/18800000.wifi" "$TMP/sys/module/ath10k_snoc"
+ln -sf "$TMP/sys/module/ath10k_snoc" "$d/module"   # a real link, not a device
+ln -sf "$d" "$d/18800000.wifi/driver"              # what a bound device has
+: > "$d/unbind"; : > "$d/bind"; : > "$d/uevent"
+printf '#!/bin/sh\nexec "$@"\n' > "$TMP/bin/sudo"; chmod +x "$TMP/bin/sudo"
+SYS="$TMP/sys" PATH="$TMP/bin:$PATH" bash -c '. tools/tk-modstack.sh; ms_unbind ath10k_snoc'
+is "the bound device is unbound" "$(cat "$d/unbind")" "18800000.wifi"
+
+# --- and tkmod actually uses all of it -------------------------------------
+reload=$(sed -n "$(grep -Fn 'cat "$modstack"' tools/ph-build.sh | cut -d: -f1 | head -1),\
+$(grep -Fn "loaded \$name'\"" tools/ph-build.sh | cut -d: -f1 | head -1)p" tools/ph-build.sh)
+before() { # before A B -> "ok" when A appears before B in the reload script
+    local a b
+    a=$(printf '%s\n' "$reload" | grep -n -- "$1" | head -1 | cut -d: -f1)
+    b=$(printf '%s\n' "$reload" | grep -n -- "$2" | head -1 | cut -d: -f1)
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && echo ok
+}
+is "the reload asks what holds the module"  "$(before 'ms_stack' 'rmmod')" "ok"
+# Decided before anything comes off, or the refusal arrives after the damage.
+is "the transport is checked before the first rmmod" \
+   "$(before 'ms_conflict' 'rmmod')" "ok"
+# A failed insmod that leaves a wifi driver unloaded is worse than a failed
+# insmod, so the stack goes back before the exit-3 branch reports one.
+is "the stack is restored before the failure is reported" \
+   "$(before 'ms_reverse' 'exit 3')" "ok"
+
+# The escaping is the part that cannot be eyeballed. Render the script tkmod
+# would actually send -- variables expanded, quoting resolved -- and check
+# that it is sh at all. It unloads a wifi driver; finding out on the phone is
+# not a plan.
+{ printf 'ssh() { printf "%%s\\n" "${@: -1}"; }\nTK_SSH_OPTS=(-q)\nphone=fake\n'
+  printf 'name=ath10k_core\n_PH_REPO_ROOT=%s\nmodstack=$_PH_REPO_ROOT/tools/tk-modstack.sh\n' "$ROOT"
+  printf '%s\n' "$reload" | tr -d '\t'; } > "$TMP/emit.sh"
+bash "$TMP/emit.sh" > "$TMP/payload.sh" 2>/dev/null
+if sh -n "$TMP/payload.sh" 2>/dev/null; then ok; else
+    bad "the script tkmod sends is valid sh" "$(sh -n "$TMP/payload.sh" 2>&1 | head -3)"; fi
+is "the module name reached the payload" \
+   "$(grep -c 'ms_stack ath10k_core' "$TMP/payload.sh")" "1"
+
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

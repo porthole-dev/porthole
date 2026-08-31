@@ -1578,15 +1578,33 @@ tkmod() {
 	# insmod then fails with "File exists", which reads like a stale file rather
 	# than a busy module. Unbind every device first, then reload and let it
 	# re-probe (camss re-registers its media device when the subdev comes back).
-	ssh "${TK_SSH_OPTS[@]}" "$phone" "set -e
-		d=/sys/bus/i2c/drivers/$name
-		[ -d \$d ] || d=/sys/bus/platform/drivers/$name
-		if [ -d \$d ]; then
-			for dev in \$(ls \$d | grep -E '^[0-9]'); do
-				echo \$dev | sudo tee \$d/unbind >/dev/null 2>&1 || true
+	# The reader half of the reload lives in a file so the tests can run it
+	# against a fixture sysfs; it is pasted in here rather than pushed because
+	# it must be in place before anything is torn down.
+	local modstack="$_PH_REPO_ROOT/tools/tk-modstack.sh"
+	[ -f "$modstack" ] || { echo ">> missing $modstack"; return 1; }
+	local stack_down=""
+	ssh "${TK_SSH_OPTS[@]}" "$phone" "$(cat "$modstack")
+		set -e
+
+		# Everything holding $name, deepest first. A module with devices of
+		# its own has an empty stack and this is the old behaviour exactly.
+		stack=\$(ms_stack $name)
+		[ -z \"\$stack\" ] || echo \">> stack above $name:\$stack\"
+
+		# Decided BEFORE anything is unloaded, and the module is still
+		# installed below either way -- so a refusal leaves the device exactly
+		# as it was, with the new build on disk for the next boot.
+		if carrier=\$(ms_conflict $name); then held=1; else held=; fi
+
+		if [ -z \"\$held\" ]; then
+			for h in \$stack; do
+				ms_unbind \$h
+				sudo rmmod \$h 2>/dev/null || true
 			done
+			ms_unbind $name
+			sudo rmmod $name 2>/dev/null || true
 		fi
-		sudo rmmod $name 2>/dev/null || true
 
 		# Overwrite every installed copy so modprobe agrees with insmod.
 		# Only the RUNNING kernel's tree -- /lib/modules also holds stale
@@ -1620,18 +1638,48 @@ tkmod() {
 			echo '>>   build. insmod below still loads it for this boot.'
 		fi
 
+		# Refused above: the install has happened, nothing has been unloaded,
+		# and the session that would have had to survive the reload is intact.
+		if [ -n \"\$held\" ]; then
+			echo \">> REFUSING: \$carrier drives the interface this ssh arrived on.\"
+			echo \">> Unloading $name would take \$carrier down with it and there\"
+			echo \">> would be nothing left to run the modprobe that brings it back.\"
+			echo \">> The copy on disk IS updated -- reboot to run it, or re-run\"
+			echo \">> over a transport this module does not carry.\"
+			exit 4
+		fi
+
 		# insmod's failure modes are not interchangeable, and conflating them
 		# is what makes a busy module read as a build error.
+		rc=0
 		if ! out=\$(sudo insmod /tmp/$name.ko 2>&1); then
 			case \"\$out\" in
-			*'File exists'*|*'Device or resource busy'*)
-				echo \">> $name is loaded and still held, so it could not be unloaded.\"
-				echo \">> The copy on disk IS updated -- reboot to run it, or unbind\"
-				echo \">> whatever holds it and re-run.\"
-				exit 3 ;;
+			*'File exists'*|*'Device or resource busy'*) rc=3 ;;
 			*)
 				echo \">> insmod failed: \$out\"; exit 1 ;;
 			esac
+		fi
+
+		# Put the stack back whatever happened above, and put it back FIRST.
+		# A failed insmod that leaves a wifi driver unloaded is worse than a
+		# failed insmod, and the window with the chip powered off is where
+		# taimen floods dmesg with the level-IRQ storm.
+		down=
+		for h in \$(ms_reverse \"\$stack\"); do
+			sudo modprobe \$h 2>/dev/null || true
+			grep -q \"^\$h \" /proc/modules || down=\"\$down \$h\"
+		done
+
+		if [ \$rc -eq 3 ]; then
+			echo \">> $name is loaded and still held, so it could not be unloaded.\"
+			echo \">> The copy on disk IS updated -- reboot to run it, or unbind\"
+			echo \">> whatever holds it and re-run.\"
+			exit 3
+		fi
+		if [ -n \"\$down\" ]; then
+			echo \">> the new $name is loaded, but this did not come back:\$down\"
+			echo \">> the stack is DOWN -- reboot to restore it.\"
+			exit 5
 		fi
 		echo '>> loaded $name'"
 	case $? in
@@ -1639,6 +1687,12 @@ tkmod() {
 		3) echo ">> not reloaded this boot -- skipping the srcversion check,"
 		   echo ">>   which would report the OLD module and read as a bad build."
 		   return 3 ;;
+		4) echo ">> not reloaded: this module carries the link you are on."
+		   echo ">>   the build is fine and installed; nothing was torn down."
+		   return 4 ;;
+		# The module IS the new one, so the proof below still runs and still
+		# means something. The stack being down is reported after it.
+		5) stack_down=1 ;;
 		*) return 1 ;;
 	esac
 
@@ -1671,6 +1725,9 @@ tkmod() {
 			exit 1; fi
 		echo '>> verified: running $name is the build just pushed ($want)'" || return 1
 	_ph_pushed_write
+	[ -z "$stack_down" ] || {
+		echo ">> ...but the stack above $name did not come back. Reboot."
+		return 5; }
 }
 
 # FAST loop for DTS and built-in code: make, repack, RAM-boot. No pmbootstrap.
