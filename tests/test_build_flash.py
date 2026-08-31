@@ -786,5 +786,117 @@ def test_the_shell_and_python_agree_on_a_relative_tree():
                                    "PORTHOLE_KERNEL_TREE": "linux-ws"})), out
 
 
+# --------------------------------------------------------- tree selection ---
+# `porthole build` defaulted to $PORTHOLE_WORKDIR/linux and stopped there. On
+# the taimen repo that is a stale topic branch sitting beside the worktree that
+# holds the product branch, so a whole session typed PORTHOLE_KERNEL_TREE by
+# hand. What makes it more than typing: the refusal that caught it compared
+# VERSION tokens (6.18 vs 7.2), so two trees on ONE version and different
+# branches would have built the stale one in silence.
+
+def _branches(mapping):
+    """(branch_of, lister) for a pretend repo, so the decision is tested
+    without a git checkout -- the same reason _classify is pure."""
+    return mapping.get, (lambda _base: sorted(mapping))
+
+
+def test_autoselect_picks_the_one_tree_on_the_product_branch():
+    import porthole_cmd_build as build
+    branch_of, lister = _branches({"/w/linux": "wifi-disablekey-test",
+                                   "/w/linux-ws": "taimen-v7.2"})
+    got = build._autoselect_tree("/w", "/w/linux", "taimen-v7.2",
+                                 branch_of, lister)
+    assert got == "/w/linux-ws", got
+
+
+def test_autoselect_refuses_when_two_trees_match():
+    """Silently choosing between two candidates is how a half-finished branch
+    gets flashed. The bar is 'there is exactly one right answer'."""
+    import porthole_cmd_build as build
+    branch_of, lister = _branches({"/w/linux": "stale", "/w/linux-a": "v7.2",
+                                   "/w/linux-b": "v7.2"})
+    assert build._autoselect_tree("/w", "/w/linux", "v7.2",
+                                  branch_of, lister) == ""
+
+
+def test_autoselect_refuses_when_no_tree_matches():
+    import porthole_cmd_build as build
+    branch_of, lister = _branches({"/w/linux": "stale", "/w/linux-ws": "other"})
+    assert build._autoselect_tree("/w", "/w/linux", "v7.2",
+                                  branch_of, lister) == ""
+
+
+def test_autoselect_does_nothing_when_the_default_is_already_right():
+    import porthole_cmd_build as build
+    branch_of, lister = _branches({"/w/linux": "v7.2", "/w/linux-ws": "v7.2"})
+    assert build._autoselect_tree("/w", "/w/linux", "v7.2",
+                                  branch_of, lister) == ""
+
+
+def test_autoselect_does_nothing_without_a_product_branch():
+    """PORTHOLE_KERNEL_BRANCH is the only thing that says which branch is the
+    product. Unset, there is no right answer for a tree to be the only one of."""
+    import porthole_cmd_build as build
+    branch_of, lister = _branches({"/w/linux": "a", "/w/linux-ws": "b"})
+    assert build._autoselect_tree("/w", "/w/linux", "",
+                                  branch_of, lister) == ""
+
+
+def test_autoselect_does_nothing_when_the_default_branch_is_unreadable():
+    """A detached or unreadable HEAD is not evidence the default is wrong --
+    and inside the workspace container every worktree reads that way, which is
+    why this decision is made on the host and not in ph-build.sh."""
+    import porthole_cmd_build as build
+    branch_of, lister = _branches({"/w/linux": "", "/w/linux-ws": "v7.2"})
+    assert build._autoselect_tree("/w", "/w/linux", "v7.2",
+                                  branch_of, lister) == ""
+
+
+def test_autoselect_never_picks_the_default_itself():
+    import porthole_cmd_build as build
+    branch_of, lister = _branches({"/w/linux": "v7.2"})
+    assert build._autoselect_tree("/w", "/w/linux", "v7.2",
+                                  branch_of, lister) == ""
+
+
+def test_a_detached_head_reads_as_no_branch():
+    """git prints the literal word HEAD for a detached checkout, and treating
+    that as a branch name would let it match a branch called HEAD."""
+    import porthole_cmd_build as build
+    with tempfile.TemporaryDirectory() as tmp:
+        assert build._branch_of(tmp) == ""
+
+
+def test_autoselect_finds_a_real_worktree_on_the_product_branch():
+    """The seam above is pure; this proves the wiring. A real repo with a real
+    worktree, because the whole defect was that the obvious implementation
+    silently never fired against the thing it was meant to find."""
+    import porthole_cmd_build as build
+    with tempfile.TemporaryDirectory() as tmp:
+        work = pathlib.Path(tmp)
+        main = work / "linux"
+        main.mkdir()
+        git = ["git", "-C", str(main)]
+        env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null",
+                   GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        quiet = {"capture_output": True, "env": env}
+        subprocess.run(["git", "init", "-q", "-b", "stale", str(main)], **quiet)
+        (main / "Makefile").write_text("VERSION = 7\n")
+        subprocess.run([*git, "add", "-A"], **quiet)
+        subprocess.run([*git, "commit", "-qm", "x"], **quiet)
+        subprocess.run([*git, "worktree", "add", "-q", "-b", "taimen-v7.2",
+                        str(work / "linux-ws")], **quiet)
+        got = build._autoselect_tree(str(work), str(main), "taimen-v7.2",
+                                     build._branch_of)
+        assert got == str(work / "linux-ws"), got
+        # And it must NOT fire once the default is on the product branch.
+        subprocess.run([*git, "checkout", "-q", "-b", "other"], **quiet)
+        subprocess.run([*git, "branch", "-qm", "other", "taimen-v7.2-main"], **quiet)
+        got2 = build._autoselect_tree(str(work), str(main), "stale",
+                                      build._branch_of)
+        assert got2 == "", got2
+
+
 if __name__ == "__main__":
     sys.exit(main())
