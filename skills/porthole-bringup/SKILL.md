@@ -213,30 +213,35 @@ patched. `brain/findings/the-workspace-caches-kernel-compiles.md`.
 
 ## Non-negotiable
 
-**Never hand-roll what a tool does.** Writing `ssh ... reboot` or `sleep 60`
-means you have not found the tool yet. `ls tools/` is over 90 files — list the
-whole directory before concluding something does not exist.
+<!-- BEGIN GENERATED RULES -->
+- **Never hand-roll what a tool already does** — writing `ssh ... reboot` or `sleep 60` means you have not found the tool yet -- `porthole tools --grep <what>`
+  (`no-hand-rolling` · **MUST**)
+- **Take the device mutex, declaring the state you need** — the-lock-says-who-not-what; exit 75 means retry, exit 76 means something must move the device first
+  (`device-mutex` · **MUST**)
+- **Found the device in a state you did not put it in? Say so and hand back** — it is usually someone else's measurement in progress, not a fault, and recovering it destroys their run
+  (`hand-back-a-device-you-did-not-set` · **SHOULD**)
+- **Confirm before anything irreversible** — flashing, set_active, thermal ramps -- a bad image on the wrong slot leaves a device that will not boot and cannot be talked to
+  (`confirm-before-irreversible` · **MUST**)
+- **Never ask for host root; builds go through `porthole sandbox`** — the sandbox grants zero standing host privilege, and a tool that escalates on the host is the one bug this design exists to prevent
+  (`no-host-root` · **MUST**)
+- **Never hardcode an IP, username, slot letter or package name** — every one of them comes from the config layer; a hardcoded value is a tool that works on exactly one desk
+  (`no-hardcoded-values` · **MUST**)
+- **Prove the code under test actually ran, and decide the control first** — every-test-needs-a-positive-control; a null from a path that never executed is not a refutation
+  (`prove-it-ran` · **SHOULD**)
+- **Write down anything that would have saved someone a session** — `porthole brain new <id>`, then lint, then submit. A session that learned something and wrote nothing down is unfinished
+  (`contribute-what-you-learn` · **SHOULD**)
+<!-- END GENERATED RULES -->
 
-**Every device command goes through the mutex, declaring the state it needs:**
+Generated from `lib/porthole_rules.py` — the full set, with levels and
+enforcers, is `AGENTS.md` section 1. The mutex call, concretely:
 
 ```sh
 TK_AGENT=<you> tools/tk-device.sh --need-booted <command>
 ```
 
-Exit 75 = lock unavailable, retry. Exit 76 = wrong state, **do not** retry;
-something must physically move the device.
-
-**Found the device in a state you did not put it in? Say so and hand back.**
-
-**Confirm before anything irreversible** — flashing, thermal ramps, anything
-that can leave a slot unbootable.
-
-**Never ask for host root.** Builds go through `porthole sandbox shell`.
-A request for sudo, or for a longer sudo timeout, is a bug in your plan
-rather than a missing permission.
-
-**Never hardcode** an IP, username, slot letter or package name. Shell:
-`. tools/tk-lib.sh`. Python: `import porthole`.
+Shell tools get the config layer with `. tools/tk-lib.sh`, python with
+`import porthole`. `ls tools/` is over 120 files — list the whole directory
+before concluding something does not exist.
 
 ## Before reporting any result
 

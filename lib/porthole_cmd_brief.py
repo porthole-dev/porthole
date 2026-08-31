@@ -18,31 +18,20 @@ import json
 import pathlib
 
 import porthole
+import porthole_rules as rules
+import porthole_secrets as secrets
 from porthole_cli import EX_OK, version
 
-# The rules an agent gets wrong most often, in the order they cause damage.
-# Kept short on purpose: a wall of text gets skimmed, and these five have each
-# cost a real session.
-RULES = [
-    ("Never hand-roll what a tool does",
-     "writing `ssh ... reboot` or `sleep 60` means you have not found the tool "
-     "yet. `porthole tools --grep <what>`."),
-    ("Take the device mutex, declaring the state you need",
-     "TK_AGENT=<you> tools/tk-device.sh --need-booted <cmd>. "
-     "Exit 75 = retry. Exit 76 = do NOT retry, something must move the device."),
-    ("Found the device in a state you did not set? Say so and hand back",
-     "it is usually someone else's measurement in progress, not a fault."),
-    ("Prove the code under test actually ran",
-     "decide which number is your control BEFORE the run. A null from a path "
-     "that never executed is not a refutation."),
-    ("Confirm before anything irreversible",
-     "flashing, thermal ramps, anything that can leave a slot unbootable."),
-    ("Contribute what you learn back to brain/",
-     "this project exists to share knowledge, not just to fix one phone. If "
-     "you established something 100% and it would have saved someone a "
-     "session: `porthole brain new <id>`, then `--lint`, then `--submit`. "
-     "A session that learned something and wrote nothing down is unfinished."),
-]
+# The rules moved to lib/porthole_rules.py, where each one names the check that
+# enforces it. They were hand-written here and had drifted from AGENTS.md and
+# the skill: this list was missing "never ask for host root" and "never
+# hardcode a value", and it is the copy an agent actually executes, because
+# section 9 tells it to run `porthole brief --json` first.
+#
+# Human output still shows the short session set -- a wall of text gets
+# skimmed, and that judgement was right. --json serves all of them with their
+# levels and enforcers, because a machine does not skim.
+RULES = rules.session_rules()
 
 
 def activity_summary(snap, holder: str = "", alive=None) -> str:
@@ -153,7 +142,10 @@ def cmd_brief(args, ctx) -> int:
             "name": cfg.get("PORTHOLE_DEVICE_NAME", ""),
             "soc": cfg.get("PORTHOLE_SOC", ""),
             "state": state,
-            "ssh_target": cfg.get("PHONE", ""),
+            # Redacted here and NOT in the human output below: this is the
+            # half that gets pasted into a note or a PR. See
+            # porthole_secrets.redact_login.
+            "ssh_target": secrets.redact_login(cfg.get("PHONE", "")),
             "profile_gaps": profile_gaps,
             "traps": _device_traps(cfg),
         },
@@ -179,7 +171,9 @@ def cmd_brief(args, ctx) -> int:
                        "re-check; scope it honestly.",
             },
         },
-        "rules": [{"rule": r, "why": w} for r, w in RULES],
+        "rules": [{"id": r.id, "level": r.level, "rule": r.statement,
+                   "why": r.why, "enforced_by": list(r.enforced_by)}
+                  for r in rules.RULES],
         "laws": _laws,
         "findings": _findings,
         "entrypoints": {
@@ -221,9 +215,9 @@ def cmd_brief(args, ctx) -> int:
                 ctx.out(f"  {ctx.out.sym('•', '-')} {trap}")
         ctx.out.blank()
         ctx.out.heading("rules that cost sessions when broken")
-        for rule, why in RULES:
-            ctx.out(f"  {ctx.out.sym('•', '-')} {ctx.out.paint(rule, 'bold')}")
-            ctx.out(f"    {ctx.out.paint(why, 'grey')}")
+        for r in RULES:
+            ctx.out(f"  {ctx.out.sym('•', '-')} {ctx.out.paint(r.statement, 'bold')}")
+            ctx.out(f"    {ctx.out.paint(r.why, 'grey')}")
         if _laws:
             ctx.out.blank()
             ctx.out.heading(f"the {len(_laws)} laws — read once, properly")
@@ -348,11 +342,15 @@ def _port_state(ctx, device: str) -> dict:
 def _from_brain(root: pathlib.Path, device: str, soc: str):
     """The laws and the findings, READ from brain/ rather than restated here.
 
-    RULES below is hand-written and stayed that way while brain/laws/ grew to
-    ten notes, so the brief showed three of them and silently omitted seven --
+    The laws were hand-written here once and stayed that way while brain/laws/
+    grew to ten notes, so the brief showed three and silently omitted seven --
     including "read the vendor before inventing a mechanism", which cost a day.
-    Writing a law had no effect on what any agent was shown. Generated now, so
-    it cannot drift again.
+    Writing a law had no effect on what any agent was shown. Read now, so it
+    cannot drift again.
+
+    RULES had the identical defect one level up and kept it longer: it was
+    hand-written while AGENTS.md and the skill grew their own copies, and the
+    three disagreed. lib/porthole_rules.py is the fix.
 
     Findings are surfaced unprompted because that is the whole point of them: a
     question already answered is only useful to someone who has not yet decided

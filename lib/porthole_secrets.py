@@ -145,6 +145,20 @@ def _placeholder(value: str) -> bool:
     return v[0] in "<$%?+-"             # a name or a shell expansion, never a secret
 
 
+def redact_login(target: str) -> str:
+    """`<user>@<host>` with the login removed. The host is not the sensitive
+    half -- 172.16.42.1 is a documented default -- and section 4.5 is explicit
+    that what both path rules protect is the login.
+
+    Exists because `porthole brief --json` publishes ssh_target, section 9 of
+    AGENTS.md tells every agent to run that first, and its output is the single
+    most likely thing to be pasted into a brain note or a PR. SECURITY.md
+    already names this class: credential material leaking into JSON output.
+    """
+    user, sep, host = target.partition("@")
+    return f"<user>{sep}{host}" if sep else target
+
+
 def scan(text: str, where: str = "-"):
     """Every rule against one blob of text. Returns [(where, line, rule, hit)]."""
     hits = []

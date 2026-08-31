@@ -94,7 +94,7 @@ for spec in $APPS; do
       printf "  round %d: ", r
       if (f!="") printf "first frame %5.0f ms   ", (f-a)*1000; else printf "first frame   n/a   "
       if (w!="") printf "WINDOW on screen %6.0f ms\n", (w-a)*1000
-      else        printf "window never appeared (40s) -- number is invalid\n" }' 
+      else        printf "window never appeared (40s) -- number is invalid\n" }'
   done
   pkill -x "$proc" 2>/dev/null
 done

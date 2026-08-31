@@ -26,10 +26,12 @@ They are written down. It is "give every rule that matters a thing that runs".
 - CI runs seven jobs (`tests` × 3.8/3.11/3.13, `console`, `lint`, `build`,
   `fresh-clone smoke`). **None of them runs the hook, and none scans for
   secrets.** The second half of that is what §4.5 has since fixed.
-- `CONTRIBUTING.md` is **not in git**. It was an untracked file in the working
-  tree at the start of this session and is gone now; `git log --all --
-  CONTRIBUTING.md` is empty. Whatever it said was never a rule anyone could
-  read from a clone.
+- A root `CONTRIBUTING.md` is **not in git**. It was an untracked file in the
+  working tree at the start of this session and is gone now; `git log --all --
+  CONTRIBUTING.md` is empty. **`docs/CONTRIBUTING.md` however is tracked**, is
+  6 KB, and is what `porthole brief` already points contributors at — a later
+  reading of this section as "there is no contributing guide at all" was
+  wrong, and §4.6's work corrected it.
 - `AGENTS.md` (26 KB) is the real contract. `brain/laws/` holds ten inviolable
   rules. `brain/workflow/` holds five method notes. There is no index saying
   which of the three a given rule lives in, or which are binding.
@@ -409,6 +411,69 @@ unimportant but because no test can decide it. Calling it a MUST while nothing
 enforces it is how a rule set loses its authority: once one MUST is decorative,
 they all read as decorative.
 
+**Implemented 2026-08-31.** `lib/porthole_rules.py` is the manifest — 27
+rules, 16 MUST and 11 SHOULD — and `tests/test_rules.py` is the test that makes
+it binding. Three things came out differently from the proposal, each because
+measuring it disagreed.
+
+**`rules.toml` is impossible here.** `tomllib` arrived in 3.11, the declared
+floor is 3.8, and `lib/` is stdlib-only — so a TOML manifest means shipping a
+parser to read the file that lists the rule against shipping parsers. The
+manifest is Python, which is also what the repo already does three times over
+(`porthole_milestones.py`, `porthole_cmd_blobs.py`, and `brief.RULES` itself).
+
+**It is not a fifth place, and that was the real finding.** The agent rules
+were in four, and they had already drifted:
+
+| rule | `AGENTS.md` §1 | `SKILL.md` | `agent-protocol.md` | `brief.RULES` |
+|---|---|---|---|---|
+| never hand-roll a tool | ✓ | ✓ | ✓ | ✓ |
+| device mutex | ✓ | ✓ | ✓ | ✓ |
+| hand back a device you did not set | ✓ | ✓ | ✓ | ✓ |
+| confirm before irreversible | ✓ | ✓ | — | ✓ |
+| **never ask for host root** | ✓ | ✓ | — | **missing** |
+| **never hardcode a value** | ✓ | ✓ | — | **missing** |
+| **ssh timeout on a reset** | ✓ | — | ✓ | **missing** |
+| **prove the code under test ran** | §2 | — | ✓ | ✓ |
+| do not sleep after a build verb | ✓ | ✓ | — | missing |
+
+`lib/porthole_cmd_brief.py` is the one that matters: §9 tells every agent to
+run `porthole brief --json` first, and it carried six of ten. **Which rules an
+agent followed depended on which file it happened to open** — the mechanism
+§4.6 blames for the serial, caught in the act. `brief` now serves the manifest:
+the human output keeps the short session set, because "a wall of text gets
+skimmed" was a correct judgement, and `--json` serves all 27 with their levels
+and enforcers, because a machine does not skim.
+
+`AGENTS.md` §1 and the skill's "Non-negotiable" now carry blocks generated
+between markers (`make rules`), the `gen-tools-doc.py` → `docs/TOOLS.md`
+pattern this repo already runs, so drift is impossible rather than merely
+detectable. `agent-protocol.md` cites ids. The narrative in all three is
+untouched — that is §6's step 3, not this one.
+
+**"Every `brain/laws/*.md` has a corresponding MUST entry" was the wrong
+test**, and writing it revealed why. The laws are methodology: only three of
+ten are machine-checkable, so restating them in the manifest would create nine
+new SHOULDs whose text immediately competes with the notes — the exact
+duplication the manifest exists to remove. `brief` already *reads* `brain/laws/`
+rather than restating it, precisely because a hand-written copy once showed
+three of ten and silently omitted seven, including one that cost a day. So the
+test asserts what actually matters: **every law on disk reaches an agent**.
+
+**The hook-only gap is declared, not hidden.** `test_every_must_is_enforced_in_ci_or_is_a_declared_hook_only_gap`
+holds a set with exactly one member — `no-trailers` — because a hook runs only
+for someone who ran `git config core.hooksPath .githooks`. Naming it means it
+cannot be forgotten, and means a second one cannot join it unnoticed. Shrinking
+that set to empty is §6 step 1.
+
+**One leak found while wiring it.** `porthole brief --json` published
+`"ssh_target": "<user>@<ipv4>"` — the maintainer's login, in the machine-readable
+output of the command §9 tells every agent to run first, and so the output most
+likely to be pasted into a brain note or a PR. `SECURITY.md` names that class
+itself: credential material leaking into JSON output. Redacted in `--json`,
+left intact in the human output, which is read on a terminal by the person who
+owns the machine.
+
 ### 4.7 Coding conventions
 
 Mostly already true in the code and almost entirely unwritten. The job is to
@@ -509,6 +574,41 @@ could not read a single real line. The test was not merely weak, it was holding
 the bug in place. A fixture nobody has checked against reality is a test that
 certifies the bug.
 
+**Implemented 2026-08-31**, in `tests/test_conventions.py` — six checks, all
+green the day they landed, which is the argument for adding them now rather
+than after the first regression.
+
+**The stdlib-only claim in this section was wrong.** "Verified: every import in
+`lib/` is stdlib" does not hold — `lib/porthole_tui/` imports `textual` and
+`rich`. That is not a defect, it is the optional console extra: CI installs
+textual for one job, and the matrix jobs run the same files without it, where
+they skip. So the rule is `lib/` is stdlib-only **outside `lib/porthole_tui/`**,
+and it is enforced in both directions — nothing outside the extra may import a
+dependency, and the carve-out cannot widen without failing.
+
+**The exit-code test found a defect on its first run.** `porthole_cli.py`
+returned a bare `130` for `KeyboardInterrupt` and the table in §6 of
+`AGENTS.md` did not mention 130 at all. A code no caller can interpret is
+exactly what `brain/laws/exit-codes-are-an-api.md` is about. It is `EX_INTERRUPT`
+now and the table has the row; the test asserts the declared constants and the
+documented table are the same set, in both directions.
+
+**File hygiene cost one line.** `.editorconfig` has demanded LF, a final
+newline and no trailing whitespace since the beginning and nothing had ever
+checked it; the tree was compliant bar a single trailing space in
+`tools/tk-firstpaint.sh`. The test then immediately caught its own author —
+the rules generator was emitting markdown's two-space hard break, which is
+trailing whitespace. That is what a check landing while it is green buys you.
+
+**`tk_*` is pinned as a literal frozen set**, and `ph_*` is required for new
+helpers, so removing a compatibility name is a visible line in a diff rather
+than a silent break for a tool outside this repo.
+
+Left as SHOULD, and honestly: 80 columns (calling it a MUST means reflowing
+~760 lines for no benefit), one logical change per commit, the pure-function
+habit, and comments that record the incident. None is machine-decidable, and
+`lib/porthole_rules.py` says so rather than pretending.
+
 ## 5. Anything currently unsafe
 
 - **The serial is public.** `477881f…` and `d1dab0e…` still resolve on GitHub
@@ -524,8 +624,9 @@ certifies the bug.
   whatever the local config says. The trailer ban still depends on every
   contributor having run one command nobody checks, which is why it is now the
   first item in §6.
-- `CONTRIBUTING.md` is absent from git entirely. Anyone who onboards from a
-  clone gets `AGENTS.md` or nothing.
+- A root `CONTRIBUTING.md` is absent from git. `docs/CONTRIBUTING.md` is not,
+  and `porthole brief` names it as the contributor entrypoint, so a clone is
+  not the blank slate this section first claimed.
 
 ## 6. The next concrete step
 
@@ -538,21 +639,28 @@ closed.
 What is left, in order, because each step's enforcer is what makes the previous
 step's rule real:
 
-1. A CI check that the trailer ban holds regardless of local hook config. It is
-   the same defect the secrets rule just had — an opt-in hook — and it is now
-   the only rule left standing on a command nobody checks was run.
-2. The rules manifest and `tests/test_rules.py`.
-3. `AGENTS.md` shrunk to narrative plus rule ids; `CONTRIBUTING.md` written and
-   committed, pointing at the manifest rather than restating it.
-4. Branch-name advisory, PR template additions beyond the secrets line, and the
-   review-comment rules in §4.3.
-5. Coding conventions (§4.7): the stdlib-only test and the exit-code-table
-   test first, since both are green today and cheap; then the written
-   conventions, cited by rule id rather than restated.
+§4.6 and the checkable half of §4.7 are **done** (2026-08-31):
+`lib/porthole_rules.py` is the manifest, `tests/test_rules.py` makes MUST mean
+something, `tests/test_conventions.py` holds the six conventions a test can
+decide, and the four drifting copies of the agent rules are one source plus
+generated views.
 
-Step 1 closes the last opt-in-hook hole. Steps 2–5 are what stop the next one,
-and they are the ones that will get skipped if the list is worked from the
-bottom.
+What is left:
+
+1. A CI check that the trailer ban holds regardless of local hook config. It is
+   the same defect the secrets rule had — an opt-in hook — and it is now the
+   only member of `test_rules.py`'s `HOOK_ONLY` set. That set reaching empty is
+   what finishes this.
+2. `AGENTS.md` shrunk: the generated block is authoritative now, so the ten
+   narrative subsections under §1 can lose their restatements and keep their
+   reasoning. `docs/CONTRIBUTING.md` updated to point at the manifest.
+3. Branch-name advisory and the remaining §4.3 review-comment rules.
+4. The SHOULDs that could become MUSTs if someone writes the check: a mutex
+   rule covering tools rather than just their headers, and a `no-hardcoded-values`
+   check that looks for more than the gadget IP.
+
+Step 1 closes the last opt-in-hook hole. The rest is narrowing what SHOULD
+means, which is a better problem than the one this document opened with.
 
 **One caution for whoever implements this.** Do not let the manifest become a
 second place where rules are written, drifting from the first. The test in
