@@ -634,11 +634,14 @@ def test_every_module_staging_path_strips_btf():
     stagers, missing = [], []
     for path in sorted(list((root / "tools").glob("*.sh"))):
         text = path.read_text(errors="replace")
-        # A path that stages a module for the device: it must transfer a .ko
-        # (scp is the evidence of transfer, not just loading).
+        # A path that stages a module for the device: it must transfer a .ko.
+        # We search for common transfer verbs (scp, rsync, sftp) not bare ssh,
+        # which would match scripts that run commands on the device without
+        # transferring files (pipe-based pushes like `cat | ssh ... cat >dest`
+        # stay outside this boundary, which is accepted as a tradeoff).
         if not re.search(r"\.ko\b", text):
             continue
-        if not re.search(r"\bscp\b", text):
+        if not re.search(r"\b(scp|rsync|sftp)\b", text):
             continue
         stagers.append(path.name)
         if "tk-strip-btf.py" not in text:
