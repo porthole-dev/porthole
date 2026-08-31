@@ -9,6 +9,7 @@ nothing and something red happened".
 """
 from __future__ import annotations
 
+import errno
 import os
 import pathlib
 import platform
@@ -149,6 +150,26 @@ def install_hint(tool: str, family: str) -> str:
             or f"install {tool} with your package manager")
 
 
+# (tool, config key, required, why, version flag)
+#
+# The version flag is per-tool and it matters: `ssh --version` is not a thing.
+# ssh rejects it with exit 255 and a usage block, so probing every tool the
+# same way reported a perfectly good ssh as FAIL on the first host this ran
+# on -- the same false verdict this check exists to remove, pointing the other
+# way. A tool is asked the question it answers.
+HOST_TOOLS = (
+    ("ssh", None, True, "every device command goes over ssh", "-V"),
+    ("fastboot", "FASTBOOT", True,
+     "the only reliable way to reach the bootloader", "--version"),
+    ("adb", "ADB", False,
+     "only for talking to a stock or recovery system", "--version"),
+    ("pmbootstrap", None, False,
+     "needed to build and flash, not to probe", "--version"),
+    ("shellcheck", None, False,
+     "only for `make lint` when contributing", "--version"),
+)
+
+
 class Checks:
     """Collects verdicts.
 
@@ -178,9 +199,100 @@ class Checks:
         return out
 
 
+def _first_line(text: str) -> str:
+    lines = (text or "").strip().splitlines()
+    return lines[0][:120] if lines else ""
+
+
 def _resolve(cfg, key, default):
+    """Where a host tool is, or None.
+
+    The isfile fallback used to accept any file that EXISTS. shutil.which
+    enforces X_OK; this branch did not -- so a config naming a non-executable
+    file rendered `ok` on FASTBOOT, a REQUIRED row whose entire purpose is to
+    fail when the bootloader is unreachable.
+    """
     value = cfg.get(key) or default
-    return shutil.which(value) or (value if os.path.isfile(value) else None)
+    if not value:
+        return None
+    found = shutil.which(value)
+    if found:
+        return found
+    return value if (os.path.isfile(value)
+                     and os.access(value, os.X_OK)) else None
+
+
+def _runs(path: str, flag: str = "--version") -> str:
+    """"" if the tool actually executes, else a one-line reason it did not.
+
+    `flag` is per-tool and not a detail: `ssh --version` is not a thing. ssh
+    rejects it with exit 255 and a usage block, so probing every tool the same
+    way failed a perfectly good ssh on the first host this ran on. The flag
+    each tool actually supports lives in check_host's table, beside the other
+    per-tool facts.
+
+    Presence is not the question doctor is asked. A +x script whose shebang
+    interpreter no longer exists passes shutil.which and dies at exec with 126
+    -- the ordinary pipx failure, a venv whose base python was removed or
+    version-bumped, and routine on an rpm-ostree host like the reference one.
+    Doctor printed `ok` for such a pmbootstrap for as long as the check
+    existed, and the first symptom was a build failing much later for reasons
+    that named neither doctor nor the interpreter.
+
+    The failure this catches was found and first fixed by Alessandro Ianne in
+    PR #2, which probed it by parsing the shebang and checking the interpreter
+    exists. That probe catches strictly less than running the tool -- it passes
+    a live interpreter whose venv is broken, which is the more common pipx
+    failure -- and its stated reason for avoiding execution ("a pmbootstrap
+    without a config file exits non-zero on every invocation") does not hold
+    for --version, which argparse answers before any config is read. Both are
+    measured in brain/findings/a-shebang-probe-is-a-subset-of-running-the-tool.md,
+    which keeps that implementation as the reference it deserves to be. Naming
+    the interpreter, in _shebang() below, is its idea and a good one.
+
+    Deliberately NOT porthole_cmd_version's cached tool_version(): doctor must
+    work when the build path is broken -- see _envkernel_candidates, which
+    duplicates ph-build.sh's search for the same reason -- and a cache is one
+    more thing that can be stale exactly when doctor is asked. The cost is
+    ~223ms, dominated by pmbootstrap starting a second interpreter (the repo's
+    own measurement, in porthole_cmd_version), against device rows that
+    already spend 8s apiece.
+    """
+    try:
+        proc = subprocess.run([path, flag], capture_output=True,
+                              text=True, timeout=10)
+    except OSError as exc:
+        # A broken shebang reaches us as ENOENT, because the kernel resolves
+        # the INTERPRETER and cannot find it. Reported raw, that is "no such
+        # file" about a file the user can plainly see -- the same misleading
+        # shape this check exists to remove. A shell prints 126 here and says
+        # `bad interpreter`; say the same thing, and name the interpreter.
+        if exc.errno == errno.ENOENT and os.path.exists(path):
+            return "{} has a bad interpreter{}".format(
+                path, _shebang(path)) + " -- it cannot start"
+        return "{} does not run: {}".format(path, exc.strerror or exc)
+    except subprocess.TimeoutExpired:
+        return "{} did not answer {} within 10s".format(path, flag)
+    if proc.returncode == 0:
+        return ""
+    tail = _first_line(proc.stderr) or _first_line(proc.stdout)
+    return "{} exited {}".format(path, proc.returncode) + (
+        ": " + tail if tail else "")
+
+
+def _shebang(path: str) -> str:
+    """ " (#!/usr/bin/python3.11)" if the file names an interpreter, else "".
+
+    Named because it is the actionable half: "pmbootstrap has a bad
+    interpreter" sends you looking at pmbootstrap, and the fix is to the venv
+    whose python was removed.
+    """
+    try:
+        with open(path, "rb") as fh:
+            first = fh.readline(256).decode("utf-8", "replace").strip()
+    except OSError:
+        return ""
+    return " ({})".format(first) if first.startswith("#!") else ""
 
 
 def check_host(ch: Checks, cfg, family: str) -> None:
@@ -189,16 +301,20 @@ def check_host(ch: Checks, cfg, family: str) -> None:
            "" if sys.version_info >= (3, 8) else
            "porthole needs python 3.8+; install a newer python3")
 
-    for tool, key, required, why in (
-        ("ssh", None, True, "every device command goes over ssh"),
-        ("fastboot", "FASTBOOT", True, "the only reliable way to reach the bootloader"),
-        ("adb", "ADB", False, "only for talking to a stock or recovery system"),
-        ("pmbootstrap", None, False, "needed to build and flash, not to probe"),
-        ("shellcheck", None, False, "only for `make lint` when contributing"),
-    ):
+    for tool, key, required, why, flag in HOST_TOOLS:
         found = _resolve(cfg, key, tool) if key else shutil.which(tool)
         if found:
-            ch.add(f"host: {tool}", "ok", found)
+            # Found is not the same as usable, and every row here reports on
+            # something a later command will actually invoke. See _runs.
+            broken = _runs(found, flag)
+            if not broken:
+                ch.add(f"host: {tool}", "ok", found)
+            elif required:
+                ch.add(f"host: {tool}", "fail", broken,
+                       install_hint(tool, family))
+            else:
+                ch.add(f"host: {tool}", "warn", broken,
+                       doc=install_hint(tool, family))
         elif required:
             ch.add(f"host: {tool}", "fail", f"not found -- {why}",
                    install_hint(tool, family))
@@ -631,6 +747,41 @@ def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
                "pmbootstrap, naming nothing")
 
 
+def _device_key_row(ch: Checks, state) -> None:
+    """The workspace's device key, reported by whether the phone accepts it.
+
+    doctor printed `✓ device key /home/you/.porthole/device_key` for a key the
+    device had never been told about, because it checked that the FILE exists.
+    That is the difference between "the key is present" and "the key works",
+    and only the second is what a build needs.
+
+    The fix is printed and never applied: installing a key is a privileged
+    write to the device, and doctor's contract is that it names fixes it will
+    not run itself.
+    """
+    key = state.get("device_key")
+    if not key:
+        ch.add("workspace: device key", "warn", "not created",
+               doc="porthole sandbox up    creates one")
+        return
+    authorized = state.get("device_key_authorized")
+    if authorized is True:
+        ch.add("workspace: device key", "ok", f"{key} -- the device accepts it")
+    elif authorized is False:
+        ch.add("workspace: device key", "fail",
+               f"{key} exists, and the device refuses it -- every workspace "
+               f"push fails with `scp: Connection closed`",
+               f"print the public half here, then add that ONE line to the "
+               f"phone's ~/.ssh/authorized_keys:\n"
+               f"          ssh-keygen -y -f {key}")
+    else:
+        ch.add("workspace: device key", "warn",
+               f"{key} -- present, but the device could not be asked whether "
+               f"it accepts it",
+               doc="a key file is not a working key; re-run with the device "
+                   "booted and reachable")
+
+
 def check_workspace(ch: Checks, ctx, family: str) -> None:
     """podman and the build workspace.
 
@@ -641,7 +792,7 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
     """
     import porthole_cmd_sandbox as sandbox
 
-    state = sandbox._container_state(ctx.root)
+    state = sandbox._container_state(ctx.root, ctx.cfg)
     if not state["podman"]:
         ch.add("host: podman", "fail",
                "not found -- builds run in a rootless container",
@@ -687,6 +838,8 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
                doc="porthole sandbox up    writes it")
     else:
         ch.add("workspace: work dir", "ok", str(pmb))
+
+    _device_key_row(ch, state)
 
     # binfmt is host-global and needs root once. Named, never automated: it is
     # a person installing software on their own machine, not a privilege the

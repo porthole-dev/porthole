@@ -86,7 +86,7 @@ fi
 
 # Default: measure the UCM path, then check the SLIMbus TX error counter, which
 # is the one kernel-side witness that the codec fed the port nothing.
-ssh "$PHONE" "$(enable_path DMIC1)
+ssh "${TK_SSH_OPTS[@]}" "$PHONE" "$(enable_path DMIC1)
   timeout $((SECS+5)) arecord -D hw:0,1 -f S16_LE -r 48000 -c 1 -d $SECS /tmp/mc.wav >/dev/null 2>&1
   $MEASURE /tmp/mc.wav
   n=\$(sudo -n dmesg 2>/dev/null | grep -c 'underflow error on TX port 7')

@@ -57,8 +57,12 @@ AUTO_DESC = "build the cheapest rung that covers what actually changed"
 ACTIONS = {
     "mod": ("tkmod",
             "build one module, push it, reload it and verify -- no reboot (~40s)"),
+    # NOT "no pmbootstrap". tkboot calls _ph_activate, which sources
+    # envkernel, which IS pmbootstrap -- so the old wording made --host look
+    # like a viable escape hatch when the workspace was down, and it never was.
+    # It means no PACKAGING step, which is the part that makes it cheap.
     "boot": ("tkboot",
-             "build the dtb, repack and RAM-boot it -- no pmbootstrap (~40s)"),
+             "build the dtb, repack and RAM-boot it -- no packaging step (~40s)"),
     "fast": ("tkbuild-kernel",
              "build the kernel and flash boot only, UUIDs untouched (~6m)"),
     "kernel": ("tkbuild",
@@ -217,12 +221,92 @@ def _assert_no_drift(ctx, args) -> None:
 
 
 def _tree(cfg) -> pathlib.Path:
-    """Where the kernel tree is, matching ph-build.sh:51 exactly."""
+    """Where the kernel tree is, matching ph-build.sh:51 exactly.
+
+    A RELATIVE PORTHOLE_KERNEL_TREE resolves against PORTHOLE_WORKDIR -- the
+    device working repo -- and never against the process cwd. The knob is the
+    toolbox's own advice ("set PORTHOLE_KERNEL_TREE to build a worktree"), and
+    `PORTHOLE_KERNEL_TREE=linux-ws` built fine in the workspace and died on
+    --host with `pushd: linux-ws: No such file or directory`: one variable,
+    two meanings, decided by whatever directory each path happened to run in.
+
+    With no workdir there is nothing to resolve AGAINST, and falling back to
+    the cwd is precisely the bug. Left as given, so the eventual failure names
+    the path that was typed rather than one nobody wrote.
+    """
+    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
     tree = (cfg.get("PORTHOLE_KERNEL_TREE") or "").strip()
     if tree:
-        return pathlib.Path(tree).expanduser()
-    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
+        path = pathlib.Path(tree).expanduser()
+        if path.is_absolute() or not workdir:
+            return path
+        return pathlib.Path(workdir).expanduser() / path
     return pathlib.Path(workdir).expanduser() / "linux" if workdir else pathlib.Path()
+
+
+def _branch_of(path) -> str:
+    """The branch a tree is on, or "" for detached, missing or not-a-repo.
+
+    "" for detached is deliberate and load-bearing: a linked worktree seen from
+    inside the workspace container cannot have its branch resolved, and a
+    selection that fired on an unresolvable HEAD would be guessing in exactly
+    the environment where builds run.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    head = proc.stdout.strip() if proc.returncode == 0 else ""
+    return "" if head == "HEAD" else head
+
+
+def _autoselect_tree(workdir, default, want, branch_of, lister=None) -> str:
+    """The one sibling tree on the product branch, or "" to change nothing.
+
+    PURE given `branch_of` and `lister` -- the same reason `_classify` is pure.
+    This is a decision that must not be wrong, and a pure function is one that
+    can be wrong in a test instead of on a device.
+
+    WHY IT LIVES HERE AND NOT IN ph-build.sh. `porthole build` defaulted to
+    $PORTHOLE_WORKDIR/linux and stopped there, so on a repo whose product
+    branch lives in a sibling worktree every invocation of a whole session
+    needed PORTHOLE_KERNEL_TREE typed by hand. The refusal that caught it only
+    fired because the VERSION tokens differed (6.18 vs 7.2); two trees on one
+    version and different branches would have built the stale one in silence,
+    which is the hazard the branch-divergence rule exists for.
+
+    The obvious place for the fix is ph-build.sh, and that is the wrong place:
+    git inside the workspace container cannot resolve a linked worktree's
+    branch, so a shell implementation would silently never fire in the one
+    environment where builds actually run. Up here git runs on the HOST, and
+    the answer reaches the container through the PORTHOLE_KERNEL_TREE
+    translation _container_cmd already performs.
+
+    Deliberately narrow. Switching trees at all is only safe when there is
+    exactly one right answer -- silently choosing between two candidates is how
+    a half-finished branch gets flashed. Every ambiguous case (no product
+    branch named, an unreadable default HEAD, zero matches, two matches) keeps
+    today's behaviour and leaves the existing version-token refusal to speak.
+    """
+    if not workdir or not want:
+        return ""
+    # An unreadable default HEAD is not evidence the default is WRONG, and it
+    # is also what stops this firing on a plain non-git directory.
+    here = branch_of(default)
+    if not here or here == want:
+        return ""
+    if lister is None:
+        def lister(base):
+            return sorted(str(p) for p in pathlib.Path(base).glob("linux*")
+                          if p.is_dir())
+    try:
+        candidates = lister(workdir)
+    except OSError:
+        return ""
+    matches = [c for c in candidates if c != default and branch_of(c) == want]
+    return matches[0] if len(matches) == 1 else ""
 
 
 def _classify(changed) -> tuple:
@@ -267,6 +351,50 @@ def _classify(changed) -> tuple:
 
     return ("fast", [],
             "both the dtb and modules changed, and no cheap rung covers both")
+
+
+_CKSUM_TABLE = None
+
+
+def _cksum(data: bytes) -> str:
+    """POSIX cksum, so python and `cksum` in ph-build.sh name the same file.
+
+    NOT zlib.crc32: cksum uses the CRC-32/CKSUM variant -- unreflected, initial
+    value 0 -- and then feeds the LENGTH through the same register. Getting
+    that subtly wrong would produce a stamp the shell writes and python never
+    finds, and the failure would be SILENT, because a missing stamp is a legal
+    state meaning "never pushed". tests/test_build_flash.py compares the two
+    implementations against each other rather than against a golden value.
+    """
+    global _CKSUM_TABLE
+    if _CKSUM_TABLE is None:
+        table = []
+        for i in range(256):
+            crc = i << 24
+            for _ in range(8):
+                crc = ((crc << 1) ^ 0x04C11DB7) if crc & 0x80000000 else crc << 1
+                crc &= 0xFFFFFFFF
+            table.append(crc)
+        _CKSUM_TABLE = table
+    crc = 0
+    for byte in data:
+        crc = ((crc << 8) & 0xFFFFFFFF) ^ _CKSUM_TABLE[((crc >> 24) ^ byte) & 0xFF]
+    length = len(data)
+    while length:
+        crc = ((crc << 8) & 0xFFFFFFFF) ^ _CKSUM_TABLE[
+            ((crc >> 24) ^ (length & 0xFF)) & 0xFF]
+        length >>= 8
+    return str((~crc) & 0xFFFFFFFF)
+
+
+def _pushed_stamp(rundir, tree) -> pathlib.Path:
+    """Where the last-push time for THIS tree is recorded.
+
+    Keyed per tree: two trees in one checkout must not share a stamp, or
+    pushing from one makes `auto` believe the other reached the device.
+    Written by ph-build.sh's _ph_pushed_write, read here.
+    """
+    return pathlib.Path(rundir) / f"pushed-{_cksum(str(tree).encode())}"
 
 
 def _changed_artifacts(tree: pathlib.Path, since) -> list:
@@ -343,8 +471,15 @@ def _tree_inside(tree, workdir) -> str:
     if not tree or not workdir:
         return ""
     try:
-        rel = pathlib.Path(tree).expanduser().resolve().relative_to(
-            pathlib.Path(workdir).expanduser().resolve())
+        base = pathlib.Path(workdir).expanduser()
+        path = pathlib.Path(tree).expanduser()
+        # Same rule as _tree, and it has to be the same rule: .resolve() alone
+        # resolves a relative value against the PROCESS cwd, so a worktree
+        # named relatively translated to whatever directory the CLI was run
+        # from and the container was handed a path that does not exist.
+        if not path.is_absolute():
+            path = base / path
+        rel = path.resolve().relative_to(base.resolve())
     except (ValueError, OSError):
         return ""
     return "/work" if str(rel) == "." else f"/work/{rel}"
@@ -455,6 +590,21 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                 "error that named neither")
         cmd = _host_cmd(script, func, extra)
         ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
+        # --host reads as the escape hatch when the workspace is down, and it
+        # is a weaker one than it looks. EVERY rung compiles through envkernel
+        # -- `boot` included, whatever its description used to say -- so this
+        # needs a host pmbootstrap that can actually build: configured work
+        # dir, chroots, dependencies. A host that has pmbootstrap on PATH but
+        # has never built with it fails inside pmbootstrap's own dependency
+        # install, which names none of that. Not a refusal, because a host
+        # that CAN build is a legitimate setup; said out loud because the
+        # failure that follows will not say it.
+        if host:
+            ctx.out(ctx.out.paint(
+                "  --host needs a host pmbootstrap that can build (chroots and "
+                "dependencies),", "grey"))
+            ctx.out(ctx.out.paint(
+                "  which is what the workspace exists to avoid needing", "grey"))
     return _stream(ctx, cmd, env, timeout, rung or func)
 
 
@@ -776,9 +926,35 @@ def _auto(ctx, args) -> int:
         ctx.out(ctx.out.paint(
             "  porthole pkg outdated   # why, and what to run", "grey"))
 
-    # A second early, because make writes files as it runs and a clock that
-    # ticks between the stamp and the first write would hide the first object.
-    since = time.time() - 1
+    # WHAT `auto` ROUTES ON. Not "what this make invocation touched": the
+    # preview runs a real incremental make, so observing the evidence consumed
+    # it. `porthole build` then `porthole build auto --yes` measured a tree
+    # that the preview had already brought up to date and concluded there was
+    # nothing to do -- so an agent following the documented preview-then-run
+    # flow got a build that refused to act, and the natural next move is to
+    # type a rung by hand, which AGENTS.md warns against.
+    #
+    # Since the last PUSH instead. That is durable: a preview compiles but
+    # pushes nothing, so it cannot move the stamp, so preview and run agree and
+    # running `auto` twice is safe.
+    #
+    # No stamp -- the first build in a tree -- falls back to the old window. A
+    # missing stamp means "never pushed", and treating every artefact under
+    # .output as unpushed would route every first build to the most expensive
+    # rung: a worse default than the one being replaced.
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    try:
+        since = _pushed_stamp(rundir, tree).stat().st_mtime
+        ctx.out(ctx.out.paint(
+            "  routing on what make built since the last push ("
+            + time.strftime("%H:%M", time.localtime(since)) + ")", "grey"))
+    except OSError:
+        # A second early, because make writes files as it runs and a clock that
+        # ticks between here and the first write would hide the first object.
+        since = time.time() - 1
+        ctx.out(ctx.out.paint(
+            "  no push recorded for this tree yet -- routing on what this "
+            "build rebuilds", "grey"))
     ctx.out(ctx.out.paint("  measuring: incremental make, then routing on what "
                           "it actually rebuilt", "grey"))
     # _ph_measure, not _ph_make: the only question here is what make touched,
@@ -852,6 +1028,31 @@ def _status(ctx) -> int:
     return ctx.emit(snap, render)
 
 
+def _maybe_autoselect_tree(ctx) -> None:
+    """Point the build at the tree holding the product branch, if exactly one
+    does. Runs before anything reads the tree, and says so loudly when it
+    fires -- a build that silently switched trees would be worse than the bug.
+    """
+    if (ctx.cfg.get("PORTHOLE_KERNEL_TREE") or "").strip():
+        return
+    want = (ctx.cfg.get("PORTHOLE_KERNEL_BRANCH") or "").strip()
+    chosen = _autoselect_tree(
+        (ctx.cfg.get("PORTHOLE_WORKDIR") or "").strip(),
+        str(_tree(ctx.cfg)), want, _branch_of)
+    if not chosen:
+        return
+    ctx.cfg["PORTHOLE_KERNEL_TREE"] = chosen
+    # os.environ too: _run copies ctx.cfg into the child environment, but
+    # _tree_inside reads the environment it was handed, and a value in only
+    # one of the two is how the host and the container end up building
+    # different trees.
+    os.environ["PORTHOLE_KERNEL_TREE"] = chosen
+    ctx.out(ctx.out.paint(
+        f"  tree: the default is not on the product branch {want}", "yellow"))
+    ctx.out(ctx.out.paint(
+        f"        building {chosen} -- the one tree that is", "yellow"))
+
+
 def cmd_build(args, ctx) -> int:
     action = args.action or "auto"
     # `status` and `auto` are actions, not flags. A store_true `--status` would
@@ -864,6 +1065,7 @@ def cmd_build(args, ctx) -> int:
                    f"actions: auto, status, {', '.join(ACTIONS)}")
 
     _assert_no_drift(ctx, args)
+    _maybe_autoselect_tree(ctx)
 
     if action == "auto":
         # Measuring needs a tree to make in. Without one -- a new port, or a
