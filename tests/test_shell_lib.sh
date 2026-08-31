@@ -135,6 +135,47 @@ out=$(phsh 'PORTHOLE_DEVICE=google-taimen PORTHOLE_ACTIVE_SLOT=a FASTBOOT=/bin/t
 has "set_active on the forbidden slot is refused" "$out" "refusing to set_active a"
 has "and it reports failure"                      "$out" "rc=1"
 
+# --------------------------------- a missing fastboot is not "no device" ----
+# A $FASTBOOT that cannot run exits 127 with EMPTY STDOUT, and tk_in_fastboot
+# reads emptiness as "not in the bootloader" -- so the TOOL being absent looked
+# exactly like the PHONE being absent. In the sandbox (config.env names a host
+# path that does not exist in the container) that cost a `fast` build 181.2s of
+# waiting for a phone that was already sitting in fastboot.
+
+out=$(phsh 'FASTBOOT=/nonexistent/platform-tools/fastboot' \
+           'tk_in_fastboot; echo "PROBE ANSWERED rc=$?"'); rc=$?
+is    "an unrunnable fastboot exits 69, not a probe answer" "$rc" "69"
+hasnt "so the probe never answers at all"    "$out" "PROBE ANSWERED"
+has   "the refusal names the offending path" "$out" "/nonexistent/platform-tools/fastboot"
+has   "and blames the tool, not the phone"   "$out" "TOOL is missing"
+
+# It exits rather than returning precisely so the wait loops cannot run: a
+# return is indistinguishable from "not yet", and the loop would poll to its
+# deadline before reporting a device that was never probed.
+out=$(phsh 'FASTBOOT=/nonexistent/fastboot' \
+           'tk_wait_fastboot $(( $(date +%s%3N) + 30000 )); echo "POLLED TO THE DEADLINE"')
+rc=$?
+is    "a wait loop refuses instead of polling" "$rc" "69"
+hasnt "and never reaches its deadline"         "$out" "POLLED TO THE DEADLINE"
+
+# The positive control: a fastboot that RUNS and lists nothing is a real "no",
+# and must still be answered as one. Without this the guard could "pass" by
+# refusing everything.
+out=$(phsh 'FASTBOOT=/bin/true' 'tk_in_fastboot; echo "rc=$?"')
+is "an installed fastboot listing nothing is still a real no" "$out" "rc=1"
+
+# And there is exactly ONE fastboot probe. ph-build.sh carried a second copy --
+# `"$FASTBOOT" devices 2>/dev/null | grep -q fastboot` -- with the same
+# conflation and no timeout, so the fix above would have missed the rung that
+# actually flashes.
+# Comment lines are dropped first: the fix in ph-build.sh explains itself by
+# quoting the pattern it removed, and a raw grep would read the explanation as
+# the thing it explains.
+raw=$(grep -rn '\$FASTBOOT" devices' "$ROOT/lib" "$ROOT/tools" 2>/dev/null \
+      | grep -vE ':[0-9]+:[[:space:]]*#' \
+      | grep -vE '/(porthole|tk-lib)\.sh:' | sort | tr '\n' ' ')
+is "nothing rolls its own fastboot devices probe" "$raw" ""
+
 # ------------------------------------------------------ python agreement ----
 # The two libs must resolve identically or the toolbox behaves differently
 # depending on which language a tool happens to be written in.

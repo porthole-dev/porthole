@@ -61,6 +61,12 @@ if [ "$magic" != "ANDROID!" ]; then
 fi
 echo ">> image ok: $IMG ($(stat -c %s "$IMG") bytes, ANDROID! magic)"
 
+# The image is fine; is the TOOL? A $FASTBOOT that cannot run exits 127 with
+# empty stdout, which every probe below reads as "not in the bootloader" -- so
+# without this the flash spends its whole timeout blaming the phone. Checked
+# once, here, rather than on every poll.
+ph_need_fastboot
+
 TOTAL_START=$(tk_now_ms)
 
 # ------------------------------------------------------ 1: to the bootloader --

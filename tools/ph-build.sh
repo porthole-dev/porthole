@@ -1048,8 +1048,10 @@ tkflash-boot() {
 
 	# Get there ourselves. tkpush-modules has to run while the phone is UP,
 	# so the caller cannot have parked it in the bootloader beforehand.
-	"$FASTBOOT" devices 2>/dev/null | grep -q fastboot || \
-		"$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
+	# tk_in_fastboot, not a hand-rolled `"$FASTBOOT" devices | grep`: the
+	# hand-rolled copy cannot tell "no device" from "no fastboot binary" -- both
+	# are empty stdout -- and it has no timeout either. See ph_need_fastboot.
+	tk_in_fastboot || "$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
 
 	local img; img=$(readlink -f /tmp/postmarketOS-export/boot.img)
 	# The DTB to verify boot.img AGAINST. Defaults to the envkernel tree build,

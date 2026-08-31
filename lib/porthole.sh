@@ -259,12 +259,43 @@ ph_timed() {
 
 # --------------------------------------------------------------- probes ----
 
+# ph_need_fastboot -- refuse, loudly, if $FASTBOOT cannot be executed.
+#
+# It EXITS 69 (EX_UNAVAILABLE) rather than returning non-zero, and that is the
+# whole point: every caller of the probe below reads a non-zero fastboot as "no
+# device in the bootloader". A binary that is not there exits 127 with EMPTY
+# STDOUT, which is byte-for-byte what a phone that is not in the bootloader
+# looks like -- so the probe cannot tell the two apart, and a wait loop then
+# polls for its entire budget against a phone that is already in fastboot.
+#
+# That is exactly what happened in the sandbox on 2026-08-31: config.env named
+# the HOST's platform-tools fastboot, which does not exist inside the
+# container, and a `fast` build spent 181.2s insisting the device never reached
+# the bootloader. 69 rather than 1 because the check did not happen, which is
+# not the same as the check failing -- brain/laws/exit-codes-are-an-api.md.
+#
+# `command -v` is a builtin, so it is free enough to sit in the probe, and it
+# covers both forms $FASTBOOT takes: a bare name is looked up on PATH, a path
+# must exist AND be executable.
+ph_need_fastboot() {
+    command -v "$FASTBOOT" >/dev/null 2>&1 && return 0
+    echo "porthole: FASTBOOT='$FASTBOOT' is not an executable command" >&2
+    echo "porthole: the TOOL is missing, not the phone -- nothing was probed." >&2
+    echo "porthole: point FASTBOOT at a fastboot that exists here, or install" >&2
+    echo "porthole: one -- \`porthole doctor\` names how." >&2
+    exit 69
+}
+
 # True only in the real bootloader.
 #
 # On a device where lsusb mislabels the running pmOS gadget (taimen:
 # 18d1:d001, PORTHOLE_USB_LIES_AS_FASTBOOT=1) this is the ONLY reliable
 # discriminator -- USB IDs cannot tell a booted device from a bootloader.
+#
+# The guard runs FIRST. A tool that could not run must never be reported as a
+# measurement that came back negative.
 tk_in_fastboot() {
+    ph_need_fastboot
     local t; t=$(tk_now_ms)
     local out; out=$(timeout 5 "$FASTBOOT" devices 2>/dev/null)
     ph_timed "fastboot devices" "$t"
