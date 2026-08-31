@@ -1294,6 +1294,54 @@ def test_a_missing_deviceinfo_is_diagnosed_as_an_uninstalled_chroot():
     assert "install" in why[0].lower(), why
 
 
+def test_a_failure_is_diagnosed_from_this_run_not_an_earlier_one():
+    """Regression: `_stream` used to `tail_text(follow)` on the whole of
+    pmbootstrap's log.txt, which is SHARED and LONG-LIVED -- it accumulates
+    every invocation in this work dir. A user hit this for real: their build
+    failed because of stale envkernel `_p` apks, but porthole diagnosed an
+    EARLIER, unrelated failure recorded higher up in the same log.txt (the
+    deviceinfo/mkinitfs signature above) and told them to run the very
+    command they had just run.
+
+    Property under test: an OLD failure signature already in the log before
+    this run starts must NOT reach diagnose() -- only what THIS run appends
+    after the recorded offset may.
+    """
+    import porthole_cmd_build as build
+
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="porthole-diag-"))
+    follow = tmp / "log.txt"
+    # An older, unrelated failure already sitting in the shared log.
+    follow.write_text(PMB_LOG_TAIL)
+
+    seen = []
+
+    class FakeOut:
+        def __call__(self, text):
+            seen.append(text)
+
+        def paint(self, s, _color):
+            return s
+
+    class FakeCtx:
+        root = ROOT
+        cfg = {"PORTHOLE_RUNDIR": str(tmp / "run")}
+        out = FakeOut()
+
+    # THIS run's own, different failure -- appended to the SAME file after
+    # `_stream` has recorded its start offset, exactly as pmbootstrap keeps
+    # appending to its one persistent log.txt.
+    new_failure = "line 0: lz4: not found"
+    cmd = ["sh", "-c", f"echo '{new_failure}' >> {follow}; exit 1"]
+
+    rc = build._stream(FakeCtx(), cmd, None, 60, "pkg:x", follow=follow)
+    assert rc != 0
+
+    text = "\n".join(seen)
+    assert "makedepends" in text, text            # this run's real cause
+    assert "never had a full" not in text, text    # not the stale earlier one
+
+
 def test_tail_text_reads_the_end_of_a_large_file():
     import tempfile
     import porthole_cmd_build as build

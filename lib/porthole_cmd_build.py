@@ -833,6 +833,21 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     """
     import porthole_progress as progress
 
+    # log.txt is shared and long-lived -- pmbootstrap appends to the SAME file
+    # across every invocation in this work dir, forever. A build that failed
+    # here once got diagnosed with advice about a *different*, EARLIER
+    # failure ("the chroot has never had a full install... run this command"
+    # -- for the command the user had just run) because the failure path
+    # tailed the whole file instead of only what THIS run appended. Recording
+    # the offset before the child starts, and reading only from there, is
+    # what keeps diagnose() looking at this run's output.
+    follow_offset = 0
+    if follow:
+        try:
+            follow_offset = follow.stat().st_size
+        except OSError:
+            follow_offset = 0
+
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
     rundir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -980,7 +995,21 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
         # warning and a line about systemd, while the real error sat 71,393
         # lines into log.txt. failure_tail already prefers the lines that name
         # a failure; it was pointed at the wrong file.
-        inner = tail_text(follow) if follow else ""
+        inner = ""
+        if follow:
+            import porthole_cmd_pkg as pkg
+            try:
+                cur_size = follow.stat().st_size
+            except OSError:
+                cur_size = 0
+            if cur_size < follow_offset:
+                # Rotated or truncated mid-build: the recorded offset now
+                # points past the end, and seeking there would read nothing.
+                # Fall back to a plain tail rather than report no cause at
+                # all.
+                inner = tail_text(follow)
+            else:
+                inner = pkg.log_since(follow, follow_offset)
         if inner:
             named = failure_tail(inner)
             if named:
