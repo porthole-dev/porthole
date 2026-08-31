@@ -96,6 +96,21 @@ class ProfileNotFound(Exception):
     """
 
 
+class FastbootUnavailable(Exception):
+    """$FASTBOOT could not be executed, so the bootloader was never probed.
+
+    Raised rather than answering "no", because the two are indistinguishable
+    at the call site: a missing binary and a phone that is not in the
+    bootloader both produce empty output. Conflating them cost a real flash --
+    a stale FASTBOOT made `wait_fastboot` poll its entire budget insisting a
+    phone that was sitting in the bootloader had never arrived.
+
+    69 (EX_UNAVAILABLE), never 1: the check did not happen, which is not the
+    same as the check failing. See brain/laws/exit-codes-are-an-api.md, and
+    ph_need_fastboot in tools/tk-lib.sh, which guards the shell side.
+    """
+
+
 class Config(dict):
     """A resolved config that remembers which layer each value came from.
 
@@ -566,7 +581,15 @@ class Device:
             proc = subprocess.run([self.fastboot, "devices"],
                                   capture_output=True, text=True, timeout=5)
             found = bool(proc.stdout.strip())
+        except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+            # Ordered before OSError, which is their parent. The TOOL could
+            # not run; that is not a phone that is absent from the bootloader.
+            raise FastbootUnavailable(
+                "FASTBOOT={!r} is not an executable command -- the TOOL is "
+                "missing, not the phone ({}). Nothing was probed.".format(
+                    self.fastboot, exc.strerror or exc)) from None
         except (subprocess.TimeoutExpired, OSError):
+            # The tool RAN and gave no usable answer in time. A real "no".
             found = False
         self._timed("fastboot devices", start)
         return found
