@@ -150,6 +150,26 @@ def install_hint(tool: str, family: str) -> str:
             or f"install {tool} with your package manager")
 
 
+# (tool, config key, required, why, version flag)
+#
+# The version flag is per-tool and it matters: `ssh --version` is not a thing.
+# ssh rejects it with exit 255 and a usage block, so probing every tool the
+# same way reported a perfectly good ssh as FAIL on the first host this ran
+# on -- the same false verdict this check exists to remove, pointing the other
+# way. A tool is asked the question it answers.
+HOST_TOOLS = (
+    ("ssh", None, True, "every device command goes over ssh", "-V"),
+    ("fastboot", "FASTBOOT", True,
+     "the only reliable way to reach the bootloader", "--version"),
+    ("adb", "ADB", False,
+     "only for talking to a stock or recovery system", "--version"),
+    ("pmbootstrap", None, False,
+     "needed to build and flash, not to probe", "--version"),
+    ("shellcheck", None, False,
+     "only for `make lint` when contributing", "--version"),
+)
+
+
 class Checks:
     """Collects verdicts.
 
@@ -202,8 +222,14 @@ def _resolve(cfg, key, default):
                      and os.access(value, os.X_OK)) else None
 
 
-def _runs(path: str) -> str:
+def _runs(path: str, flag: str = "--version") -> str:
     """"" if the tool actually executes, else a one-line reason it did not.
+
+    `flag` is per-tool and not a detail: `ssh --version` is not a thing. ssh
+    rejects it with exit 255 and a usage block, so probing every tool the same
+    way failed a perfectly good ssh on the first host this ran on. The flag
+    each tool actually supports lives in check_host's table, beside the other
+    per-tool facts.
 
     Presence is not the question doctor is asked. A +x script whose shebang
     interpreter no longer exists passes shutil.which and dies at exec with 126
@@ -222,7 +248,7 @@ def _runs(path: str) -> str:
     already spend 8s apiece.
     """
     try:
-        proc = subprocess.run([path, "--version"], capture_output=True,
+        proc = subprocess.run([path, flag], capture_output=True,
                               text=True, timeout=10)
     except OSError as exc:
         # A broken shebang reaches us as ENOENT, because the kernel resolves
@@ -235,7 +261,7 @@ def _runs(path: str) -> str:
                 path, _shebang(path)) + " -- it cannot start"
         return "{} does not run: {}".format(path, exc.strerror or exc)
     except subprocess.TimeoutExpired:
-        return "{} did not answer --version within 10s".format(path)
+        return "{} did not answer {} within 10s".format(path, flag)
     if proc.returncode == 0:
         return ""
     tail = _first_line(proc.stderr) or _first_line(proc.stdout)
@@ -264,18 +290,12 @@ def check_host(ch: Checks, cfg, family: str) -> None:
            "" if sys.version_info >= (3, 8) else
            "porthole needs python 3.8+; install a newer python3")
 
-    for tool, key, required, why in (
-        ("ssh", None, True, "every device command goes over ssh"),
-        ("fastboot", "FASTBOOT", True, "the only reliable way to reach the bootloader"),
-        ("adb", "ADB", False, "only for talking to a stock or recovery system"),
-        ("pmbootstrap", None, False, "needed to build and flash, not to probe"),
-        ("shellcheck", None, False, "only for `make lint` when contributing"),
-    ):
+    for tool, key, required, why, flag in HOST_TOOLS:
         found = _resolve(cfg, key, tool) if key else shutil.which(tool)
         if found:
             # Found is not the same as usable, and every row here reports on
             # something a later command will actually invoke. See _runs.
-            broken = _runs(found)
+            broken = _runs(found, flag)
             if not broken:
                 ch.add(f"host: {tool}", "ok", found)
             elif required:

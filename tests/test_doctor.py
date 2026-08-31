@@ -223,6 +223,17 @@ def test_a_working_tool_reports_no_reason():
     assert doctor._runs(shutil.which("sh")) == ""
 
 
+def test_ssh_is_probed_with_the_flag_ssh_actually_takes():
+    """`ssh --version` is not a thing -- it exits 255 with a usage block. A
+    uniform --version probe reported a working ssh as FAIL on the very first
+    host this ran on, which is the same false-confidence bug in reverse."""
+    ssh = shutil.which("ssh")
+    if ssh:
+        assert doctor._runs(ssh, "-V") == ""
+    flags = {t: f for t, _k, _r, _w, f in doctor.HOST_TOOLS}
+    assert flags["ssh"] == "-V", flags
+
+
 def test_a_tool_that_is_absent_is_a_reason_not_a_crash():
     """_runs is handed a resolved path, but a tool can vanish between the
     resolve and the exec. That must be a row, not a traceback."""
