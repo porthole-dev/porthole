@@ -28,6 +28,21 @@ GETVAR = """\
 all: Done!!
 """
 
+# A redfin (Pixel 5) in fastboot, 2026-08-31, serial 0A31XXXXXX068X. fastboot
+# writes `key:value` with no space after the colon; this is the spelling the
+# parser has to live on, not a variant of it.
+GETVAR_REAL = """\
+(bootloader) product:redfin
+(bootloader) serialno:0A31XXXXXX068X
+(bootloader) slot-count:2
+(bootloader) current-slot:a
+(bootloader) slot-unbootable:a:no
+(bootloader) slot-unbootable:b:no
+(bootloader) slot-retry-count:a:2
+(bootloader) version-bootloader:r3-0.6-10489834
+all: Done!!
+"""
+
 
 def test_getvar_lines_are_parsed():
     found = slots.parse_getvar(GETVAR)
@@ -65,6 +80,49 @@ def test_an_unbootable_slot_is_recorded_as_forbidden():
 def test_garbage_is_not_mistaken_for_an_answer():
     assert slots.parse_getvar("") == {}
     assert slots.slot_policy({}) == {}
+
+
+def test_the_spelling_a_real_fastboot_writes_is_parsed():
+    """The positive control for the bug this fix exists for. A parser that
+    only accepted `key: value` rejected every line of a real device and the
+    verb bailed with `the device reported no variables` while its own
+    `fastboot devices` call had just listed that same device."""
+    found = slots.parse_getvar(GETVAR_REAL)
+    assert found["slot-count"] == "2"
+    assert found["current-slot"] == "a"
+    policy = slots.slot_policy(found)
+    assert policy["PORTHOLE_HAS_AB_SLOTS"] == "1"
+    assert policy["PORTHOLE_ACTIVE_SLOT"] == "a"
+    assert "PORTHOLE_SLOT_FORBIDDEN" not in policy
+
+
+def test_both_colon_spellings_parse_to_the_same_dict():
+    spaced = slots.parse_getvar("(bootloader) slot-count: 2\n"
+                                "(bootloader) current-slot: a\n")
+    tight = slots.parse_getvar("(bootloader) slot-count:2\n"
+                               "(bootloader) current-slot:a\n")
+    assert spaced == tight == {"slot-count": "2", "current-slot": "a"}
+
+
+def test_a_value_containing_a_colon_keeps_its_colons():
+    found = slots.parse_getvar("(bootloader) version-bootloader:r3-0.6-10489834\n")
+    assert found == {"version-bootloader": "r3-0.6-10489834"}
+
+
+def test_a_value_with_a_colon_splits_at_the_last_colon_as_documented():
+    """Pins the documented lossy split so a later edit cannot silently move
+    it to the first colon, where `slot-unbootable:a` would break."""
+    found = slots.parse_getvar("(bootloader) citadel-fw:0.0.5 2023-04-10 22:15:29\n")
+    assert found == {"citadel-fw:0.0.5 2023-04-10 22:15": "29"}
+
+
+def test_a_key_that_contains_a_colon_is_one_key():
+    found = slots.parse_getvar("(bootloader) slot-unbootable:a:no\n")
+    assert found == {"slot-unbootable:a": "no"}
+
+
+def test_a_colon_without_a_key_is_not_an_answer():
+    assert slots.parse_getvar("(bootloader) :nope\n") == {}
 
 
 def test_updating_a_profile_preserves_the_comment_that_explains_the_value():

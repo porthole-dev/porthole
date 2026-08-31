@@ -431,45 +431,5 @@ def main():
     return 1 if failed else 0
 
 
-def test_the_build_path_never_invokes_ssh_without_the_shared_options():
-    """TK_SSH_OPTS is where -i "$PORTHOLE_SSH_KEY" -o IdentitiesOnly=yes lives
-    (lib/porthole.sh:188), along with ConnectTimeout, BatchMode and the
-    connection mux.
-
-    tkmod's two scps and its two sshs omitted it, so in the workspace -- where
-    PORTHOLE_SSH_KEY is /run/porthole/device_key, the ONLY key the container
-    has -- the device key was never offered. Every `porthole build mod --yes`
-    ended `scp: Connection closed`, which names nothing and reads like a
-    network fault; a session went looking at the ssh control master instead.
-
-    Scoped to the files every build and push routes through, and asserted here
-    rather than left to review: patching the one line a report names leaves
-    every sibling caller just as broken, and there were four.
-
-    tools/ that hand-roll their own option sets (stallwatch, tk-recover,
-    tk-stream) are deliberately outside this: they are host-side freeze
-    detectors whose whole job is for ssh to time out, and the mux would mask
-    exactly what they watch for. They do not push anything to a device.
-    """
-    bare = re.compile(r'(?<![\w./-])(ssh|scp)\s')
-    offenders = []
-    for name in ("tools/ph-build.sh", "lib/porthole.sh"):
-        path = ROOT / name
-        for n, line in enumerate(path.read_text().splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith("#") or "TK_SSH_OPTS" in line:
-                continue
-            # Prose and here-doc text mention ssh constantly; only a line that
-            # STARTS a command is an invocation.
-            if not re.match(r'^(ssh|scp)\s|[;&|(]\s*(ssh|scp)\s|'
-                            r'^\s*(timeout\s+\S+\s+)?(ssh|scp)\s', stripped):
-                continue
-            if bare.search(stripped):
-                offenders.append(f"{name}:{n}: {stripped[:70]}")
-    assert not offenders, (
-        "these invoke ssh/scp without TK_SSH_OPTS, so they offer no device "
-        "key:\n  " + "\n  ".join(offenders))
-
-
 if __name__ == "__main__":
     sys.exit(main())

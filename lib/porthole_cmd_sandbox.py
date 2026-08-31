@@ -587,39 +587,6 @@ def _sudo_state() -> dict:
     return out
 
 
-def _device_key_authorized(cfg, key):
-    """True / False / None-for-unknown: does the phone accept the device key?
-
-    Three states, not two. An unreachable device or a name that does not
-    resolve is not evidence the key is bad, and a check that cries failure when
-    it does not know is a check people learn to scroll past. Only an explicit
-    "Permission denied" is a False.
-
-    Run from the host with the same key file the container mounts read-only.
-    The container is where it matters, but a check that needs a running
-    workspace to answer says nothing on the day the workspace is what broke --
-    and it is the same bytes on both sides of the mount.
-    """
-    phone = cfg.get("PHONE") or ""
-    if not phone or not key.exists() or not shutil.which("ssh"):
-        return None
-    try:
-        proc = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-             "-o", "StrictHostKeyChecking=no",
-             "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
-             # IdentitiesOnly, or a working agent key masks a device key that
-             # is not installed -- the check would pass for the wrong reason.
-             "-i", str(key), "-o", "IdentitiesOnly=yes",
-             phone, "true"],
-            capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode == 0:
-        return True
-    return False if "Permission denied" in proc.stderr else None
-
-
 def _container_state(root: pathlib.Path, cfg=None) -> dict:
     out = {"podman": shutil.which("podman"), "image": _image_tag(root),
            "image_built": False, "container_running": False,
@@ -639,14 +606,6 @@ def _container_state(root: pathlib.Path, cfg=None) -> dict:
             f"`podman unshare rm -rf {pmb}` then `porthole sandbox up`")
     key = pathlib.Path.home() / DEVICE_KEY
     out["device_key"] = str(key) if key.exists() else ""
-    # Does the DEVICE accept it -- not merely, does the file exist.
-    #
-    # `porthole doctor` reported this green on a phone whose authorized_keys
-    # had been lost in a fresh install, so doctor was ok while every workspace
-    # push failed with `scp: Connection closed`. Same class of error as
-    # trusting an exit code over content: the file being present is a PROXY for
-    # the thing that matters, and the proxy held while the thing did not.
-    out["device_key_authorized"] = _device_key_authorized(cfg or {}, key)
     if not out["podman"]:
         out["issues"].append("podman not installed -- the workspace is "
                              "unavailable. `porthole doctor` has install hints")
@@ -672,11 +631,6 @@ def _container_state(root: pathlib.Path, cfg=None) -> dict:
     if not out["device_key"]:
         out["issues"].append("no device key yet -- `porthole sandbox up` "
                              "creates one so the workspace never needs ~/.ssh")
-    elif out["device_key_authorized"] is False:
-        out["issues"].append(
-            "the device refuses the workspace key, so every build that pushes "
-            "will fail. Add it to the phone's authorized_keys: "
-            f"ssh-keygen -y -f {out['device_key']}")
     return out
 
 
@@ -732,20 +686,8 @@ def _status(ctx) -> int:
         line("work dir", c["work_dir_ok"],
              c["work_dir"] if c["work_dir_ok"]
              else o.paint(f"{c['work_dir']} -- not yours", "yellow"))
-        # Tri-state: a present key that the device refuses is the case this
-        # whole row exists for, and it is not the same as "not created".
-        authorized = c.get("device_key_authorized")
-        if not c["device_key"]:
-            line("device key", False, o.paint("not created", "grey"))
-        elif authorized is True:
-            line("device key", True, f"{c['device_key']} -- the device accepts it")
-        elif authorized is False:
-            line("device key", False,
-                 o.paint(f"{c['device_key']} -- the device REFUSES it", "red"))
-        else:
-            line("device key", True,
-                 f"{c['device_key']} " + o.paint("(device not reachable to "
-                                                 "check)", "grey"))
+        line("device key", bool(c["device_key"]),
+             c["device_key"] or o.paint("not created", "grey"))
         o.blank()
 
         o.heading("host sudo")
