@@ -57,8 +57,12 @@ AUTO_DESC = "build the cheapest rung that covers what actually changed"
 ACTIONS = {
     "mod": ("tkmod",
             "build one module, push it, reload it and verify -- no reboot (~40s)"),
+    # NOT "no pmbootstrap". tkboot calls _ph_activate, which sources
+    # envkernel, which IS pmbootstrap -- so the old wording made --host look
+    # like a viable escape hatch when the workspace was down, and it never was.
+    # It means no PACKAGING step, which is the part that makes it cheap.
     "boot": ("tkboot",
-             "build the dtb, repack and RAM-boot it -- no pmbootstrap (~40s)"),
+             "build the dtb, repack and RAM-boot it -- no packaging step (~40s)"),
     "fast": ("tkbuild-kernel",
              "build the kernel and flash boot only, UUIDs untouched (~6m)"),
     "kernel": ("tkbuild",
@@ -586,6 +590,21 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                 "error that named neither")
         cmd = _host_cmd(script, func, extra)
         ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
+        # --host reads as the escape hatch when the workspace is down, and it
+        # is a weaker one than it looks. EVERY rung compiles through envkernel
+        # -- `boot` included, whatever its description used to say -- so this
+        # needs a host pmbootstrap that can actually build: configured work
+        # dir, chroots, dependencies. A host that has pmbootstrap on PATH but
+        # has never built with it fails inside pmbootstrap's own dependency
+        # install, which names none of that. Not a refusal, because a host
+        # that CAN build is a legitimate setup; said out loud because the
+        # failure that follows will not say it.
+        if host:
+            ctx.out(ctx.out.paint(
+                "  --host needs a host pmbootstrap that can build (chroots and "
+                "dependencies),", "grey"))
+            ctx.out(ctx.out.paint(
+                "  which is what the workspace exists to avoid needing", "grey"))
     return _stream(ctx, cmd, env, timeout, rung or func)
 
 

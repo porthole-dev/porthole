@@ -967,5 +967,37 @@ def test_artefacts_older_than_the_last_push_are_not_work_to_do():
         assert build._changed_artifacts(tree, built + 1) == []
 
 
+def test_the_boot_rung_does_not_claim_to_need_no_pmbootstrap():
+    """`boot` compiles through _ph_activate -> envkernel -> pmbootstrap. The
+    description said "no pmbootstrap", so --host read as the escape hatch when
+    the workspace was down and died with `Failed to install all dependencies`
+    -- which names neither the cause nor that it could never have worked. It
+    means no PACKAGING step."""
+    import porthole_cmd_build as build
+    _, desc = build.ACTIONS["boot"]
+    assert "no pmbootstrap" not in desc, desc
+    assert "packaging" in desc, desc
+
+
+def test_the_ladder_and_the_verb_table_agree_about_boot():
+    """AGENTS.md and --help both print from these, and a description that
+    drifts from what the rung does is how --host got offered."""
+    import porthole_cmd_build as build
+    assert not any("no pmbootstrap" in text
+                   for row in build.LADDER for text in row), build.LADDER
+
+
+def test_the_host_branch_says_what_host_building_actually_needs():
+    """--host reads as the escape hatch when the workspace is down. Every rung
+    compiles through envkernel, so it needs a host pmbootstrap that can BUILD
+    -- chroots and dependencies -- and a host that merely has it on PATH fails
+    inside pmbootstrap's own dependency install, naming none of that.
+
+    A warning rather than a refusal: a host that can build is legitimate, and
+    the exact precondition is not cheaply checkable from here."""
+    src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
+    assert "chroots and " in src and "workspace exists to avoid needing" in src
+
+
 if __name__ == "__main__":
     sys.exit(main())

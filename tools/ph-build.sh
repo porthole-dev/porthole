@@ -1612,7 +1612,81 @@ tkmod() {
 #
 #   tkboot                 # make dtbs only, repack, boot
 #   tkboot --kernel        # built-in code changed too: make Image.gz as well
-_PH_BASEIMG=${TK_BASEIMG:-/tmp/tk-base-boot.img}
+# The base image the dtb is spliced into.
+#
+# The old default was /tmp/tk-base-boot.img, with "seed it once from a
+# known-good UUID-patched boot.img" printed when it was absent. That
+# instruction cannot be followed from where the build runs: the workspace
+# container does not mount the host's /tmp, so seeding the named path on the
+# host changed nothing, and pointing TK_BASEIMG at a scratch path failed the
+# same way for the same reason.
+#
+# Left EMPTY by default and resolved inside tkboot against the device's own
+# kernel release. TK_BASEIMG still overrides, for a base image you have and the
+# device cannot supply.
+_PH_BASEIMG=${TK_BASEIMG:-}
+
+# Which partition holds a known-good boot image.
+#
+# Derived, never hardcoded: this file is `scope: generic`, and a device without
+# A/B slots has a plain `boot`. TK_BOOT_PARTLABEL is the escape hatch for a
+# bootloader that names it something else.
+_ph_boot_partlabel() {
+	if [ -n "${TK_BOOT_PARTLABEL:-}" ]; then
+		printf '%s\n' "$TK_BOOT_PARTLABEL"
+	elif [ "${PORTHOLE_HAS_AB_SLOTS:-0}" = "1" ] && [ -n "${PORTHOLE_ACTIVE_SLOT:-}" ]; then
+		printf 'boot_%s\n' "$PORTHOLE_ACTIVE_SLOT"
+	else
+		printf 'boot\n'
+	fi
+}
+
+# Pull a known-good base image off the device.
+#
+# The active slot's boot partition IS a known-good, UUID-patched image by
+# definition, so there is nothing for a human to find and nothing to seed by
+# hand. Cached under .run, which the container DOES mount.
+#
+# Keyed on the device's kernel release by the caller, and that is what makes
+# the cache safe rather than merely convenient: after a `fast` flash the key
+# changes and the image re-seeds, so a DTS-only RAM boot can never carry a
+# stale kernel behind a fresh dtb -- a failure that would present as a bad
+# devicetree and cost a boot to diagnose.
+#
+# Verify the artifact, not the exit code: a truncated read is still a file, and
+# a repack from a truncated base produces an image the bootloader rejects with
+# nothing here having complained. bootimg-cmdline.py already answers exactly
+# "is this an Android boot image" and refuses with a sentence that says so.
+_ph_seed_baseimg() {
+	local part tmp
+	[ -s "$_PH_BASEIMG" ] && return 0
+	part=$(_ph_boot_partlabel)
+	echo ">> no base image yet -- seeding from the device's $part"
+	mkdir -p "$(dirname "$_PH_BASEIMG")" || return 1
+	tmp="$_PH_BASEIMG.partial"
+	if ! TK_RUN_TIMEOUT=15 tk_run "test -e /dev/disk/by-partlabel/$part" >/dev/null 2>&1; then
+		echo ">> the device has no /dev/disk/by-partlabel/$part" >&2
+		echo ">> set TK_BOOT_PARTLABEL to the partition holding a good boot image," >&2
+		echo ">> or TK_BASEIMG to a known-good UUID-patched boot.img you already have" >&2
+		return 1
+	fi
+	# `cat`, not `dd`: dd's count/bs would have to be guessed per device, and
+	# the partition is exactly the image. sudo because the block device is not
+	# world-readable.
+	if ! TK_RUN_TIMEOUT=180 tk_run "sudo cat /dev/disk/by-partlabel/$part" > "$tmp" 2>/dev/null; then
+		rm -f "$tmp"
+		echo ">> could not read $part from the device" >&2
+		return 1
+	fi
+	if ! "$_PH_REPO_ROOT/tools/bootimg-cmdline.py" show "$tmp" >/dev/null 2>&1; then
+		rm -f "$tmp"
+		echo ">> what came off $part is not a boot image -- refusing to cache it" >&2
+		echo ">> (a truncated read is still a file; the repack would not say so)" >&2
+		return 1
+	fi
+	mv "$tmp" "$_PH_BASEIMG" || return 1
+	echo ">> base image cached at $_PH_BASEIMG"
+}
 
 tkboot() {
 	local with_kernel=""
@@ -1645,12 +1719,21 @@ tkboot() {
 		echo ">>       userspace without them; use \`fast\` if it does not."
 	fi
 
-	[ -f "$_PH_BASEIMG" ] || {
-		echo ">> no base image at $_PH_BASEIMG"
-		echo "   seed it once from a known-good UUID-patched boot.img:"
-		echo "     cp <good>.img $_PH_BASEIMG"
-		return 1
-	}
+	# BEFORE the compile, not after. `auto` routes to `boot` without checking
+	# the rung can run, so a missing base image used to surface minutes into a
+	# make -- the cost paid before the news.
+	if [ -z "$_PH_BASEIMG" ]; then
+		local _rel _rundir
+		_rundir=${PORTHOLE_RUNDIR:-$_PH_REPO_ROOT/.run}
+		_rel=$(TK_RUN_TIMEOUT=8 tk_run 'uname -r' 2>/dev/null | tr -d '\r\n')
+		[ -n "$_rel" ] || {
+			echo ">> cannot reach the device, so no base image can be seeded" >&2
+			echo ">> boot the phone, or set TK_BASEIMG to a known-good" >&2
+			echo ">> UUID-patched boot.img" >&2
+			return 1; }
+		_PH_BASEIMG="$_rundir/base-boot-$_rel.img"
+	fi
+	_ph_seed_baseimg || return 1
 
 	_ph_activate || return 1
 	shopt -s expand_aliases
