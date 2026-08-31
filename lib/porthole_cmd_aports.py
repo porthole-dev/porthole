@@ -862,6 +862,18 @@ def lint_verdict(problems, apkbuild_lint_rc) -> int:
     return EX_FAIL if apkbuild_lint_rc != 0 else EX_OK
 
 
+def _lint_unavailable_hint(problems) -> str:
+    """The Bail hint for a missing apkbuild-lint. Pure, so the "clean" claim
+    can be asserted without a ctx -- same reason lint_verdict is separate.
+
+    Must not say "clean" when non-fatal warnings were just printed two lines
+    above in the same invocation; that is the printed claim outrunning the
+    measurement that AGENTS.md section 6 forbids.
+    """
+    state = "found only non-fatal issues" if problems else "ran and was clean"
+    return f"the series check above {state}; pmaports CI lints the merge request"
+
+
 def cmd_lint(args, ctx, pmaports) -> int:
     """The local series check always; apkbuild-lint when pmbootstrap has it.
 
@@ -900,8 +912,7 @@ def cmd_lint(args, ctx, pmaports) -> int:
     verdict = lint_verdict(problems, rc)
     if verdict == EX_UNAVAILABLE:
         raise Bail(_lint_unavailable(gone), EX_UNAVAILABLE,
-                   "the series check above ran and was clean; pmaports CI "
-                   "lints the merge request")
+                   _lint_unavailable_hint(problems))
     if verdict != EX_OK:
         raise Bail("lint found problems", EX_FAIL,
                    "fix them before opening a merge request — pmaports CI "

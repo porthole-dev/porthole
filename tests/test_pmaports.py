@@ -360,6 +360,18 @@ def test_lint_a_stripped_patch_alone_does_not_fail_the_verb():
     assert aports.lint_verdict(problems, apkbuild_lint_rc=0) == 0
 
 
+def test_lint_unavailable_hint_does_not_claim_clean_over_warnings():
+    # apkbuild-lint absent AND a non-fatal warning printed above: the hint
+    # must not say "clean" -- that would contradict the yellow line the user
+    # just read two lines up in the same invocation.
+    import porthole_cmd_aports as aports
+
+    problems = [("stripped", "1000-drm.patch: line 12: ... leading space")]
+    hint = aports._lint_unavailable_hint(problems)
+    assert "clean" not in hint, hint
+    assert "non-fatal" in hint, hint
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
