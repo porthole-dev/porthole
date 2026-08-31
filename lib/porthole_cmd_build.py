@@ -804,9 +804,21 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
         text = logpath.read_text(errors="replace")
         for line in failure_tail(text):
             ctx.out(ctx.out.paint(f"  | {line}", "grey"))
+        # pmbootstrap's stdout is reliably NOT where pmbootstrap puts the
+        # cause. A 21-minute run died with a tail containing an APKINDEX
+        # warning and a line about systemd, while the real error sat 71,393
+        # lines into log.txt. failure_tail already prefers the lines that name
+        # a failure; it was pointed at the wrong file.
+        inner = tail_text(follow) if follow else ""
+        if inner:
+            named = failure_tail(inner)
+            if named:
+                ctx.out(ctx.out.paint(f"  from {follow}:", "grey"))
+                for line in named:
+                    ctx.out(ctx.out.paint(f"  | {line}", "grey"))
         # The error text is the one thing every porter has in hand, and for a
         # known signature the cause is somewhere the message does not mention.
-        for why in diagnose(text):
+        for why in diagnose(text + "\n" + inner):
             ctx.out(ctx.out.paint(f"  ? {why}", "yellow"))
     return rc
 
@@ -841,6 +853,23 @@ def failure_tail(text: str, limit: int = 6) -> list[str]:
     if lines[-1] not in keep:
         keep = keep + [lines[-1]]
     return keep
+
+
+def tail_text(path, limit_bytes: int = 2_000_000) -> str:
+    """The last `limit_bytes` of a file, decoded leniently.
+
+    pmbootstrap's log.txt is shared, long-lived and was 71,393 lines deep when
+    it held the answer to a failed build. Reading it whole to print six lines
+    is not the shape of a thing that runs at the end of every failure.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - limit_bytes))
+            return handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 # Build failures whose message names something other than the cause. Each one
@@ -891,6 +920,14 @@ _DIAGNOSES = (
      "`ls <workdir>/chroot_buildroot_<arch>/home/pmos/build/src/`. "
      "`porthole pkg build` and `porthole aports` take a lock; raw pmbootstrap "
      "does not."),
+    (re.compile(r"deviceinfo[^\n]*not found, required by mkinitfs"
+                r"|mkinitfs: skipping \(no deviceinfo file found\)", re.I),
+     "`pmbootstrap export` builds boot.img from the ROOTFS CHROOT, and the "
+     "chroot in this work dir has never had a full `pmbootstrap install` -- "
+     "so it has no device package and no deviceinfo. The workspace keeps its "
+     "own pmbootstrap work dir, separate from the host's, so an install done "
+     "on the host does not populate it. Run `porthole build kernel --yes` "
+     "once against this work dir."),
 )
 
 

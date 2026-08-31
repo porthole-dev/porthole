@@ -1145,5 +1145,45 @@ def test_run_follows_pmbootstraps_own_log():
     assert str(seen["follow"]).endswith("log.txt"), seen["follow"]
 
 
+PMB_LOG_TAIL = """\
+(rootfs_google-taimen) install postmarketos-mkinitfs
+* mkinitfs: skipping (no deviceinfo file found)
+OK: 96.2 MiB in 19 packages
+/usr/share/deviceinfo/deviceinfo: "..." not found, required by mkinitfs
+/etc/deviceinfo: "..." not found, required by mkinitfs
+ERROR: Command failed (exit code 1): (rootfs_google-taimen) % mkinitfs
+*** Additional information: log file, examples ***
+See also: <https://postmarketos.org/troubleshooting>
+"""
+
+
+def test_failure_tail_finds_the_cause_not_the_boilerplate():
+    import porthole_cmd_build as build
+
+    lines = build.failure_tail(PMB_LOG_TAIL)
+    joined = "\n".join(lines)
+    assert "required by mkinitfs" in joined, joined
+    assert "postmarketos.org/troubleshooting" not in "\n".join(lines[:-1]), joined
+
+
+def test_a_missing_deviceinfo_is_diagnosed_as_an_uninstalled_chroot():
+    import porthole_cmd_build as build
+
+    why = build.diagnose(PMB_LOG_TAIL)
+    assert why, "no diagnosis for the mkinitfs/deviceinfo signature"
+    assert "install" in why[0].lower(), why
+
+
+def test_tail_text_reads_the_end_of_a_large_file():
+    import tempfile
+    import porthole_cmd_build as build
+
+    path = pathlib.Path(tempfile.mkdtemp(prefix="porthole-tail-")) / "log.txt"
+    path.write_text("filler\n" * 200000 + "THE LAST LINE\n")
+    got = build.tail_text(path, limit_bytes=4096)
+    assert "THE LAST LINE" in got
+    assert len(got) <= 5000, len(got)
+
+
 if __name__ == "__main__":
     sys.exit(main())
