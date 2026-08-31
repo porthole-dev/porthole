@@ -949,6 +949,29 @@ def cmd_bump(args, ctx, pmaports) -> int:
 
 # ----------------------------------------------------------------- patches --
 
+def dropped_patches(listed, new) -> list:
+    """Patches in source= that this rewrite would not reproduce. Pure.
+
+    `cmd_patches` deletes every .patch and rewrites source= from the tree, so
+    running it against a tree that lacks work the aport carries removes that
+    work silently. Against the taimen aport from a tree without the venus
+    commits it would have deleted all 19 venus patches -- and the failure mode
+    of a missing venus patch is a missing /dev node and nothing in any log.
+    """
+    fresh = set(new)
+    return [name for name in listed if name not in fresh]
+
+
+def next_patch_number(existing) -> int:
+    """One past the highest 4-digit prefix in the series. Pure."""
+    numbers = []
+    for name in existing:
+        head = name[:4]
+        if head.isdigit():
+            numbers.append(int(head))
+    return (max(numbers) + 1) if numbers else 1
+
+
 def cmd_patches(args, ctx, pmaports) -> int:
     """Export kernel commits into a kernel aport as a numbered patch series.
 
@@ -961,6 +984,14 @@ def cmd_patches(args, ctx, pmaports) -> int:
     Stale patches are REMOVED rather than merged: the series in the aport must
     equal the series in the tree. A patch dropped from the branch but left in
     the package is a change nobody can account for, and it will be built.
+
+    That deletion refuses to run when the tree does not reproduce a patch the
+    aport currently carries -- a tree missing work the aport has looks
+    identical to a tree the work was deliberately dropped from, and the
+    former used to get silently deleted. `--drop` overrides it when a
+    regenerated series really is what you mean. `--append` is for the common
+    case instead: N new commits on top of an existing series, numbered from
+    the end, nothing deleted.
     """
     tree = pathlib.Path(
         args.tree or ctx.cfg.get("PORTHOLE_WORKDIR", "") or ".").expanduser()
@@ -1009,23 +1040,47 @@ def cmd_patches(args, ctx, pmaports) -> int:
         o.blank()
         o(f"  into {pkgdir.relative_to(pmaports)}")
         if old:
-            o(o.paint(f"  replacing {len(old)} existing patch(es)", "yellow"))
+            if args.append:
+                o(o.paint(f"  appending after {len(old)} existing patch(es)",
+                          "yellow"))
+            else:
+                o(o.paint(f"  replacing {len(old)} existing patch(es)", "yellow"))
         o.blank()
-        o.hint(f"porthole aports patches --base {base} --pkg {pkgname} --yes")
+        extra = " --append" if args.append else ""
+        o.hint(f"porthole aports patches --base {base} --pkg {pkgname}"
+               f"{extra} --yes")
         return EX_OK
 
-    for name in old:
-        (pkgdir / name).unlink()
+    format_patch_args = ["format-patch", f"{base}..HEAD", "-o", str(pkgdir),
+                         "--no-signature", "--zero-commit", "--no-numbered"]
+    if args.append:
+        format_patch_args += ["--start-number", str(next_patch_number(old))]
     # --zero-commit and --no-signature keep the patch files stable across
     # regenerations, so re-running this does not produce a diff of noise.
-    rc, out, err = git(tree, "format-patch", f"{base}..HEAD", "-o", str(pkgdir),
-                       "--no-signature", "--zero-commit", "--no-numbered",
-                       timeout=300)
+    rc, out, err = git(tree, *format_patch_args, timeout=300)
     if rc != 0:
         raise Bail(f"format-patch failed: {err}", EX_FAIL)
     new = sorted(pathlib.Path(l).name for l in out.splitlines() if l.strip())
 
-    changed = _rewrite_source(pkgdir / "APKBUILD", new)
+    gone = dropped_patches(old, new)
+    if gone and not args.append and not args.drop:
+        raise Bail(
+            f"this would delete {len(gone)} patch(es) the tree does not "
+            f"reproduce", EX_FAIL,
+            "they are: " + ", ".join(gone[:5])
+            + (" ..." if len(gone) > 5 else "")
+            + ".  If that is what you meant, add --drop. If you have N NEW "
+              "commits on top, use --append instead — it renumbers from the "
+              "end and deletes nothing.")
+
+    if args.append:
+        series = old + new
+    else:
+        for name in gone:
+            (pkgdir / name).unlink()
+        series = new
+
+    changed = _rewrite_source(pkgdir / "APKBUILD", series)
     ctx.out(f"  {len(new)} patch(es) written to {pkgdir.relative_to(pmaports)}")
     if changed:
         ctx.out("  APKBUILD source= updated")
@@ -1037,7 +1092,7 @@ def cmd_patches(args, ctx, pmaports) -> int:
                    "`porthole aports checksum`")
 
     payload = {"package": pkgname, "tree": str(tree), "base": base,
-               "patches": new, "removed": [p for p in old if p not in new]}
+               "patches": series, "removed": [] if args.append else gone}
 
     def render():
         o = ctx.out
@@ -1262,6 +1317,12 @@ SPEC = {
                              "help": "start: branch despite uncommitted changes"}),
         (["--yes"], {"action": "store_true",
                      "help": "start/new/patches: actually do it"}),
+        (["--append"], {"action": "store_true",
+                        "help": "patches: add these commits after the existing "
+                                "series instead of replacing it"}),
+        (["--drop"], {"action": "store_true",
+                      "help": "patches: allow the rewrite to delete patches "
+                              "the tree does not reproduce"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "escapes_scope": True,

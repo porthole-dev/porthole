@@ -372,6 +372,36 @@ def test_lint_unavailable_hint_does_not_claim_clean_over_warnings():
     assert "non-fatal" in hint, hint
 
 
+def test_dropped_patches_names_what_the_rewrite_would_delete():
+    """The 19 venus patches, in the shape they would have vanished in."""
+    import porthole_cmd_aports as aports
+
+    listed = ["0001-a.patch", "0181-venus-a.patch", "0199-venus-s.patch"]
+    new = ["0001-a.patch"]
+    gone = aports.dropped_patches(listed, new)
+    assert gone == ["0181-venus-a.patch", "0199-venus-s.patch"], gone
+
+
+def test_dropped_patches_is_empty_when_the_series_is_reproduced():
+    import porthole_cmd_aports as aports
+
+    same = ["0001-a.patch", "0002-b.patch"]
+    assert aports.dropped_patches(same, list(same)) == []
+
+
+def test_append_numbers_from_one_past_the_highest():
+    import porthole_cmd_aports as aports
+
+    existing = ["0001-a.patch", "0199-venus.patch"]
+    assert aports.next_patch_number(existing) == 200
+
+
+def test_append_numbers_from_one_when_there_is_no_series():
+    import porthole_cmd_aports as aports
+
+    assert aports.next_patch_number([]) == 1
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
