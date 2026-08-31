@@ -60,6 +60,74 @@ and `exits`, so `head -20 <tool>` also answers the question.
 
 ## 1. The rules that are not negotiable
 
+Every rule in this repo, with its level and the thing that enforces it. A MUST
+is machine-checked and `enforced by` names the check; a SHOULD is one no test
+can decide, which is a statement about what is checkable and never about what
+matters. `tests/test_rules.py` fails if a MUST has no live enforcer, because a
+MUST with a checkbox and nothing behind it is exactly how a device serial
+reached a public branch.
+
+**This block is generated from `lib/porthole_rules.py`** — edit that and run
+`make rules`, never this list. The sections below are the narrative: what each
+rule cost to learn, and how to follow it.
+
+<!-- BEGIN GENERATED RULES -->
+- **Never hand-roll what a tool already does** — writing `ssh ... reboot` or `sleep 60` means you have not found the tool yet -- `porthole tools --grep <what>`
+  (`no-hand-rolling` · **MUST** · enforced by `tests/test_tools.py::test_every_tool_declares_the_four_fields`)
+- **Take the device mutex, declaring the state you need** — the-lock-says-who-not-what; exit 75 means retry, exit 76 means something must move the device first
+  (`device-mutex` · **MUST** · enforced by `tests/test_tools.py::test_tools_that_need_a_device_mention_the_mutex_or_use_the_lib`)
+- **Found the device in a state you did not put it in? Say so and hand back** — it is usually someone else's measurement in progress, not a fault, and recovering it destroys their run
+  (`hand-back-a-device-you-did-not-set` · **SHOULD** · no enforcer, and so not a MUST)
+- **Confirm before anything irreversible** — flashing, set_active, thermal ramps -- a bad image on the wrong slot leaves a device that will not boot and cannot be talked to
+  (`confirm-before-irreversible` · **MUST** · enforced by `tests/test_cli_rules.py::test_verbs_escaping_their_scope_require_yes`, `tests/test_tui_safety.py::test_no_safe_milestone_command_is_irreversible`)
+- **Never ask for host root; builds go through `porthole sandbox`** — the sandbox grants zero standing host privilege, and a tool that escalates on the host is the one bug this design exists to prevent
+  (`no-host-root` · **MUST** · enforced by `tests/test_cli.py::test_init_prints_the_sudoers_snippet_rather_than_applying_it`, `tests/test_sandbox_container.py::test_up_argv_maps_container_root_to_our_uid`)
+- **Never hardcode an IP, username, slot letter or package name** — every one of them comes from the config layer; a hardcoded value is a tool that works on exactly one desk
+  (`no-hardcoded-values` · **MUST** · enforced by `tests/test_tools.py::test_no_hardcoded_gadget_ip_outside_config`)
+- **Put a timeout on every ssh in anything that deliberately induces a reset** — 'the device stopped answering' is the expected outcome there, and an untimed command wedges the lock against every other agent
+  (`ssh-timeout-on-reset` · **SHOULD** · no enforcer, and so not a MUST)
+- **Every ssh and scp in the build path passes the shared options** — without them the device key is never offered, which is why `porthole build mod` silently failed to authenticate
+  (`ssh-shared-options` · **MUST** · enforced by `tests/test_tools.py::test_the_build_path_never_invokes_ssh_without_the_shared_options`)
+- **Do not sleep after a build verb** — poll-never-sleep; every rung returns when the device is back, not when it was asked to move
+  (`no-sleep-after-a-build-verb` · **SHOULD** · no enforcer, and so not a MUST)
+- **Prove the code under test actually ran, and decide the control first** — every-test-needs-a-positive-control; a null from a path that never executed is not a refutation
+  (`prove-it-ran` · **SHOULD** · no enforcer, and so not a MUST)
+- **Write down anything that would have saved someone a session** — `porthole brain new <id>`, then lint, then submit. A session that learned something and wrote nothing down is unfinished
+  (`contribute-what-you-learn` · **SHOULD** · no enforcer, and so not a MUST)
+- **In a review, say which claims you verified by execution and which you read** — the failure mode is not rudeness, it is a confident review of code nobody ran -- and an agent is the likeliest author of one
+  (`state-what-you-verified` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
+- **Never publish anything on the sensitive list** — docs/HANDOFF-contribution-rules.md section 4.5; publication is irreversible and redaction is free
+  (`no-secrets` · **MUST** · enforced by `tests/test_secrets.py`, `.githooks/commit-msg`, `.githooks/pre-push`)
+- **No attribution trailers of any kind on a commit** — they are injected by a harness default rather than typed by anyone, and the history has been rewritten twice to remove them
+  (`no-trailers` · **MUST** · enforced by `.githooks/commit-msg`)
+- **Run `make ci`, not `make check`, before opening a pull request** — `make check` skips the console, smoke and python-floor jobs that CI still runs
+  (`make-ci-before-pushing` · **SHOULD** · no enforcer, and so not a MUST)
+- **Changing a check means showing it fail without the fix** — every-test-needs-a-positive-control; the slots fixture used a spelling no device emits and so held the parser bug in place
+  (`a-check-must-fail-without-its-fix` · **SHOULD** · no enforcer, and so not a MUST)
+- **Every tool declares `scope:`, `needs:`, `env:` and `exits:`** — a tool nobody can describe without reading it is a tool nobody improves
+  (`tool-header-fields` · **MUST** · enforced by `tests/test_tools.py::test_every_tool_declares_the_four_fields`)
+- **A device-specific probe lives in `profiles/<codename>/tools/`** — in tools/ it reads as generic, and the next porter runs it on the wrong phone
+  (`device-tools-live-in-a-profile` · **MUST** · enforced by `tests/test_tools.py::test_device_scoped_tools_live_in_a_profile`)
+- **`lib/` is stdlib-only, except `lib/porthole_tui/` which is the optional console extra** — the CLI must work on a bare 3.8 with nothing installed; the console degrades to a skip when textual is absent
+  (`stdlib-only` · **MUST** · enforced by `tests/test_conventions.py::test_lib_is_stdlib_only_outside_the_console_extra`)
+- **Exit codes come from the documented table and nowhere else** — exit-codes-are-an-api; 69 versus 1 is the difference between 'the check did not happen' and 'the check failed'
+  (`exit-codes-are-an-api` · **MUST** · enforced by `tests/test_conventions.py::test_exit_codes_come_from_the_documented_table`)
+- **Python 3.8 is the floor, and bin/porthole, the Makefile and CI agree on it** — a PEP 701 f-string compiled locally on 3.14 and broke every CI job
+  (`python-floor` · **MUST** · enforced by `tests/test_tools.py::test_the_python_floor_is_declared_consistently`)
+- **LF endings, a final newline, and no trailing whitespace** — .editorconfig says so and nothing checked it until now
+  (`file-hygiene` · **MUST** · enforced by `tests/test_conventions.py::test_tracked_text_files_are_clean`)
+- **`tk_*` shell helpers are never renamed or deleted; new ones are `ph_*`** — they are a compatibility surface for tools outside this repo, which is why `tk_wait_fastboot` stays despite having no callers
+  (`frozen-tk-names` · **MUST** · enforced by `tests/test_conventions.py::test_the_tk_helper_surface_is_frozen`)
+- **CI runs nothing but `make` targets that `make ci` also reaches** — three hand-kept copies of the step list is how a green `make check` kept shipping a red pipeline
+  (`ci-runs-only-make-targets` · **MUST** · enforced by `tests/test_tools.py::test_ci_runs_nothing_but_make_targets_that_make_ci_also_runs`)
+- **One logical change per commit, and the body says why rather than what** — not machine-decidable, and calling it a MUST would make every MUST read as decorative
+  (`one-logical-change-per-commit` · **SHOULD** · no enforcer, and so not a MUST)
+- **A decision that must not be wrong is a pure function** — `_classify`'s own docstring: a pure function is one that can be wrong in a test instead of on a device
+  (`a-decision-that-must-not-be-wrong-is-pure` · **SHOULD** · no enforcer, and so not a MUST)
+- **A comment says why the code is shaped this way and what it cost to learn** — it is why this codebase is legible cold; a comment that only restates the code should be deleted in review
+  (`comments-record-the-incident` · **SHOULD** · no enforcer, and so not a MUST)
+<!-- END GENERATED RULES -->
+
 ### Never hand-roll what a tool already does
 
 If you are writing an `ssh ... reboot` one-liner or a `sleep 60`, stop. There is
@@ -433,6 +501,7 @@ have the full rules.
 | 75 | could not get the device lock | **retry** |
 | 76 | device in the wrong state | **do not retry** — something must move it |
 | 124 | killed at the hold ceiling | a wedge; investigate, do not just rerun |
+| 130 | interrupted (SIGINT) | a person stopped it; not a result either way |
 
 Do not conflate 1 with the others. An agent that cannot tell "the tool broke"
 from "the answer is no" reports broken tools as findings.

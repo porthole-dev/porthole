@@ -41,6 +41,7 @@ EX_USAGE = 64
 EX_LOCK = 75
 EX_STATE = 76
 EX_TIMEOUT = 124
+EX_INTERRUPT = 130
 # The tool could not run at all. Distinct from EX_FAIL, which means the thing
 # under test failed: an agent that conflates them reports broken tools as
 # findings, which AGENTS.md section 6 forbids.
@@ -518,6 +519,6 @@ def _run(args, out: Out, root: pathlib.Path) -> int:
                   file=sys.stderr)
         return exc.code
     except KeyboardInterrupt:
-        return 130
+        return EX_INTERRUPT
     except BrokenPipeError:
         return EX_OK

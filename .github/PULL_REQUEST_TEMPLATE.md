@@ -17,6 +17,9 @@
       placeholder rather than deleting the evidence.
 - [ ] device-specific probes live in `profiles/<codename>/tools/`, not `tools/`
 - [ ] non-trivial logic leaves one runnable check behind
+- [ ] **if an agent wrote or reviewed this**: it says which claims it verified by
+      execution and which it only read (`state-what-you-verified`). The failure
+      mode is not rudeness, it is a confident review of code nobody ran.
 - [ ] a lesson that generalises became a `brain/` note with its evidence
 - [ ] no trailers on any commit — no `Signed-off-by:`, no AI attribution
 

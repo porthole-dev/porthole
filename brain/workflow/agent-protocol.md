@@ -22,19 +22,23 @@ Written for LLM agents, and it applies to humans too.
 
 ## While you work
 
-**Never hand-roll what a tool already does.** If you are writing an
-`ssh ... reboot` one-liner or a `sleep 60`, there is a tool and you have not
-found it yet.
+The rules themselves live in `lib/porthole_rules.py` with their levels and
+enforcers, and reach you through `porthole brief --json`. They were restated
+here once, and this copy had drifted: it carried four of the ten. Cited by id
+now, because a rule written in two voices is a rule a reader gets to choose
+between.
 
-**Every command that touches the device goes through the mutex, declaring the
-state it needs.** [[the-lock-says-who-not-what]].
+`no-hand-rolling` — if you are writing an `ssh ... reboot` one-liner or a
+`sleep 60`, there is a tool and you have not found it yet.
 
-**If you find the device in a state you did not put it in, say so and hand
-back.** Do not recover someone else's experiment out from under them.
+`device-mutex` — [[the-lock-says-who-not-what]].
 
-**Put a timeout on every ssh in anything that deliberately induces a reset.**
-"The device stopped answering" is your expected outcome there, and a command
-without a timeout wedges the lock against every other agent.
+`hand-back-a-device-you-did-not-set` — do not recover someone else's
+experiment out from under them.
+
+`ssh-timeout-on-reset` — "the device stopped answering" is your expected
+outcome there, and a command without a timeout wedges the lock against every
+other agent.
 
 ## Before you report a result
 

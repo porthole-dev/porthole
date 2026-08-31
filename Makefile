@@ -23,7 +23,7 @@ TEST_JOBS ?= 8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
-.PHONY: help test console smoke lint floor check ci distros fmt tools-doc brain-index clean install-completion docs docs-serve
+.PHONY: help test console smoke lint floor check ci distros fmt tools-doc brain-index clean install-completion docs docs-serve rules
 
 help:            ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -132,6 +132,11 @@ docs:            ## generate the documentation site sources
 
 docs-serve:      ## preview the docs at http://127.0.0.1:8000
 	@./bin/porthole docs serve
+
+rules:           ## regenerate the rule blocks in AGENTS.md and the skill
+	@# tests/test_rules.py fails when these are stale, the same way
+	@# tools-doc's output is checked. Edit lib/porthole_rules.py, run this.
+	@$(PY) lib/porthole_rules.py --write
 
 tools-doc:       ## regenerate docs/TOOLS.md from the tool headers
 	@$(PY) tools/gen-tools-doc.py > docs/TOOLS.md && echo "wrote docs/TOOLS.md"
