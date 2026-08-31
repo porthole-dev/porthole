@@ -66,24 +66,49 @@ GENERIC = [
     ("gps", {"present": "test -e /dev/gnss0 || "
                         "mmcli -m any --location-status 2>/dev/null | grep -q gps"}),
     ("nfc", {"present": "test -d /sys/class/nfc/nfc0"}),
-    ("display", {"present": "test -e /sys/class/drm/card0",
-                 "works": "grep -qx 'connected' "
-                          "/sys/class/drm/card0-*/status 2>/dev/null"}),
+    # No `works:` here on purpose. A DRM connector's status reads
+    # `connected` as soon as the driver registers it, before display
+    # bring-up has painted a single pixel -- brain/laws/never-judge-a-boot-
+    # by-the-screen.md: "a fully booted device and a hung one look
+    # identical". That status file is presence under another name, the same
+    # defect that got camera.works deleted from this table. And it cannot be
+    # patched around later: caps.merge() lets a profile OVERRIDE a field but
+    # cannot REMOVE one, so a wrong generic `works:` here would keep showing
+    # through on every device whose profile does not set its own -- which is
+    # exactly why a doubtful generic probe must not exist in the first
+    # place. `display` reports `?`, honestly: there is no read-only way to
+    # prove a panel is displaying.
+    ("display", {"present": "test -e /sys/class/drm/card0"}),
     ("touchscreen", {"present": "grep -qi touch /proc/bus/input/devices"}),
     ("audio-out", {"present": "test -e /dev/snd/pcmC0D0p"}),
     ("audio-in", {"present": "test -e /dev/snd/pcmC0D0c"}),
     ("battery", {"present": "ls /sys/class/power_supply/*/capacity >/dev/null 2>&1",
                  "works": "cat /sys/class/power_supply/*/capacity 2>/dev/null | "
                           "grep -qE '^[0-9]+$'"}),
+    # `works` asks "does the gauge report a real charging state", not "is a
+    # cable plugged in right now" -- an unplugged but healthy phone reports
+    # `Discharging` or `Not charging`, and grepping only for Charging|Full
+    # answered the cable question instead of the hardware one. Only
+    # `Unknown` (or an unreadable status) means the gauge itself is not
+    # telling us anything, which is the actual failure this probe should
+    # catch.
     ("charging", {"present": "ls /sys/class/power_supply/*/type >/dev/null 2>&1",
-                  "works": "grep -qxE 'Charging|Full' "
+                  "works": "grep -qxE 'Charging|Full|Not charging|Discharging' "
                            "/sys/class/power_supply/*/status 2>/dev/null"}),
     ("suspend", {"present": "grep -q mem /sys/power/state"}),
     ("sensors", {"present": "ls -d /sys/bus/iio/devices/iio:device* "
                             ">/dev/null 2>&1"}),
     ("camera", {"present": "ls /dev/video* >/dev/null 2>&1"}),
-    ("video-decode", {"present": "v4l2-ctl --list-devices 2>/dev/null | "
-                                 "grep -qiE 'venus|vidc|hantro|rkvdec'"}),
+    # `v4l2-ctl --list-devices` open()s every /dev/video* node to read its
+    # card name -- the exact probe removed from taimen's profile as a
+    # Critical, because brain/findings/venus-decode-works-and-what-it-took.md
+    # records that patch 0198 calls pm_runtime_forbid() on the venus core:
+    # "powered at first use, stays up while bound". Reading the driver name
+    # from sysfs instead is a pure read, no open(), and globs every node so
+    # it stays generic across SoCs rather than naming one path.
+    ("video-decode", {"present": "grep -qiE 'venus|vidc|hantro|rkvdec' "
+                                 "/sys/class/video4linux/*/name "
+                                 "2>/dev/null"}),
 ]
 
 FIELDS = ("present", "works")
@@ -209,12 +234,17 @@ def demux(text: str) -> dict:
 def verdict(record) -> str:
     """`yes` | `no` | `?` for one cell.
 
-    `?` covers both "no probe is defined for this" and "the probe did not
-    run", and it is NEVER partial credit. A matrix that reports an unrun probe
-    as a failure is as wrong as one that reports it as a pass -- the honest
-    answer is that nobody looked.
+    `?` covers "no probe is defined for this", "the probe did not run", and
+    now "the probe's tool was not there to run" -- rc 127 (command not
+    found) and 126 (found but not executable) mean the shell could not even
+    invoke the probe. That is nobody looking, not looking and finding
+    nothing, and this whole verb rests on keeping those apart: collapsing
+    127 into `no` is how "hciconfig is missing on this rootfs" turns into
+    "porthole matrix says bluetooth does not work".
     """
     if not record or "rc" not in record:
+        return "?"
+    if record["rc"] in (126, 127):
         return "?"
     return "yes" if record["rc"] == 0 else "no"
 

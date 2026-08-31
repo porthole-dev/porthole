@@ -175,6 +175,34 @@ def test_a_capability_with_no_probe_for_that_field_is_unknown():
     assert caps.verdict({}) == "?"
 
 
+def test_verdict_treats_a_missing_tool_as_unknown_not_no():
+    """rc 127 (command not found) and 126 (found but not executable) mean
+    the shell could not invoke the probe at all -- nobody looked, which is
+    not the same as looking and finding nothing.
+    """
+    assert caps.verdict({"rc": 127, "out": ""}) == "?"
+    assert caps.verdict({"rc": 126, "out": ""}) == "?"
+
+
+def test_generic_display_has_no_works_probe():
+    """A DRM connector reads `connected` before the panel ever lights --
+    brain/laws/never-judge-a-boot-by-the-screen.md. `works:` must stay
+    absent for `display` in the generic table."""
+    generic = dict(caps.GENERIC)
+    assert "present" in generic["display"]
+    assert "works" not in generic["display"], generic["display"]
+
+
+def test_generic_video_decode_present_does_not_open_a_device_node():
+    """The taimen finding: opening a V4L2 node can power a decoder core
+    that then stays powered (pm_runtime_forbid()). The generic present
+    probe must read sysfs instead of v4l2-ctl/open()."""
+    generic = dict(caps.GENERIC)
+    present = generic["video-decode"]["present"]
+    assert "v4l2-ctl" not in present, present
+    assert "/sys/class/video4linux" in present, present
+
+
 def test_script_output_contains_the_real_separator_bytes():
     # A regression that dropped RS/US from the format string would still pass
     # a "printf appears twice" count -- assert the actual framing bytes.
