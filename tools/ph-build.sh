@@ -1457,6 +1457,35 @@ tkpush-modules() {
 # session if you are chasing a sensor bring-up.
 #
 #   tkmod drivers/media/i2c/imx179.ko imx179
+# Say what an ssh/scp failure to the device actually was.
+#
+# `scp: Connection closed` names nothing, and the first guess is a stale ssh
+# control master -- a real hazard after a reboot, and the wrong one here. It
+# cost a session to learn the answer was that the phone does not have this key.
+#
+# One probe, on the failure path only, so a working push pays nothing.
+# ControlMaster=no because a dead master is one of the answers this has to be
+# able to distinguish, and reusing it would hide the very thing being asked.
+_ph_ssh_diagnose() {
+	local phone=$1 err
+	err=$(ssh "${TK_SSH_OPTS[@]}" -o ControlMaster=no -o ControlPath=none \
+		"$phone" true 2>&1)
+	case $err in
+	*"Permission denied"*)
+		echo ">> the device refuses this key: ${PORTHOLE_SSH_KEY:-(your default ssh keys)}" >&2
+		echo ">> in the workspace that is the ONLY key the container has, so" >&2
+		echo ">> every push fails until the phone is told about it. Once, by hand:" >&2
+		echo ">>   ssh-keygen -y -f ${PORTHOLE_SSH_KEY:-~/.ssh/id_ed25519}" >&2
+		echo ">>   # add that one line to ~/.ssh/authorized_keys ON THE PHONE" >&2
+		echo ">> \`porthole doctor\` reports this as workspace: device key." >&2 ;;
+	"")
+		echo ">> ssh answers now, so the failure was transient or the mux was stale" >&2
+		echo ">>   ph_ssh_mux_reset   # if it recurs" >&2 ;;
+	*)
+		echo ">> ssh to $phone failed: $err" >&2 ;;
+	esac
+}
+
 tkmod() {
 	local rel=$1 name=$2 phone=${PHONE:-$PORTHOLE_USER@$HOST}
 	[ -n "$rel" ] && [ -n "$name" ] || { echo ">> usage: tkmod <path/to/mod.ko> <modname>"; return 1; }
@@ -1493,7 +1522,8 @@ tkmod() {
 	# reads like a network fault and sent a session looking at the ssh mux.
 	# They also lost ConnectTimeout, BatchMode (a prompt instead of a fast
 	# failure) and the multiplexing that makes every other device call ~15ms.
-	scp -q "${TK_SSH_OPTS[@]}" "$ko" "$phone:/tmp/$name.ko" || return 1
+	scp -q "${TK_SSH_OPTS[@]}" "$ko" "$phone:/tmp/$name.ko" || {
+		_ph_ssh_diagnose "$phone"; return 1; }
 
 	# ALSO replace the installed module, not just the hot-loaded one.
 	#
@@ -1505,7 +1535,8 @@ tkmod() {
 	# Modules on the device are xz-compressed; a plain .ko next to the .ko.xz
 	# is ignored (TODO section 3), so compress and overwrite in place.
 	xz -cf "$ko" > "/tmp/$name.ko.xz" || return 1
-	scp -q "${TK_SSH_OPTS[@]}" "/tmp/$name.ko.xz" "$phone:/tmp/$name.ko.xz" || return 1
+	scp -q "${TK_SSH_OPTS[@]}" "/tmp/$name.ko.xz" "$phone:/tmp/$name.ko.xz" || {
+		_ph_ssh_diagnose "$phone"; return 1; }
 
 	# rmmod alone is not enough once something holds the driver -- camss keeps a
 	# reference to a sensor subdev, so the module refcount never reaches zero and

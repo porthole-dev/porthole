@@ -736,6 +736,41 @@ def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
                "pmbootstrap, naming nothing")
 
 
+def _device_key_row(ch: Checks, state) -> None:
+    """The workspace's device key, reported by whether the phone accepts it.
+
+    doctor printed `✓ device key /home/you/.porthole/device_key` for a key the
+    device had never been told about, because it checked that the FILE exists.
+    That is the difference between "the key is present" and "the key works",
+    and only the second is what a build needs.
+
+    The fix is printed and never applied: installing a key is a privileged
+    write to the device, and doctor's contract is that it names fixes it will
+    not run itself.
+    """
+    key = state.get("device_key")
+    if not key:
+        ch.add("workspace: device key", "warn", "not created",
+               doc="porthole sandbox up    creates one")
+        return
+    authorized = state.get("device_key_authorized")
+    if authorized is True:
+        ch.add("workspace: device key", "ok", f"{key} -- the device accepts it")
+    elif authorized is False:
+        ch.add("workspace: device key", "fail",
+               f"{key} exists, and the device refuses it -- every workspace "
+               f"push fails with `scp: Connection closed`",
+               f"print the public half here, then add that ONE line to the "
+               f"phone's ~/.ssh/authorized_keys:\n"
+               f"          ssh-keygen -y -f {key}")
+    else:
+        ch.add("workspace: device key", "warn",
+               f"{key} -- present, but the device could not be asked whether "
+               f"it accepts it",
+               doc="a key file is not a working key; re-run with the device "
+                   "booted and reachable")
+
+
 def check_workspace(ch: Checks, ctx, family: str) -> None:
     """podman and the build workspace.
 
@@ -746,7 +781,7 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
     """
     import porthole_cmd_sandbox as sandbox
 
-    state = sandbox._container_state(ctx.root)
+    state = sandbox._container_state(ctx.root, ctx.cfg)
     if not state["podman"]:
         ch.add("host: podman", "fail",
                "not found -- builds run in a rootless container",
@@ -792,6 +827,8 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
                doc="porthole sandbox up    writes it")
     else:
         ch.add("workspace: work dir", "ok", str(pmb))
+
+    _device_key_row(ch, state)
 
     # binfmt is host-global and needs root once. Named, never automated: it is
     # a person installing software on their own machine, not a privilege the

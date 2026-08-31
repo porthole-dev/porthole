@@ -265,5 +265,69 @@ def test_check_host_fails_a_required_row_whose_tool_cannot_run():
         assert rows["host: fastboot"]["fix"], "a failing row must name a fix"
 
 
+# ------------------------------------------------------- the device key ---
+# doctor printed a green device key for a key the phone had never been told
+# about, because it checked that the FILE exists. So doctor was ok while every
+# workspace push failed with `scp: Connection closed`.
+
+def test_the_device_key_row_reports_three_states():
+    """Three, not two. An unreachable device is not evidence the key is bad,
+    and a check that cries failure when it does not know is one people learn
+    to scroll past."""
+    seen = {}
+    for value in (True, False, None):
+        ch = doctor.Checks()
+        doctor._device_key_row(ch, {"device_key": "/k",
+                                    "device_key_authorized": value})
+        seen[value] = ch.rows[-1]["status"]
+    assert seen == {True: "ok", False: "fail", None: "warn"}, seen
+
+
+def test_a_missing_key_is_not_reported_as_refused():
+    ch = doctor.Checks()
+    doctor._device_key_row(ch, {"device_key": "", "device_key_authorized": None})
+    assert ch.rows[-1]["status"] == "warn", ch.rows[-1]
+    assert "not created" in ch.rows[-1]["detail"], ch.rows[-1]
+
+
+def test_a_refused_key_names_the_command_that_fixes_it():
+    ch = doctor.Checks()
+    doctor._device_key_row(ch, {"device_key": "/k", "device_key_authorized": False})
+    fix = ch.rows[-1]["fix"]
+    assert "ssh-keygen -y" in fix and "authorized_keys" in fix, fix
+
+
+def test_doctor_prints_the_key_fix_and_does_not_perform_it():
+    """Installing a key is a privileged write to the device. doctor names
+    fixes it will not run, and this is not the place to make an exception."""
+    src = (ROOT / "lib" / "porthole_cmd_doctor.py").read_text()
+    body = src.split("def _device_key_row")[1].split("\ndef ")[0]
+    for verb in ("subprocess.run", "os.system", "tee "):
+        assert verb not in body, verb
+
+
+def test_an_agent_key_cannot_mask_an_uninstalled_device_key():
+    """Without IdentitiesOnly a working key in the user's agent answers for the
+    device key, and the check passes for the wrong reason."""
+    import porthole_cmd_sandbox as sandbox
+    src = (ROOT / "lib" / "porthole_cmd_sandbox.py").read_text()
+    body = src.split("def _device_key_authorized")[1].split("\ndef ")[0]
+    assert "IdentitiesOnly" in body and "BatchMode" in body
+
+
+def test_only_a_refusal_counts_as_unauthorized():
+    """A device that is off, or a name that does not resolve, is unknown."""
+    import porthole_cmd_sandbox as sandbox
+    with tempfile.TemporaryDirectory() as tmp:
+        key = pathlib.Path(tmp) / "k"
+        key.write_text("x")
+        # No PHONE configured at all: nothing to ask, so nothing is claimed.
+        assert sandbox._device_key_authorized({}, key) is None
+        # A host that cannot resolve is unknown, never False.
+        got = sandbox._device_key_authorized(
+            {"PHONE": "porthole-nonexistent.invalid"}, key)
+        assert got is None, got
+
+
 if __name__ == "__main__":
     sys.exit(main())
