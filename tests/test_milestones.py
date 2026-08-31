@@ -366,6 +366,45 @@ def test_a_missing_build_artefact_costs_no_search():
             f"confirming a missing .dtb read {len(visited)} directories")
 
 
+def test_series_applies_blocks_when_a_patch_is_malformed():
+    import porthole_milestones as ms
+
+    assert "series-applies" in ms.BY_ID, sorted(ms.BY_ID)
+    milestone = ms.BY_ID["series-applies"]
+    # It sits before `builds`: a series that cannot apply is WHY the packages
+    # would not build, so reporting them in the other order buries the cause.
+    ids = [m.id for m in ms.MILESTONES]
+    assert ids.index("series-applies") < ids.index("builds")
+
+
+def test_series_applies_is_blocked_not_todo():
+    """A broken series is a precondition, not a task you can pick up.
+
+    BLOCKED is what `next` renders in the "getting in the way" list; TODO
+    would offer it as the next action, which reads as "go and do this" for
+    something no one can do until the patch is fixed.
+    """
+    import porthole_milestones as ms
+
+    verdict = ms.verdict_for_series([("malformed", "0199-x.patch: ...")])
+    assert verdict.state == ms.BLOCKED, verdict
+    assert "0199" in verdict.evidence, verdict.evidence
+
+
+def test_series_applies_ignores_warnings():
+    import porthole_milestones as ms
+
+    verdict = ms.verdict_for_series([("stripped", "a.patch: line 12 ...")])
+    assert verdict.state == ms.DONE, verdict
+
+
+def test_series_applies_says_how_many_patches_it_checked():
+    import porthole_milestones as ms
+
+    verdict = ms.verdict_for_series([], count=199)
+    assert "199" in verdict.evidence, verdict.evidence
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

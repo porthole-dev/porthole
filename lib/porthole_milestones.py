@@ -412,6 +412,49 @@ def _package_dirs(ctx):
     return [d for d in out if d.is_dir()]
 
 
+def verdict_for_series(problems, count: int = 0):
+    """A verdict from a series check. Pure, so the severity rule is testable.
+
+    BLOCKED rather than TODO: a series that cannot apply is a precondition of
+    the whole packaging phase, not a task anyone can pick up. `next` renders
+    BLOCKED in the "in the way" list and TODO as the next action, and offering
+    "fix this" as the next action for a patch nobody has diagnosed yet is the
+    wrong instruction.
+    """
+    fatal = [msg for kind, msg in problems
+             if kind not in ("duplicate", "stripped")]
+    if fatal:
+        return blocked("the series does not apply: " + "; ".join(fatal[:2]))
+    return done("{} patch(es) check out".format(count) if count
+                else "the series checks out")
+
+
+def probe_series_applies(ctx):
+    """Does the kernel aport's patch series actually apply?
+
+    Read off disk, never built and never on the device: this runs inside every
+    `next` and every `brief`, including `brief --no-device`.
+
+    It exists because the taimen series was broken for the life of a port and
+    the only way to find out was a two-minute build that failed naming
+    something else, so work drifted to a tree that had none of the patches.
+    """
+    pkgname = _cfg(ctx, "PORTHOLE_KERNEL_PKG")
+    if not pkgname:
+        return unknown()
+    try:
+        import porthole_cmd_aports as aports
+
+        pmaports = aports._pmaports(ctx)
+        pkg_dir = aports._pkg_dir(pmaports, pkgname)
+    except Exception:  # noqa: BLE001 -- no pmaports is not a broken series
+        return unknown()
+    if pkg_dir is None:
+        return unknown()
+    count = len(list(pkg_dir.glob("*.patch")))
+    return verdict_for_series(aports._series_problems(pkg_dir), count)
+
+
 def probe_kernel_pkg(ctx):
     name = _cfg(ctx, "PORTHOLE_KERNEL_PKG")
     if not name:
@@ -659,6 +702,12 @@ MILESTONES = [
         "kernel-pkg", "packaging", "pmaports kernel package exists",
         why="It pins the tree and the config the port actually builds.",
         how="porthole aports status", probe=probe_kernel_pkg, safe=True),
+    Milestone(
+        "series-applies", "packaging", "The kernel patch series applies",
+        why="A series that cannot apply makes every aport build fail for a "
+            "reason nothing surfaces, and work drifts to a tree that does not "
+            "carry the patches. taimen lost a whole subsystem this way.",
+        how="porthole aports lint", probe=probe_series_applies, safe=True),
     Milestone(
         "builds", "packaging", "The packages build",
         why="A package that builds on your host is the first thing anyone else "
