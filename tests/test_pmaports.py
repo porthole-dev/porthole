@@ -402,6 +402,47 @@ def test_append_numbers_from_one_when_there_is_no_series():
     assert aports.next_patch_number([]) == 1
 
 
+def test_patches_checks_dropped_patches_before_it_unlinks_anything():
+    """The order is load-bearing, not tidiness.
+
+    The guard must see the old series before any file backing it is deleted,
+    or it reports on files it has already destroyed -- the exact silent-loss
+    bug this task exists to prevent. Asserted via AST on the actual call
+    nodes so a future edit that reorders the two statements fails this test
+    even though every other assertion in this file still passes.
+    """
+    import ast
+    import inspect
+    import textwrap
+    import porthole_cmd_aports as aports
+
+    source = inspect.getsource(aports.cmd_patches)
+    tree = ast.parse(textwrap.dedent(source))
+
+    guard_lines = []
+    unlink_lines = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == "dropped_patches":
+            guard_lines.append(node.lineno)
+        elif isinstance(node.func, ast.Attribute) and node.func.attr == "unlink":
+            unlink_lines.append(node.lineno)
+
+    # ast.walk is breadth-first, not source order, so the last node visited
+    # is not the last in the file. min() asks the right question: does the
+    # first dropped_patches() call happen before the first unlink() call?
+    guard_lineno = min(guard_lines) if guard_lines else None
+    unlink_lineno = min(unlink_lines) if unlink_lines else None
+
+    assert guard_lineno is not None, "cmd_patches must call dropped_patches()"
+    assert unlink_lineno is not None, "cmd_patches must call .unlink() on stale patches"
+    assert guard_lineno < unlink_lineno, (
+        f"dropped_patches() at line {guard_lineno} must run before "
+        f"unlink() at line {unlink_lineno} -- otherwise the guard reports "
+        f"on patches it has already deleted")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
