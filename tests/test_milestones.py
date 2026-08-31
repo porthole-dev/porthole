@@ -422,17 +422,24 @@ def test_brief_probes_the_device_before_it_evaluates_milestones():
     source = inspect.getsource(brief.cmd_brief)
     tree = ast.parse(textwrap.dedent(source))
 
-    state_lineno = None
-    port_state_lineno = None
+    state_lines = []
+    port_state_lines = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         # state(...) call: func is ast.Attribute with attr='state'
         if isinstance(node.func, ast.Attribute) and node.func.attr == "state":
-            state_lineno = node.lineno
+            state_lines.append(node.lineno)
         # _port_state(...) call: func is ast.Name with id='_port_state'
         elif isinstance(node.func, ast.Name) and node.func.id == "_port_state":
-            port_state_lineno = node.lineno
+            port_state_lines.append(node.lineno)
+
+    # ast.walk is breadth-first, not source order, so the last node visited is
+    # not the last in the file. Use min() to find the earliest occurrence, which
+    # is the right question here: does the first device probe happen before the
+    # first milestone evaluation?
+    state_lineno = min(state_lines) if state_lines else None
+    port_state_lineno = min(port_state_lines) if port_state_lines else None
 
     assert state_lineno is not None, (
         "cmd_brief must call state() on the device")
