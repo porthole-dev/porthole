@@ -26,17 +26,34 @@ _PREFIX = "(bootloader) "
 
 
 def parse_getvar(text: str) -> dict:
-    """`fastboot getvar all` output as a dict. Pure, so it is testable."""
+    """`fastboot getvar all` output as a dict. Pure, so it is testable.
+
+    fastboot writes `key:value` (no space after the colon) and some tooling
+    writes `key: value`, so both sides are stripped. The KEY may contain a
+    colon (`slot-unbootable:a`), so the split is at the LAST colon. A value
+    that itself contains a colon (a timestamp) is then split as well; the
+    slot variables this verb consumes (`a`, `b`, `0-9`, `yes`, `no`) never
+    do, so the policy they drive is exact even where the mirror is not.
+    """
     found = {}
     for line in text.splitlines():
         line = line.strip()
         if not line.startswith(_PREFIX):
             continue
         body = line[len(_PREFIX):]
-        if ": " not in body:
+        # fastboot writes `key:value` with no space after the colon (AOSP
+        # fastboot: fprintf(stderr, "(bootloader) %s:%s", name, value)).
+        # `key: value` from other tooling must keep working. The KEY may
+        # itself contain a colon (`slot-unbootable:a`) and the VALUE may
+        # contain one too (a timestamp), so split on the LAST colon and
+        # strip both sides instead of matching one spelling.
+        head, sep, tail = body.rpartition(":")
+        if not sep:
             continue
-        key, value = body.split(": ", 1)
-        found[key.strip()] = value.strip()
+        key = head.strip()
+        if not key:
+            continue
+        found[key] = tail.strip()
     return found
 
 

@@ -227,28 +227,7 @@ tk_since() {
 # tk_deadline_ms SECONDS -> absolute epoch-ms deadline
 tk_deadline_ms() { echo $(( $(tk_now_ms) + $1 * 1000 )); }
 
-# tk_expired DEADLINE_MS -- true once the deadline has passed.
-#
-# A non-integer deadline is a PROGRAMMING error, not a timing one, and bash's
-# own `[: : integer expected` names the line inside this library rather than
-# the caller that passed nothing. Five of those during tk-to-fastboot were
-# unattributable for exactly that reason: the message points here, and here is
-# not where the bug is. (The handoff that reported them blamed
-# tk_wait_fastboot; nothing in the repo calls that function, which is how much
-# help the original message was.) Naming BASH_SOURCE[1] costs one line and
-# turns noise into a lead.
-#
-# Returns 1 -- NOT expired -- when it cannot tell. A wait loop that treats an
-# unknown deadline as expired gives up instantly on a device that was fine,
-# which is a worse failure than the noise this replaces.
-tk_expired() {
-    case ${1:-} in
-    ''|*[!0-9]*)
-        echo "tk_expired: bad deadline '${1:-}' from ${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}" >&2
-        return 1 ;;
-    esac
-    [ "$(tk_now_ms)" -ge "$1" ]
-}
+tk_expired() { [ "$(tk_now_ms)" -ge "$1" ]; }
 
 # ph_timed LABEL START_MS -- emit a probe timing when PORTHOLE_TIMING=1.
 # This is how "blazing fast" stays a measurement instead of a claim.

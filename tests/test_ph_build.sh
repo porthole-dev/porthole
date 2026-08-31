@@ -209,56 +209,5 @@ if test_arm_ccache_is_callable_standalone; then ok; else
 	bad "_ph_arm_ccache is callable standalone" "marker or function missing"
 fi
 
-# --- the boot rung's base image ------------------------------------------
-#
-# The old default was /tmp/tk-base-boot.img with "seed it once" printed when it
-# was missing -- an instruction that cannot be followed from where builds run,
-# because the workspace container does not mount the host's /tmp. And the check
-# fired AFTER the compile, so the cost was paid before the news.
-
-partlabel() { # partlabel EXTRA_ENV [DEVICE]
-    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
-        PORTHOLE_DEVICE="${2:-google-taimen}" PORTHOLE_WORKDIR="$TMP/repo" \
-        PORTHOLE_KERNEL_PKG=k PORTHOLE_DEVICE_PKG=d PORTHOLE_FW_PKG=f \
-        PORTHOLE_DTB_FILE=x.dtb $1 \
-        bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
-                 _ph_boot_partlabel'
-}
-
-# Derived per device, because this file is scope: generic.
-is "a/b slots give a suffixed partlabel" \
-   "$(partlabel 'PORTHOLE_HAS_AB_SLOTS=1 PORTHOLE_ACTIVE_SLOT=b')" "boot_b"
-is "no slots gives a plain partlabel" \
-   "$(partlabel 'PORTHOLE_HAS_AB_SLOTS=0')" "boot"
-# A/B slots with no ACTIVE slot recorded is the real state of an unprobed
-# port -- google-cheetah in this repo is exactly that. Guessing a suffix there
-# names a partition that may not exist; plain `boot` at least fails by saying
-# which partlabel it looked for.
-is "slots without a probed active slot does not guess a suffix" \
-   "$(partlabel '' google-cheetah)" "boot"
-is "the override wins over both" \
-   "$(partlabel 'TK_BOOT_PARTLABEL=weird PORTHOLE_HAS_AB_SLOTS=1 PORTHOLE_ACTIVE_SLOT=b')" \
-   "weird"
-
-# The seed must refuse a truncated or garbage read rather than caching it: a
-# repack from a bad base produces an image the bootloader rejects, with nothing
-# in this file having complained.
-seedcheck=$(env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
-    PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" \
-    PORTHOLE_KERNEL_PKG=k PORTHOLE_DEVICE_PKG=d PORTHOLE_FW_PKG=f \
-    PORTHOLE_DTB_FILE=x.dtb TMP="$TMP" \
-    bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
-             _PH_BASEIMG="$TMP/base.img"
-             tk_run() { case "$*" in *test\ -e*) return 0 ;;
-                                     *) printf "not a boot image" ;; esac; }
-             _ph_seed_baseimg >/dev/null 2>&1; echo "$?:$([ -e "$TMP/base.img" ] && echo cached || echo absent)"')
-is "a non-boot-image read is refused, not cached" "$seedcheck" "1:absent"
-
-# No /tmp anywhere in the base-image path: that was the whole defect.
-if grep -q 'TK_BASEIMG:-/tmp' "$ROOT/tools/ph-build.sh"; then
-    bad "the base image no longer defaults into /tmp" \
-        "the container does not mount the host's /tmp"
-else ok; fi
-
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

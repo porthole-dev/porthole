@@ -79,26 +79,6 @@ if [ ${#_siblings[@]} -gt 0 ]; then
     echo "### brain/traps/pushing-one-module-of-a-pair-corrupts-the-other.md"
 fi
 
-# A module built from the tree carries .BTF that references the *aport*
-# kernel's BTF by type id. The ids do not line up, the module notifier fails
-# the load with -40, and modprobe says "Symbolic link loop". Neuter .BTF before
-# it ever reaches the phone -- see tools/tk-strip-btf.py for the whole story.
-#
-# Stage into a temp dir rather than editing in place: build output under
-# .output belongs to the workspace container's uid, is not writable by us, and
-# is not ours to rewrite even when it is. Done after the sibling warning above,
-# which needs the real build paths.
-_stage=$(mktemp -d)
-trap 'rm -rf "$_stage"' EXIT
-_staged=()
-for ko in "$@"; do
-    [ -f "$ko" ] || { echo "no such module: $ko"; exit 1; }
-    cp -p "$ko" "$_stage/$(basename "$ko")"
-    _staged+=("$_stage/$(basename "$ko")")
-done
-"$(dirname "$0")/tk-strip-btf.py" "${_staged[@]}"
-set -- "${_staged[@]}"
-
 for ko in "$@"; do
     [ -f "$ko" ] || { echo "no such module: $ko"; exit 1; }
     base=$(basename "$ko")
