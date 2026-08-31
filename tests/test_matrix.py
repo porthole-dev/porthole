@@ -83,7 +83,8 @@ def test_a_profile_overrides_a_generic_capability_in_place():
     """
     merged = caps.merge(caps.GENERIC, caps.parse(CONF))
     names = [name for name, _ in merged]
-    assert names.index("wifi") < names.index("video-decode") or True
+    generic_names = [name for name, _ in caps.GENERIC]
+    assert [n for n in names if n in set(generic_names)] == generic_names, names
     got = dict(merged)
     assert got["video-decode"]["present"] == "test -e /dev/video7"
 
