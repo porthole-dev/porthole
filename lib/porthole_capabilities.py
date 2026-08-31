@@ -120,6 +120,77 @@ def parse(text: str):
     return found
 
 
+# ASCII record and unit separators. They exist for this and no ordinary
+# command output contains them, so a cell can never be mistaken for another
+# cell's output -- which matters because these probes run as ONE script and a
+# misattributed result is worse than a missing one.
+RS, US = "\x1e", "\x1f"
+
+
+def script(capabilities) -> str:
+    """One shell script that runs every probe and frames every answer.
+
+    Thirty capabilities must not cost thirty ssh connections. The device is
+    reached once; each probe's exit status and first line of output come back
+    framed and attributable.
+
+    A probe with a syntax error breaks only its own record, because each runs
+    inside its own command substitution. That is the intended blast radius for
+    a command someone wrote in a profile.
+    """
+    parts = []
+    for name, fields in capabilities:
+        for field in FIELDS:
+            command = fields.get(field)
+            if not command:
+                continue
+            # `out=$(...)` then `$?` is the SUBSTITUTED command's status, not
+            # a pipeline's last stage -- which is why the capture is not piped
+            # through head here. Trimming happens on this side.
+            parts.append(
+                "out=$( {{ {cmd} ; }} 2>&1 ); rc=$?; "
+                "printf '{rs}%s{us}%s{us}%s{us}%s' '{name}' '{field}' "
+                '"$rc" "$out"'.format(cmd=command, rs=RS, us=US,
+                                      name=name, field=field))
+    return "\n".join(parts)
+
+
+def demux(text: str) -> dict:
+    """Framed output -> {(capability, field): {rc, out}}.
+
+    Anything before the first record separator is dropped: a login banner, an
+    MOTD or an ssh warning is not a cell.
+    """
+    found = {}
+    for chunk in (text or "").split(RS)[1:]:
+        bits = chunk.split(US)
+        if len(bits) < 3:
+            continue
+        name, field, rc = bits[0], bits[1], bits[2]
+        out = bits[3] if len(bits) > 3 else ""
+        if field not in FIELDS:
+            continue
+        try:
+            code = int(rc.strip())
+        except ValueError:
+            continue
+        found[(name, field)] = {"rc": code, "out": out.strip()[:200]}
+    return found
+
+
+def verdict(record) -> str:
+    """`yes` | `no` | `?` for one cell.
+
+    `?` covers both "no probe is defined for this" and "the probe did not
+    run", and it is NEVER partial credit. A matrix that reports an unrun probe
+    as a failure is as wrong as one that reports it as a pass -- the honest
+    answer is that nobody looked.
+    """
+    if not record or "rc" not in record:
+        return "?"
+    return "yes" if record["rc"] == 0 else "no"
+
+
 def merge(generic, profile):
     """Built-in capabilities, with the profile's overriding IN PLACE.
 

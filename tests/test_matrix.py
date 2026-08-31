@@ -94,5 +94,51 @@ def test_a_profile_can_add_a_capability_the_generic_table_lacks():
     assert merged["easel"]["present"] == "test -e /dev/easel"
 
 
+RS, US = "\x1e", "\x1f"
+
+
+def test_script_emits_one_framed_record_per_probe():
+    caps_list = [("wifi", {"present": "true", "works": "false"})]
+    text = caps.script(caps_list)
+    assert text.count("printf") >= 2, text
+    assert "wifi" in text
+
+
+def test_demux_reads_rc_and_output_per_cell():
+    stream = (RS + "wifi" + US + "present" + US + "0" + US + "phy0"
+              + RS + "wifi" + US + "works" + US + "1" + US + "")
+    got = caps.demux(stream)
+    assert got[("wifi", "present")]["rc"] == 0
+    assert got[("wifi", "present")]["out"] == "phy0"
+    assert got[("wifi", "works")]["rc"] == 1
+
+
+def test_demux_ignores_anything_before_the_first_record():
+    # A login banner, an MOTD, an ssh warning: none of it is a cell.
+    stream = ("Welcome to postmarketOS\n" + RS + "wifi" + US + "present"
+              + US + "0" + US + "phy0")
+    got = caps.demux(stream)
+    assert list(got) == [("wifi", "present")], got
+
+
+def test_verdict_maps_rc_to_yes_and_no():
+    assert caps.verdict({"rc": 0, "out": ""}) == "yes"
+    assert caps.verdict({"rc": 1, "out": ""}) == "no"
+
+
+def test_a_missing_record_is_unknown_not_no():
+    """empty must mean unknown, never changed -- and never `no`.
+
+    A probe that did not run and a probe that said no are different answers,
+    and reporting the first as the second is how a matrix becomes a thing that
+    lies confidently.
+    """
+    assert caps.verdict(None) == "?"
+
+
+def test_a_capability_with_no_probe_for_that_field_is_unknown():
+    assert caps.verdict({}) == "?"
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
