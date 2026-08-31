@@ -20,6 +20,7 @@ Two rules from the session that asked for this, and one this design adds:
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -138,6 +139,48 @@ def test_a_missing_record_is_unknown_not_no():
 
 def test_a_capability_with_no_probe_for_that_field_is_unknown():
     assert caps.verdict({}) == "?"
+
+
+def test_script_output_contains_the_real_separator_bytes():
+    # A regression that dropped RS/US from the format string would still pass
+    # a "printf appears twice" count -- assert the actual framing bytes.
+    text = caps.script([("wifi", {"present": "true", "works": "false"})])
+    assert RS in text, text
+    assert US in text, text
+
+
+def test_demux_drops_bad_rc_unknown_field_and_a_truncated_record():
+    stream = (
+        RS + "wifi" + US + "present" + US + "notanumber" + US + "junk"
+        + RS + "wifi" + US + "not-a-field" + US + "0" + US + "junk"
+        + RS + "wifi" + US + "works"
+    )
+    got = caps.demux(stream)
+    assert got == {}, got
+
+
+def test_a_syntax_error_in_one_probe_does_not_abort_later_capabilities():
+    """The containment claim, proven against real bash, not just read.
+
+    An earlier version spliced the command straight into `{ cmd ; }`, and a
+    capability named with a stray apostrophe or a probe with an unbalanced
+    `}` broke the OUTER script's parse, silently zeroing every capability
+    after it. Passing each probe, name and field as one `shlex.quote()`-d
+    argument to a nested `bash -c` turns that into a runtime failure of the
+    inner shell only -- the outer script still parses and later capabilities
+    still fire.
+    """
+    caps_list = [
+        ("modem's-sim", {"present": "true"}),
+        ("bad-probe", {"present": "echo hi; }; echo sneaky"}),
+        ("wifi", {"present": "true", "works": "false"}),
+    ]
+    text = caps.script(caps_list)
+    out = subprocess.run(["bash", "-c", text], capture_output=True,
+                          text=True, timeout=10).stdout
+    got = caps.demux(out)
+    assert got[("wifi", "present")]["rc"] == 0, got
+    assert got[("wifi", "works")]["rc"] == 1, got
 
 
 if __name__ == "__main__":

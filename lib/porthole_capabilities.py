@@ -44,6 +44,7 @@ WHY THE PROBES ARE READ-ONLY
 from __future__ import annotations
 
 import collections
+import shlex
 
 # Capabilities every phone has, with probes that hold on any mainline pmOS
 # rootfs. A profile overrides any of these in place and may add its own: that
@@ -134,9 +135,23 @@ def script(capabilities) -> str:
     reached once; each probe's exit status and first line of output come back
     framed and attributable.
 
-    A probe with a syntax error breaks only its own record, because each runs
-    inside its own command substitution. That is the intended blast radius for
-    a command someone wrote in a profile.
+    Every probe, and the capability name and field it is filed under, is
+    passed as a single `shlex.quote()`-d ARGUMENT to a nested `bash -c`,
+    never spliced into the outer script as shell syntax. This was not the
+    first version: an earlier draft interpolated the command directly inside
+    `{ cmd ; }` and claimed that was containment enough, on the theory that a
+    command substitution walls off its own failure. That is true for a
+    RUNTIME failure (a command that exits 127 stays contained) and false for
+    a SYNTAX error, because bash parses the entire outer script before
+    running any of it -- one capability named with a stray apostrophe, or one
+    profile probe with an unbalanced `}`, produced a parse error that aborted
+    everything after it in the script and silently zeroed every later
+    capability's records. Passed as an argument instead, a malformed probe or
+    name can only make the inner `bash -c` exit non-zero; the outer script
+    still parses as a flat sequence of well-formed statements and every
+    later record still fires. The extra `bash -c` fork per probe is the
+    accepted cost -- the round trip this task exists to avoid is the SSH
+    connection, not the process.
     """
     parts = []
     for name, fields in capabilities:
@@ -148,10 +163,11 @@ def script(capabilities) -> str:
             # a pipeline's last stage -- which is why the capture is not piped
             # through head here. Trimming happens on this side.
             parts.append(
-                "out=$( {{ {cmd} ; }} 2>&1 ); rc=$?; "
-                "printf '{rs}%s{us}%s{us}%s{us}%s' '{name}' '{field}' "
-                '"$rc" "$out"'.format(cmd=command, rs=RS, us=US,
-                                      name=name, field=field))
+                "out=$(bash -c {cmd} 2>&1); rc=$?; "
+                "printf '{rs}%s{us}%s{us}%s{us}%s' {name} {field} "
+                '"$rc" "$out"'.format(cmd=shlex.quote(command), rs=RS, us=US,
+                                      name=shlex.quote(name),
+                                      field=shlex.quote(field)))
     return "\n".join(parts)
 
 
