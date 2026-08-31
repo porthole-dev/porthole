@@ -30,7 +30,7 @@ import threading
 import time
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_UNAVAILABLE, EX_USAGE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
 
 # Each verb maps to a shell function ph-build.sh defines. The names are kept
 # from the taimen toolbox because they are what every runbook prints and what
@@ -1265,13 +1265,7 @@ def cmd_build(args, ctx) -> int:
                         render)
 
     if problems and action in BUILD_ACTIONS:
-        # 76 ("wrong device state, do not retry"), not 1, when the profile
-        # itself is otherwise ready and the only thing standing in the way is
-        # the rootfs chroot: that is not a usage mistake, it is `porthole
-        # build kernel --yes` away, and the exit code should say so.
-        code = EX_STATE if action in EXPORT_RUNGS and not _preflight(ctx) \
-            else EX_FAIL
-        raise Bail("this profile cannot build yet", code,
+        raise Bail("this profile cannot build yet", EX_FAIL,
                    "; ".join(problems))
 
     if not func:
