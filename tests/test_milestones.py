@@ -411,15 +411,34 @@ def test_brief_probes_the_device_before_it_evaluates_milestones():
     `state(max_age=30)` writes the state cache, and the milestone probes read
     it. Evaluating milestones first means they read whatever was there before
     -- which is the "brief says BOOTED, next says not probed" defect exactly.
-    Asserted on the source because the alternative is a live device.
+    Asserted via AST on the actual call nodes because comments can contain the
+    same strings as code.
     """
+    import ast
     import inspect
+    import textwrap
     import porthole_cmd_brief as brief
 
     source = inspect.getsource(brief.cmd_brief)
-    probe_at = source.index("state(max_age=")
-    port_at = source.index("_port_state(")
-    assert probe_at < port_at, (
+    tree = ast.parse(textwrap.dedent(source))
+
+    state_lineno = None
+    port_state_lineno = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        # state(...) call: func is ast.Attribute with attr='state'
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "state":
+            state_lineno = node.lineno
+        # _port_state(...) call: func is ast.Name with id='_port_state'
+        elif isinstance(node.func, ast.Name) and node.func.id == "_port_state":
+            port_state_lineno = node.lineno
+
+    assert state_lineno is not None, (
+        "cmd_brief must call state() on the device")
+    assert port_state_lineno is not None, (
+        "cmd_brief must call _port_state() to evaluate milestones")
+    assert state_lineno < port_state_lineno, (
         "cmd_brief must probe the device before evaluating milestones; "
         "the probe warms the cache the milestone probes read")
 
