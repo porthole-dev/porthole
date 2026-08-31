@@ -134,6 +134,13 @@ def cmd_brief(args, ctx) -> int:
 
     _laws, _findings = _from_brain(pathlib.Path(ctx.root), device,
                                    cfg.get("PORTHOLE_SOC", ""))
+
+    # ORDER IS LOAD-BEARING. state(max_age=30) writes the state cache, and the
+    # milestone probes in _port_state() below READ it. Evaluate milestones
+    # first and they see a stale reading or none -- which is how `brief` came
+    # to print `state BOOTED` directly above `next` rows saying "device state
+    # not probed (run porthole doctor)", advising the command that had already
+    # answered. tests/test_milestones.py pins this.
     payload = {
         "porthole_version": version(root),
         "root": str(root),

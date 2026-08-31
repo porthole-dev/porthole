@@ -405,6 +405,25 @@ def test_series_applies_says_how_many_patches_it_checked():
     assert "199" in verdict.evidence, verdict.evidence
 
 
+def test_brief_probes_the_device_before_it_evaluates_milestones():
+    """The order is load-bearing, not tidiness.
+
+    `state(max_age=30)` writes the state cache, and the milestone probes read
+    it. Evaluating milestones first means they read whatever was there before
+    -- which is the "brief says BOOTED, next says not probed" defect exactly.
+    Asserted on the source because the alternative is a live device.
+    """
+    import inspect
+    import porthole_cmd_brief as brief
+
+    source = inspect.getsource(brief.cmd_brief)
+    probe_at = source.index("state(max_age=")
+    port_at = source.index("_port_state(")
+    assert probe_at < port_at, (
+        "cmd_brief must probe the device before evaluating milestones; "
+        "the probe warms the cache the milestone probes read")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
