@@ -506,8 +506,14 @@ def test_watch_detects_a_dead_pid_as_stale_instead_of_polling_forever():
 # in exactly the "somebody else's run just finished" case this feature
 # exists to handle. If these two tests ever assert different key tuples, the
 # union is back and neither test would catch it.
+#
+# `note` is in this tuple ON PURPOSE, after a SECOND review round found it
+# present on waiting objects and absent from live ones -- a smaller version
+# of the same defect, missed the first time because this constant did not
+# name every key the contract promises. A constant that omits a key pins
+# nothing about that key.
 NDJSON_KEYS_AN_AGENT_READS = ("rung", "phase", "state", "elapsed", "progress",
-                              "eta")
+                              "eta", "note")
 
 
 def test_watch_ndjson_streams_json_and_skips_the_summary_block():
@@ -543,6 +549,9 @@ def test_watch_ndjson_streams_json_and_skips_the_summary_block():
         # missing key), so only PRESENCE is asserted, not type.
         for key in NDJSON_KEYS_AN_AGENT_READS:
             assert key in obj, f"{key!r} missing from the ndjson object"
+        # A live object has nothing to SAY -- the rest of its fields already
+        # speak for it -- so `note` is present but empty, never absent.
+        assert obj["note"] == "", obj
 
 
 def test_watch_ndjson_waiting_path_carries_the_same_keys():

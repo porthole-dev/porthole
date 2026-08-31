@@ -697,13 +697,15 @@ def waiting_line(snap, now=None) -> str:
             f"waiting for a new build to start")
 
 
-# The key set every `snapshot()` (Tracker's and PkgTracker's on-disk shape,
-# and `publish_pending`'s) always includes. Used as the ndjson "waiting"
-# object's baseline: copy a previous snapshot's own keys when there is one,
-# fall back to this -- all `None` -- when nothing has EVER published here, so
-# the emitted object's key set never depends on which branch produced it.
+# Every ndjson object's key set -- `snapshot()`'s own keys (Tracker's and
+# PkgTracker's on-disk shape, and `publish_pending`'s) plus `note`, which a
+# snapshot on disk never carries but every EMITTED object must, live or
+# waiting, or `obj["note"]` KeyErrors on exactly the objects that have
+# nothing to say. Used as the "waiting, and nothing has EVER published here"
+# fallback -- all `None`, `note` included -- so the emitted object's key set
+# never depends on which branch, or how much history, produced it.
 NDJSON_KEYS = ("rung", "phase", "state", "pid", "elapsed", "progress", "eta",
-              "compile_lines", "last", "started")
+              "compile_lines", "last", "started", "note")
 
 
 def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
@@ -735,14 +737,16 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     exactly the "somebody else's run just finished" case this feature exists
     to handle. Every emitted object now carries the same key set --
     `rung`, `phase`, `state`, `pid`, `elapsed`, `progress`, `eta`,
-    `compile_lines`, `last`, `started` (plus `rate` when the tracker reports
-    one) -- so `obj["rung"]`, `obj["progress"]`, `obj["state"]` are always
-    safe to read. `state` is still the discriminator: `"waiting"` means no
-    run is live right now (a `note` key carries the human sentence, and the
-    rest of the fields are the PREVIOUS run's, or all `None` if nothing has
-    ever published here); anything else is a real snapshot's own `state`
-    (`"running"`, `"done"`, `"failed"`, ...). A `None` value means genuinely
-    not known yet, never a missing key.
+    `compile_lines`, `last`, `started`, `note` (plus `rate` when the tracker
+    reports one) -- so `obj["rung"]`, `obj["progress"]`, `obj["note"]` are
+    always safe to read, on EVERY object, not just the waiting ones. `state`
+    is still the discriminator: `"waiting"` means no run is live right now
+    (`note` carries the human sentence, and the rest of the fields are the
+    PREVIOUS run's, or all `None` if nothing has ever published here);
+    anything else is a real snapshot's own `state` (`"running"`, `"done"`,
+    `"failed"`, ...) and `note` is `""` -- there is nothing to say about a
+    run that is speaking for itself through the rest of the fields. A `None`
+    value means genuinely not known yet, never a missing key.
 
     `start_hint`, if given, is the exact command that starts a run of this
     kind (e.g. "porthole pkg build <aport>") -- only the CALLER knows that,
@@ -846,7 +850,11 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
         while True:
             live = liveness(snap)
             if ndjson:
-                out(json.dumps(snap) + "\n")
+                # `note` is on every object, not just the waiting ones --
+                # `obj["note"]` must never KeyError on a live object either.
+                # Empty here: there is nothing to SAY about a run that is
+                # speaking for itself via the rest of the fields.
+                out(json.dumps({**snap, "note": snap.get("note", "")}) + "\n")
             elif tty:
                 out("\r\033[2K  " + line_of(snap))
             elif time.time() - last_note > max(interval, 15):
