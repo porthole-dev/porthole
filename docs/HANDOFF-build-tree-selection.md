@@ -1,5 +1,56 @@
 # Handoff: `porthole build` picks the wrong tree, and the workspace cannot reach the device
 
+> **STATUS 2026-08-31 — all of it landed except one, and that one is named.**
+> §1, §2, §4a, §4b, §4c and §4d are implemented and tested; §4e is mitigated
+> rather than fixed, deliberately, and the reason is below.
+>
+> **Three things this handoff did not know, all found by tracing its own
+> claims:**
+>
+> **(1) §2 has a second cause, and it is in our code.** `tkmod`'s two `scp`s
+> and its two `ssh`s omitted `"${TK_SSH_OPTS[@]}"`, which every other device
+> call in `ph-build.sh` passes. That array is where
+> `-i "$PORTHOLE_SSH_KEY" -o IdentitiesOnly=yes` lives (`lib/porthole.sh:188`),
+> and in the workspace that key is `/run/porthole/device_key` — the only key
+> the container has. So the intended key was **never offered at all**, which is
+> why the error was `scp: Connection closed` and not a refusal. The key does
+> also need authorizing, so both causes were real. Four sites, not one, plus
+> the same defect in `tk-mic-check.sh`; a contract test now covers the build
+> path, and it was checked by reintroducing the bug.
+>
+> **(2) §4e's attribution is wrong.** Nothing in the repo calls
+> `tk_wait_fastboot`. The real caller of the bad `tk_expired` is still
+> unidentified, which is precisely the defect: the message named a line inside
+> `lib/porthole.sh` rather than whoever passed nothing. `tk_expired` now names
+> its caller, so the next occurrence is a lead instead of noise. No claim is
+> made that the underlying caller is fixed.
+>
+> **(3) §1's suggested shape would not have worked, and the handoff nearly
+> said so.** The note about worktrees reading as detached inside the container
+> is correct and fatal to a shell implementation — it would silently never fire
+> in the one environment where builds run. The selection therefore lives in
+> `lib/porthole_cmd_build.py`, on the host, where git works, and reaches the
+> container through the `PORTHOLE_KERNEL_TREE` translation `_container_cmd`
+> already performs. No container-side git, so nothing to test on that path.
+>
+> **§4c got smaller on inspection.** `boot` genuinely cannot run on a host
+> without a working pmbootstrap: `tkboot` calls `_ph_activate`, which sources
+> envkernel. The description saying "no pmbootstrap" was the bug — it means no
+> *packaging* step — so that is fixed and `--host` now says what it needs. No
+> precondition check was added: the reported failure was pmbootstrap's own
+> dependency install on a host that HAS pmbootstrap, and that was not
+> reproducible here. Guessing a guard for an unreproduced failure is how a
+> check starts lying.
+>
+> **One defect landed that came from outside this handoff.** `porthole doctor`
+> reported every host tool by whether `shutil.which` found it. `which` does
+> enforce the executable bit, but a `+x` script whose shebang interpreter is
+> gone passes it and dies at exec — the ordinary pipx failure. Checking that
+> turned up the same bug verbatim in `_resolve`, which had no executable check
+> at all and backs the REQUIRED `fastboot` row.
+>
+> Design and plan: `docs/superpowers/specs/2026-08-31-porthole-build-defects-design.md`.
+
 Written 2026-08-31 from a taimen WiFi session. **Two defects in porthole's own
 tooling, both found by being bitten, neither fixed here** — the owner asked that
 core changes be left to a dedicated agent. Two related tool-level fixes *were*
