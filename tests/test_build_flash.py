@@ -566,6 +566,61 @@ def test_the_host_branch_names_both_cause_and_fix_with_no_pmbootstrap():
         shutil.which = real_which
 
 
+def test_the_bar_repaints_while_the_child_says_nothing():
+    """Measured 2026-08-31 on `porthole pkg build phosh`: pmbootstrap put
+    nothing on stdout for four minutes, so the terminal froze at
+    `[??????] -- build --/s 32s eta --` while pkg-status.json -- fed by the
+    same tracker from pmbootstrap's own log.txt -- reached 87%, 4.93/s, eta
+    27s. `porthole pkg watch` was live the whole time, which is the tell: the
+    tracker was never behind, only the renderer was, because a stdout line was
+    the only thing that repainted it."""
+    import porthole_cmd_build as build
+
+    class FakeOut:
+        def __call__(self, *a, **k):
+            pass
+
+        def paint(self, s, _color):
+            return s
+
+    class Term:
+        """A tty that counts repaints. `\033[2K` is the erase the bar starts
+        with, so one per painted frame."""
+
+        def __init__(self):
+            self.painted = 0
+
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            self.painted += text.count("\033[2K")
+
+        def flush(self):
+            pass
+
+    tmp = tempfile.mkdtemp(prefix="porthole-beat-")
+
+    class FakeCtx:
+        root = ROOT
+        cfg = {"PORTHOLE_RUNDIR": tmp}
+        out = FakeOut()
+
+    term, real, beat = Term(), sys.stdout, build.BEAT
+    build.BEAT = 0.05        # instead of sleeping through a real heartbeat
+    sys.stdout = term
+    try:
+        # Says NOTHING and exits 0: exactly the quiet phase that froze the bar.
+        rc = build._stream(FakeCtx(), ["sh", "-c", "sleep 0.6"], None, 60,
+                           "pkg:quiet")
+    finally:
+        sys.stdout, build.BEAT = real, beat
+    assert rc == 0, rc
+    # One of these is the final erase in _stream's `finally`; before the fix
+    # it was the only one.
+    assert term.painted >= 3, term.painted
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

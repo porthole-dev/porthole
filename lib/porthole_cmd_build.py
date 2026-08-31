@@ -608,6 +608,12 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     return _stream(ctx, cmd, env, timeout, rung or func)
 
 
+# How often the bar repaints and the status file is written while the child
+# says nothing. Named rather than inline so the test can turn it down instead
+# of sleeping through a real one.
+BEAT = 1.0
+
+
 def _stream(ctx, cmd, env, timeout: int, rung: str,
             tracker_cls=None, log_prefix: str = "build", follow=None,
             on_kill=None) -> int:
@@ -656,21 +662,53 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     except FileNotFoundError:
         raise Bail("bash is not installed", EX_FAIL) from None
 
-    # The publish below only fires when a LINE arrives. Quiet phases are
-    # normal and long -- installing build dependencies, a cmake configure that
-    # prints nothing for ninety seconds -- and during one the status file
-    # freezes. A frozen `elapsed` is indistinguishable from a hung build to
-    # anything watching, which is the whole failure this instrumentation
-    # exists to end. Measured on a real gst-plugins-good build: `status` said
-    # `elapsed 7s` four minutes in.
+    # Neither the publish nor the BAR below fires unless a LINE arrives on the
+    # child's stdout. Quiet phases are normal and long -- installing build
+    # dependencies, a cmake configure that prints nothing for ninety seconds --
+    # and pmbootstrap is quiet on stdout for most of a build by design, because
+    # it sends the real output to the log.txt the `follow` thread reads. A
+    # frozen `elapsed` is indistinguishable from a hung build, which is the
+    # whole failure this instrumentation exists to end. So the heartbeat drives
+    # BOTH renderers, not just the file.
     #
     # publish() is atomic (tmp file + rename), so a heartbeat racing the line
     # loop can only ever leave one whole snapshot behind.
     stop_beat = threading.Event()
+    painting = threading.Lock()
+    last_note = 0.0
+
+    def _paint():
+        """The one-line bar, repainted from the line loop AND the heartbeat.
+
+        Measured on a real `pkg build phosh` 2026-08-31: the terminal sat at
+        `[??????] -- build --/s 32s eta --` for four minutes while
+        pkg-status.json -- same tracker, written by the heartbeat -- said 87%,
+        4.93/s, eta 27s. `porthole pkg watch` in another terminal was live the
+        whole time. The bar was not stale because the tracker was behind; it
+        was stale because only a stdout line could repaint it, and pmbootstrap
+        had not written one since 32s.
+        """
+        nonlocal last_note
+        if verbose:
+            return  # --verbose is the raw stream; a bar would fight it
+        with painting:
+            if stop_beat.is_set():
+                return  # the finally below cleared the line -- leave it clear
+            if tty:
+                sys.stdout.write("\r\033[2K  " + tracker.line())
+                sys.stdout.flush()
+            elif time.time() - last_note > 15:
+                # Not a terminal: an agent's pipe, or CI. A repainting bar
+                # would be thousands of useless lines, and silence is the
+                # black box this exists to end. One line every 15s is both
+                # readable and enough to see it is alive.
+                last_note = time.time()
+                print("  " + tracker.line(), flush=True)
 
     def _heartbeat():
-        while not stop_beat.wait(5.0):
+        while not stop_beat.wait(BEAT):
             tracker.publish(force=True)
+            _paint()
 
     threading.Thread(target=_heartbeat, daemon=True).start()
 
@@ -693,26 +731,20 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     if follow:
         threading.Thread(target=_follow, args=(follow,), daemon=True).start()
 
-    last_note = 0.0
     killed = False
     try:
-        with open(logpath, "w") as log:
+        # Line buffered: this is the path printed on screen as `log: ...`, and
+        # with the default 8 KiB buffer it was still zero bytes four minutes
+        # into the phosh build above -- `tail -f` on the file we told them to
+        # look at showed nothing.
+        with open(logpath, "w", buffering=1) as log:
             for line in proc.stdout:
                 log.write(line)
                 tracker.feed(line)
                 tracker.publish()
                 if verbose:
                     sys.stdout.write(line)
-                elif tty:
-                    sys.stdout.write("\r\033[2K  " + tracker.line())
-                    sys.stdout.flush()
-                elif time.time() - last_note > 15:
-                    # Not a terminal: an agent's pipe, or CI. A repainting bar
-                    # would be thousands of useless lines, and silence is the
-                    # black box this exists to end. One line every 15s is both
-                    # readable and enough to see it is alive.
-                    last_note = time.time()
-                    print("  " + tracker.line(), flush=True)
+                _paint()
                 if tracker.elapsed > timeout:
                     killed = True
                     proc.kill()
@@ -726,8 +758,9 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     finally:
         stop_beat.set()
         if tty and not verbose:
-            sys.stdout.write("\r\033[2K")
-            sys.stdout.flush()
+            with painting:
+                sys.stdout.write("\r\033[2K")
+                sys.stdout.flush()
         rc = proc.wait()
         tracker.finish(rc == 0 and not killed)
 
