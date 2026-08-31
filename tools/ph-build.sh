@@ -888,6 +888,33 @@ _ph_wait_up() {
 # (see tkflash).
 _PH_STAMP="$_PH_REPO/.last-build"
 
+# Record that the DEVICE now has what this tree built.
+#
+# `porthole build auto` routes on what make has produced SINCE this moment, so
+# it is written after a push or flash SUCCEEDS and never before. That is what
+# makes the preview idempotent: a preview compiles but pushes nothing, so it
+# cannot move this stamp, so the run that follows still sees the same work.
+#
+# Before this, `auto` routed on what one `make` invocation happened to touch --
+# and the preview runs a real make, so it consumed the very evidence it was
+# about to route on. `porthole build` followed by `porthole build auto --yes`
+# reported "make rebuilt nothing -- there is nothing to push" about a tree with
+# a real change in it, and the documented preview-then-run flow was therefore
+# self-defeating.
+#
+# cksum of the tree path, matching lib/porthole_cmd_build.py:_pushed_stamp.
+# A test compares the two implementations, because a stamp written under one
+# name and read under another fails SILENTLY: a missing stamp is a legal state
+# meaning "never pushed".
+_ph_pushed_write() {
+	local rundir stamp
+	rundir=${PORTHOLE_RUNDIR:-$_PH_REPO_ROOT/.run}
+	mkdir -p "$rundir" 2>/dev/null || return 0
+	stamp="$rundir/pushed-$(printf '%s' "$_PH_TREE" | cksum | cut -d' ' -f1)"
+	: > "$stamp" 2>/dev/null || return 0
+	return 0
+}
+
 _ph_stamp_write() {
 	{
 		printf 'tree=%s\n' "$_PH_TREE"
@@ -1179,7 +1206,8 @@ tkbuild-kernel() {
 		echo ">> refusing to flash a stale image"; return 1; }
 
 	tkpush-modules || return 1
-	tkflash-boot
+	tkflash-boot || return 1
+	_ph_pushed_write
 }
 
 # Move the device to a DIFFERENT kernel flavor -- a major version bump.
@@ -1315,7 +1343,8 @@ tkupgrade-kernel() {
 
 	# Modules first, while the phone is still up on the outgoing kernel.
 	tkpush-modules || return 1
-	tkflash-boot
+	tkflash-boot || return 1
+	_ph_pushed_write
 }
 
 # Put the freshly built modules on the phone.
@@ -1555,6 +1584,7 @@ tkmod() {
 	sysname=${name//-/_}
 	if [ -z "$want" ]; then
 		echo ">> WARNING: built $name.ko has no srcversion -- cannot verify the load"
+		_ph_pushed_write   # it did reach the device; only the proof is missing
 		return 0
 	fi
 	ssh "${TK_SSH_OPTS[@]}" "$phone" "
@@ -1566,6 +1596,7 @@ tkmod() {
 			echo '>> the old module never unloaded -- something still holds it'
 			exit 1; fi
 		echo '>> verified: running $name is the build just pushed ($want)'" || return 1
+	_ph_pushed_write
 }
 
 # FAST loop for DTS and built-in code: make, repack, RAM-boot. No pmbootstrap.
@@ -1644,5 +1675,6 @@ tkboot() {
 	local old_id; old_id=$(tk_boot_id 2>/dev/null || true)
 	"$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
 	"$FASTBOOT" boot "$out" || return 1
-	_ph_wait_up "$old_id"
+	_ph_wait_up "$old_id" || return 1
+	_ph_pushed_write
 }

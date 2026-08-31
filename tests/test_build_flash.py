@@ -898,5 +898,74 @@ def test_autoselect_finds_a_real_worktree_on_the_product_branch():
         assert got2 == "", got2
 
 
+# ------------------------------------------------------- the routing window ---
+# `porthole build` (preview) runs a REAL incremental make, so it built the
+# artefact and the run that followed found everything up to date: "make rebuilt
+# nothing -- there is nothing to push", about a tree with a real change in it.
+# Routing since the last PUSH is durable -- a preview pushes nothing, so it
+# cannot move the stamp.
+
+def test_the_push_stamp_is_keyed_on_the_tree():
+    """Two trees in one checkout must not share a stamp, or pushing from one
+    makes `auto` believe the other reached the device."""
+    import porthole_cmd_build as build
+    a = build._pushed_stamp("/r/.run", "/w/linux")
+    b = build._pushed_stamp("/r/.run", "/w/linux-ws")
+    assert a != b, (a, b)
+    assert a.name.startswith("pushed-"), a
+
+
+def test_the_python_and_shell_stamp_names_agree():
+    """The stamp is written by ph-build.sh and read in python. Two spellings of
+    one name is a stamp that is never found -- and the failure is SILENT,
+    because a missing stamp is a legal state meaning 'never pushed'.
+
+    Compared against `cksum` itself rather than a golden number: the point is
+    that the two implementations agree, not that either matches a constant
+    someone once pasted in."""
+    import porthole_cmd_build as build
+    for tree in ("/w/linux-ws", "/var/home/x/linux", "/w/a b/linux"):
+        want = build._pushed_stamp("/r", tree).name
+        got = subprocess.run(
+            ["bash", "-c", 'printf %s "$1" | cksum | cut -d" " -f1', "_", tree],
+            capture_output=True, text=True).stdout.strip()
+        assert want == "pushed-" + got, (tree, want, got)
+
+
+def test_the_stamp_is_what_the_shell_actually_writes():
+    """Not just the name: the file the shell creates must be the file python
+    stats. This is the whole seam, and both halves are cheap to run."""
+    import porthole_cmd_build as build
+    script = ROOT / "tools" / "ph-build.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+        rundir = pathlib.Path(tmp) / "run"
+        tree = "/w/linux-ws"
+        probe = (
+            f'PORTHOLE_WORKDIR=/w PORTHOLE_KERNEL_TREE={tree} '
+            f'PORTHOLE_RUNDIR={rundir} PORTHOLE_KERNEL_PKG=k '
+            f'PORTHOLE_DEVICE_PKG=d PORTHOLE_FW_PKG=f PORTHOLE_DTB_FILE=x.dtb '
+            f'bash -c \'source "{script}" >/dev/null 2>&1; _ph_pushed_write\''
+        )
+        subprocess.run(["bash", "-c", probe], capture_output=True)
+        assert build._pushed_stamp(rundir, tree).exists(), \
+            sorted(p.name for p in rundir.iterdir()) if rundir.exists() else "no rundir"
+
+
+def test_artefacts_older_than_the_last_push_are_not_work_to_do():
+    """The routing question, stated directly: what has make built that the
+    device has not received."""
+    import porthole_cmd_build as build
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = pathlib.Path(tmp) / "linux"
+        out = tree / ".output" / "arch" / "arm64" / "boot"
+        out.mkdir(parents=True)
+        dtb = out / "x.dtb"
+        dtb.write_text("dtb")
+        built = dtb.stat().st_mtime
+        assert build._changed_artifacts(tree, built - 1) == \
+            ["arch/arm64/boot/x.dtb"]
+        assert build._changed_artifacts(tree, built + 1) == []
+
+
 if __name__ == "__main__":
     sys.exit(main())

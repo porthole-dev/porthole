@@ -349,6 +349,50 @@ def _classify(changed) -> tuple:
             "both the dtb and modules changed, and no cheap rung covers both")
 
 
+_CKSUM_TABLE = None
+
+
+def _cksum(data: bytes) -> str:
+    """POSIX cksum, so python and `cksum` in ph-build.sh name the same file.
+
+    NOT zlib.crc32: cksum uses the CRC-32/CKSUM variant -- unreflected, initial
+    value 0 -- and then feeds the LENGTH through the same register. Getting
+    that subtly wrong would produce a stamp the shell writes and python never
+    finds, and the failure would be SILENT, because a missing stamp is a legal
+    state meaning "never pushed". tests/test_build_flash.py compares the two
+    implementations against each other rather than against a golden value.
+    """
+    global _CKSUM_TABLE
+    if _CKSUM_TABLE is None:
+        table = []
+        for i in range(256):
+            crc = i << 24
+            for _ in range(8):
+                crc = ((crc << 1) ^ 0x04C11DB7) if crc & 0x80000000 else crc << 1
+                crc &= 0xFFFFFFFF
+            table.append(crc)
+        _CKSUM_TABLE = table
+    crc = 0
+    for byte in data:
+        crc = ((crc << 8) & 0xFFFFFFFF) ^ _CKSUM_TABLE[((crc >> 24) ^ byte) & 0xFF]
+    length = len(data)
+    while length:
+        crc = ((crc << 8) & 0xFFFFFFFF) ^ _CKSUM_TABLE[
+            ((crc >> 24) ^ (length & 0xFF)) & 0xFF]
+        length >>= 8
+    return str((~crc) & 0xFFFFFFFF)
+
+
+def _pushed_stamp(rundir, tree) -> pathlib.Path:
+    """Where the last-push time for THIS tree is recorded.
+
+    Keyed per tree: two trees in one checkout must not share a stamp, or
+    pushing from one makes `auto` believe the other reached the device.
+    Written by ph-build.sh's _ph_pushed_write, read here.
+    """
+    return pathlib.Path(rundir) / f"pushed-{_cksum(str(tree).encode())}"
+
+
 def _changed_artifacts(tree: pathlib.Path, since) -> list:
     """Artifacts under .output newer than `since`, as tree-relative paths."""
     out = tree / ".output"
@@ -863,9 +907,35 @@ def _auto(ctx, args) -> int:
         ctx.out(ctx.out.paint(
             "  porthole pkg outdated   # why, and what to run", "grey"))
 
-    # A second early, because make writes files as it runs and a clock that
-    # ticks between the stamp and the first write would hide the first object.
-    since = time.time() - 1
+    # WHAT `auto` ROUTES ON. Not "what this make invocation touched": the
+    # preview runs a real incremental make, so observing the evidence consumed
+    # it. `porthole build` then `porthole build auto --yes` measured a tree
+    # that the preview had already brought up to date and concluded there was
+    # nothing to do -- so an agent following the documented preview-then-run
+    # flow got a build that refused to act, and the natural next move is to
+    # type a rung by hand, which AGENTS.md warns against.
+    #
+    # Since the last PUSH instead. That is durable: a preview compiles but
+    # pushes nothing, so it cannot move the stamp, so preview and run agree and
+    # running `auto` twice is safe.
+    #
+    # No stamp -- the first build in a tree -- falls back to the old window. A
+    # missing stamp means "never pushed", and treating every artefact under
+    # .output as unpushed would route every first build to the most expensive
+    # rung: a worse default than the one being replaced.
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    try:
+        since = _pushed_stamp(rundir, tree).stat().st_mtime
+        ctx.out(ctx.out.paint(
+            "  routing on what make built since the last push ("
+            + time.strftime("%H:%M", time.localtime(since)) + ")", "grey"))
+    except OSError:
+        # A second early, because make writes files as it runs and a clock that
+        # ticks between here and the first write would hide the first object.
+        since = time.time() - 1
+        ctx.out(ctx.out.paint(
+            "  no push recorded for this tree yet -- routing on what this "
+            "build rebuilds", "grey"))
     ctx.out(ctx.out.paint("  measuring: incremental make, then routing on what "
                           "it actually rebuilt", "grey"))
     # _ph_measure, not _ph_make: the only question here is what make touched,
