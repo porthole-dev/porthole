@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -27,7 +28,7 @@ import time
 
 __all__ = [
     "Config", "ProfileNotFound", "load_config", "list_profiles",
-    "resolve_phone", "resolve_host", "legacy", "ssh_opts", "Device",
+    "resolve_phone", "resolve_host", "legacy", "ssh_opts", "slot_suffix", "Device",
     "find_root", "DEFAULTS",
 ]
 
@@ -418,6 +419,24 @@ def resolve_phone(cfg: dict) -> str:
         return cfg["PHONE"]
     user = cfg.get("PORTHOLE_USER") or DEFAULTS["PORTHOLE_USER"]
     return f"{user}@{resolve_host(cfg)}"
+
+
+_SLOT_SUFFIX = re.compile(r"\bandroidboot\.slot_suffix=_([ab])\b")
+
+
+def slot_suffix(cmdline: str) -> str:
+    """The active slot letter from a kernel command line, or "".
+
+    The bootloader passes it and the running kernel keeps it in
+    /proc/cmdline, so a BOOTED device can answer "which slot am I on" without
+    being in fastboot. Verified on taimen: `androidboot.slot_suffix=_b`,
+    matching the profile's committed PORTHOLE_ACTIVE_SLOT="b".
+
+    Shared with boot-partlabel derivation, which needs the same value. One
+    helper, not two.
+    """
+    match = _SLOT_SUFFIX.search(cmdline or "")
+    return match.group(1) if match else ""
 
 
 def ssh_opts(cfg: dict) -> list[str]:

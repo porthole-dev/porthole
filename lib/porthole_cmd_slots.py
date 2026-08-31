@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_UNAVAILABLE
+from porthole_cli import Bail, EX_FAIL, EX_STATE, EX_UNAVAILABLE
 
 _PREFIX = "(bootloader) "
 
@@ -79,6 +79,27 @@ def slot_policy(variables: dict) -> dict:
     return policy
 
 
+def policy_from_device(cmdline: str, partlabels: str) -> dict:
+    """Slot policy from a BOOTED device. Pure.
+
+    Answers only the two keys ssh can answer. slot-unbootable and
+    slot-retry-count are bootloader state with no ssh equivalent, and this
+    must never invent them: the redfin session got this right by hand and
+    said so in its own retrospective, and guessing an active slot is how a
+    port writes to the wrong one.
+    """
+    import porthole
+
+    names = set((partlabels or "").split())
+    policy = {}
+    has_ab = "boot_a" in names and "boot_b" in names
+    policy["PORTHOLE_HAS_AB_SLOTS"] = "1" if has_ab else "0"
+    active = porthole.slot_suffix(cmdline)
+    if has_ab and active:
+        policy["PORTHOLE_ACTIVE_SLOT"] = active
+    return policy
+
+
 def update_env(text: str, values: dict) -> str:
     """Set keys in a device.env, preserving everything else.
 
@@ -126,10 +147,16 @@ def _probe(ctx, args) -> int:
     except subprocess.SubprocessError as exc:
         raise Bail(f"fastboot failed: {exc}", EX_FAIL) from None
     if not (listed.stdout or "").strip():
-        raise Bail("no device is in fastboot", EX_STATE,
-                   "`fastboot devices` lists nothing. Note lsusb mislabels the "
-                   "running gadget as fastboot -- only `fastboot devices` "
-                   "discriminates (profiles/google-taimen/device.env)")
+        # Reading A/B policy is a question ABOUT THE DEVICE, and a booted
+        # device can answer two thirds of it. Requiring fastboot made the
+        # verb unusable exactly when you are deciding whether to flash.
+        policy, unknown, source = _probe_over_ssh(ctx)
+        if policy:
+            return _report(ctx, args, policy, unknown, source)
+        raise Bail("no device in fastboot, and ssh did not answer either",
+                   EX_STATE, "`fastboot devices` lists nothing. Note lsusb "
+                   "mislabels the running gadget as fastboot -- only "
+                   "`fastboot devices` discriminates")
 
     try:
         proc = subprocess.run(["fastboot", "getvar", "all"],
@@ -152,26 +179,73 @@ def _probe(ctx, args) -> int:
     unknown = [name for name in ("PORTHOLE_HAS_AB_SLOTS", "PORTHOLE_ACTIVE_SLOT")
                if name not in policy]
 
+    return _report(ctx, args, policy, unknown, "fastboot getvar all")
+
+
+# What ssh can answer, and what it cannot. The second list is not a gap to be
+# closed later: slot-unbootable and slot-retry-count are bootloader state
+# with no running-system equivalent, and inventing either is how a port
+# writes to a slot with no known-good image.
+SSH_ANSWERS = ("PORTHOLE_HAS_AB_SLOTS", "PORTHOLE_ACTIVE_SLOT")
+BOOTLOADER_ONLY = ("PORTHOLE_SLOT_FORBIDDEN", "PORTHOLE_SLOT_RETRY_COUNT")
+
+
+def _probe_over_ssh(ctx):
+    """`(policy, unknown, source)` from a BOOTED device, or ({}, [], "").
+
+    One round trip for both reads. Reading A/B policy is a question ABOUT THE
+    DEVICE, and requiring fastboot to answer it made the verb unusable
+    exactly when you are deciding whether to flash.
+    """
+    try:
+        out = ctx.device().run(
+            "cat /proc/cmdline; echo '<<>>'; "
+            "ls /dev/disk/by-partlabel 2>/dev/null | tr '\\n' ' '",
+            timeout=20) or ""
+    except Exception:  # noqa: BLE001 -- an unreachable device is not an error
+        return {}, [], ""
+    if "<<>>" not in out:
+        return {}, [], ""
+    cmdline, _, partlabels = out.partition("<<>>")
+    policy = policy_from_device(cmdline, partlabels)
+    if not policy:
+        return {}, [], ""
+    return policy, list(BOOTLOADER_ONLY), "ssh (/proc/cmdline)"
+
+
+def _report(ctx, args, policy: dict, unknown, source: str) -> int:
+    """One renderer for both sources, each row saying which one answered.
+
+    Two renderers is how the ssh path would quietly stop reporting the keys
+    it cannot know, and those two are the ones that matter: a value the
+    device did not report stays UNSET.
+    """
     def render():
         ctx.out.heading("slot policy read from the device")
+        ctx.out.kv("source", source, 26)
         for key, value in sorted(policy.items()):
             ctx.out.kv(key, value, 26)
         for name in unknown:
             ctx.out.kv(name, "NOT REPORTED — left unset", 26)
+        if unknown and source.startswith("ssh"):
+            ctx.out(ctx.out.paint(
+                "  those two are bootloader state and ssh cannot see them; "
+                "put the device in fastboot to read them", "grey"))
         if not args.yes:
             ctx.out.blank()
             ctx.out(ctx.out.paint(
                 "  nothing was written — add --yes to save this to the profile",
                 "grey"))
 
-    rc = ctx.emit(policy, render)
+    rc = ctx.emit({"source": source, "policy": policy,
+                   "not_reported": list(unknown)}, render)
     if args.yes and policy:
         path = (ctx.root / "profiles"
                 / str(ctx.cfg.get("PORTHOLE_DEVICE")) / "device.env")
         path.write_text(update_env(path.read_text(), policy))
         ctx.out(ctx.out.paint(f"  wrote {len(policy)} value(s) to {path}",
                               "green"))
-    return rc if rc == EX_OK else rc
+    return rc
 
 
 def cmd_slots(args, ctx) -> int:
