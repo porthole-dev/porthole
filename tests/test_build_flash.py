@@ -163,10 +163,26 @@ def test_only_the_export_rungs_are_checked():
     import porthole_cmd_build as build
 
     assert "fast" in build.EXPORT_RUNGS
-    assert "kernel" in build.EXPORT_RUNGS
     assert "upgrade" in build.EXPORT_RUNGS
     assert "mod" not in build.EXPORT_RUNGS
     assert "boot" not in build.EXPORT_RUNGS
+
+
+def test_kernel_is_not_gated_on_its_own_precondition():
+    """`kernel` (tkbuild) runs `pmbootstrap install` before `export` --
+    ph-build.sh:~821 -- which is what CREATES and populates the rootfs
+    chroot export_problems() checks for. Gating `kernel` on that chroot
+    already existing made `porthole build kernel --yes` refuse with the
+    exact advice it was told to follow: "Run `porthole build kernel --yes`
+    once against this work dir." A real session hit that loop -- `fast`
+    refused for lack of an installed chroot, and `kernel`, the only rung
+    that can install one, refused for the same reason.
+    """
+    import porthole_cmd_build as build
+
+    assert "kernel" not in build.EXPORT_RUNGS, (
+        "kernel populates the chroot itself; gating it on the chroot "
+        "already existing is the circular refusal this test guards against")
 
 
 # -------------------------------------------------------- no taimen values --
@@ -1212,13 +1228,15 @@ def test_run_follows_pmbootstraps_own_log():
 
 
 def test_a_non_export_rung_keeps_its_bare_rung_as_the_history_key():
-    """`mod` and `boot` are not bimodal on the apk-present axis `fast`,
-    `kernel` and `upgrade` are -- fix round 1 gated the history-bucket split
-    on EXPORT_RUNGS so those two rungs keep matching an EXISTING unkeyed
-    history entry (`{"mod": {...}}`) instead of losing it to a `mod|cached` /
-    `mod|rebuild` split nothing about them needs. That property has no other
-    test pinning it: without the gate this passes with `key="mod|cached"` just
-    as easily as with the intended `key="mod"`.
+    """`mod` and `boot` are not bimodal on the apk-present axis `fast` and
+    `upgrade` are (`kernel` always does a full install+export and is
+    deliberately not in EXPORT_RUNGS either -- see
+    test_kernel_is_not_gated_on_its_own_precondition) -- fix round 1 gated
+    the history-bucket split on EXPORT_RUNGS so those two rungs keep matching
+    an EXISTING unkeyed history entry (`{"mod": {...}}`) instead of losing it
+    to a `mod|cached` / `mod|rebuild` split nothing about them needs. That
+    property has no other test pinning it: without the gate this passes with
+    `key="mod|cached"` just as easily as with the intended `key="mod"`.
     """
     import shutil
     import porthole_cmd_build as build

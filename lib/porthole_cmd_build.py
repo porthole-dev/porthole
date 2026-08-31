@@ -116,7 +116,15 @@ def _script(ctx) -> pathlib.Path:
 # The rungs that end in `pmbootstrap export`, which builds boot.img out of the
 # rootfs chroot and therefore needs one a full `pmbootstrap install` has
 # populated. `mod` and `boot` never reach it.
-EXPORT_RUNGS = ("fast", "kernel", "upgrade")
+#
+# `kernel` is deliberately ABSENT, though tkbuild also calls `pmbootstrap
+# export` (ph-build.sh ~825). tkbuild runs `pmbootstrap install` first
+# (~821), which is what CREATES and populates the rootfs chroot -- so
+# `kernel` is the rung that FIXES an uninstalled chroot, not one that needs
+# it already fixed. Gating it here made export_problems() refuse `kernel`
+# with "run `porthole build kernel --yes` once against this work dir" --
+# its own advice, unrunnable, a circular refusal a real session hit.
+EXPORT_RUNGS = ("fast", "upgrade")
 
 
 def export_problems(workdir, device: str) -> list:
