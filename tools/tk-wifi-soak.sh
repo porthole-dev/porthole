@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (run it on the device as root, under systemd-run)
-# env: TK_WIFI_SOAK_LOG, TK_WIFI_SOAK_INTERVAL
+# env: TK_WIFI_SOAK_LOG, TK_WIFI_SOAK_INTERVAL, TK_WIFI_SOAK_PROBE_EVERY, TK_WIFI_SOAK_IF
 # exits: 0 ok · non-zero on failure
 # tk-wifi-soak.sh -- watch a WiFi link for the two ways it fails quietly.
 #
@@ -25,12 +25,27 @@
 # Counters are cumulative since the soak started, read from the journal rather
 # than kept in memory, so a restart of this script does not lose them.
 #
+# THE PROBE IS ITSELF A KEEPALIVE, WHICH IS WHY IT IS RARE BY DEFAULT.
+# Nothing on this stack polls an idle link: ath10k sets
+# IEEE80211_HW_CONNECTION_MONITOR, which switches off mac80211's idle
+# connection polling, and then disables the firmware's STA keepalive too. The
+# firmware still watches beacons, so a dead DATA path under a live beacon is
+# detected by nobody -- which is exactly the failure being soaked for. A ping
+# every minute supplies the very traffic whose absence triggers it, so a
+# minute-cadence probe would soak for a bug it is busy preventing.
+#
+# So: sample passively every interval (counters and signal cost no frames) and
+# only spend a probe every PROBE_EVERY-th sample. Coarser resolution on when
+# the link died, in exchange for the link being allowed to die at all.
+#
 # ponytail: ping over any richer data path. If a gateway ever stops answering
 # ICMP the upgrade is a TCP connect to the gateway, not a bigger framework.
 set -u
 
 LOG=${TK_WIFI_SOAK_LOG:-/var/log/tk-wifi-soak.jsonl}
 INTERVAL=${TK_WIFI_SOAK_INTERVAL:-60}
+PROBE_EVERY=${TK_WIFI_SOAK_PROBE_EVERY:-10}
+N=0
 IF=${TK_WIFI_SOAK_IF:-wlan0}
 START=$(date '+%Y-%m-%d %H:%M:%S')
 
@@ -57,11 +72,16 @@ while :; do
     fi
     GW=$(ip route show default dev "$IF" 2>/dev/null | awk '{print $3; exit}')
 
-    # --- what is actually TRUE ---------------------------------------------
-    # 3 packets, 1 s each: enough to tell "dead" from "one lost packet", cheap
-    # enough to run every minute for days.
-    LOSS=100
-    if [ -n "$GW" ]; then
+    # --- passive counters: no frames generated -----------------------------
+    RXP=$(cat "/sys/class/net/$IF/statistics/rx_packets" 2>/dev/null || echo 0)
+    TXP=$(cat "/sys/class/net/$IF/statistics/tx_packets" 2>/dev/null || echo 0)
+
+    # --- what is actually TRUE, bought with real frames --------------------
+    # -1 means "not probed this round", which is NOT the same as 0% loss and
+    # must never be read as healthy.
+    N=$((N + 1))
+    LOSS=-1
+    if [ -n "$GW" ] && [ $((N % PROBE_EVERY)) -eq 0 ]; then
         LOSS=$(ping -c 3 -W 1 "$GW" 2>/dev/null \
                | sed -n 's/.*, \([0-9]*\)% packet loss.*/\1/p')
         [ -n "$LOSS" ] || LOSS=100
@@ -85,9 +105,9 @@ while :; do
     D=$(journalctl --since "$START" --no-pager 2>/dev/null \
         | grep -c "reason=4 locally_generated=1")
 
-    printf '{"ev":"hb","assoc":%s,"bssid":"%s","freq":%s,"signal":%s,"gw":"%s","loss":%s,"dead":%s,"n_assoc":%s,"n_key":%s,"n_disc4":%s,"oper":"%s","t":"%s"}\n' \
+    printf '{"ev":"hb","assoc":%s,"bssid":"%s","freq":%s,"signal":%s,"gw":"%s","loss":%s,"dead":%s,"rx_pkts":%s,"tx_pkts":%s,"n_assoc":%s,"n_key":%s,"n_disc4":%s,"oper":"%s","t":"%s"}\n' \
         "$ASSOC" "$BSSID" "${FREQ:-0}" "${SIG:-0}" "${GW:-}" "$LOSS" "$DEAD" \
-        "$A" "$K" "$D" "$OPER" "$NOW" >> "$LOG"
+        "$RXP" "$TXP" "$A" "$K" "$D" "$OPER" "$NOW" >> "$LOG"
     sync
 
     echo "tk-wifi-soak assoc=$ASSOC loss=$LOSS dead=$DEAD n_assoc=$A n_key=$K" \
