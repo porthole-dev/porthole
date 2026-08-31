@@ -578,5 +578,56 @@ def test_build_and_fork_share_one_container_wrapper():
     assert pkg.in_container("x")[:-1] == pkg.container_cmd("p", "aarch64")[:-1]
 
 
+# Real lines from pmbootstrap's own log.txt, for the `pkg build phosh` run of
+# 2026-08-31 that exited 0 having built nothing.
+PHOSH_LOG = """\
+(078646) [13:36:35] $ /usr/bin/pmbootstrap build --lax phosh --arch aarch64
+(078646) [13:36:38] WARNING: about to install phosh 99990.57.0-r1 (local pmaports: 99990.56.0-r0, consider 'pmbootstrap pull')
+(078646) [13:36:40] Building 1 package
+(078646) [13:45:23] => edge/modemmanager: Done!
+(078646) [13:45:23] NOTE: Package 'phosh' is up to date. Use 'pmbootstrap build phosh --force' if needed.
+(078646) [13:45:23] DONE!
+"""
+
+
+def test_a_build_that_built_nothing_says_what_pmbootstrap_said():
+    """8m49s, exit 0, 662 build steps -- all of them modemmanager's -- and
+    porthole reported "build reported success but phosh-99990.56.0-r0.apk is
+    not there". pmbootstrap had said why twice in the same log."""
+    why = pkg.why_nothing_built(PHOSH_LOG, "phosh")
+    assert why, "the NOTE was right there"
+    message, hint = why
+    assert "up to date" in message and "phosh" in message, message
+    # Both versions, or the reader cannot tell which way round the skew runs.
+    assert "99990.57.0-r1" in hint and "99990.56.0-r0" in hint, hint
+    assert "--force" in hint, hint
+
+
+def test_the_reason_is_not_borrowed_from_another_package():
+    """The same log says modemmanager was BUILT. A diagnosis that matched any
+    "is up to date" anywhere would explain every failure with the first note
+    it found."""
+    assert pkg.why_nothing_built(PHOSH_LOG, "modemmanager") is None
+
+
+def test_a_missing_apk_with_no_explanation_stays_unexplained():
+    """Inventing a reason is worse than the old blunt message. No note, no
+    claim."""
+    assert pkg.why_nothing_built("=> edge/phosh: Done!\n", "phosh") is None
+
+
+def test_only_this_run_of_the_shared_log_is_read():
+    """log.txt is appended to by every pmbootstrap invocation forever. Reading
+    it whole would let YESTERDAY's "is up to date" explain today's build --
+    the same defect the follow thread's seek-to-end exists to prevent."""
+    tmp = pathlib.Path(tempfile.mkdtemp()) / "log.txt"
+    old = "NOTE: Package 'phosh' is up to date. Use --force if needed.\n"
+    tmp.write_text(old)
+    end = tmp.stat().st_size
+    tmp.write_text(old + "=> edge/phosh: Done!\n")
+    assert pkg.why_nothing_built(pkg.log_since(tmp, end), "phosh") is None
+    assert pkg.why_nothing_built(pkg.log_since(tmp, 0), "phosh") is not None
+
+
 if __name__ == "__main__":
     sys.exit(main())
