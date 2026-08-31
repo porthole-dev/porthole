@@ -621,6 +621,36 @@ def test_the_bar_repaints_while_the_child_says_nothing():
     assert term.painted >= 3, term.painted
 
 
+def test_every_module_staging_path_strips_btf():
+    """Two paths push a .ko to the device. Both must strip BTF.
+
+    A module built against a different kernel keeps a .BTF section the loader
+    refuses, and the fix lived in exactly one of the two paths for the whole
+    life of the `mod` verb. This is a registry check, not a spot check: it
+    finds the paths rather than being told them, so a THIRD one cannot land
+    without either calling the stripper or failing here.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    stagers, missing = [], []
+    for path in sorted(list((root / "tools").glob("*.sh"))):
+        text = path.read_text(errors="replace")
+        # A path that stages a module for the device: it must transfer a .ko
+        # (scp is the evidence of transfer, not just loading).
+        if not re.search(r"\.ko\b", text):
+            continue
+        if not re.search(r"\bscp\b", text):
+            continue
+        stagers.append(path.name)
+        if "tk-strip-btf.py" not in text:
+            missing.append(path.name)
+
+    assert stagers, "found no module staging path at all -- the probe is wrong"
+    assert not missing, (
+        "these stage a .ko for the device without stripping BTF: "
+        + ", ".join(missing)
+        + " -- see brain/traps and tools/tk-strip-btf.py")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
