@@ -698,7 +698,7 @@ def waiting_line(snap, now=None) -> str:
 
 
 def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
-          tty=None) -> int:
+          tty=None, start_hint: str = "") -> int:
     """Follow a status file until the run stops. Returns EX_OK when the run
     finished `done`, non-zero otherwise.
 
@@ -719,6 +719,11 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     `ndjson=True` emits one JSON object per update instead of a bar, and
     skips the final `status_report` block: an agent can consume a stream: it
     cannot consume a redrawn terminal.
+
+    `start_hint`, if given, is the exact command that starts a run of this
+    kind (e.g. "porthole pkg build <aport>") -- only the CALLER knows that,
+    so this function never guesses one from `status_name`. Without it, the
+    "nothing has ever published here" error falls back to generic wording.
 
     Polling a file, not sleeping through the run: the sleep here is between
     reads of a real signal, which is what brain/laws/poll-never-sleep.md asks
@@ -788,20 +793,26 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     if snap is None:
         # Generic on purpose: this function has no verb of its own, only a
         # status filename ("pkg-status.json", "build-status.json", ...).
+        # `start_hint` is how the caller -- the only one who knows the exact
+        # command -- gets that command into the message instead of a guess
+        # derived from the filename, which could easily be wrong.
         verb = status_name.split("-status", 1)[0] or "run"
         raise Bail(f"no {verb} run has published a status here", EX_FAIL,
-                   f"start one, then `porthole {verb} watch` finds it")
+                   start_hint or f"start one, then `porthole {verb} watch` "
+                                 f"finds it")
 
     # The grace window ran out with nothing new. Say so plainly, then fall
     # through and render the stale run -- clearly labelled as the PREVIOUS
     # run, not left to look current the way the silent version did.
     if is_stale(snap):
         if not ndjson:
-            # ponytail: plain text, not `ctx.out.paint(..., "yellow")` --
-            # colouring one line is not worth carrying an Out dependency into
-            # a module that stays pure and reusable. Add it back here if a
-            # colourless staleness notice ever costs someone real time.
-            out("  no new build started -- showing the previous run:\n")
+            # Coloured inline (not via `ctx.out.paint`) because this module
+            # has no `ctx` and should not grow one just to colour a warning:
+            # this line exists to stop the reader mistaking a stale run for
+            # theirs, which is the whole subject of this branch, so the
+            # colour is signal, not decoration.
+            note = "  no new build started -- showing the previous run:"
+            out((f"\033[33m{note}\033[0m" if tty else note) + "\n")
     else:
         while True:
             live = liveness(snap)

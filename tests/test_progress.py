@@ -503,11 +503,17 @@ def test_watch_ndjson_streams_json_and_skips_the_summary_block():
     (this is what `ndjson=True` is for). One JSON object per update, and none
     of the plain-text kv summary a human-facing watch prints at the end --
     proven by every emitted line parsing as JSON, which that summary does
-    not."""
+    not.
+
+    The fixture is shaped like `Tracker.snapshot()` actually writes it
+    (porthole_progress.py Tracker.snapshot), not a hand-picked subset of
+    keys -- the ndjson object is the agent-facing contract Task 14 depends
+    on, so the schema has to come from production, not from the test."""
     with tempfile.TemporaryDirectory() as rundir:
         now = time.time()
-        snap = {"rung": "pkg:phoc", "state": "done", "pid": 1,
-                "started": now, "elapsed": 5.0}
+        snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
+                "pid": 1, "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
+                "compile_lines": 42, "last": "DONE!", "started": now}
         (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
         lines = []
         rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
@@ -515,7 +521,13 @@ def test_watch_ndjson_streams_json_and_skips_the_summary_block():
         assert rc == progress.EX_OK
         assert lines, "ndjson mode must not be silent"
         for line in lines:
-            json.loads(line)
+            obj = json.loads(line)
+        # Keys an agent actually consumes. Every one of these is set
+        # unconditionally in Tracker.snapshot() -- "progress"/"eta" can be
+        # None there (an honest "unknown", not a missing key), so only their
+        # PRESENCE is asserted, not their type.
+        for key in ("rung", "phase", "state", "elapsed", "progress", "eta"):
+            assert key in obj, f"{key!r} missing from the ndjson object"
 
 
 def test_watch_says_something_before_the_first_sleep_and_gives_up_on_a_ceiling():

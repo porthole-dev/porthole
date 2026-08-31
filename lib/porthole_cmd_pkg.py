@@ -859,7 +859,9 @@ def _watch(ctx, args) -> int:
         sys.stdout.write(line)
         sys.stdout.flush()
 
-    return progress.watch(rundir, "pkg-status.json", args.interval, out)
+    return progress.watch(rundir, "pkg-status.json", args.interval, out,
+                          start_hint="start one with "
+                                     "`porthole pkg build <aport>`")
 
 
 def _outdated(ctx) -> int:
