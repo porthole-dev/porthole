@@ -353,6 +353,60 @@ def expected_apk(packages: pathlib.Path, arch: str, fields: dict):
     return packages / channel / arch / wanted
 
 
+# What pmbootstrap says when it decides not to build. Both lines land in the
+# log porthole already writes, and both were there for the phosh run below --
+# they just never reached the person who ran it.
+_UP_TO_DATE = re.compile(r"Package '([^']+)' is up to date")
+_NEWER_BINARY = re.compile(r"about to install (\S+) (\S+) "
+                           r"\(local pmaports: ([^,)]+)")
+
+
+def why_nothing_built(log_text: str, aport: str):
+    """`(message, hint)` when pmbootstrap declined to build, else None.
+
+    Measured 2026-08-31: `pkg build phosh` ran 8m49s, exited 0, and porthole
+    said "build reported success but phosh-99990.56.0-r0.apk is not there" --
+    true, and useless. pmbootstrap had already explained itself twice in the
+    same log: the binary repo carries phosh 99990.57.0-r1, NEWER than the
+    99990.56.0-r0 in local pmaports, so it built the one dependency that was
+    outdated (modemmanager, 662 steps) and skipped phosh itself. Discarding a
+    reason the tool stated in plain words and replacing it with "the file is
+    not there" is the black box this command exists to end.
+
+    Pure: the parsing is the part that can be wrong, and it is testable
+    without an eight-minute build.
+    """
+    # No ANSI stripping: pmbootstrap colours its terminal output, not the
+    # log.txt this reads.
+    if not any(m.group(1) == aport for m in _UP_TO_DATE.finditer(log_text)):
+        return None
+    message = f"{aport}: nothing was built -- pmbootstrap says it is up to date"
+    force = f"`porthole pkg build {aport} --force` builds your aport anyway"
+    for match in _NEWER_BINARY.finditer(log_text):
+        if match.group(1) == aport:
+            return (message,
+                    f"the binary repo has {match.group(2)}, newer than the "
+                    f"{match.group(3)} in your pmaports -- so there was "
+                    f"nothing to build. {force}, `pmbootstrap pull` catches "
+                    f"pmaports up")
+    return (message, force)
+
+
+def log_since(path, offset: int) -> str:
+    """What was appended to pmbootstrap's log after `offset`.
+
+    Bounded on purpose. log.txt is shared and long-lived, and reading it whole
+    would let a PREVIOUS run's "is up to date" explain this one -- the same
+    defect the follow thread's seek-to-end exists to prevent.
+    """
+    try:
+        with open(path, errors="replace") as handle:
+            handle.seek(offset)
+            return handle.read()
+    except OSError:
+        return ""
+
+
 def outdated(pmaports: pathlib.Path, packages: pathlib.Path, arch: str):
     """`[(name, why)]` for local aports whose .apk no longer matches them.
 
@@ -610,11 +664,15 @@ def _build(ctx, args) -> int:
 
     # pmbootstrap keeps the real build output in its own log.txt and puts
     # only high-level `=> step` lines on stdout. Following that file is what
-    # makes the ninja `[N/M]` fraction reachable at all.
+    # makes the ninja `[N/M]` fraction reachable at all -- and what this run
+    # appends to it is also the only place pmbootstrap explains a build it
+    # decided not to do, so note where the file ends before we start.
+    pmb_log = workdir / "log.txt"
+    log_end = pmb_log.stat().st_size if pmb_log.exists() else 0
     with hold(workdir, aport, args.wait):
         rc = build._stream(ctx, cmd, env, args.timeout, f"pkg:{aport}",
                            tracker_cls=progress.PkgTracker, log_prefix="pkg",
-                           follow=workdir / "log.txt",
+                           follow=pmb_log,
                            on_kill=_kill_inside if usable else None)
 
     # Verify the ARTIFACT, not the exit code. `pmbootstrap build` can write an
@@ -628,6 +686,12 @@ def _build(ctx, args) -> int:
         raise Bail(f"{aport} failed to build", EX_FAIL,
                    f"the log is in {ctx.root / '.run'}")
     if not landed:
+        # Ask pmbootstrap why before guessing. It skips a package whose binary
+        # is already current, exits 0, and the artifact check alone reads that
+        # as a mystery.
+        why = why_nothing_built(log_since(pmb_log, log_end), aport)
+        if why:
+            raise Bail(why[0], EX_FAIL, why[1])
         raise Bail(f"{aport}: build reported success but {want.name} is not "
                    f"there", EX_FAIL, f"looked in {want.parent}")
     ctx.out(ctx.out.paint(
