@@ -5,6 +5,20 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- `porthole doctor` and `porthole sandbox status` report whether the DEVICE
+  accepts the workspace ssh key, not merely whether the key file exists. The
+  old check was green on a phone whose `authorized_keys` had been lost in a
+  fresh install, so doctor said everything was fine while every workspace push
+  failed with `scp: Connection closed`. Three states, because an unreachable
+  device is not evidence a key is bad. The fix is printed and never run —
+  installing a key is a privileged write to the device.
+- Every host tool in `doctor` is now proved to RUN, not merely to be on PATH.
+  A `+x` script whose shebang interpreter no longer exists — the ordinary pipx
+  failure, and routine on an rpm-ostree host — passes `shutil.which` and dies
+  at exec. Each tool is asked the version flag it actually supports, because
+  `ssh --version` is not one.
+
+### Added
 - `porthole pkg search` and `porthole pkg fork` — pmbootstrap keeps pmaports
   and Alpine's aports side by side and `pmbootstrap build` reads only the
   first, so Alpine's twelve thousand packages were present, useful and
@@ -75,6 +89,45 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   valid scopes, no personal paths, device-scoped tools living in a profile.
 - CI across python 3.8/3.11/3.13, plus a fresh-clone smoke test.
 - `Makefile` with `test`, `lint`, `check`, `install-completion`.
+
+### Fixed
+- `porthole build auto` routed on what one `make` invocation happened to
+  touch, and the preview runs a real incremental make — so a preview consumed
+  the evidence the run needed. `porthole build` followed by `porthole build
+  auto --yes` reported "make rebuilt nothing" about a tree with a real change
+  in it, which made the documented preview-then-run flow self-defeating. It
+  now routes on what the device has not received, recorded when a rung
+  actually pushes, so preview and run agree and running it twice is safe.
+- `porthole build` defaulted to `$PORTHOLE_WORKDIR/linux` and stopped there,
+  so a repo whose product branch lives in a sibling worktree needed
+  `PORTHOLE_KERNEL_TREE` typed on every invocation. It now builds the one
+  sibling tree on `PORTHOLE_KERNEL_BRANCH` when exactly one is, and says so.
+  Never when two are: choosing silently is how a half-finished branch gets
+  flashed.
+- A relative `PORTHOLE_KERNEL_TREE` meant three different directories in three
+  places. `linux-ws` built in the workspace and died on `--host` with
+  `pushd: linux-ws: No such file or directory`. It now resolves against the
+  device working repo everywhere, and a test compares the shell and Python
+  answers.
+- `porthole build mod` never offered the device ssh key: `tkmod`'s two `scp`s
+  and its two `ssh`s omitted `TK_SSH_OPTS`, which is where
+  `-i $PORTHOLE_SSH_KEY` lives — so in the workspace, where that key is the
+  only one the container has, every push failed with an error that named
+  nothing. Same one-line defect in `tk-mic-check.sh`. A contract test covers
+  the build path now.
+- The `boot` rung seeds its own base image from the device's active boot
+  partition, cached under `.run` keyed on the device's kernel release. The old
+  default was `/tmp/tk-base-boot.img` with an instruction to seed it by hand
+  that could not be followed from where builds run — the workspace container
+  does not mount the host's `/tmp`. The check also fired after the compile
+  rather than before it.
+- The `boot` rung no longer claims to need "no pmbootstrap". It compiles
+  through envkernel, which is pmbootstrap; it needs no *packaging* step, which
+  is what made it cheap. `--host` says what host building actually requires.
+- `tk_expired` with an unusable deadline printed `[: : integer expected` from
+  inside the library rather than naming the caller that passed it. It now
+  names the caller, and reports "not expired" rather than giving up instantly
+  on a device that was fine.
 
 ### Changed
 - `aports build` delegates to `pkg build`, so there is one build path with the
