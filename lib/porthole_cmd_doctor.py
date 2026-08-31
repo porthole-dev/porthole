@@ -709,6 +709,8 @@ def bench(ch: Checks, ctx) -> None:
         ch.add("bench", "skip", "device is not booted")
         return
 
+    import porthole
+
     def timed(label, fn, budget_ms):
         start = time.monotonic()
         fn()
@@ -719,7 +721,13 @@ def bench(ch: Checks, ctx) -> None:
 
     dev.run("true")                                    # warm the master
     timed("ssh round trip (warm)", lambda: dev.run("true"), 30)
-    timed("fastboot devices", dev.in_fastboot, 250)
+    try:
+        timed("fastboot devices", dev.in_fastboot, 250)
+    except porthole.FastbootUnavailable as exc:
+        # One probe exploding degrades the verdict, never the command -- the
+        # rule a missing `ping` binary bought when it took doctor down.
+        ch.add("bench: fastboot devices", "fail", str(exc),
+               doc="`porthole doctor` names how to install fastboot")
     timed("device state", dev.state, 100)
 
 
@@ -810,6 +818,47 @@ def _device_key_row(ch: Checks, state) -> None:
                    "booted and reachable")
 
 
+def _workspace_fastboot_row(ch: Checks, sandbox) -> None:
+    """Does $FASTBOOT resolve INSIDE the container, where builds run?
+
+    Checking it on the host is not the same question and answering the host's
+    is what let this ship. config.env is mounted read-only into the workspace
+    and load_config reads it in there too, so a FASTBOOT naming a host path --
+    the normal case, since that is where platform-tools lives -- named a file
+    the container does not have. Every `fastboot devices` in there exited 127
+    with empty stdout, which is byte-for-byte a phone that is NOT in the
+    bootloader.
+
+    The cost of not checking: a `fast` build compiled, reached "ALL CHECKS
+    PASSED - safe to flash", sent the phone to the bootloader, then spent
+    181.2s insisting it never got there and told the user to do it by hand --
+    with the phone in fastboot the whole time. A precondition that only
+    surfaces after a full compile, at the flash step, is one doctor owes you
+    up front.
+    """
+    probe = 'command -v "${FASTBOOT:-fastboot}"'
+    try:
+        proc = subprocess.run(
+            ["podman", "exec", sandbox.CONTAINER, "sh", "-c", probe],
+            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as exc:
+        # The CHECK could not run. Not a finding about FASTBOOT.
+        ch.add("workspace: fastboot", "warn",
+               f"could not ask the container ({exc})")
+        return
+    found = (proc.stdout or "").strip()
+    if proc.returncode == 0 and found:
+        ch.add("workspace: fastboot", "ok", found)
+    else:
+        ch.add("workspace: fastboot", "fail",
+               "$FASTBOOT does not resolve inside the workspace -- every "
+               "`fastboot devices` in there looks like a phone that is not "
+               "in the bootloader",
+               fix="porthole sandbox down && porthole sandbox up",
+               doc="the workspace names its own fastboot; a host path "
+                   "(platform-tools) does not exist in there")
+
+
 def check_workspace(ch: Checks, ctx, family: str) -> None:
     """podman and the build workspace.
 
@@ -834,6 +883,7 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
                doc="porthole sandbox up")
     if state["container_running"]:
         ch.add("workspace: container", "ok", sandbox.CONTAINER)
+        _workspace_fastboot_row(ch, sandbox)
     else:
         ch.add("workspace: container", "warn", "not running",
                doc="porthole sandbox up")
