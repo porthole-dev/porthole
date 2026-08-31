@@ -608,14 +608,29 @@ def _host_cmd(script: pathlib.Path, func: str,
     return ["bash", "-c", f'source "{script}" && {call}']
 
 
+def build_env(cfg, base) -> dict:
+    """The environment a build child gets. Pure, so what crosses is testable.
+
+    PMB_SUDO is REMOVED. doctor already fails on it and calls it a leftover
+    whose privilege broker is gone -- but an export survives in a shell long
+    after the file does, and pmbootstrap invokes it directly, so a stale one
+    kills the build with exit 78 deep inside pmbootstrap with nothing anywhere
+    saying the words PMB_SUDO. porthole builds already refuse to inherit
+    config drift; this is drift by another name.
+    """
+    env = dict(base)
+    env.pop("PMB_SUDO", None)
+    for key, value in cfg.items():
+        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
+            env[key] = value
+    return env
+
+
 def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
          host: bool = False, rung: str = "") -> int:
     """Run one of ph-build.sh's functions, in the workspace or on the host."""
     script = _script(ctx)
-    env = dict(os.environ)
-    for key, value in ctx.cfg.items():
-        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
-            env[key] = value
+    env = build_env(ctx.cfg, os.environ)
 
     # shlex.quote, not naive interpolation: these arguments are a path and a
     # module name that reach a shell, and a path with a space in it would

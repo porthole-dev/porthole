@@ -9,6 +9,7 @@ nothing and something red happened".
 """
 from __future__ import annotations
 
+import collections
 import errno
 import os
 import pathlib
@@ -747,6 +748,33 @@ def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
                "pmbootstrap, naming nothing")
 
 
+def _check_pmos_password(ch: Checks, env) -> None:
+    """TK_PMOS_PASSWORD unset, which stops `kernel` and `upgrade` dead.
+
+    The exact mirror of _check_pmb_sudo: that one fails when a variable is
+    SET, this one warns when one is UNSET. tools/ph-build.sh:820 requires it
+    and dies with a bare shell parameter error naming no fix, and doctor
+    reported 23 ok / 2 warn / 2 fail on a host where it was missing without
+    mentioning it once.
+
+    WARN and not FAIL: it gates two rungs of six. A host doing `mod` and
+    `boot` work is not broken for lacking it, and a FAIL there teaches people
+    to skim the row.
+
+    The VALUE is never printed. It is a rootfs password; see
+    tests/test_secrets.py.
+    """
+    if (env.get("TK_PMOS_PASSWORD") or "").strip():
+        ch.add("host: TK_PMOS_PASSWORD", "ok", "set")
+        return
+    ch.add("host: TK_PMOS_PASSWORD", "warn",
+           "unset -- `porthole build kernel` and `upgrade` need it and stop "
+           "dead without it",
+           fix="export TK_PMOS_PASSWORD=<the rootfs user password>"
+               "    # an environment variable on purpose: a flag would show "
+               "it in ps")
+
+
 def _device_key_row(ch: Checks, state) -> None:
     """The workspace's device key, reported by whether the phone accepts it.
 
@@ -845,6 +873,11 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
     # a person installing software on their own machine, not a privilege the
     # agent holds.
     _check_pmb_sudo(ch, ctx, state)
+
+    # kernel and upgrade hard-require it (tools/ph-build.sh:820) and die with
+    # a bare shell parameter error naming no fix. ctx.cfg falls back to
+    # os.environ, same source _check_pmb_sudo reads.
+    _check_pmos_password(ch, collections.ChainMap(ctx.cfg, os.environ))
 
     # The thing this project exists to replace, reported by the verb people
     # actually run. `porthole sandbox` has always shown it; nobody runs
