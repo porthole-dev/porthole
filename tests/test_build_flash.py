@@ -734,5 +734,57 @@ def test_no_host_path_setting_crosses_by_accident():
         assert not any(w in key for w in ("DIR", "TREE", "PATH", "WORKDIR")), key
 
 
+def test_a_relative_kernel_tree_resolves_against_the_workdir():
+    """PORTHOLE_KERNEL_TREE=linux-ws worked for the workspace build and broke
+    --host with `pushd: linux-ws: No such file or directory`, because each path
+    interpreted it against whatever pwd it happened to have."""
+    import porthole_cmd_build as build
+    got = build._tree({"PORTHOLE_WORKDIR": "/w",
+                       "PORTHOLE_KERNEL_TREE": "linux-ws"})
+    assert str(got) == "/w/linux-ws", got
+
+
+def test_an_absolute_kernel_tree_is_left_alone():
+    import porthole_cmd_build as build
+    got = build._tree({"PORTHOLE_WORKDIR": "/w",
+                       "PORTHOLE_KERNEL_TREE": "/elsewhere/linux"})
+    assert str(got) == "/elsewhere/linux", got
+
+
+def test_a_relative_tree_with_no_workdir_is_not_guessed_from_the_cwd():
+    """Nothing to resolve against is not a licence to use pwd -- that IS the
+    bug. Left as given, so the failure names the path the user typed."""
+    import porthole_cmd_build as build
+    got = build._tree({"PORTHOLE_KERNEL_TREE": "linux-ws"})
+    assert str(got) == "linux-ws", got
+
+
+def test_tree_inside_translates_a_relative_tree():
+    """_tree_inside called .resolve(), which resolves against the PROCESS cwd.
+    A relative tree therefore translated to whatever directory the CLI was run
+    from, and the container was handed a path that does not exist."""
+    import porthole_cmd_build as build
+    with tempfile.TemporaryDirectory() as tmp:
+        (pathlib.Path(tmp) / "linux-ws").mkdir()
+        assert build._tree_inside("linux-ws", tmp) == "/work/linux-ws"
+
+
+def test_the_shell_and_python_agree_on_a_relative_tree():
+    """Two implementations of one rule drift unless something compares them,
+    and this pair decides WHICH TREE gets flashed."""
+    import porthole_cmd_build as build
+    script = ROOT / "tools" / "ph-build.sh"
+    probe = (
+        'PORTHOLE_WORKDIR=/w PORTHOLE_KERNEL_TREE=linux-ws '
+        'PORTHOLE_KERNEL_PKG=k PORTHOLE_DEVICE_PKG=d PORTHOLE_FW_PKG=f '
+        'PORTHOLE_DTB_FILE=x.dtb '
+        f'bash -c \'source "{script}" >/dev/null 2>&1; echo "$_PH_TREE"\''
+    )
+    out = subprocess.run(["bash", "-c", probe], capture_output=True,
+                         text=True).stdout.strip()
+    assert out == str(build._tree({"PORTHOLE_WORKDIR": "/w",
+                                   "PORTHOLE_KERNEL_TREE": "linux-ws"})), out
+
+
 if __name__ == "__main__":
     sys.exit(main())

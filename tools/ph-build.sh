@@ -49,6 +49,12 @@ _PH_REPO=${PORTHOLE_WORKDIR:?set PORTHOLE_WORKDIR to the device working repo (ke
 # be sitting on -- it is often a worktree -- and switching the main checkout to
 # reach it is how a half-finished branch gets built and flashed.
 _PH_TREE=${PORTHOLE_KERNEL_TREE:-$_PH_REPO/linux}
+# A RELATIVE value resolves against the device working repo, never against
+# whatever pwd this happens to be sourced with. `PORTHOLE_KERNEL_TREE=linux-ws`
+# built fine in the workspace and died on --host with `pushd: linux-ws: No such
+# file or directory` -- one variable, two meanings, decided by the caller's cwd.
+# lib/porthole_cmd_build.py:_tree applies the same rule, and must.
+case $_PH_TREE in /*) ;; *) _PH_TREE=$_PH_REPO/$_PH_TREE ;; esac
 _PH_PMB=${PORTHOLE_PMB_DIR:-$_PH_PMB}
 # pmaports. The device repo normally symlinks it, but that symlink names an
 # ABSOLUTE host path, and inside the workspace container the pmbootstrap work

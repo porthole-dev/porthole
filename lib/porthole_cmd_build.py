@@ -217,11 +217,26 @@ def _assert_no_drift(ctx, args) -> None:
 
 
 def _tree(cfg) -> pathlib.Path:
-    """Where the kernel tree is, matching ph-build.sh:51 exactly."""
+    """Where the kernel tree is, matching ph-build.sh:51 exactly.
+
+    A RELATIVE PORTHOLE_KERNEL_TREE resolves against PORTHOLE_WORKDIR -- the
+    device working repo -- and never against the process cwd. The knob is the
+    toolbox's own advice ("set PORTHOLE_KERNEL_TREE to build a worktree"), and
+    `PORTHOLE_KERNEL_TREE=linux-ws` built fine in the workspace and died on
+    --host with `pushd: linux-ws: No such file or directory`: one variable,
+    two meanings, decided by whatever directory each path happened to run in.
+
+    With no workdir there is nothing to resolve AGAINST, and falling back to
+    the cwd is precisely the bug. Left as given, so the eventual failure names
+    the path that was typed rather than one nobody wrote.
+    """
+    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
     tree = (cfg.get("PORTHOLE_KERNEL_TREE") or "").strip()
     if tree:
-        return pathlib.Path(tree).expanduser()
-    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
+        path = pathlib.Path(tree).expanduser()
+        if path.is_absolute() or not workdir:
+            return path
+        return pathlib.Path(workdir).expanduser() / path
     return pathlib.Path(workdir).expanduser() / "linux" if workdir else pathlib.Path()
 
 
@@ -343,8 +358,15 @@ def _tree_inside(tree, workdir) -> str:
     if not tree or not workdir:
         return ""
     try:
-        rel = pathlib.Path(tree).expanduser().resolve().relative_to(
-            pathlib.Path(workdir).expanduser().resolve())
+        base = pathlib.Path(workdir).expanduser()
+        path = pathlib.Path(tree).expanduser()
+        # Same rule as _tree, and it has to be the same rule: .resolve() alone
+        # resolves a relative value against the PROCESS cwd, so a worktree
+        # named relatively translated to whatever directory the CLI was run
+        # from and the container was handed a path that does not exist.
+        if not path.is_absolute():
+            path = base / path
+        rel = path.resolve().relative_to(base.resolve())
     except (ValueError, OSError):
         return ""
     return "/work" if str(rel) == "." else f"/work/{rel}"
