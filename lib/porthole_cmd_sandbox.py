@@ -372,10 +372,12 @@ def _up_argv(root, image, mounts, device) -> list[str]:
     # never got there, with the phone sitting in fastboot the entire time. The
     # image's own fastboot is on PATH, so name it bare.
     #
-    # ADB is deliberately NOT given the same treatment: the image ships no adb
-    # at all, so a bare name would only swap one path that cannot run for
-    # another. tk_in_fastboot's ph_need_fastboot guard is what makes a gap like
-    # that fail loudly instead of reading as "no device".
+    # ADB is the same shape -- config.env names the host's platform-tools adb
+    # too -- and is deliberately left for its own change: nothing in lib/ or
+    # tools/ ever EXECUTES $ADB (doctor only checks the path, init only writes
+    # it), so in here it is a latent host path rather than a live one. Verified
+    # read-only 2026-09-01: the image does carry a working /usr/bin/adb from
+    # android-tools, so `adb` is the right value when that change is made.
     argv += ["-e", "FASTBOOT=fastboot"]
     for src, dst, opts in mounts:
         argv += ["-v", f"{src}:{dst}:{opts}"]

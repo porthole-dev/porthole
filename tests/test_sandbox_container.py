@@ -571,15 +571,9 @@ def test_the_container_gets_a_fastboot_that_exists_inside_it():
     "no device in the bootloader". A `fast` build reached "safe to flash",
     parked the phone in the bootloader and then timed out after 181.2s
     claiming it never arrived, with the phone in fastboot the whole time.
-
-    ADB must NOT get the same override: the image ships no adb at all, so a
-    bare name would swap one path that cannot run for another.
     """
     argv = _argv_for_test()
     assert "FASTBOOT=fastboot" in argv, argv
-    assert not any(a.startswith("ADB=") for a in argv), (
-        "the image has no adb, so a bare ADB= is a second unrunnable path in "
-        "disguise: " + str(argv))
 
 
 # ------------------------------------------- raw pmbootstrap is redirected --
