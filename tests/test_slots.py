@@ -17,6 +17,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
 
 import porthole_cmd_slots as slots  # noqa: E402
 
+# Real, from the booted phone 2026-08-31. Truncated; the slot_suffix is what
+# this reads and it is near the end.
+CMDLINE = ("quiet splash clk_ignore_unused androidboot.bootreason=reboot "
+           "androidboot.slot_suffix=_b skip_initramfs rootwait ro init=/init")
+
+PARTLABELS = ("abl_a abl_b boot_a boot_b dtbo_a dtbo_b modem_a modem_b "
+              "misc metadata frp")
+
 GETVAR = """\
 (bootloader) slot-count: 2
 (bootloader) current-slot: a
@@ -152,6 +160,41 @@ def test_no_device_is_reported_immediately_rather_than_after_a_timeout():
     source = inspect.getsource(slots._probe)
     assert source.index('"devices"') < source.index('"getvar"'), \
         "getvar is reached before the devices check"
+
+
+def test_slot_suffix_reads_the_active_slot_from_the_cmdline():
+    import porthole
+
+    assert porthole.slot_suffix(CMDLINE) == "b"
+
+
+def test_slot_suffix_is_empty_when_the_cmdline_does_not_say():
+    import porthole
+
+    assert porthole.slot_suffix("quiet splash ro") == ""
+
+
+def test_ssh_policy_reports_the_two_keys_it_can_answer():
+    policy = slots.policy_from_device(CMDLINE, PARTLABELS)
+    assert policy["PORTHOLE_HAS_AB_SLOTS"] == "1", policy
+    assert policy["PORTHOLE_ACTIVE_SLOT"] == "b", policy
+
+
+def test_ssh_policy_never_invents_the_two_it_cannot():
+    """Guessing an unbootable slot is how a port bricks a phone.
+
+    slot-unbootable and slot-retry-count live in the bootloader and there is
+    no ssh equivalent. Absent means absent.
+    """
+    policy = slots.policy_from_device(CMDLINE, PARTLABELS)
+    assert "PORTHOLE_SLOT_FORBIDDEN" not in policy, policy
+    assert "PORTHOLE_SLOT_RETRY_COUNT" not in policy, policy
+
+
+def test_ssh_policy_on_a_non_ab_device_says_so_rather_than_guessing():
+    policy = slots.policy_from_device("quiet ro", "boot system userdata")
+    assert policy.get("PORTHOLE_HAS_AB_SLOTS") == "0", policy
+    assert "PORTHOLE_ACTIVE_SLOT" not in policy, policy
 
 
 def main():

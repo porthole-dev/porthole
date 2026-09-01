@@ -489,6 +489,72 @@ def _workspace_usable(ctx):
     return True, ""
 
 
+def apk_is_current(packages_dir, pkgname: str, pkgver: str, pkgrel: str,
+                   arch: str) -> bool:
+    """Is the release apk this rung will install already built? Pure.
+
+    The same question _ph_install_kernel_release asks in shell before deciding
+    whether to build the aport. Asking it in Python BEFORE the run starts is
+    what lets the ETA know which of two very different builds this is.
+    """
+    apk = pathlib.Path(packages_dir) / arch / \
+        f"{pkgname}-{pkgver}-r{pkgrel}.apk"
+    return apk.is_file()
+
+
+def aport_version(ctx):
+    """`(pkgver, pkgrel)` for the configured kernel aport, or ("", "").
+
+    One parser, reused: porthole_cmd_pkg.apkbuild_version already reads an
+    APKBUILD and a second reader of the same file is a second thing to be
+    wrong about `pkgrel`.
+    """
+    import porthole_cmd_aports as aports
+    import porthole_cmd_pkg as pkg
+
+    name = ctx.cfg.get("PORTHOLE_KERNEL_PKG", "")
+    if not name:
+        return "", ""
+    try:
+        directory = aports._pkg_dir(aports._pmaports(ctx), name)
+    except Exception:  # noqa: BLE001 -- no pmaports is not a build failure
+        return "", ""
+    if directory is None:
+        return "", ""
+    version = pkg.apkbuild_version(directory)      # "7.2.2-r22"
+    pkgver, _, pkgrel = version.partition("-r")
+    return pkgver, pkgrel
+
+
+def _release_apk_present(ctx, usable: bool) -> bool:
+    """Is the kernel apk this rung will install already built?
+
+    The same question _ph_install_kernel_release asks in shell before it
+    decides whether to build the aport. Asked here, BEFORE the run starts, it
+    is what lets the ETA know which of two very different builds this is.
+
+    `usable` is `_run`'s own workspace-vs-host decision, passed in rather than
+    re-derived. A second call to `_workspace_usable` here disagreed with the
+    first whenever `--host` forced a host build with a workspace still up: the
+    build ran on the host while this unforced re-query still read the
+    WORKSPACE's packages/edge, silently reintroducing the very
+    averaging-two-populations bug this module exists to remove, for exactly
+    those builds, and printing a message that could contradict where the
+    build was about to run. Threading the value through cannot disagree with
+    it by construction.
+
+    Unknown counts as "present": an ETA that under-promises is a pleasant
+    surprise, and refusing to guess is already what `eta unknown` is for.
+    """
+    pkgver, pkgrel = aport_version(ctx)
+    if not pkgver or not pkgrel:
+        return True
+    return apk_is_current(
+        pmb_workdir(ctx, usable) / "packages" / "edge",
+        ctx.cfg.get("PORTHOLE_KERNEL_PKG", ""), pkgver, pkgrel,
+        ctx.cfg.get("PORTHOLE_ARCH") or "aarch64")
+
+
 def pmb_workdir(ctx, in_container: bool) -> pathlib.Path:
     """pmbootstrap's own work dir, on the HOST filesystem either way.
 
@@ -688,7 +754,43 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     # written; the kernel rungs never did, so build-history.json recorded
     # `compile_lines: 0` for every kernel build ever run and `fast` rendered
     # [??????] for the 20 minutes that dominate it.
-    return _stream(ctx, cmd, env, timeout, rung or func,
+    effective_rung = rung or func
+
+    # `fast` (and every export rung) is two very different builds wearing one
+    # name: install + export + flash when the release apk already exists, and
+    # a full compile plus package plus that same install/export/flash when it
+    # does not -- measured at 6m43s against 21m24s. porthole knows which one
+    # this is before it starts, the same way _ph_install_kernel_release does
+    # in shell, so say it rather than let a "~6m" advertisement stand while a
+    # 21-minute compile runs silently underneath it.
+    #
+    # Gated on EXPORT_RUNGS -- the same table that already answers "is this
+    # rung bimodal on this axis" for `_preflight`'s chroot check. `mod` and
+    # `boot` are not: the apk-present lookup would cost them a pmaports glob
+    # and an APKBUILD read on every run for nothing, and splitting their
+    # history key would halve the sample pool of the two rungs an agent hits
+    # hardest, doubling how often THEY report "eta unknown". Keeping their key
+    # as the bare rung name has a pleasant side effect too: an existing
+    # unkeyed `{"mod": {...}}` entry keeps matching, because only the rungs
+    # that were actually being averaged wrongly lose their old history.
+    key = effective_rung
+    if effective_rung in EXPORT_RUNGS:
+        rebuilding = not _release_apk_present(ctx, usable)
+        if rebuilding:
+            ctx.out(ctx.out.paint(
+                f"  the {effective_rung} rung must build the kernel package "
+                f"first — this is the full-compile path, not the "
+                f"install-and-flash one", "yellow"))
+        else:
+            ctx.out(ctx.out.paint(
+                "  the kernel package is already built — install, export "
+                "and flash only", "grey"))
+
+        import porthole_progress as progress
+
+        key = progress.history_key(effective_rung, rebuilding)
+
+    return _stream(ctx, cmd, env, timeout, effective_rung, key=key,
                    follow=pmb_workdir(ctx, usable) / "log.txt")
 
 
@@ -700,7 +802,7 @@ BEAT = 1.0
 
 def _stream(ctx, cmd, env, timeout: int, rung: str,
             tracker_cls=None, log_prefix: str = "build", follow=None,
-            on_kill=None) -> int:
+            on_kill=None, key: str = "") -> int:
     """Run the build, publishing where it is the whole time.
 
     Every line goes to a log file unconditionally, so "quiet by default" never
@@ -734,7 +836,10 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     verbose = getattr(getattr(ctx, "args", None), "verbose", False)
     tty = sys.stdout.isatty()
 
-    tracker = (tracker_cls or progress.Tracker)(rundir, rung)
+    # `key`, when given, is the history bucket (see progress.history_key) --
+    # a rung whose cost is bimodal needs to learn each case separately, and
+    # the rung itself stays what a reader (snapshot's own "rung" field) sees.
+    tracker = (tracker_cls or progress.Tracker)(rundir, rung, key=key)
     tracker.publish(force=True)
     ctx.out(ctx.out.paint(f"  log: {logpath}", "grey"))
 
@@ -1182,7 +1287,99 @@ def _status(ctx) -> int:
     return ctx.emit(snap, render)
 
 
-def _maybe_autoselect_tree(ctx) -> None:
+def detach_argv(porthole, action: str, args) -> list:
+    """The argv a detached build re-invokes itself with. Pure.
+
+    Rebuilt by hand, so every flag that changes what the build DOES must be
+    listed here or it is silently dropped -- `pkg` lost --force and --wait
+    exactly that way. `--detach` is deliberately absent: forwarding it would
+    make the child detach again and orphan the run.
+    """
+    argv = [str(porthole), "build", action, "--timeout", str(args.timeout)]
+    if getattr(args, "kernel", False):
+        argv.append("--kernel")
+    if getattr(args, "host", False):
+        argv.append("--host")
+    if getattr(args, "verbose", False):
+        argv.append("--verbose")
+    if getattr(args, "allow_env_override", False):
+        argv.append("--allow-env-override")
+    if getattr(args, "yes", False):
+        argv.append("--yes")
+    return argv + list(getattr(args, "rest", None) or [])
+
+
+def _detach(ctx, args, action: str) -> int:
+    """Start the build in its own session and return immediately.
+
+    Re-invokes this same verb rather than duplicating the run path, so a
+    detached build is byte-for-byte the foreground one: same tracker, same
+    status file, same log, same artifact check.
+
+    Available on the flashing rungs too. The irreversible-action boundary is
+    `--yes`, which was given at launch; detaching does not make a confirmed
+    flash less confirmed, and `fast` and `upgrade` are the two rungs an agent
+    most needs to detach.
+    """
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+    rundir.mkdir(parents=True, exist_ok=True)
+    spawn_log = rundir / f"build-{action}-detached.log"
+    argv = detach_argv(ctx.root / "bin" / "porthole", action, args)
+    with open(spawn_log, "w") as handle:
+        proc = subprocess.Popen(argv, cwd=str(ctx.root), stdout=handle,
+                                stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL,
+                                start_new_session=True)
+    # Claim the status file for THIS run before returning, or a `watch` in the
+    # next second reads the PREVIOUS build's final snapshot and reports it.
+    progress.publish_pending(rundir, action, proc.pid, "build-status.json")
+    ctx.out.kv("pid", str(proc.pid), 10)
+    ctx.out.kv("log", str(spawn_log), 10)
+    ctx.out(ctx.out.paint("  porthole build watch          # live, exits with "
+                          "the build", "cyan"))
+    ctx.out(ctx.out.paint("  porthole build watch --json   # one JSON object "
+                          "per update, for an agent", "cyan"))
+    return EX_OK
+
+
+def _watch(ctx, args) -> int:
+    """Follow the kernel build's status file until it stops."""
+    import porthole_progress as progress
+
+    rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
+
+    # A raw sink, not `ctx.out`: `progress.watch` bakes its own line ending
+    # into every string it emits (a bare `\r\033[2K` prefix for a tty
+    # redraw-in-place, a trailing `\n` otherwise), matching `pkg`'s `_watch`.
+    def out(line):
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    return progress.watch(rundir, "build-status.json",
+                          getattr(args, "interval", 1.0), out,
+                          ndjson=getattr(args, "json", False),
+                          start_hint="start one with `porthole build <action> "
+                                     "--yes` or `--detach`")
+
+
+def tree_banner(rung: str, tree, release: str) -> str:
+    """What to say about the tree, for THIS rung. Pure.
+
+    `fast` and `upgrade` install and flash the APORT apk -- the rung's own
+    source comments say the tree cannot affect what lands on the phone -- and
+    both printed a banner naming a tree immediately before doing so. Keyed on
+    the rung and not on whether the tree matches, because the tree is inert on
+    these rungs either way.
+    """
+    if rung in ("fast", "upgrade"):
+        return ("flashing the APORT release {} — the tree is not used by this "
+                "rung".format(release or "(unknown release)"))
+    return "building {}".format(tree)
+
+
+def _maybe_autoselect_tree(ctx, action: str = "") -> None:
     """Point the build at the tree holding the product branch, if exactly one
     does. Runs before anything reads the tree, and says so loudly when it
     fires -- a build that silently switched trees would be worse than the bug.
@@ -1201,10 +1398,12 @@ def _maybe_autoselect_tree(ctx) -> None:
     # one of the two is how the host and the container end up building
     # different trees.
     os.environ["PORTHOLE_KERNEL_TREE"] = chosen
+    _, pkgrel = aport_version(ctx)
+    release = f"r{pkgrel}" if pkgrel else ""
     ctx.out(ctx.out.paint(
         f"  tree: the default is not on the product branch {want}", "yellow"))
     ctx.out(ctx.out.paint(
-        f"        building {chosen} -- the one tree that is", "yellow"))
+        f"        {tree_banner(action, chosen, release)}", "yellow"))
 
 
 def cmd_build(args, ctx) -> int:
@@ -1214,12 +1413,14 @@ def cmd_build(args, ctx) -> int:
     # is what tests/test_cli_rules.py forbids repo-wide.
     if action == "status":
         return _status(ctx)
+    if action == "watch":
+        return _watch(ctx, args)
     if action != "auto" and action not in ACTIONS:
         raise Bail(f"unknown action {action!r}", EX_USAGE,
-                   f"actions: auto, status, {', '.join(ACTIONS)}")
+                   f"actions: auto, status, watch, {', '.join(ACTIONS)}")
 
     _assert_no_drift(ctx, args)
-    _maybe_autoselect_tree(ctx)
+    _maybe_autoselect_tree(ctx, action)
 
     if action == "auto":
         # Measuring needs a tree to make in. Without one -- a new port, or a
@@ -1291,6 +1492,11 @@ def cmd_build(args, ctx) -> int:
                    f"expected {_tree(ctx.cfg)}/Makefile -- set "
                    f"PORTHOLE_KERNEL_TREE, or name an explicit rung")
 
+    # After the `--yes` gate, so a detached build is still a confirmed one --
+    # `--detach` changes WHERE the build runs, not whether it was confirmed.
+    if getattr(args, "detach", False):
+        return _detach(ctx, args, action)
+
     rc = _run(ctx, func, args.timeout, extra,
               host=getattr(args, "host", False), rung=action)
     if rc != 0:
@@ -1314,8 +1520,10 @@ SPEC = {
         "release build. Artifacts are verified rather than exit codes trusted."),
     "escapes_scope": True,
     "args": [
-        (["action"], {"nargs": "?", "metavar": "ACTION", "choices": ["auto", "status"] + list(ACTIONS),
-                      "help": "auto | status | " + " | ".join(ACTIONS) + "  (default: auto)"}),
+        (["action"], {"nargs": "?", "metavar": "ACTION",
+                      "choices": ["auto", "status", "watch"] + list(ACTIONS),
+                      "help": "auto | status | watch | " + " | ".join(ACTIONS)
+                              + "  (default: auto)"}),
         (["rest"], {"nargs": "*", "metavar": "ARG",
                     "help": "mod: MODULE.ko NAME"}),
         (["--kernel"], {"action": "store_true",
@@ -1331,6 +1539,11 @@ SPEC = {
         (["--host"], {"action": "store_true",
                       "help": "build on the host, not in the workspace"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),
+        (["--detach"], {"action": "store_true",
+                        "help": "start the build in its own session and "
+                                "return; follow it with `build watch`"}),
+        (["--interval"], {"type": float, "default": 1.0, "metavar": "SEC",
+                          "help": "watch: seconds between reads (default 1)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_build,
@@ -1340,6 +1553,9 @@ SPEC = {
         "porthole build boot --yes",
         "porthole build boot --kernel --yes",
         "porthole build fast --yes",
+        "porthole build fast --yes --detach",
+        "porthole build watch",
+        "porthole build watch --json",
         "porthole build kernel --yes",
         "porthole build clean",
     ],

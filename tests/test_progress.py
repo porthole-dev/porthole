@@ -10,9 +10,11 @@ test: an unknown total says unknown, and an ETA is refused rather than
 extrapolated from noise.
 """
 import json
+import os
 import pathlib
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
@@ -111,6 +113,46 @@ def test_history_survives_a_round_trip():
 def test_a_missing_history_file_is_not_an_error():
     """Bookkeeping must never be a way for a build to fail."""
     assert progress.load_history("/nonexistent/porthole/rundir") == {}
+
+
+def test_history_key_separates_a_rebuild_from_a_cached_run():
+    assert progress.history_key("fast", True) != progress.history_key("fast", False)
+    assert "fast" in progress.history_key("fast", True)
+
+
+def test_an_unkeyed_legacy_entry_is_not_read_as_either_bucket():
+    """The old `fast: 403.4` is the mean of a 6m path and a 21m one.
+
+    Seeding either bucket with it reintroduces the exact error this removes,
+    once, in the bucket where nobody would look for it. No history is the
+    honest answer, and `eta unknown` on a first run is already how this module
+    behaves for a rung it has never seen.
+    """
+    history = {"fast": {"total": 403.4, "compile_lines": 0}}
+    assert progress.estimate_total(history, progress.history_key("fast", True)) is None
+    assert progress.estimate_total(history, progress.history_key("fast", False)) is None
+
+
+def test_each_bucket_learns_its_own_total():
+    rundir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-hist-"))
+    progress.record(rundir, progress.history_key("fast", True), 1284.0, 8100)
+    progress.record(rundir, progress.history_key("fast", False), 403.4, 0)
+    history = progress.load_history(rundir)
+
+    assert progress.estimate_total(history, progress.history_key("fast", True)) == 1284.0
+    assert progress.estimate_total(history, progress.history_key("fast", False)) == 403.4
+
+
+def test_apk_is_current_is_false_when_the_release_apk_is_absent():
+    import porthole_cmd_build as build
+
+    packages = pathlib.Path(tempfile.mkdtemp(prefix="porthole-pkgs-")) / "aarch64"
+    packages.mkdir(parents=True)
+    assert not build.apk_is_current(packages.parent, "linux-x", "7.2.2", "22",
+                                    "aarch64")
+    (packages / "linux-x-7.2.2-r22.apk").write_text("")
+    assert build.apk_is_current(packages.parent, "linux-x", "7.2.2", "22",
+                               "aarch64")
 
 
 def test_the_tracker_publishes_something_an_agent_can_poll():
@@ -437,6 +479,289 @@ def test_a_live_run_still_reads_as_starting_before_any_phase_lands():
     head, _ = progress.status_report(live, alive=lambda _: True)
     assert "starting" in head
     assert "starting" in progress.line_of(live)
+
+
+def test_status_report_labels_a_stale_last_line_with_its_age():
+    """`last DONE!` beside a stalled bar read as "finished and hung".
+
+    It was pmbootstrap finishing a sub-step twenty minutes earlier, and the
+    build was healthy. A stale line labelled stale is informative; unlabelled
+    it is a lie.
+    """
+    now = 2000.0
+    snap = {"rung": "fast", "state": "running", "pid": os.getpid(),
+            "elapsed": 719.0, "progress": None, "eta": None,
+            "compile_lines": 0, "last": "[14:49:08] DONE!",
+            "last_at": now - 1200, "started": now - 719}
+    _head, rows = progress.status_report(snap, now=now)
+    last = dict(rows)["last"]
+    assert "20m" in last, last
+
+
+def test_stall_note_names_packaging_as_the_reason_for_no_signal():
+    note = progress.stall_note("[14:49:08] DONE!", silence=1200.0)
+    assert note, "a silent packaging phase must say why"
+    assert "packag" in note.lower() or "compress" in note.lower(), note
+
+
+def test_stall_note_is_silent_when_output_is_recent():
+    assert progress.stall_note("  CC  drivers/media/x.o", silence=3.0) == ""
+
+
+def test_feed_advances_last_at():
+    """`__init__` already sets `last_at = started`, so a test that only
+    checks the field's PRESENCE (its previous shape) passes whether or not
+    `feed()` ever touches it -- proven by deleting `self.last_at =
+    time.time()` from `feed()` and re-running: 59/59 still passed. Prove the
+    UPDATE instead: hold the clock at a fixed instant, snapshot, advance it,
+    `feed()` a line, snapshot again, and check the value moved to the new
+    instant, not merely that it is a float.
+    """
+    real_time = progress.time.time
+    now = [1000.0]
+    progress.time.time = lambda: now[0]
+    try:
+        tracker = progress.Tracker(
+            pathlib.Path(tempfile.mkdtemp(prefix="porthole-t-")), "fast")
+        before = tracker.snapshot()["last_at"]
+        assert before == 1000.0, before
+        now[0] = 1090.0
+        tracker.feed("  CC  drivers/x.o\n")
+        after = tracker.snapshot()
+        assert after["last_at"] == 1090.0, after
+        assert after["last_age"] == 0.0, after
+    finally:
+        progress.time.time = real_time
+
+
+def test_status_report_pairs_a_stall_pattern_with_its_why_row():
+    """The deliverable is "a `[??????]` bar always comes with a reason" --
+    `stall_note` and `status_report` tested in isolation does not prove they
+    are actually wired together. This is the join: a RUNNING snapshot whose
+    `last` matches a stall pattern and is old enough gets a `why` row, and
+    the same snapshot with a FRESH `last` gets none -- so the row cannot be
+    unconditional."""
+    now = 5000.0
+    stale = {"rung": "fast", "state": "running", "pid": os.getpid(),
+             "elapsed": 1300.0, "progress": None, "eta": None,
+             "compile_lines": 0, "last": "[14:49:08] DONE!",
+             "last_at": now - 1200, "started": now - 1300}
+    _head, rows = progress.status_report(stale, alive=lambda _: True, now=now)
+    rows = dict(rows)
+    assert "why" in rows, rows
+    assert "packag" in rows["why"].lower() or "compress" in rows["why"].lower()
+
+    fresh = dict(stale, last="  CC  drivers/media/x.o", last_at=now - 3)
+    _head, rows = progress.status_report(fresh, alive=lambda _: True, now=now)
+    assert "why" not in dict(rows), dict(rows)
+
+
+# --------------------------------------------------------- watch() (Task 13) --
+#
+# Moved here from `porthole_cmd_pkg._watch` so `porthole build watch` (Task
+# 14) can be the same implementation. Every fixture below uses a FRESH
+# timestamp (finished a few seconds after `now`, not before) -- a snapshot
+# timestamped before the watch began is deliberately treated as somebody
+# else's earlier run (decision 3) and left waiting for a NEW one, which is
+# correct but would make these tests wait out the 30s ceiling. A fixture
+# timestamped moments after "now" models watching a run that finished while
+# we were attached to it, which is the case these tests are about.
+
+
+def test_watch_returns_promptly_for_a_run_that_finished_moments_ago():
+    """A `done` run discovered the instant `watch` starts must not be mistaken
+    for a stale run left over from a previous watch session (decision 3) --
+    it finished AFTER this watch began, so the report is immediate, not a
+    30-second wait for a "new" run that will never come."""
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "state": "done", "pid": 1,
+                "started": now, "elapsed": 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        lines = []
+        rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                            tty=False)
+        assert rc == progress.EX_OK
+        assert any("phoc" in line for line in lines)
+
+
+def test_watch_reports_a_failed_run_as_nonzero():
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "state": "failed", "pid": 1,
+                "started": now, "elapsed": 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        rc = progress.watch(rundir, "x-status.json", 0.01, [].append,
+                            tty=False)
+        assert rc == progress.EX_FAIL
+
+
+def test_watch_detects_a_dead_pid_as_stale_instead_of_polling_forever():
+    """A `running` snapshot whose process has already died must be caught by
+    `liveness()` and reported, not polled at `interval` forever waiting for a
+    pid that will never move again. Regression guard: real time spent here
+    must stay well under a second."""
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "state": "running", "pid": 999999,
+                "started": now, "elapsed": 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        started = time.time()
+        rc = progress.watch(rundir, "x-status.json", 0.01, [].append,
+                            tty=False)
+        assert time.time() - started < 2.0, (
+            "watch polled a dead pid instead of detecting it as stale")
+        assert rc == progress.EX_FAIL
+
+
+# Keys an agent actually consumes from an ndjson line, regardless of which
+# branch of `watch` produced it. Shared between the live-path and the
+# waiting-path test below ON PURPOSE: Task 14's review found the two
+# branches emitting two different shapes ({rung, phase, ...} live vs.
+# {state, note, previous} waiting), so `obj["rung"]` KeyErrored on line one
+# in exactly the "somebody else's run just finished" case this feature
+# exists to handle. If these two tests ever assert different key tuples, the
+# union is back and neither test would catch it.
+#
+# `note` is in this tuple ON PURPOSE, after a SECOND review round found it
+# present on waiting objects and absent from live ones -- a smaller version
+# of the same defect, missed the first time because this constant did not
+# name every key the contract promises. A constant that omits a key pins
+# nothing about that key.
+#
+# `last_at`/`last_age` (Task 16 fix round 1) are in it for the same reason:
+# they are the newest keys `snapshot()` grows, so they are the most likely
+# pair to drift between the live and waiting branches next, and the only
+# thing that had been checking they matched was a one-off script run by
+# hand. Adding them here forced the two hand-written fixtures below to carry
+# them too -- that churn is this constant doing its job.
+NDJSON_KEYS_AN_AGENT_READS = ("rung", "phase", "state", "elapsed", "progress",
+                              "eta", "last_at", "last_age", "note")
+
+
+def test_watch_ndjson_streams_json_and_skips_the_summary_block():
+    """An agent can consume a stream; it cannot consume a redrawn terminal
+    (this is what `ndjson=True` is for). One JSON object per update, and none
+    of the plain-text kv summary a human-facing watch prints at the end --
+    proven by every emitted line parsing as JSON, which that summary does
+    not.
+
+    The fixture is shaped like `Tracker.snapshot()` actually writes it
+    (porthole_progress.py Tracker.snapshot), not a hand-picked subset of
+    keys -- the ndjson object is the agent-facing contract Task 14 depends
+    on, so the schema has to come from production, not from the test.
+
+    This is the LIVE branch: `started + elapsed` lands AFTER this watch
+    began, so the run is not stale and `watch` reports it directly rather
+    than waiting. See `test_watch_ndjson_waiting_path_carries_the_same_keys`
+    for the other branch."""
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
+                "pid": 1, "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
+                "compile_lines": 42, "last": "DONE!", "last_at": now,
+                "last_age": 0.0, "started": now}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        lines = []
+        rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                            ndjson=True, tty=False)
+        assert rc == progress.EX_OK
+        assert lines, "ndjson mode must not be silent"
+        for line in lines:
+            obj = json.loads(line)
+        # "progress"/"eta" can be None there (an honest "unknown", not a
+        # missing key), so only PRESENCE is asserted, not type.
+        for key in NDJSON_KEYS_AN_AGENT_READS:
+            assert key in obj, f"{key!r} missing from the ndjson object"
+        # A live object has nothing to SAY -- the rest of its fields already
+        # speak for it -- so `note` is present but empty, never absent.
+        assert obj["note"] == "", obj
+
+
+def test_watch_ndjson_waiting_path_carries_the_same_keys():
+    """The branch that used to be the discriminated union's other shape.
+
+    A snapshot that finished well BEFORE this watch began is stale --
+    `is_stale` -- so `watch` never reports it as live; it emits "waiting"
+    objects instead and (off a tty, ceiling patched down like the ceiling
+    test below) gives up once the ceiling passes, still reporting the stale
+    run's own exit code. Before this fix those waiting objects were
+    `{"state": ..., "note": ..., "previous": {...}}` -- a consumer doing
+    `json.loads(line)["rung"]` KeyErrored on line one, in precisely this
+    "somebody else's run just finished" scenario. Now every field a
+    snapshot carries is copied up to the top level, so the same key check as
+    the live-path test above passes here too.
+    """
+    real_ceiling = progress.wait_ceiling
+    progress.wait_ceiling = lambda tty, now, seconds=30.0: now + 0.05
+    try:
+        with tempfile.TemporaryDirectory() as rundir:
+            finished = time.time() - 120  # long before this watch begins
+            snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
+                    "pid": 1, "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
+                    "compile_lines": 42, "last": "DONE!", "last_at": finished,
+                    "last_age": 0.0, "started": finished - 5.0}
+            (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+            lines = []
+            rc = progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                                ndjson=True, tty=False)
+    finally:
+        progress.wait_ceiling = real_ceiling
+    assert rc == progress.EX_OK, "the stale run's own state still decides the exit code"
+    assert lines, "ndjson mode must not be silent while waiting either"
+    for line in lines:
+        obj = json.loads(line)
+        assert obj["state"] == "waiting", obj
+        assert "note" in obj, "the human sentence must still be reachable"
+        for key in NDJSON_KEYS_AN_AGENT_READS:
+            assert key in obj, f"{key!r} missing from the waiting ndjson object"
+
+
+def test_watch_ndjson_waiting_path_is_all_none_when_nothing_ever_published():
+    """No file has EVER been written -- there is no previous snapshot to copy
+    fields from at all. The key set must still hold, with `None` in every
+    slot rather than the keys simply being absent."""
+    real_ceiling = progress.wait_ceiling
+    progress.wait_ceiling = lambda tty, now, seconds=30.0: now + 0.05
+    try:
+        with tempfile.TemporaryDirectory() as rundir:
+            lines = []
+            try:
+                progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                               ndjson=True, tty=False)
+            except progress.Bail:
+                pass  # expected once the ceiling passes; the point is `lines`
+    finally:
+        progress.wait_ceiling = real_ceiling
+    assert lines, "ndjson mode must not be silent while waiting"
+    for line in lines:
+        obj = json.loads(line)
+        assert obj["state"] == "waiting", obj
+        for key in NDJSON_KEYS_AN_AGENT_READS:
+            assert key in obj, f"{key!r} missing from the waiting ndjson object"
+        assert obj["rung"] is None, "nothing has ever published -- must be null, not guessed"
+
+
+def test_watch_says_something_before_the_first_sleep_and_gives_up_on_a_ceiling():
+    """No status file has ever been written. Off a tty this must not hang --
+    the real ceiling default is 30s, patched down here so the test stays
+    fast -- and it must have said SOMETHING before giving up, never the old
+    bare `continue`'s blank screen."""
+    real_ceiling = progress.wait_ceiling
+    progress.wait_ceiling = lambda tty, now, seconds=30.0: now + 0.05
+    try:
+        with tempfile.TemporaryDirectory() as rundir:
+            lines = []
+            try:
+                progress.watch(rundir, "x-status.json", 0.01, lines.append,
+                               tty=False)
+                raise AssertionError("expected Bail: nothing ever published")
+            except progress.Bail as exc:
+                assert exc.message == "no x run has published a status here"
+                assert "porthole x watch" in exc.hint
+        assert lines, "must say something before the ceiling, never silent"
+    finally:
+        progress.wait_ceiling = real_ceiling
 
 
 def main():

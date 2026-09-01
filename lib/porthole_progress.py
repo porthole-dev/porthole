@@ -31,6 +31,8 @@ import pathlib
 import re
 import time
 
+from porthole_cli import Bail, EX_FAIL, EX_OK
+
 # The phases the shell already announces, in the order they happen. Not every
 # rung runs all of them -- `mod` stops after push -- and a phase that never
 # arrives simply never contributes.
@@ -235,6 +237,23 @@ def eta(history: dict, rung: str, elapsed: float, frac):
     return None
 
 
+def history_key(rung: str, rebuilding: bool) -> str:
+    """The bucket a run's timing is remembered under.
+
+    A rung's cost can be BIMODAL and the predictor was unimodal. `fast` is
+    install + export + flash when the target apk already exists, and a full
+    199-patch compile plus module strip plus compression when it does not --
+    measured at 6m43s against 21m24s. One bucket learns the mean of both and
+    is wrong by 3.5x whenever the package changed.
+
+    Legacy unkeyed entries stop matching, which is deliberate: the stored
+    403.4 IS that mean, so seeding either bucket with it reintroduces the
+    error in the bucket nobody would look in. No history is honest, and
+    `eta unknown` on a first run is already what this module does.
+    """
+    return "{}|{}".format(rung, "rebuild" if rebuilding else "cached")
+
+
 def load_history(rundir) -> dict:
     try:
         return json.loads((pathlib.Path(rundir) / "build-history.json").read_text())
@@ -274,14 +293,19 @@ class Tracker:
     # a build nobody asked about.
     status_name = "build-status.json"
 
-    def __init__(self, rundir, rung: str):
+    def __init__(self, rundir, rung: str, key: str = ""):
         self.rundir = pathlib.Path(rundir)
         self.rung = rung
+        # The history bucket, which may differ from the rung -- see
+        # `history_key`. Defaults to the rung itself, so every existing
+        # caller (one bucket per rung) keeps behaving exactly as before.
+        self.key = key or rung
         self.history = load_history(rundir)
         self.started = time.time()
         self.phase = ""
         self.compile_seen = 0
         self.last = ""
+        self.last_at = self.started
         self.state = "running"
         self._written = 0.0
         # (when, compile_seen) so BOTH trackers can measure a real rate. The
@@ -303,6 +327,7 @@ class Tracker:
             self.compile_seen += 1
             self._samples.append((time.time(), self.compile_seen))
         self.last = line[:200]
+        self.last_at = time.time()
 
     def _fraction(self):
         """Where this tracker's percentage comes from.
@@ -312,7 +337,7 @@ class Tracker:
         ONLY thing that differs between them. Overriding one method keeps the
         publish/history/log path a single implementation.
         """
-        return fraction(self.history, self.rung, self.elapsed, self.compile_seen)
+        return fraction(self.history, self.key, self.elapsed, self.compile_seen)
 
     def _eta(self, frac):
         """Seconds remaining, from a measured rate where one exists.
@@ -326,10 +351,10 @@ class Tracker:
         than being replaced.
         """
         recent = window_rate(self._samples, time.time())
-        total = (self.history or {}).get(self.rung, {}).get("compile_lines")
+        total = (self.history or {}).get(self.key, {}).get("compile_lines")
         if recent and isinstance(total, int) and total > self.compile_seen:
             return (total - self.compile_seen) / recent
-        return eta(self.history, self.rung, self.elapsed, frac)
+        return eta(self.history, self.key, self.elapsed, frac)
 
     def snapshot(self) -> dict:
         frac = self._fraction()
@@ -345,6 +370,8 @@ class Tracker:
                 "eta": self._eta(frac),
                 "compile_lines": self.compile_seen,
                 "last": self.last,
+                "last_at": round(self.last_at, 1),
+                "last_age": round(time.time() - self.last_at, 1),
                 "started": round(self.started, 1)}
 
     def publish(self, force: bool = False) -> None:
@@ -366,7 +393,7 @@ class Tracker:
         self.state = "done" if ok else "failed"
         self.publish(force=True)
         if ok:
-            record(self.rundir, self.rung, self.elapsed, self.compile_seen)
+            record(self.rundir, self.key, self.elapsed, self.compile_seen)
 
     def line(self, width: int = 18) -> str:
         """The one-line human view."""
@@ -424,8 +451,8 @@ class PkgTracker(Tracker):
 
     status_name = "pkg-status.json"
 
-    def __init__(self, rundir, rung: str):
-        super().__init__(rundir, rung)
+    def __init__(self, rundir, rung: str, key: str = ""):
+        super().__init__(rundir, rung, key=key)
         self.ninja_total = 0
         self.step = ""
         self.compiles = 0
@@ -443,6 +470,7 @@ class PkgTracker(Tracker):
                 self.compiles += 1
                 self._samples.append((time.time(), self.compiles))
         self.last = line[:200]
+        self.last_at = time.time()
 
     def rate(self):
         """Compiles per second right now, or None when nothing supports one."""
@@ -503,7 +531,7 @@ class PkgTracker(Tracker):
         # there is no denominator. If this aport has been built here before,
         # elapsed-against-last-total is honest; otherwise it stays unknown and
         # the bar says so rather than sitting at 0%.
-        return fraction(self.history, self.rung, self.elapsed, 0)
+        return fraction(self.history, self.key, self.elapsed, 0)
 
 
 def line_of(snap, width: int = 18) -> str:
@@ -546,9 +574,11 @@ def publish_pending(rundir, rung: str, pid: int,
     The child overwrites this within a second or two. It only has to be true
     for that window, and `running` with the child's pid is true.
     """
+    now = round(time.time(), 1)
     snap = {"rung": rung, "phase": "", "state": "running", "pid": pid,
             "elapsed": 0.0, "progress": None, "eta": None,
-            "compile_lines": 0, "last": "", "started": round(time.time(), 1)}
+            "compile_lines": 0, "last": "", "last_at": now, "last_age": 0.0,
+            "started": now}
     path = pathlib.Path(rundir) / name
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -611,6 +641,50 @@ _HEADLINE = {"done": "finished", "failed": "FAILED",
              "stale": "no longer running -- its process is gone"}
 
 
+# How long a build may say nothing before the display owes the reader a
+# reason. Packaging a kernel is legitimately silent for minutes; a reader who
+# is not told that concludes it has hung, and kills a healthy build.
+STALL_AFTER_S = 90.0
+
+# What a long silence MEANS, keyed on the last thing that was said. Same shape
+# as _DIAGNOSES in porthole_cmd_build: a lookup table, because the alternative
+# is every porter rediscovering the same three answers, and the last line is
+# the one thing they all have in hand.
+_STALL_NOTES = (
+    (re.compile(r"\bDONE!|\bBuilding package\b|\bfakeroot\b|\bcompress",
+                re.I),
+     "no progress signal during packaging -- abuild is compressing the kernel "
+     "and its modules, which is normally several minutes and prints nothing"),
+    (re.compile(r"\bmodules_install\b|\bstrip\b|\bMODPOST\b", re.I),
+     "no progress signal while modules are installed and stripped; this step "
+     "is quiet and long on a kernel with many modules"),
+    (re.compile(r"\bapk add\b|\binstalling\b|\bdependenc", re.I),
+     "no progress signal while build dependencies install"),
+)
+
+
+def stall_note(last: str, silence: float) -> str:
+    """Why nothing has been said for a while, or "" if it is too soon to ask.
+
+    Never renders a bar as [??????] with `eta --` and no explanation. The
+    report is explicit that this one line removes the entire "why is this
+    taking so long" anxiety, and the anxiety is what makes people kill builds
+    that were working.
+    """
+    if silence < STALL_AFTER_S:
+        return ""
+    for pattern, note in _STALL_NOTES:
+        if pattern.search(last or ""):
+            return note
+    # ponytail: no CPU sampling, so "quiet and working" and "quiet and wedged"
+    # still read the same here. Upgrade path: read the container's cgroup
+    # cpu.stat (or the child's descendants for a host build) on the heartbeat
+    # and say which it is. Deferred because following pmbootstrap's log.txt
+    # shrank the silent window to the compression tail.
+    return "no output for {} -- the process is still running".format(
+        fmt_dur(silence))
+
+
 def status_report(snap, alive=None, now=None):
     """`(headline, rows)` for a `status` verb. Pure, so the staleness rule is
     testable without running a build.
@@ -646,5 +720,238 @@ def status_report(snap, alive=None, now=None):
         rows.append(("phase", "none reached" if reached in ("", "starting")
                      else reached))
     if snap.get("last"):
-        rows.append(("last", str(snap["last"])[:100]))
+        age = snap.get("last_age")
+        if age is None and snap.get("last_at"):
+            age = now - snap["last_at"]
+        label = str(snap["last"])[:100]
+        if age is not None and age >= STALL_AFTER_S:
+            label = "({} ago) {}".format(fmt_dur(age), label)
+        rows.append(("last", label))
+        note = stall_note(snap.get("last", ""), age or 0.0)
+        if note and live == "running":
+            rows.append(("why", note))
     return head, rows
+
+
+# --------------------------------------------------------------- watching --
+#
+# Moved here from `porthole_cmd_pkg` (Task 13) so `porthole build watch`
+# (Task 14) can be the SAME implementation rather than a second one that
+# drifts. `porthole pkg watch` carries four decisions, each paid for in a
+# real session, and every one survives the move:
+#   1. No ceiling on a tty, a ceiling off one (`wait_ceiling`).
+#   2. Never silent -- it says what it found BEFORE the first sleep and
+#      keeps saying it, never the old bare `continue`'s blank screen.
+#   3. A run that finished before this watch began is somebody else's, and
+#      is reported as the PREVIOUS run, not as the answer (`is_stale`).
+#   4. It polls a real signal rather than sleeping through the build --
+#      brain/laws/poll-never-sleep.md.
+
+
+def wait_ceiling(tty: bool, now: float, seconds: float = 30.0):
+    """When to stop waiting for a run to start, or None for never.
+
+    None on a terminal: `watch` is advertised as free to leave open, and a
+    ceiling defeats that -- opened before an agent starts a build, it would
+    exit before the build began. A person can Ctrl-C. A pipe cannot, and an
+    agent that ran this by accident would hang forever, so it keeps a ceiling.
+    """
+    return None if tty else now + seconds
+
+
+def waiting_line(snap, now=None) -> str:
+    """What `watch` is doing while there is nothing live to attach to.
+
+    Said once immediately and then repeated, never left to silence. Measured:
+    `timeout 5 porthole pkg watch` against an already-finished build printed
+    NOTHING, because the old code's grace window was a bare `continue` --
+    thirty seconds of blank screen that reads as a hang, not as "waiting".
+    Pure (a snapshot and a clock, no file, no sleep) so the wording is
+    testable without driving the loop.
+    """
+    now = time.time() if now is None else now
+    if not snap:
+        return "  nothing has built in this checkout yet -- waiting for a build to start"
+    stopped = finished_at(snap)
+    ago = fmt_dur(now - stopped) if stopped is not None else "a while"
+    return (f"  {snap.get('rung', '?')} finished {ago} ago -- "
+            f"waiting for a new build to start")
+
+
+# Every ndjson object's key set -- `snapshot()`'s own keys (Tracker's and
+# PkgTracker's on-disk shape, and `publish_pending`'s) plus `note`, which a
+# snapshot on disk never carries but every EMITTED object must, live or
+# waiting, or `obj["note"]` KeyErrors on exactly the objects that have
+# nothing to say. Used as the "waiting, and nothing has EVER published here"
+# fallback -- all `None`, `note` included -- so the emitted object's key set
+# never depends on which branch, or how much history, produced it.
+NDJSON_KEYS = ("rung", "phase", "state", "pid", "elapsed", "progress", "eta",
+              "compile_lines", "last", "last_at", "last_age", "started",
+              "note")
+
+
+def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
+          tty=None, start_hint: str = "") -> int:
+    """Follow a status file until the run stops. Returns EX_OK when the run
+    finished `done`, non-zero otherwise.
+
+    This exists so that watching a run costs NOTHING. A human leaves this
+    open in a second terminal and gets the same bar the run prints; an agent
+    never has to poll, because it can start the run as a background job and
+    be told when it exits. The failure mode this replaces is an agent burning
+    a request every thirty seconds to re-read a number that changed by 1%.
+
+    `out` is a LINE SINK (one positional argument, e.g. `print`) rather than
+    a terminal, so this loop is testable without a tty and reusable by any
+    verb that publishes a status file shaped like `porthole_progress`'s.
+    Every line this function emits carries its own line ending -- a bare
+    `\\r\\033[2K` prefix (no trailing newline) for a tty redraw-in-place, a
+    trailing `\\n` for everything else -- so `out` itself never has to know
+    which mode is active.
+
+    `ndjson=True` emits one JSON object per update instead of a bar, and
+    skips the final `status_report` block: an agent can consume a stream: it
+    cannot consume a redrawn terminal.
+
+    ONE SHAPE, always -- this was a discriminated union (a waiting object with
+    only `state`/`note`/`previous`, a live object with the full snapshot) and
+    an agent doing `json.loads(line)["rung"]` KeyErrored on line one, in
+    exactly the "somebody else's run just finished" case this feature exists
+    to handle. Every emitted object now carries the same key set --
+    `rung`, `phase`, `state`, `pid`, `elapsed`, `progress`, `eta`,
+    `compile_lines`, `last`, `started`, `note` (plus `rate` when the tracker
+    reports one) -- so `obj["rung"]`, `obj["progress"]`, `obj["note"]` are
+    always safe to read, on EVERY object, not just the waiting ones. `state`
+    is still the discriminator: `"waiting"` means no run is live right now
+    (`note` carries the human sentence, and the rest of the fields are the
+    PREVIOUS run's, or all `None` if nothing has ever published here);
+    anything else is a real snapshot's own `state` (`"running"`, `"done"`,
+    `"failed"`, ...) and `note` is `""` -- there is nothing to say about a
+    run that is speaking for itself through the rest of the fields. A `None`
+    value means genuinely not known yet, never a missing key.
+
+    `start_hint`, if given, is the exact command that starts a run of this
+    kind (e.g. "porthole pkg build <aport>") -- only the CALLER knows that,
+    so this function never guesses one from `status_name`. Without it, the
+    "nothing has ever published here" error falls back to generic wording.
+
+    Polling a file, not sleeping through the run: the sleep here is between
+    reads of a real signal, which is what brain/laws/poll-never-sleep.md asks
+    for rather than what it forbids.
+    """
+    path = pathlib.Path(rundir) / status_name
+    if tty is None:
+        tty = os.isatty(1)
+
+    def snapshot():
+        # Absent, or read mid-rename: both are "nothing to attach to yet",
+        # not an error -- the writer is atomic, so the next read succeeds.
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):
+            return None
+
+    started_watching = time.time()
+    # How long to wait for a run to START, and it depends on who is
+    # watching. `watch` is advertised as "costs nothing to leave open", and a
+    # ceiling breaks exactly that use: open it in a second terminal BEFORE the
+    # agent kicks off a run and it gives up before the run begins.
+    #
+    # So on a terminal there is no ceiling -- a person left it open on purpose
+    # and can Ctrl-C. Off a terminal there is one, because a pipe cannot be
+    # interrupted meaningfully and an agent that ran this by mistake would
+    # hang forever; it gets the previous run and an exit instead.
+    appear = wait_ceiling(tty, started_watching)
+
+    def is_stale(snap):
+        # A run that had already finished before this watch began is
+        # somebody else's run. Keep waiting for ours rather than reporting
+        # theirs -- belt and braces behind publish_pending, for a `watch`
+        # started by hand rather than straight after `--detach`.
+        if not snap:
+            return False
+        stopped = finished_at(snap)
+        return (liveness(snap) != "running" and stopped is not None
+                and stopped < started_watching)
+
+    # Never silent: say what was found BEFORE the first sleep, then keep
+    # saying it (repainted in place on a tty, throttled on a pipe or as
+    # ndjson) for as long as there is nothing live -- instead of the old bare
+    # `continue`.
+    last_note = 0.0
+    snap = snapshot()
+    while (snap is None or is_stale(snap)) and (appear is None
+                                                or time.time() < appear):
+        line = waiting_line(snap)
+        if ndjson:
+            if last_note == 0.0 or time.time() - last_note > max(interval, 15):
+                last_note = time.time()
+                # Same key set a live object has (copied from the previous
+                # run's own snapshot when there is one), not a bare
+                # {state, note} pair -- see the ONE SHAPE note above.
+                obj = dict(snap) if snap else dict.fromkeys(NDJSON_KEYS)
+                obj["state"] = "waiting"
+                obj["note"] = line
+                out(json.dumps(obj) + "\n")
+        elif tty:
+            out("\r\033[2K" + line)
+        elif last_note == 0.0 or time.time() - last_note > max(interval, 15):
+            last_note = time.time()
+            out(line + "\n")
+        time.sleep(0.25 if snap is None else interval)
+        snap = snapshot()
+    if tty and not ndjson:
+        out("\r\033[2K")
+
+    if snap is None:
+        # Generic on purpose: this function has no verb of its own, only a
+        # status filename ("pkg-status.json", "build-status.json", ...).
+        # `start_hint` is how the caller -- the only one who knows the exact
+        # command -- gets that command into the message instead of a guess
+        # derived from the filename, which could easily be wrong.
+        verb = status_name.split("-status", 1)[0] or "run"
+        raise Bail(f"no {verb} run has published a status here", EX_FAIL,
+                   start_hint or f"start one, then `porthole {verb} watch` "
+                                 f"finds it")
+
+    # The grace window ran out with nothing new. Say so plainly, then fall
+    # through and render the stale run -- clearly labelled as the PREVIOUS
+    # run, not left to look current the way the silent version did.
+    if is_stale(snap):
+        if not ndjson:
+            # Coloured inline (not via `ctx.out.paint`) because this module
+            # has no `ctx` and should not grow one just to colour a warning:
+            # this line exists to stop the reader mistaking a stale run for
+            # theirs, which is the whole subject of this branch, so the
+            # colour is signal, not decoration.
+            note = "  no new build started -- showing the previous run:"
+            out((f"\033[33m{note}\033[0m" if tty else note) + "\n")
+    else:
+        while True:
+            live = liveness(snap)
+            if ndjson:
+                # `note` is on every object, not just the waiting ones --
+                # `obj["note"]` must never KeyError on a live object either.
+                # Empty here: there is nothing to SAY about a run that is
+                # speaking for itself via the rest of the fields.
+                out(json.dumps({**snap, "note": snap.get("note", "")}) + "\n")
+            elif tty:
+                out("\r\033[2K  " + line_of(snap))
+            elif time.time() - last_note > max(interval, 15):
+                last_note = time.time()
+                out("  " + line_of(snap) + "\n")
+            if live != "running":
+                break
+            time.sleep(interval)
+            snap = snapshot() or snap
+        if tty and not ndjson:
+            out("\r\033[2K")
+
+    if not ndjson:
+        head, rows = status_report(snap)
+        out("  " + head + "\n")
+        for label, value in rows:
+            out(f"  {label:<10}  {value}\n")
+    return EX_OK if liveness(snap) == "done" else EX_FAIL

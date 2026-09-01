@@ -134,6 +134,18 @@ If you are writing an `ssh ... reboot` one-liner or a `sleep 60`, stop. There is
 a tool and you have not found it yet. Both of those specific mistakes have cost
 whole sessions.
 
+**To watch a build, run `porthole build watch`. Do not write a poll loop.**
+
+`porthole build watch` and `porthole pkg watch` block until the build stops
+and exit with it — 0 on success, non-zero on failure or on a run whose process
+has gone. `porthole build watch --json` emits one JSON object per update on
+stdout, line-buffered, which is what an agent can consume; a redrawn terminal
+bar is not. Start long builds with `--detach` and wait on the watcher.
+
+Three hand-rolled poll loops were written against `--json` in a single session
+and one of them timed out at ten minutes, reporting nothing, while the build
+was still healthy.
+
 ### Let `porthole build` pick the rung
 
 **Run `porthole build`.** It does an incremental `make`, sees what actually got

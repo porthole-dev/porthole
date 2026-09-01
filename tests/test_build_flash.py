@@ -1012,6 +1012,24 @@ def test_autoselect_never_picks_the_default_itself():
                                   branch_of, lister) == ""
 
 
+def test_the_tree_banner_says_the_tree_is_unused_on_the_flashing_rungs():
+    """`fast` announced a tree it then does not use.
+
+    The rung installs and flashes the APORT apk -- the source comments say so
+    outright -- so a banner naming a tree reads as "this is what you are
+    building" for something that cannot affect the result.
+    """
+    import porthole_cmd_build as build
+
+    for rung in ("fast", "upgrade"):
+        line = build.tree_banner(rung, "/x/linux-ws", "r22")
+        assert "not used" in line, (rung, line)
+        assert "r22" in line, (rung, line)
+    # On the rungs that DO build the tree, it still names the tree.
+    line = build.tree_banner("kernel", "/x/linux-ws", "r22")
+    assert "linux-ws" in line, line
+
+
 def test_a_detached_head_reads_as_no_branch():
     """git prints the literal word HEAD for a detached checkout, and treating
     that as a branch name would let it match a branch called HEAD."""
@@ -1193,6 +1211,42 @@ def test_run_follows_pmbootstraps_own_log():
     assert str(seen["follow"]).endswith("log.txt"), seen["follow"]
 
 
+def test_a_non_export_rung_keeps_its_bare_rung_as_the_history_key():
+    """`mod` and `boot` are not bimodal on the apk-present axis `fast`,
+    `kernel` and `upgrade` are -- fix round 1 gated the history-bucket split
+    on EXPORT_RUNGS so those two rungs keep matching an EXISTING unkeyed
+    history entry (`{"mod": {...}}`) instead of losing it to a `mod|cached` /
+    `mod|rebuild` split nothing about them needs. That property has no other
+    test pinning it: without the gate this passes with `key="mod|cached"` just
+    as easily as with the intended `key="mod"`.
+    """
+    import shutil
+    import porthole_cmd_build as build
+
+    seen = {}
+
+    def fake_stream(ctx, cmd, env, timeout, rung, **kw):
+        seen.update(kw)
+        seen["rung"] = rung
+        return 0
+
+    real_stream = build._stream
+    real_which = shutil.which
+    build._stream = fake_stream
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
+    try:
+        ctx = _FakeCtx({"PORTHOLE_DEVICE": "google-taimen",
+                        "PORTHOLE_WORKDIR": "/nonexistent",
+                        "PORTHOLE_KERNEL_PKG": "linux-google-taimen"})
+        build._run(ctx, "tkmod", 60, host=True, rung="mod")
+    finally:
+        build._stream = real_stream
+        shutil.which = real_which
+
+    assert seen.get("key") == "mod", seen
+
+
 PMB_LOG_TAIL = """\
 (rootfs_google-taimen) install postmarketos-mkinitfs
 * mkinitfs: skipping (no deviceinfo file found)
@@ -1231,6 +1285,60 @@ def test_tail_text_reads_the_end_of_a_large_file():
     got = build.tail_text(path, limit_bytes=4096)
     assert "THE LAST LINE" in got
     assert len(got) <= 5000, len(got)
+
+
+def test_watch_is_an_action_not_a_flag():
+    # A store_true --watch would be a MODE encoded as a boolean, which permits
+    # nonsense combinations; tests/test_cli_rules.py forbids that repo-wide,
+    # and `status` is already an action for the same reason.
+    import porthole_cmd_build as build
+
+    action_arg = [a for a in build.SPEC["args"] if a[0] == ["action"]][0]
+    assert "watch" in action_arg[1]["choices"], action_arg[1]["choices"]
+
+
+def test_detach_argv_forwards_every_flag_that_changes_the_build():
+    """A flag dropped here is a declared flag that silently does nothing.
+
+    `pkg` lost --force and --wait this way: `pkg build X --force --detach`
+    built without force, and --wait leaking made the parent return OK while
+    the child bailed on a busy buildroot. Rebuilt by hand, so every flag has
+    to be listed.
+    """
+    import argparse
+    import porthole_cmd_build as build
+
+    # verbose and allow_env_override are True too -- both flags previously
+    # went untested (the brief's own fixture set them False), which is
+    # exactly the shape of gap that let `pkg` lose --force and --wait
+    # unnoticed: a flag can be dropped from detach_argv and a test asserting
+    # only the False default would never see it missing.
+    args = argparse.Namespace(timeout=5400, kernel=True, host=True,
+                              verbose=True, yes=True, rest=[], detach=True,
+                              allow_env_override=True)
+    argv = build.detach_argv("/x/bin/porthole", "boot", args)
+
+    assert argv[:3] == ["/x/bin/porthole", "build", "boot"], argv
+    assert "--yes" in argv, "a detached build that does not build is useless"
+    assert "--kernel" in argv, argv
+    assert "--host" in argv, argv
+    assert "--verbose" in argv, argv
+    assert "--allow-env-override" in argv, argv
+    assert "--timeout" in argv and "5400" in argv, argv
+    # The one flag that must NOT be forwarded, or the child detaches again.
+    assert "--detach" not in argv, argv
+
+
+def test_detach_argv_forwards_the_mod_arguments():
+    import argparse
+    import porthole_cmd_build as build
+
+    args = argparse.Namespace(timeout=5400, kernel=False, host=False,
+                              verbose=False, yes=True, detach=True,
+                              allow_env_override=False,
+                              rest=["drivers/media/i2c/imx179.ko", "imx179"])
+    argv = build.detach_argv("/x/bin/porthole", "mod", args)
+    assert argv[-2:] == ["drivers/media/i2c/imx179.ko", "imx179"], argv
 
 
 if __name__ == "__main__":

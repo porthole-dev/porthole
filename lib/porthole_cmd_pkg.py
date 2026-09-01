@@ -39,7 +39,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import time
 
 from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE, EX_USAGE
 
@@ -824,138 +823,45 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     return EX_OK
 
 
+# Kept as names because tests/test_pkg.py calls them directly (the pattern
+# `_pmb_workdir` already uses for `porthole_cmd_brief`): the implementation
+# moved to `porthole_progress` in Task 13, so `porthole build watch` (Task 14)
+# can share one `watch()` loop instead of growing a second one that drifts.
 def wait_ceiling(tty: bool, now: float, seconds: float = 30.0):
-    """When to stop waiting for a build to start, or None for never.
+    import porthole_progress as progress
 
-    None on a terminal: `watch` is advertised as free to leave open, and a
-    ceiling defeats that -- opened before an agent starts a build, it would
-    exit before the build began. A person can Ctrl-C. A pipe cannot, and an
-    agent that ran this by accident would hang forever, so it keeps a ceiling.
-    """
-    return None if tty else now + seconds
+    return progress.wait_ceiling(tty, now, seconds)
 
 
 def waiting_line(snap, now=None) -> str:
-    """What `watch` is doing while there is nothing live to attach to.
-
-    Said once immediately and then repeated, never left to silence. Measured:
-    `timeout 5 porthole pkg watch` against an already-finished build printed
-    NOTHING, because the old code's grace window was a bare `continue` --
-    thirty seconds of blank screen that reads as a hang, not as "waiting".
-    Pure (a snapshot and a clock, no file, no sleep) so the wording is
-    testable without driving the loop.
-    """
     import porthole_progress as progress
 
-    now = time.time() if now is None else now
-    if not snap:
-        return "  nothing has built in this checkout yet -- waiting for a build to start"
-    stopped = progress.finished_at(snap)
-    ago = progress.fmt_dur(now - stopped) if stopped is not None else "a while"
-    return (f"  {snap.get('rung', '?')} finished {ago} ago -- "
-            f"waiting for a new build to start")
+    return progress.waiting_line(snap, now)
 
 
 def _watch(ctx, args) -> int:
     """Follow the status file until the build stops.
 
-    This exists so that watching a build costs NOTHING. A human leaves this
-    open in a second terminal and gets the same bar the build prints; an agent
-    never has to poll, because it can start the build as a background job and
-    be told when it exits. The failure mode this replaces is an agent burning
-    a request every thirty seconds to re-read a number that changed by 1%.
-
-    Polling a file, not sleeping through the build: the sleep here is between
-    reads of a real signal, which is what brain/laws/poll-never-sleep.md asks
-    for rather than what it forbids.
+    Thin on purpose: the loop itself -- the no-ceiling-on-a-tty rule, the
+    never-silent waiting line, the stale-run check, the poll-not-sleep -- now
+    lives in `porthole_progress.watch`, shared with `porthole build watch`.
     """
     import porthole_progress as progress
 
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
-    path = rundir / "pkg-status.json"
-    tty = os.isatty(1)
 
-    def snapshot():
-        # Absent, or read mid-rename: both are "nothing to attach to yet",
-        # not an error -- the writer is atomic, so the next read succeeds.
-        if not path.exists():
-            return None
-        try:
-            return json.loads(path.read_text())
-        except (OSError, ValueError):
-            return None
+    # A raw sink, not `ctx.out`: `progress.watch` bakes its own line ending
+    # into every string it emits (a bare `\r\033[2K` prefix for a tty
+    # redraw-in-place, a trailing `\n` otherwise), so writing exactly what it
+    # is given -- no `ctx.out`'s automatic newline -- is what keeps the bar
+    # redrawing in place on a terminal exactly as it did before the move.
+    def out(line):
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
-    started_watching = time.time()
-    # How long to wait for a build to START, and it depends on who is
-    # watching. `watch` is advertised as "costs nothing to leave open", and a
-    # ceiling breaks exactly that use: open it in a second terminal BEFORE the
-    # agent kicks off a build and it gives up before the build begins.
-    #
-    # So on a terminal there is no ceiling -- a person left it open on purpose
-    # and can Ctrl-C. Off a terminal there is one, because a pipe cannot be
-    # interrupted meaningfully and an agent that ran this by mistake would
-    # hang forever; it gets the previous run and an exit instead.
-    appear = wait_ceiling(tty, started_watching)
-
-    def is_stale(snap):
-        # A run that had already finished before this watch began is
-        # somebody else's build. Keep waiting for ours rather than reporting
-        # theirs -- belt and braces behind publish_pending, for a `watch`
-        # started by hand rather than straight after `--detach`.
-        if not snap:
-            return False
-        stopped = progress.finished_at(snap)
-        return (progress.liveness(snap) != "running" and stopped is not None
-                and stopped < started_watching)
-
-    # Never silent: say what was found BEFORE the first sleep, then keep
-    # saying it (repainted in place on a tty, throttled on a pipe) for as
-    # long as there is nothing live -- instead of the old bare `continue`.
-    last_note = 0.0
-    snap = snapshot()
-    while (snap is None or is_stale(snap)) and (appear is None
-                                                or time.time() < appear):
-        line = waiting_line(snap)
-        if tty:
-            print("\r\033[2K" + line, end="", flush=True)
-        elif last_note == 0.0 or time.time() - last_note > max(args.interval, 15):
-            last_note = time.time()
-            print(line, flush=True)
-        time.sleep(0.25 if snap is None else args.interval)
-        snap = snapshot()
-    if tty:
-        print("\r\033[2K", end="")
-
-    if snap is None:
-        raise Bail("no package build has published a status here", EX_FAIL,
-                   "start one with `porthole pkg build <aport>`")
-
-    # The grace window ran out with nothing new. Say so plainly, then fall
-    # through and render the stale run -- clearly labelled as the PREVIOUS
-    # build, not left to look current the way the silent version did.
-    if is_stale(snap):
-        ctx.out(ctx.out.paint(
-            "  no new build started -- showing the previous run:", "yellow"))
-    else:
-        while True:
-            live = progress.liveness(snap)
-            if tty:
-                print("\r\033[2K  " + progress.line_of(snap), end="", flush=True)
-            elif time.time() - last_note > max(args.interval, 15):
-                last_note = time.time()
-                print("  " + progress.line_of(snap), flush=True)
-            if live != "running":
-                break
-            time.sleep(args.interval)
-            snap = snapshot() or snap
-        if tty:
-            print("\r\033[2K", end="")
-
-    head, rows = progress.status_report(snap)
-    ctx.out("  " + head)
-    for label, value in rows:
-        ctx.out.kv(label, value, 10)
-    return EX_OK if progress.liveness(snap) == "done" else EX_FAIL
+    return progress.watch(rundir, "pkg-status.json", args.interval, out,
+                          start_hint="start one with "
+                                     "`porthole pkg build <aport>`")
 
 
 def _outdated(ctx) -> int:
