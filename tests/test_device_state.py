@@ -12,6 +12,7 @@ probes against a device that was not plugged in. Concurrency must not have
 changed a single verdict, so every combination is pinned here.
 """
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -215,6 +216,83 @@ def test_the_default_still_retries_unconditionally():
     dev.run = lambda cmd, timeout=None: calls.append(1) or ""
     assert dev.boot_id() == ""
     assert len(calls) == 2, "the baseline retry was weakened"
+
+
+def test_cached_state_returns_the_verdict_and_its_age():
+    import json
+    import tempfile
+    import time
+    import porthole
+
+    home = pathlib.Path(tempfile.mkdtemp(prefix="porthole-cache-"))
+    os.environ["XDG_CACHE_HOME"] = str(home)
+    dev = porthole.Device({"HOST": "10.0.0.1"})
+    path = dev._state_cache()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(
+        {"state": "BOOTED", "at": time.time() - 62, "host": "10.0.0.1"}))
+
+    got = dev.cached_state(300)
+    assert got is not None, "a 62s-old cache is inside a 300s window"
+    state, age = got
+    assert state == "BOOTED", state
+    assert 60 <= age <= 70, age
+
+
+def test_cached_state_is_none_past_the_window():
+    import json
+    import tempfile
+    import time
+    import porthole
+
+    home = pathlib.Path(tempfile.mkdtemp(prefix="porthole-cache-"))
+    os.environ["XDG_CACHE_HOME"] = str(home)
+    dev = porthole.Device({"HOST": "10.0.0.2"})
+    path = dev._state_cache()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(
+        {"state": "BOOTED", "at": time.time() - 900, "host": "10.0.0.2"}))
+
+    assert dev.cached_state(300) is None
+
+
+def test_reachable_verdict_from_a_fresh_cache_is_done_and_names_the_age():
+    import porthole_milestones as ms
+
+    verdict = ms.reachable_verdict(forced="", cached=("BOOTED", 62.0))
+    assert verdict.state == ms.DONE, verdict
+    assert "62s ago" in verdict.evidence, verdict.evidence
+    # The whole defect: it must NOT tell you to run the command that answered.
+    assert "porthole doctor" not in verdict.evidence, verdict.evidence
+
+
+def test_reachable_verdict_with_no_cache_names_doctor():
+    import porthole_milestones as ms
+
+    verdict = ms.reachable_verdict(forced="", cached=None)
+    assert verdict.state == ms.BLOCKED, verdict
+    assert "porthole doctor" in verdict.evidence, verdict.evidence
+
+
+def test_reachable_verdict_reports_a_cached_absent_device_as_blocked():
+    import porthole_milestones as ms
+
+    verdict = ms.reachable_verdict(forced="", cached=("ABSENT", 30.0))
+    assert verdict.state == ms.BLOCKED, verdict
+    assert "ABSENT" in verdict.evidence, verdict.evidence
+
+
+def test_a_forced_state_still_outranks_the_cache():
+    """TK_DEVICE_STATE is an assertion, and it keeps winning.
+
+    A human who exported it is claiming something; the change here is only
+    that the ABSENCE of that claim is no longer read as ignorance.
+    """
+    import porthole_milestones as ms
+
+    verdict = ms.reachable_verdict(forced="BOOTED", cached=("ABSENT", 5.0))
+    assert verdict.state == ms.DONE, verdict
+    assert "asserted" in verdict.evidence, verdict.evidence
 
 
 def main():

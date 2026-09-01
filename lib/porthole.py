@@ -684,6 +684,29 @@ class Device:
             pass
         return None
 
+    def cached_state(self, max_age: float):
+        """`(state, age_seconds)` from the cache, or None. NEVER probes.
+
+        A file read, so it is safe everywhere a probe is not: offline, with no
+        device attached, inside `brief --no-device`, and inside a milestone
+        probe that must not hang on a dead phone.
+
+        The age is returned rather than swallowed because that is the whole
+        point. `porthole next` reported "device state not probed" beside a
+        `brief` that had just printed BOOTED, and told the reader to run the
+        command that had already answered. A reading with its age attached is
+        a fact; the same reading without it is a claim.
+        """
+        try:
+            blob = json.loads(self._state_cache().read_text())
+            age = time.time() - blob["at"]
+        except Exception:  # noqa: BLE001 -- a bad cache is not an error
+            return None
+        if age < 0 or age > max_age:
+            return None
+        state = blob.get("state")
+        return (state, age) if state else None
+
     def _remember_state(self, verdict: str) -> None:
         try:
             path = self._state_cache()

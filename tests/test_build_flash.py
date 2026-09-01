@@ -38,6 +38,23 @@ def run(*args, env=None):
 DEV = "google-taimen"
 
 
+class _FakeCtx:
+    """A ctx good enough to drive `_run`/`_stream` without a real profile:
+    cfg, out, root. Shared here so each test does not hand-roll its own."""
+
+    class _FakeOut:
+        def __call__(self, *a, **k):
+            pass
+
+        def paint(self, s, _color):
+            return s
+
+    def __init__(self, cfg=None):
+        self.cfg = cfg or {}
+        self.out = _FakeCtx._FakeOut()
+        self.root = ROOT
+
+
 # ----------------------------------------------------------------- refusals --
 
 def test_flash_refuses_a_forbidden_slot():
@@ -102,6 +119,54 @@ def test_build_reports_every_missing_value_at_once():
     rc, out, err = run("-d", "google-cheetah", "build", "--yes")
     assert rc != 0
     assert "cannot build yet" in (out + err)
+
+
+def _fake_workdir(populated: bool):
+    import tempfile
+    root = pathlib.Path(tempfile.mkdtemp(prefix="porthole-pmb-"))
+    chroot = root / "chroot_rootfs_google-taimen"
+    if populated:
+        info = chroot / "usr" / "share" / "deviceinfo"
+        info.mkdir(parents=True)
+        (info / "deviceinfo").write_text("deviceinfo_format_version=0\n")
+    else:
+        chroot.mkdir(parents=True)
+    return root
+
+
+def test_export_rungs_refuse_an_uninstalled_rootfs_chroot():
+    """One is_file() instead of twenty minutes.
+
+    `fast` compiled a kernel for 20m35s and then died in `pmbootstrap export`
+    because the workspace's rootfs chroot had never had a full install. The
+    workspace keeps its own pmbootstrap work dir; installs done on the host do
+    not populate it.
+    """
+    import porthole_cmd_build as build
+
+    problems = build.export_problems(_fake_workdir(populated=False),
+                                     "google-taimen")
+    assert problems, "an empty rootfs chroot must be refused"
+    assert "install" in problems[0], problems
+
+
+def test_export_rungs_accept_a_populated_rootfs_chroot():
+    import porthole_cmd_build as build
+
+    assert build.export_problems(_fake_workdir(populated=True),
+                                 "google-taimen") == []
+
+
+def test_only_the_export_rungs_are_checked():
+    # `mod` and `boot` never call pmbootstrap export, so an empty rootfs
+    # chroot is irrelevant to them and refusing would be a false stop.
+    import porthole_cmd_build as build
+
+    assert "fast" in build.EXPORT_RUNGS
+    assert "kernel" in build.EXPORT_RUNGS
+    assert "upgrade" in build.EXPORT_RUNGS
+    assert "mod" not in build.EXPORT_RUNGS
+    assert "boot" not in build.EXPORT_RUNGS
 
 
 # -------------------------------------------------------- no taimen values --
@@ -621,6 +686,39 @@ def test_the_bar_repaints_while_the_child_says_nothing():
     assert term.painted >= 3, term.painted
 
 
+def test_every_module_staging_path_strips_btf():
+    """Two paths push a .ko to the device. Both must strip BTF.
+
+    A module built against a different kernel keeps a .BTF section the loader
+    refuses, and the fix lived in exactly one of the two paths for the whole
+    life of the `mod` verb. This is a registry check, not a spot check: it
+    finds the paths rather than being told them, so a THIRD one cannot land
+    without either calling the stripper or failing here.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    stagers, missing = [], []
+    for path in sorted(list((root / "tools").glob("*.sh"))):
+        text = path.read_text(errors="replace")
+        # A path that stages a module for the device: it must transfer a .ko.
+        # We search for common transfer verbs (scp, rsync, sftp) not bare ssh,
+        # which would match scripts that run commands on the device without
+        # transferring files (pipe-based pushes like `cat | ssh ... cat >dest`
+        # stay outside this boundary, which is accepted as a tradeoff).
+        if not re.search(r"\.ko\b", text):
+            continue
+        if not re.search(r"\b(scp|rsync|sftp)\b", text):
+            continue
+        stagers.append(path.name)
+        if "tk-strip-btf.py" not in text:
+            missing.append(path.name)
+
+    assert stagers, "found no module staging path at all -- the probe is wrong"
+    assert not missing, (
+        "these stage a .ko for the device without stripping BTF: "
+        + ", ".join(missing)
+        + " -- see brain/traps and tools/tk-strip-btf.py")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
@@ -1052,6 +1150,87 @@ def test_the_host_branch_says_what_host_building_actually_needs():
     the exact precondition is not cheaply checkable from here."""
     src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
     assert "chroots and " in src and "workspace exists to avoid needing" in src
+
+
+def test_run_follows_pmbootstraps_own_log():
+    """The kernel rungs must read log.txt, not only pmbootstrap's stdout.
+
+    pmbootstrap relays `=> step` lines to stdout and writes the actual build
+    output -- every CC, every LD -- to its own log.txt. `porthole pkg` has
+    always followed it; `porthole build` never did, so build-history.json
+    recorded compile_lines 0 for every kernel rung ever run and the bar had
+    nothing to move on.
+
+    `_run` bails out before ever reaching `_stream` if `pmbootstrap` is not
+    on PATH (see `test_the_host_branch_names_both_cause_and_fix_with_no_pmbootstrap`
+    above), and CI has no pmbootstrap installed -- so `shutil.which` is
+    stubbed here too, to report it present regardless of the real machine.
+    """
+    import shutil
+    import porthole_cmd_build as build
+
+    seen = {}
+
+    def fake_stream(ctx, cmd, env, timeout, rung, **kw):
+        seen.update(kw)
+        seen["rung"] = rung
+        return 0
+
+    real_stream = build._stream
+    real_which = shutil.which
+    build._stream = fake_stream
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
+    try:
+        ctx = _FakeCtx({"PORTHOLE_DEVICE": "google-taimen",
+                        "PORTHOLE_WORKDIR": "/nonexistent"})
+        build._run(ctx, "tkbuild-kernel", 60, host=True, rung="fast")
+    finally:
+        build._stream = real_stream
+        shutil.which = real_which
+
+    assert seen.get("follow"), "no follow= was passed"
+    assert str(seen["follow"]).endswith("log.txt"), seen["follow"]
+
+
+PMB_LOG_TAIL = """\
+(rootfs_google-taimen) install postmarketos-mkinitfs
+* mkinitfs: skipping (no deviceinfo file found)
+OK: 96.2 MiB in 19 packages
+/usr/share/deviceinfo/deviceinfo: "..." not found, required by mkinitfs
+/etc/deviceinfo: "..." not found, required by mkinitfs
+ERROR: Command failed (exit code 1): (rootfs_google-taimen) % mkinitfs
+*** Additional information: log file, examples ***
+See also: <https://postmarketos.org/troubleshooting>
+"""
+
+
+def test_failure_tail_finds_the_cause_not_the_boilerplate():
+    import porthole_cmd_build as build
+
+    lines = build.failure_tail(PMB_LOG_TAIL)
+    joined = "\n".join(lines)
+    assert "required by mkinitfs" in joined, joined
+    assert "postmarketos.org/troubleshooting" not in "\n".join(lines[:-1]), joined
+
+
+def test_a_missing_deviceinfo_is_diagnosed_as_an_uninstalled_chroot():
+    import porthole_cmd_build as build
+
+    why = build.diagnose(PMB_LOG_TAIL)
+    assert why, "no diagnosis for the mkinitfs/deviceinfo signature"
+    assert "install" in why[0].lower(), why
+
+
+def test_tail_text_reads_the_end_of_a_large_file():
+    import tempfile
+    import porthole_cmd_build as build
+
+    path = pathlib.Path(tempfile.mkdtemp(prefix="porthole-tail-")) / "log.txt"
+    path.write_text("filler\n" * 200000 + "THE LAST LINE\n")
+    got = build.tail_text(path, limit_bytes=4096)
+    assert "THE LAST LINE" in got
+    assert len(got) <= 5000, len(got)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,8 @@ check something itself, this file is a second opinion.
       Nothing installs without it.
 - [ ] pmaports kernel package exists <!-- kernel-pkg -->
       It pins the tree and the config the port actually builds.
+- [ ] The kernel patch series applies <!-- series-applies -->
+      A series that cannot apply makes every aport build fail for a reason nothing surfaces, and work drifts to a tree that does not carry the patches. taimen lost a whole subsystem this way.
 - [ ] The packages build <!-- builds -->
       A package that builds on your host is the first thing anyone else can reproduce.
 

@@ -361,5 +361,48 @@ def test_only_a_refusal_counts_as_unauthorized():
         assert got is None, got
 
 
+def test_unset_pmos_password_is_a_warning_not_a_failure():
+    """It gates only `kernel` and `upgrade`, so an absent value is not broken.
+
+    tkbuild hard-requires it and dies with a bare shell parameter error.
+    doctor is where that becomes findable -- but a host doing `mod` work all
+    day is fine without it, and a FAIL there would train people to ignore the
+    row.
+    """
+    import porthole_cmd_doctor as doctor
+
+    ch = doctor.Checks()
+    doctor._check_pmos_password(ch, {})
+    # Checks.rows holds dicts, not objects -- see lib/porthole_cmd_doctor.py.
+    row, = [c for c in ch.rows if "PMOS_PASSWORD" in c["name"]]
+    assert row["status"] == "warn", row["status"]
+    assert "kernel" in row["fix"] or "kernel" in row["detail"], row
+
+
+def test_a_set_pmos_password_is_ok_and_never_printed():
+    import porthole_cmd_doctor as doctor
+
+    ch = doctor.Checks()
+    doctor._check_pmos_password(ch, {"TK_PMOS_PASSWORD": "hunter2"})
+    row, = [c for c in ch.rows if "PMOS_PASSWORD" in c["name"]]
+    assert row["status"] == "ok", row["status"]
+    blob = " ".join([row["name"], row["detail"], row["fix"]])
+    assert "hunter2" not in blob, "doctor must never echo the password"
+
+
+def test_a_build_does_not_inherit_pmb_sudo():
+    """doctor already calls it a leftover; a build should not carry it.
+
+    A stale PMB_SUDO export kills a build with exit 78 deep inside
+    pmbootstrap, with nothing anywhere saying the words PMB_SUDO.
+    """
+    import porthole_cmd_build as build
+
+    env = build.build_env({"PORTHOLE_ARCH": "aarch64"},
+                          {"PMB_SUDO": "sudo", "PATH": "/usr/bin"})
+    assert "PMB_SUDO" not in env, env
+    assert env.get("PATH") == "/usr/bin", "the rest of the environment stands"
+
+
 if __name__ == "__main__":
     sys.exit(main())

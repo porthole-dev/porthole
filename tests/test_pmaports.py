@@ -303,6 +303,75 @@ def test_docs_index_drops_the_readme_table_of_contents():
     assert "Real section" in out and "body" in out
 
 
+def test_series_problems_reports_a_malformed_patch():
+    import tempfile
+    import porthole_cmd_aports as aports
+
+    pkg = pathlib.Path(tempfile.mkdtemp(prefix="porthole-series-"))
+    (pkg / "APKBUILD").write_text(
+        'pkgname=linux-test\nsource="\n\tlinux-1.0.tar.xz\n\t0001-a.patch\n"\n')
+    # Header promises two insertions; the body has one.
+    (pkg / "0001-a.patch").write_text(
+        "--- a/f.c\n+++ b/f.c\n@@ -1,2 +1,3 @@\n ctx\n-gone\n+new\n")
+
+    kinds = [kind for kind, _ in aports._series_problems(pkg)]
+    assert "malformed" in kinds, aports._series_problems(pkg)
+
+
+def test_series_problems_still_reports_orphans():
+    # The pre-existing kinds must survive the refactor.
+    import tempfile
+    import porthole_cmd_aports as aports
+
+    pkg = pathlib.Path(tempfile.mkdtemp(prefix="porthole-series-"))
+    (pkg / "APKBUILD").write_text('pkgname=linux-test\nsource="\n\tlinux.tar.xz\n"\n')
+    (pkg / "0001-orphan.patch").write_text(
+        "--- a/f.c\n+++ b/f.c\n@@ -1,1 +1,1 @@\n-a\n+b\n")
+
+    kinds = [kind for kind, _ in aports._series_problems(pkg)]
+    assert "orphan" in kinds, aports._series_problems(pkg)
+
+
+def test_lint_reports_a_bad_series_even_when_apkbuild_lint_is_gone():
+    """The local check runs whether or not pmbootstrap can lint.
+
+    `aports lint` could previously only decline. A verb whose only outcome is
+    "I cannot" is one nobody runs, and the series defect it would have caught
+    cost the taimen port a subsystem.
+    """
+    import porthole_cmd_aports as aports
+
+    problems = [("malformed", "0199-x.patch: header says -7/+9, body has -7/+8")]
+    assert aports.lint_verdict(problems, apkbuild_lint_rc=None) == 1
+
+
+def test_lint_missing_apkbuild_lint_alone_is_not_a_finding():
+    # 69, never 1: the tool did not run, so the answer is not "no".
+    import porthole_cmd_aports as aports
+
+    assert aports.lint_verdict([], apkbuild_lint_rc=None) == 69
+
+
+def test_lint_a_stripped_patch_alone_does_not_fail_the_verb():
+    # 16 real patches carry this and build. Reported, not fatal.
+    import porthole_cmd_aports as aports
+
+    problems = [("stripped", "1000-drm.patch: line 12: ... leading space")]
+    assert aports.lint_verdict(problems, apkbuild_lint_rc=0) == 0
+
+
+def test_lint_unavailable_hint_does_not_claim_clean_over_warnings():
+    # apkbuild-lint absent AND a non-fatal warning printed above: the hint
+    # must not say "clean" -- that would contradict the yellow line the user
+    # just read two lines up in the same invocation.
+    import porthole_cmd_aports as aports
+
+    problems = [("stripped", "1000-drm.patch: line 12: ... leading space")]
+    hint = aports._lint_unavailable_hint(problems)
+    assert "clean" not in hint, hint
+    assert "non-fatal" in hint, hint
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -113,12 +113,43 @@ def _script(ctx) -> pathlib.Path:
     return path
 
 
-def _preflight(ctx) -> list[str]:
+# The rungs that end in `pmbootstrap export`, which builds boot.img out of the
+# rootfs chroot and therefore needs one a full `pmbootstrap install` has
+# populated. `mod` and `boot` never reach it.
+EXPORT_RUNGS = ("fast", "kernel", "upgrade")
+
+
+def export_problems(workdir, device: str) -> list:
+    """Can `pmbootstrap export` run in this work dir? Pure, given a path.
+
+    `fast` is advertised at ~6m and is what the ladder steers you to for a
+    config or series change. On a work dir whose rootfs chroot has never been
+    installed it CANNOT succeed, and it discovered that only after a full
+    kernel compile -- 20m35s, measured. deviceinfo is the file mkinitfs names
+    when it fails, so it is the file to test for.
+    """
+    if not device:
+        return []
+    chroot = pathlib.Path(workdir) / f"chroot_rootfs_{device}"
+    if (chroot / "usr" / "share" / "deviceinfo" / "deviceinfo").is_file():
+        return []
+    return [f"the rootfs chroot in {workdir} has never been installed, so "
+            f"`pmbootstrap export` cannot build a boot.img "
+            f"(no {chroot}/usr/share/deviceinfo/deviceinfo). "
+            f"Run `porthole build kernel --yes` once against this work dir."]
+
+
+def _preflight(ctx, action: str = "") -> list[str]:
     """What must be true before a build can even start.
 
     Reported together rather than one failure at a time: an envkernel build is
     minutes long, and finding out about the second missing value after the
     first one is fixed is how an afternoon goes.
+
+    `action` is optional: the `auto` guard calls this with none, asking
+    "could this profile build at all"; the real call site passes the rung it
+    is about to run, which is what lets the export-rung check below know
+    whether it applies.
     """
     problems = []
     cfg = ctx.cfg
@@ -132,6 +163,10 @@ def _preflight(ctx) -> list[str]:
     if not shutil.which("pmbootstrap"):
         problems.append("pmbootstrap is not on PATH")
     problems += _space_problems(cfg)
+    if action in EXPORT_RUNGS:
+        problems += export_problems(
+            pmb_workdir(ctx, _workspace_usable(ctx)[0]),
+            cfg.get("PORTHOLE_DEVICE", ""))
     return problems
 
 
@@ -454,6 +489,26 @@ def _workspace_usable(ctx):
     return True, ""
 
 
+def pmb_workdir(ctx, in_container: bool) -> pathlib.Path:
+    """pmbootstrap's own work dir, on the HOST filesystem either way.
+
+    Lives here rather than in `pkg` because the decision it depends on --
+    _workspace_usable -- lives here, and because BOTH build paths need it now:
+    the kernel rungs to follow log.txt, and the export rungs to check whether
+    the rootfs chroot has ever been installed.
+
+    The workspace deliberately keeps its own pmbootstrap work dir, separate
+    from the host's. That split is the whole reason `fast` can find both apks
+    and still fail in export: the two dirs have different chroots.
+    """
+    import porthole_cmd_sandbox as sandbox
+
+    if in_container:
+        return sandbox._sandbox_pmb(ctx.cfg)
+    host = ctx.cfg.get("PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
+    return pathlib.Path(host).expanduser()
+
+
 def _tree_inside(tree, workdir) -> str:
     """PORTHOLE_KERNEL_TREE as the CONTAINER sees it, or "" if it cannot.
 
@@ -553,14 +608,29 @@ def _host_cmd(script: pathlib.Path, func: str,
     return ["bash", "-c", f'source "{script}" && {call}']
 
 
+def build_env(cfg, base) -> dict:
+    """The environment a build child gets. Pure, so what crosses is testable.
+
+    PMB_SUDO is REMOVED. doctor already fails on it and calls it a leftover
+    whose privilege broker is gone -- but an export survives in a shell long
+    after the file does, and pmbootstrap invokes it directly, so a stale one
+    kills the build with exit 78 deep inside pmbootstrap with nothing anywhere
+    saying the words PMB_SUDO. porthole builds already refuse to inherit
+    config drift; this is drift by another name.
+    """
+    env = dict(base)
+    env.pop("PMB_SUDO", None)
+    for key, value in cfg.items():
+        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
+            env[key] = value
+    return env
+
+
 def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
          host: bool = False, rung: str = "") -> int:
     """Run one of ph-build.sh's functions, in the workspace or on the host."""
     script = _script(ctx)
-    env = dict(os.environ)
-    for key, value in ctx.cfg.items():
-        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
-            env[key] = value
+    env = build_env(ctx.cfg, os.environ)
 
     # shlex.quote, not naive interpolation: these arguments are a path and a
     # module name that reach a shell, and a path with a space in it would
@@ -605,7 +675,21 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                 "dependencies),", "grey"))
             ctx.out(ctx.out.paint(
                 "  which is what the workspace exists to avoid needing", "grey"))
-    return _stream(ctx, cmd, env, timeout, rung or func)
+    # WHERE a build ran is the first thing you need when it fails in a way
+    # that makes no sense, and WHICH WORK DIR is the second. The
+    # workspace/host split is documented and was invisible at build time,
+    # which is how `fast` came to find both apks present and still fail in
+    # export against a chroot that had never been installed.
+    ctx.out(ctx.out.paint(
+        f"  work dir: {pmb_workdir(ctx, usable)}"
+        f"  ({'workspace' if usable else 'host'})", "grey"))
+    # pmbootstrap keeps the real build output in its own log.txt and puts only
+    # `=> step` lines on stdout. `pkg` has followed it since the bar was
+    # written; the kernel rungs never did, so build-history.json recorded
+    # `compile_lines: 0` for every kernel build ever run and `fast` rendered
+    # [??????] for the 20 minutes that dominate it.
+    return _stream(ctx, cmd, env, timeout, rung or func,
+                   follow=pmb_workdir(ctx, usable) / "log.txt")
 
 
 # How often the bar repaints and the status file is written while the child
@@ -778,9 +862,21 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
         text = logpath.read_text(errors="replace")
         for line in failure_tail(text):
             ctx.out(ctx.out.paint(f"  | {line}", "grey"))
+        # pmbootstrap's stdout is reliably NOT where pmbootstrap puts the
+        # cause. A 21-minute run died with a tail containing an APKINDEX
+        # warning and a line about systemd, while the real error sat 71,393
+        # lines into log.txt. failure_tail already prefers the lines that name
+        # a failure; it was pointed at the wrong file.
+        inner = tail_text(follow) if follow else ""
+        if inner:
+            named = failure_tail(inner)
+            if named:
+                ctx.out(ctx.out.paint(f"  from {follow}:", "grey"))
+                for line in named:
+                    ctx.out(ctx.out.paint(f"  | {line}", "grey"))
         # The error text is the one thing every porter has in hand, and for a
         # known signature the cause is somewhere the message does not mention.
-        for why in diagnose(text):
+        for why in diagnose(text + "\n" + inner):
             ctx.out(ctx.out.paint(f"  ? {why}", "yellow"))
     return rc
 
@@ -815,6 +911,23 @@ def failure_tail(text: str, limit: int = 6) -> list[str]:
     if lines[-1] not in keep:
         keep = keep + [lines[-1]]
     return keep
+
+
+def tail_text(path, limit_bytes: int = 2_000_000) -> str:
+    """The last `limit_bytes` of a file, decoded leniently.
+
+    pmbootstrap's log.txt is shared, long-lived and was 71,393 lines deep when
+    it held the answer to a failed build. Reading it whole to print six lines
+    is not the shape of a thing that runs at the end of every failure.
+    """
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - limit_bytes))
+            return handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 # Build failures whose message names something other than the cause. Each one
@@ -865,6 +978,14 @@ _DIAGNOSES = (
      "`ls <workdir>/chroot_buildroot_<arch>/home/pmos/build/src/`. "
      "`porthole pkg build` and `porthole aports` take a lock; raw pmbootstrap "
      "does not."),
+    (re.compile(r"deviceinfo[^\n]*not found, required by mkinitfs"
+                r"|mkinitfs: skipping \(no deviceinfo file found\)", re.I),
+     "`pmbootstrap export` builds boot.img from the ROOTFS CHROOT, and the "
+     "chroot in this work dir has never had a full `pmbootstrap install` -- "
+     "so it has no device package and no deviceinfo. The workspace keeps its "
+     "own pmbootstrap work dir, separate from the host's, so an install done "
+     "on the host does not populate it. Run `porthole build kernel --yes` "
+     "once against this work dir."),
 )
 
 
@@ -1114,7 +1235,7 @@ def cmd_build(args, ctx) -> int:
         func, what = ACTIONS[action]
         extra = _rung_args(args, action)
 
-    problems = _preflight(ctx)
+    problems = _preflight(ctx, action)
     tight = _space_warning(ctx.cfg)
     if tight and not problems:
         ctx.out.warn(tight)

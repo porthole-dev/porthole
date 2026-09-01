@@ -366,6 +366,90 @@ def test_a_missing_build_artefact_costs_no_search():
             f"confirming a missing .dtb read {len(visited)} directories")
 
 
+def test_series_applies_blocks_when_a_patch_is_malformed():
+    import porthole_milestones as ms
+
+    assert "series-applies" in ms.BY_ID, sorted(ms.BY_ID)
+    milestone = ms.BY_ID["series-applies"]
+    # It sits before `builds`: a series that cannot apply is WHY the packages
+    # would not build, so reporting them in the other order buries the cause.
+    ids = [m.id for m in ms.MILESTONES]
+    assert ids.index("series-applies") < ids.index("builds")
+
+
+def test_series_applies_is_blocked_not_todo():
+    """A broken series is a precondition, not a task you can pick up.
+
+    BLOCKED is what `next` renders in the "getting in the way" list; TODO
+    would offer it as the next action, which reads as "go and do this" for
+    something no one can do until the patch is fixed.
+    """
+    import porthole_milestones as ms
+
+    verdict = ms.verdict_for_series([("malformed", "0199-x.patch: ...")])
+    assert verdict.state == ms.BLOCKED, verdict
+    assert "0199" in verdict.evidence, verdict.evidence
+
+
+def test_series_applies_ignores_warnings():
+    import porthole_milestones as ms
+
+    verdict = ms.verdict_for_series([("stripped", "a.patch: line 12 ...")])
+    assert verdict.state == ms.DONE, verdict
+
+
+def test_series_applies_says_how_many_patches_it_checked():
+    import porthole_milestones as ms
+
+    verdict = ms.verdict_for_series([], count=199)
+    assert "199" in verdict.evidence, verdict.evidence
+
+
+def test_brief_probes_the_device_before_it_evaluates_milestones():
+    """The order is load-bearing, not tidiness.
+
+    `state(max_age=30)` writes the state cache, and the milestone probes read
+    it. Evaluating milestones first means they read whatever was there before
+    -- which is the "brief says BOOTED, next says not probed" defect exactly.
+    Asserted via AST on the actual call nodes because comments can contain the
+    same strings as code.
+    """
+    import ast
+    import inspect
+    import textwrap
+    import porthole_cmd_brief as brief
+
+    source = inspect.getsource(brief.cmd_brief)
+    tree = ast.parse(textwrap.dedent(source))
+
+    state_lines = []
+    port_state_lines = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        # state(...) call: func is ast.Attribute with attr='state'
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "state":
+            state_lines.append(node.lineno)
+        # _port_state(...) call: func is ast.Name with id='_port_state'
+        elif isinstance(node.func, ast.Name) and node.func.id == "_port_state":
+            port_state_lines.append(node.lineno)
+
+    # ast.walk is breadth-first, not source order, so the last node visited is
+    # not the last in the file. Use min() to find the earliest occurrence, which
+    # is the right question here: does the first device probe happen before the
+    # first milestone evaluation?
+    state_lineno = min(state_lines) if state_lines else None
+    port_state_lineno = min(port_state_lines) if port_state_lines else None
+
+    assert state_lineno is not None, (
+        "cmd_brief must call state() on the device")
+    assert port_state_lineno is not None, (
+        "cmd_brief must call _port_state() to evaluate milestones")
+    assert state_lineno < port_state_lineno, (
+        "cmd_brief must probe the device before evaluating milestones; "
+        "the probe warms the cache the milestone probes read")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

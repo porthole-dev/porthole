@@ -543,13 +543,12 @@ UNBUFFERED = {"PYTHONUNBUFFERED": "1"}
 
 
 def _pmb_workdir(ctx, in_container: bool) -> pathlib.Path:
-    """pmbootstrap's own work dir, on the HOST filesystem either way."""
-    import porthole_cmd_sandbox as sandbox
+    """Kept as a name because `brief` calls it; the implementation is in
+    `porthole_cmd_build`, beside the _workspace_usable decision it depends
+    on."""
+    import porthole_cmd_build as build
 
-    if in_container:
-        return sandbox._sandbox_pmb(ctx.cfg)
-    host = ctx.cfg.get("PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
-    return pathlib.Path(host).expanduser()
+    return build.pmb_workdir(ctx, in_container)
 
 
 def _packages_dir(ctx, in_container: bool) -> pathlib.Path:
