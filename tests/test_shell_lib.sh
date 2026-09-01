@@ -242,5 +242,51 @@ is    "a past deadline is still expired" "$out" "EXPIRED"
 out=$(phsh '' 'tk_expired $(( $(date +%s%3N) + 60000 )) || echo PENDING')
 is    "a future deadline is still pending" "$out" "PENDING"
 
+# ------------------------------------------------------ the usb bus state ----
+#
+# ph_usb_state answers the question `fastboot devices` cannot: is the phone on
+# the bus AT ALL. An empty answer from fastboot covers three states that want
+# three different fixes, and porthole told the operator to do the wrong one for
+# 26 minutes on 2026-09-01 because nothing looked. PORTHOLE_USB_SYSFS is what
+# makes all four answers reachable with no phone plugged in -- the positive
+# control included, so an "absent" pass cannot come from a helper that always
+# says absent.
+USBFAKE=$(mktemp -d)
+trap 'rm -rf "$TMPXDG" "$USBFAKE"' EXIT
+USBIDS='PORTHOLE_USB_FASTBOOT_ID=18d1:4ee0 PORTHOLE_USB_GADGET_ID=18d1:d001'
+mkdir -p "$USBFAKE/1-2" "$USBFAKE/usb1"
+printf '1d6b\n' > "$USBFAKE/usb1/idVendor"; printf '0002\n' > "$USBFAKE/usb1/idProduct"
+
+printf '18d1\n' > "$USBFAKE/1-2/idVendor"; printf 'd001\n' > "$USBFAKE/1-2/idProduct"
+is "the running pmOS gadget on the bus reads as gadget" \
+   "$(phsh "$USBIDS PORTHOLE_USB_SYSFS=$USBFAKE" 'ph_usb_state')" "gadget"
+
+printf '4ee0\n' > "$USBFAKE/1-2/idProduct"
+is "the bootloader ID on the bus reads as fastboot" \
+   "$(phsh "$USBIDS PORTHOLE_USB_SYSFS=$USBFAKE" 'ph_usb_state')" "fastboot"
+
+# THE CASE THAT COST THE SESSION: a populated bus with a root hub on it and no
+# phone. Not an empty directory -- the helper must distinguish "I looked and
+# the phone is not here" from "I could not look".
+rm -rf "$USBFAKE/1-2"
+is "a bus with no phone on it reads as absent" \
+   "$(phsh "$USBIDS PORTHOLE_USB_SYSFS=$USBFAKE" 'ph_usb_state')" "absent"
+
+is "a profile that names no IDs gets unknown, never a guess" \
+   "$(phsh "PORTHOLE_USB_SYSFS=$USBFAKE" 'ph_usb_state')" "unknown"
+is "no usb sysfs to read is unknown, not absent" \
+   "$(phsh "$USBIDS PORTHOLE_USB_SYSFS=$USBFAKE/gone" 'ph_usb_state')" "unknown"
+
+# Only one of the two IDs filled in must still work: the template ships both
+# empty and a bring-up fills them in one at a time.
+mkdir -p "$USBFAKE/1-2"
+printf '18d1\n' > "$USBFAKE/1-2/idVendor"; printf '4ee0\n' > "$USBFAKE/1-2/idProduct"
+is "the bootloader ID alone is enough" \
+   "$(phsh "PORTHOLE_USB_FASTBOOT_ID=18d1:4ee0 PORTHOLE_USB_SYSFS=$USBFAKE" \
+           'ph_usb_state')" "fastboot"
+is "the gadget ID alone does not claim the bootloader" \
+   "$(phsh "PORTHOLE_USB_GADGET_ID=18d1:d001 PORTHOLE_USB_SYSFS=$USBFAKE" \
+           'ph_usb_state')" "absent"
+
 echo "$PASS/$((PASS+FAIL)) passed"
 [ "$FAIL" -eq 0 ]

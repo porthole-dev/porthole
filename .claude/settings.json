@@ -1,0 +1,8 @@
+{
+  "$comment": "porthole statusline: see lib/porthole_cmd_statusline.py for why refreshInterval is the load-bearing field. Other projects: `porthole statusline --install`.",
+  "statusLine": {
+    "type": "command",
+    "command": "porthole statusline",
+    "refreshInterval": 2
+  }
+}

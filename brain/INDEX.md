@@ -13,6 +13,7 @@ generic notes as well.
 | [a-comment-cannot-unset-an-inherited-dt-property](findings/a-comment-cannot-unset-an-inherited-dt-property.md) | `soc:msm8998` | A board file that declines to mention a DT property does not unset it, and a comment is not a revert |
 | [a-created-mvm-carries-call-audio](findings/a-created-mvm-carries-call-audio.md) | `soc:msm8998` | A (created) MVM carries call audio: what matters is whether the modem had a call, not the joined flag |
 | [a-level-irq-with-a-pull-up-storms-when-its-chip-is-off](findings/a-level-irq-with-a-pull-up-storms-when-its-chip-is-off.md) | `device:google-taimen` | The NFC interrupt storm was a devicetree pull-up, not a driver bug |
+| [a-phone-in-the-bootloader-can-be-off-the-bus](findings/a-phone-in-the-bootloader-can-be-off-the-bus.md) | `generic` | A phone can reach the bootloader and never enumerate, and porthole read that as never reaching it |
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
@@ -38,8 +39,10 @@ generic notes as well.
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
+| [the-missing-eapol-is-ath10ks-rx-confused-latch](findings/the-missing-eapol-is-ath10ks-rx-confused-latch.md) | `device:google-taimen` | The missing 4-way handshake is ath10k's rx_confused latch: one split A-MSDU disables data RX for the life of the firmware |
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
 | [the-reserved-vht-width-pair-is-why-the-ap-refused](findings/the-reserved-vht-width-pair-is-why-the-ap-refused.md) | `soc:msm8998` | The reserved VHT channel-width pair was the refusal -- clamping it associates 8/8 |
+| [the-top-right-corruption-is-freedreno-gmem](findings/the-top-right-corruption-is-freedreno-gmem.md) | `soc:msm8998` | The top-right corruption is freedreno's GMEM tile path, not a GPU fault -- the boundary is the a5xx bin column at x=1024 |
 | [the-venus-wedge-was-wrapper-clock-auto-gating](findings/the-venus-wedge-was-wrapper-clock-auto-gating.md) | `device:google-taimen` | The msm8998 venus wedge was wrapper clock auto-gating, and one write closes it |
 | [the-vocproc-refuses-a-volume-step-without-cal](findings/the-vocproc-refuses-a-volume-step-without-cal.md) | `soc:msm8998` | In-call volume: the vocproc refuses VSS_IVOLUME_CMD_SET_STEP without a registered volume calibration table |
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
@@ -106,6 +109,7 @@ generic notes as well.
 | [initramfs-is-not-frozen](traps/initramfs-is-not-frozen.md) | `generic` | A device stopped in the initramfs looks exactly like a frozen one, and is nothing like it |
 | [installing-firmware-can-flash-the-boot-partition](traps/installing-firmware-can-flash-the-boot-partition.md) | `generic` | apk add <firmware-pkg> (and apk fix) can FLASH the boot partition |
 | [memory-high-arms-systemd-oomd-against-the-browser](traps/memory-high-arms-systemd-oomd-against-the-browser.md) | `generic` | MemoryHigh= on an app scope arms systemd-oomd against that app |
+| [mod-rung-pushes-an-unstripped-module-into-a-stripped-set](traps/mod-rung-pushes-an-unstripped-module-into-a-stripped-set.md) | `generic` | porthole build mod pushes an unstripped tree module into a stripped packaged set -- on venus-core that bootloops taimen |
 | [monitor-mode-alongside-managed-captures-no-rx](traps/monitor-mode-alongside-managed-captures-no-rx.md) | `soc:msm8998` | A monitor vif on ath10k can be added alongside managed but receives nothing |
 | [never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport](traps/never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport.md) | `generic` | Never flash a kernel built from the source tree when the device ships from an aport series |
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
@@ -163,8 +167,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 19
-- `generic` — 89
+- `device:google-taimen` — 20
+- `generic` — 91
 - `soc:gs201` — 1
-- `soc:msm8998` — 16
+- `soc:msm8998` — 17
 - `soc:qcom` — 1
