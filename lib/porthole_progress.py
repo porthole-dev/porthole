@@ -1316,6 +1316,42 @@ def log_tail(path, limit: int = LOG_TAIL_BYTES):
         return None, None
 
 
+# How recently a log must have been written for "this build is still going"
+# to be the honest reading, and how far ahead of us its timestamp may sit
+# before it is a disagreeing clock rather than a build. Bounded at BOTH ends:
+# a log dated in the future -- skew, a restored tree, a copied checkout -- is
+# not evidence of anything running now.
+LOG_FRESH_S = 120.0
+CLOCK_SKEW_S = 5.0
+
+
+def reattach_from_log(log_path, snap, now=None, samples=None):
+    """The build `snap` was following, re-read from its log, or None.
+
+    The single answer to "the tracker died but did the BUILD?", shared by
+    everything that has to ask: `watch` paints from it, `status` reports it,
+    the status line puts it in the chrome. Three copies of this rule would be
+    three chances to disagree about whether a build is alive.
+
+    Returns None unless all of it holds: the snapshot froze mid-build (it says
+    `running`), its process is gone, and the log is being written right now.
+    A snapshot that ended properly is not an orphan, and a quiet log is not a
+    running build.
+    """
+    if not snap or (snap.get("state") or "") != "running":
+        return None
+    if liveness(snap) == "running":
+        return None            # the tracker is alive; its own file is better
+    text, mtime = log_tail(log_path)
+    if text is None:
+        return None
+    now = time.time() if now is None else now
+    if not -CLOCK_SKEW_S <= now - mtime <= LOG_FRESH_S:
+        return None
+    name = str(snap.get("rung") or "build").split(":", 1)[-1]
+    return snapshot_from_log(text, name, mtime, now=now, samples=samples)
+
+
 def orphaned(snap, foreign: str) -> bool:
     """Is `foreign` the very build this status file was following?
 

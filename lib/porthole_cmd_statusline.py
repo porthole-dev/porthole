@@ -175,17 +175,12 @@ def _snap(rundir: pathlib.Path, name: str):
 PMB_LOGS = (("PORTHOLE_SANDBOX_PMB_DIR", "~/.local/var/porthole-sandbox"),
             ("PORTHOLE_PMB_DIR", "~/.local/var/pmbootstrap"))
 
-# How recently the log must have been written for "something is building" to
-# be the honest reading. Longer than a quiet packaging step is not the point
-# here: the status line refreshes every two seconds, so a build that has gone
-# quiet for two minutes is better described by its last snapshot than by a
-# bar this file inferred.
-LOG_FRESH_S = 120.0
+# The freshness window and the skew allowance are `porthole_progress`'s, so
+# this file and `pkg status` cannot disagree about whether a log is live.
+def _fresh_bounds():
+    import porthole_progress as pp
 
-# How far ahead of us a log's timestamp may sit and still be believed. Some
-# slack for a filesystem's own rounding; anything beyond it is a clock that
-# disagrees, not a build.
-CLOCK_SKEW_S = 5.0
+    return pp.LOG_FRESH_S, pp.CLOCK_SKEW_S
 
 
 def _live_log(now: float):
@@ -197,13 +192,14 @@ def _live_log(now: float):
             mtime = (path / "log.txt").stat().st_mtime
         except OSError:
             continue
-        age = now - mtime
+        fresh, skew = _fresh_bounds()
         # Bounded at BOTH ends. A log dated in the future -- clock skew, a
         # copied tree, a restored backup -- is not evidence that something is
-        # building now, and an unbounded `age <= LOG_FRESH_S` accepts every
-        # one of them.
-        if -CLOCK_SKEW_S <= age <= LOG_FRESH_S and (best is None
-                                                    or mtime > best[1]):
+        # building now, and an unbounded `age <= fresh` accepts every one of
+        # them. Checked here as well as in `reattach_from_log`, because this
+        # is also what PICKS between the two work dirs' logs.
+        if -skew <= now - mtime <= fresh and (best is None
+                                              or mtime > best[1]):
             best = (path / "log.txt", mtime)
     return best
 
@@ -287,13 +283,16 @@ def build_snapshot(repo: pathlib.Path, now: float):
     if best and (best.get("state") or "") == "running":
         live = _live_log(now)
         if live:
-            text, mtime = pp.log_tail(live[0])
-            if text is not None:
-                name = str(best.get("rung") or "build").split(":", 1)[-1]
-                samples = _samples(repo / ".run", mtime,
-                                   pp.log_steps(text)[0], now)
-                return pp.snapshot_from_log(text, name, mtime, now=now,
-                                            samples=samples), True
+            text, _ = pp.log_tail(live[0])
+            samples = _samples(repo / ".run", live[1],
+                               pp.log_steps(text or "")[0], now)
+            # The freshness rule itself lives in `porthole_progress`, shared
+            # with `pkg watch` and `pkg status`: three copies of "is this
+            # build still alive" would be three chances to disagree.
+            snap = pp.reattach_from_log(live[0], best, now=now,
+                                        samples=samples)
+            if snap is not None:
+                return snap, True
     if best and now - (best.get("last_at") or 0) <= LINGER_S:
         return best, False       # old news lingers briefly; then it is clutter
     return None, False

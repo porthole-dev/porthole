@@ -1372,5 +1372,40 @@ def test_the_line_the_build_printed_is_not_dimmed_like_the_chrome():
     assert "\033[90m" + said not in activity, "the build's line must not be grey"
 
 
+def test_one_rule_decides_whether_a_build_outlived_its_tracker():
+    """`watch`, `status` and the status line all have to ask it, and three
+    copies would be three chances to disagree about whether a build is
+    alive. Every one of the four conditions is load-bearing."""
+    with tempfile.TemporaryDirectory() as tmp:
+        log = pathlib.Path(tmp) / "log.txt"
+        log.write_text("[8591/9429] Building CXX object a.cpp.o\n")
+        now = time.time()
+        os.utime(log, (now - 3, now - 3))
+        frozen = {"rung": "pkg:webkit2gtk-6.0", "state": "running",
+                  "pid": 999999999, "elapsed": 6832.0, "progress": 0.839,
+                  "last_at": now - 2900, "started": now - 9700}
+
+        got = progress.reattach_from_log(log, frozen, now=now)
+        assert got and got["steps"] == "8591/9429", got
+        assert got["rung"] == "pkg:webkit2gtk-6.0"
+
+        # A run that ENDED properly is not an orphan.
+        assert progress.reattach_from_log(
+            log, dict(frozen, state="done"), now=now) is None
+        # A tracker that is alive describes its own build better than we can.
+        assert progress.reattach_from_log(
+            log, dict(frozen, pid=os.getpid()), now=now) is None
+        # A quiet log is not a running build...
+        assert progress.reattach_from_log(
+            log, frozen, now=now + progress.LOG_FRESH_S + 60) is None
+        # ...and neither is one dated in the future: that is a clock that
+        # disagrees, not evidence of work.
+        os.utime(log, (now + 3600, now + 3600))
+        assert progress.reattach_from_log(log, frozen, now=now) is None
+        # No log at all is simply no answer.
+        assert progress.reattach_from_log(
+            pathlib.Path(tmp) / "nope.txt", frozen, now=now) is None
+
+
 if __name__ == "__main__":
     sys.exit(main())

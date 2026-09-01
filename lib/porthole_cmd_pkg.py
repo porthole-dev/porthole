@@ -975,11 +975,23 @@ def _status(ctx) -> int:
                         lambda: ctx.out("no package build has run in this "
                                         "checkout"))
 
+    # The same question `watch` and the status line ask: the tracker can die
+    # without the build dying, and reporting the frozen file as `stale` is
+    # how this said nothing for two hours about a build sitting at 88%.
+    live = progress.reattach_from_log(_log_path(ctx), snap)
+    if live is not None:
+        snap = dict(live, reattached=True)
+
     def render():
-        head, rows = progress.status_report(snap)
+        head, rows = progress.status_report(
+            snap, alive=(lambda pid: True) if live is not None else None)
         ctx.out("  " + head)
         for label, value in rows:
             ctx.out.kv(label, value, 10)
+        if live is not None:
+            ctx.out.kv("note", "reattached: this build outlived the run that "
+                               "was tracking it, so these numbers come from "
+                               "the workspace log", 10)
 
     return ctx.emit(snap, render)
 
