@@ -404,5 +404,55 @@ is "tkbuild purges after _ph_make" \
 is "tkbuild purges before pmbootstrap install" \
    "$(tb_before 'tkpurge-devpkgs || return 1' 'pmbootstrap install --password')" "ok"
 
+# ----------------------------------------------- issue #20: the size guard --
+#
+# `mod` built from the tree and pushed the .ko whole while `fast` installs
+# modules abuild already stripped, so the same source produced a venus-core.ko
+# ~11x the size of the one it replaced. Rebooting onto that mix bootlooped
+# taimen twice -- no console, no pstore, physical Power+VolDown both times.
+#
+# The guard lives inside tkmod's remote here-doc, so the test extracts it the
+# way the device receives it and runs it against fixture files. Extracting
+# rather than re-implementing: a second copy of the comparison would pass this
+# file while the shipped one stayed wrong.
+guard() { # guard NEW_BYTES OLD_BYTES [EXT] -> the device-side script's output
+    local newsz=$1 oldsz=$2 ext=${3:-.ko} dir
+    dir=$(mktemp -d)
+    head -c "$newsz" /dev/zero > "$dir/mod.ko"
+    head -c "$oldsz" /dev/zero > "$dir/installed$ext"
+    sed -n '/ISSUE #20/,/^\t\tdone$/p' "$ROOT/tools/ph-build.sh" \
+        | sed 's/\\"/"/g; s/\\\$/$/g' \
+        | sed "s#/tmp/\$name.ko#$dir/mod.ko#" > "$dir/guard.sh"
+    ( cd "$dir" && inst="$dir/installed$ext" bash -c '
+        inst='"$dir"'/installed'"$ext"'
+        . '"$dir"'/guard.sh
+        echo "REACHED-THE-INSTALL"' ) 2>&1
+    rm -rf "$dir"
+}
+
+saw() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
+
+out=$(guard 3431808 315448)
+is "an 11x module is refused"           "$(saw "$out" REFUSING)" "yes"
+is "the refusal shows both sizes"       "$(saw "$out" "3431808 bytes")" "yes"
+is "nothing downstream of it runs"      "$(saw "$out" REACHED-THE-INSTALL)" "no"
+
+# THE POSITIVE CONTROL. Without it a guard that refused everything would pass
+# every assertion above, and `mod` -- the rung the ladder says to try FIRST --
+# would be dead for every module on every device.
+out=$(guard 320000 315448)
+is "an ordinary rebuild is not refused" "$(saw "$out" REFUSING)" "no"
+is "so the install still runs"          "$(saw "$out" REACHED-THE-INSTALL)" "yes"
+
+# A raw .ko against an installed .ko.xz compares nothing about either, so the
+# comparison is skipped rather than guessed at -- otherwise every device with
+# compressed modules refuses every push.
+out=$(guard 3431808 315448 .ko.xz)
+is "a compressed sibling is not compared" "$(saw "$out" REFUSING)" "no"
+is "and the install still runs"           "$(saw "$out" REACHED-THE-INSTALL)" "yes"
+
+out=$(TK_MOD_SIZE_RATIO=99 guard 3431808 315448)
+is "TK_MOD_SIZE_RATIO raises the bound" "$(saw "$out" REFUSING)" "no"
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -1493,11 +1493,51 @@ tkpush-modules() {
 # Split out of tkmod because everything else in that function needs a
 # container, a kernel build and a phone; this step needs none of the three,
 # and it is the one whose absence has already cost a wifi driver.
+#
+# It also STRIPS DEBUG INFO, and that was issue #20. `fast` installs modules
+# extracted from the built apk, which abuild stripped; `mod` built from the
+# tree and pushed the .ko whole, so the same source produced a venus-core.ko
+# of 3431808 bytes against the packaged 315448 -- ~11x -- while its siblings
+# stayed byte-identical. Rebooting onto that mix bootlooped taimen twice, with
+# no console, no pstore and no remote window: the USB gadget re-enumerated
+# every ~21-28 s and port 22 answered "Connection refused" before sshd was up.
+# Recovery was a physical Power+VolDown, both times.
+#
+# `--strip-debug` specifically, because that is what the kernel's own
+# `modules_install INSTALL_MOD_STRIP=1` runs and what abuild does -- not an
+# invention, the same operation the packaged copy already went through.
+#
+# BEST EFFORT, and the order matters. llvm-strip lives only inside
+# chroot_native (the host has no aarch64 strip; that is why the BTF fix below
+# is Python ELF surgery), and it cannot be run from outside the chroot -- its
+# musl libs are not there. So it goes THROUGH pmbootstrap, and when there is
+# no chroot to reach -- a `--host` build, a fresh workspace -- the module is
+# pushed unstripped and said so. The device-side size guard in tkmod is what
+# makes that safe: it refuses the push rather than trusting this to have run.
+_ph_strip_module() {
+	local staged=$1 name=$2
+	local native="$_PH_PMB/chroot_native" tmp="ph-strip-$name.ko"
+	if [ ! -d "$native/tmp" ] || ! command -v pmbootstrap >/dev/null 2>&1; then
+		echo ">> no chroot_native to reach llvm-strip in -- pushing unstripped" >&2
+		return 0
+	fi
+	cp -p "$staged" "$native/tmp/$tmp" 2>/dev/null || return 0
+	if pmbootstrap -q chroot -- llvm-strip --strip-debug "/tmp/$tmp" >&2; then
+		cp -p "$native/tmp/$tmp" "$staged" && chmod u+w "$staged"
+	else
+		echo ">> llvm-strip failed -- pushing unstripped; the size guard decides" >&2
+	fi
+	rm -f "$native/tmp/$tmp"
+}
+
 _ph_stage_module() {
 	local ko=$1 name=$2
 	local staged="/tmp/$name.ko"   # $name is not set until the local above ends
 	cp -p "$ko" "$staged" || return 1
 	chmod u+w "$staged" || return 1
+	# Strip BEFORE neutering .BTF: llvm-strip rewrites the section table, and
+	# doing it second could undo a rename that has to survive to the loader.
+	_ph_strip_module "$staged" "$name"
 	# stdout is the staged path; the tool's own report goes to stderr.
 	"$_PH_REPO_ROOT/tools/tk-strip-btf.py" "$staged" >&2 || return 1
 	echo "$staged"
@@ -1642,6 +1682,42 @@ tkmod() {
 			\\( -name '$name.ko'    -o -name '${name//_/-}.ko' \\
 			-o -name '$name.ko.xz' -o -name '${name//_/-}.ko.xz' \\
 			-o -name '$name.ko.gz' -o -name '${name//_/-}.ko.gz' \\) 2>/dev/null)
+		# ISSUE #20. What is about to be written must look like it came from
+		# the same build path as the set it is joining. A module pushed
+		# unstripped into a stripped set bootlooped taimen twice on
+		# venus-core -- no console, no pstore, physical recovery both times.
+		# Which property is fatal (stripping, section layout, a sibling ABI
+		# skew) is NOT established, so this does not test for stripping: it
+		# tests for the artefacts disagreeing, which is true whichever it is.
+		#
+		# Decided BEFORE the first write, so a refusal leaves the device
+		# exactly as it was running.
+		#
+		# Only uncompressed siblings are comparable -- a raw .ko against an
+		# installed .ko.xz says nothing about either. Skipped rather than
+		# guessed at.
+		ratio=\${TK_MOD_SIZE_RATIO:-4}
+		new_sz=\$(stat -c %s /tmp/$name.ko 2>/dev/null || echo 0)
+		for f in \$inst; do
+			case \"\$f\" in *.ko) ;; *) continue ;; esac
+			old_sz=\$(stat -c %s \"\$f\" 2>/dev/null || echo 0)
+			[ \"\$old_sz\" -gt 0 ] && [ \"\$new_sz\" -gt 0 ] || continue
+			if [ \$(( new_sz / old_sz )) -ge \"\$ratio\" ]; then
+				echo \">> REFUSING: the module just built is \$(( new_sz / old_sz ))x the\"
+				echo \">> size of the one it would replace, so the two came from\"
+				echo \">> different build paths -- almost certainly a tree module\"
+				echo \">> against a stripped, packaged set.\"
+				echo \">>   about to write  \$new_sz bytes\"
+				echo \">>   installed now   \$old_sz bytes  (\$f)\"
+				echo \">> NOTHING was written and nothing was unloaded. On venus-core\"
+				echo \">> this combination bootloops the device with no console, no\"
+				echo \">> pstore and no remote way back (issue #20).\"
+				echo \">> Use 'porthole build fast --yes', which installs the whole\"
+				echo \">> set from one package. TK_MOD_SIZE_RATIO raises the bound.\"
+				exit 6
+			fi
+		done
+
 		if [ -n \"\$inst\" ]; then
 			for f in \$inst; do
 				case \"\$f\" in

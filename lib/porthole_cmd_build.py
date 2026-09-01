@@ -75,6 +75,16 @@ AUTO_DESC = "build the cheapest rung that covers what actually changed"
 #
 # 5 is deliberately absent: "loaded, but the stack did not come back up" is a
 # device left worse than it was found, and that is a failure.
+# Exit 6 is a REFUSAL, not an installed module: tkmod decided the artefact it
+# built does not belong in the set on the device and wrote nothing. A failure,
+# unlike 3 and 4 -- but a diagnosed one, and "tkmod failed, pmbootstrap log has
+# more" would send the reader to a compile log that is perfectly clean.
+TKMOD_REFUSED = {
+    6: ("refused to push a module that does not match its siblings",
+        "nothing was written and nothing was unloaded. `porthole build fast "
+        "--yes` installs the whole set from one package; see issue #20"),
+}
+
 TKMOD_INSTALLED_NOT_LOADED = {
     3: ("installed, but not loaded this boot -- something still holds it",
         "the copy on disk IS the module you just built. One reboot runs it "
@@ -1580,6 +1590,9 @@ def cmd_build(args, ctx) -> int:
         outcome = TKMOD_INSTALLED_NOT_LOADED.get(rc) if func == "tkmod" else None
         if outcome:
             raise Bail(f"{what}: {outcome[0]}", EX_STATE, outcome[1])
+        refused = TKMOD_REFUSED.get(rc) if func == "tkmod" else None
+        if refused:
+            raise Bail(f"{what}: {refused[0]}", EX_FAIL, refused[1])
         raise Bail(f"{func} failed", EX_FAIL,
                    "the output above is the build's; `pmbootstrap log` has more")
     ctx.out(ctx.out.paint(f"  {what}: done", "green"))
