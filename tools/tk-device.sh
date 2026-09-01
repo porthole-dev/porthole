@@ -88,7 +88,22 @@ fi
 # This also fills in state= for the holder file, which is what turns the next
 # agent's timeout message from "someone has it" into "someone has it and the
 # phone is in the bootloader".
-state=$(tk_device_state </dev/null)
+#
+# Here the state is an ANNOTATION, not a precondition: a caller that named no
+# --need-* wants the mutex, and has said nothing about the device. So ask only
+# if the probe can answer -- tk_device_state reaches tk_in_fastboot, which
+# exits 69 when $FASTBOOT cannot run, and that must not take down a run that
+# never asked. Unknown is already this file's word for it, two messages up.
+# A caller that DID name --need-* was refused before the lock, above.
+#
+# TK_DEVICE_STATE is checked first because tk_device_state honours it before
+# it probes anything, so an override still annotates the holder file on a host
+# that has no fastboot at all.
+if [ -n "${TK_DEVICE_STATE:-}" ] || ph_have_fastboot; then
+    state=$(tk_device_state </dev/null)
+else
+    state=unknown
+fi
 printf 'agent=%s pid=%s since=%s state=%s cmd=%s\n' \
     "$AGENT" "$$" "$(date -Is)" "$state" "$*" >"$LOCK.holder"
 trap 'rm -f "$LOCK.holder"' EXIT

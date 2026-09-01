@@ -85,6 +85,17 @@ def test_phases_come_from_the_lines_the_script_already_prints():
     assert progress.phase_of("some unrelated noise", "make") == "make"
 
 
+def test_the_install_step_ph_build_announces_resolves_to_install():
+    """ph-build.sh's `pmbootstrap install` runs as a plain shell command and
+    is never echoed, so `_MARKERS`' `pmbootstrap install` alternative never
+    fires on it -- only the `>>` announcement tkbuild() prints right before
+    it does. Coupled to the exact string in tools/ph-build.sh's tkbuild() so
+    this breaks if one is reworded without the other."""
+    assert progress.phase_of(
+        ">> installing the kernel into the rootfs chroot (pmbootstrap install) --",
+        "package") == "install"
+
+
 def test_a_later_phase_wins_when_a_line_mentions_two():
     """`>> verifying the exported image` names both export and verify, and the
     true phase is the later one."""
@@ -506,6 +517,30 @@ def test_stall_note_names_packaging_as_the_reason_for_no_signal():
 
 def test_stall_note_is_silent_when_output_is_recent():
     assert progress.stall_note("  CC  drivers/media/x.o", silence=3.0) == ""
+
+
+def test_line_of_carries_the_stall_note_watch_actually_renders():
+    """`stall_note` had exactly one caller -- `status_report` -- reached only
+    after a run has already stopped. `watch` renders `line_of` while the run
+    is still live, so a healthy multi-minute `pmbootstrap install` looked
+    identical to a hang there. The note belongs on the line `watch` draws."""
+    stale = {"rung": "kernel", "phase": "install", "state": "running",
+             "pid": 1, "elapsed": 133.0, "progress": None, "eta": None,
+             "last": "Executing postmarketos-base-systemd-91-r1.trigger",
+             "last_age": 133.0, "last_at": 1000.0}
+    line = progress.line_of(stale)
+    assert "\n" not in line
+    assert "no output for" in line or "install" in line.lower(), line
+
+
+def test_line_of_stays_quiet_on_a_healthy_fast_moving_build():
+    fresh = {"rung": "kernel", "phase": "make", "state": "running",
+             "pid": 1, "elapsed": 133.0, "progress": 0.4, "eta": 10.0,
+             "last": "  CC  drivers/gpu/drm/msm/msm_drv.o",
+             "last_age": 2.0, "last_at": 1000.0}
+    line = progress.line_of(fresh)
+    assert "\n" not in line
+    assert line == progress.line_of(dict(fresh, last=""))
 
 
 def test_feed_advances_last_at():

@@ -27,6 +27,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import time
 
 # Verdict states, in the order `next` cares about them.
 DONE, TODO, BLOCKED, UNKNOWN = "done", "todo", "blocked", "unknown"
@@ -457,10 +458,38 @@ def probe_series_applies(ctx):
 
 _PROVENANCE_STATES = {"done": done, "todo": todo, "blocked": blocked}
 
+# How old a cached kernel-provenance reading may be and still let the
+# `kernel-provenance` milestone report DONE. Same reasoning and same 24h as
+# MATRIX_MAX_AGE_S: both caches describe device state that a flash
+# invalidates, and `brief` writing the blob once does not mean it is still
+# true after the device was reflashed since. Without this, flashing the
+# phone left `next`/`brief` repeating a provenance verdict from before the
+# flash forever, until someone happened to re-run `brief`. Override with
+# PORTHOLE_PROVENANCE_MAX_AGE_S, same shape as PORTHOLE_MATRIX_MAX_AGE_S.
+PROVENANCE_MAX_AGE_S = 86400.0
 
-def verdict_for_provenance(state: str, evidence: str):
-    """Map porthole_provenance's plain state to a Verdict. Pure."""
-    return _PROVENANCE_STATES.get(state, lambda _e: unknown())(evidence)
+
+def verdict_for_provenance(state: str, evidence: str, age=None,
+                            max_age=PROVENANCE_MAX_AGE_S):
+    """Map porthole_provenance's plain state to a Verdict, dated. Pure.
+
+    Same asymmetry as verdict_from_matrix: only the DONE claim needs a
+    verifiable, fresh age to stand on. An unknown or expired age downgrades a
+    would-be DONE to TODO; it never upgrades a TODO or BLOCKED the cache
+    already reported -- a broken timestamp does not make a bad reading MORE
+    true.
+    """
+    when = " (probed {} ago)".format(_ago(age)) if age is not None else ""
+    if state == "done":
+        if age is None:
+            return todo(evidence + " — no usable timestamp for this "
+                        "reading, re-run `porthole brief`")
+        if age > max_age:
+            return todo("{} (stale: probed {} ago, cap {}) — re-run "
+                        "`porthole brief`".format(evidence, _ago(age),
+                                                  _ago(max_age)))
+        return done(evidence + when)
+    return _PROVENANCE_STATES.get(state, lambda _e: unknown())(evidence + when)
 
 
 def _read_run_json(ctx, name: str) -> dict:
@@ -491,8 +520,142 @@ def probe_kernel_provenance(ctx):
     blob = _read_run_json(ctx, "kernel-provenance.json")
     if not blob:
         return unknown()
+    at = blob.get("at")
+    age = (time.time() - at) if isinstance(at, (int, float)) else None
+    try:
+        max_age = float(_cfg(ctx, "PORTHOLE_PROVENANCE_MAX_AGE_S")
+                        or PROVENANCE_MAX_AGE_S)
+    except (TypeError, ValueError):
+        max_age = PROVENANCE_MAX_AGE_S
     return verdict_for_provenance(blob.get("state", ""),
-                                  blob.get("evidence", ""))
+                                  blob.get("evidence", ""), age, max_age)
+
+
+# How old a cached device state may be and still be reported as a fact. Past
+# this the honest answer is that nobody has looked recently.
+STATE_MAX_AGE_S = 300.0
+
+# How old a cached MATRIX reading may be and still let a milestone report
+# DONE. Past this, a DONE reverts to TODO -- the age is rendered inline
+# either way, but that is not enough on its own: a claim that renders
+# identically at 30 seconds and three weeks old is a claim that stands
+# forever. 24h, not 300s like STATE_MAX_AGE_S: a device's reachability
+# changes minute to minute, but active porting reflashes at most once a day,
+# so a day-old matrix on an idle port is still roughly true. Past a day the
+# claim should be re-earned by running `porthole matrix` again, not
+# inherited. Override with PORTHOLE_MATRIX_MAX_AGE_S, same as
+# PORTHOLE_STATE_MAX_AGE_S overrides STATE_MAX_AGE_S.
+MATRIX_MAX_AGE_S = 86400.0
+
+
+def verdict_from_matrix(blob, names, age, max_age=MATRIX_MAX_AGE_S):
+    """A milestone verdict from cached matrix cells. Pure.
+
+    `?` is NEVER done. It means no probe is defined or the probe did not run,
+    and reading it as a pass would make the matrix worse than no matrix: this
+    module exists because a display that trusts a stale tick is confidently
+    wrong in the direction of "you are further along than you are".
+
+    But `?` is also NEVER a manufactured TODO on its own. `suspend` has no
+    `works:` probe and BY DESIGN never can -- the spec forbids a probe that
+    induces a suspend -- so its matrix row is `works: ?` forever, on every
+    device, from the moment `matrix.json` first exists. Reporting that as
+    TODO would report a negative finding nobody made, and would un-tick a box
+    a human earned on every future evaluation: `evaluate()` demotes a ticked
+    milestone to "stale" exactly when the probe says TODO. So when EVERY
+    requested name is untested (`?`, missing `works`, or absent from the
+    matrix entirely) this returns UNKNOWN -- nobody looked, so a tick still
+    counts, same as the no-matrix-at-all case below. TODO is reserved for
+    when the matrix actually SAYS something: a real "no", or a genuine mix of
+    some names passing and others not (that mix is actionable in a way "we
+    haven't tried any of them yet" is not).
+
+    A requested capability the matrix does not MENTION is not evidence of
+    success either -- it is treated exactly like `?`, by name, the same as a
+    cell whose `works` is missing or holds anything other than "yes"/"no".
+    Silently dropping an unmentioned name (and only refusing when NONE of
+    the names appear) was the same optimistic mistake as trusting `?`: a
+    `radios` matrix with wifi and bluetooth profiled and modem never touched
+    reported DONE on two radios out of three.
+
+    No matrix at all returns UNKNOWN, which preserves the pre-matrix
+    behaviour exactly -- a tick still counts. Landing this must not un-tick a
+    box somebody earned.
+
+    A malformed cache (capabilities missing, null, the wrong type, or full of
+    non-dict entries) degrades to UNKNOWN rather than raising -- a corrupt
+    file must read as "nobody has looked", never as a crash in `next` or
+    `brief`.
+    """
+    caps = blob.get("capabilities") if isinstance(blob, dict) else None
+    if not isinstance(caps, list):
+        caps = []
+    cells = {c.get("name"): c for c in caps if isinstance(c, dict)}
+    if not any(n in cells for n in names):
+        return unknown()
+    when = " (probed {} ago)".format(_ago(age)) if age is not None else ""
+    failing = [n for n in names if cells.get(n, {}).get("works") == "no"]
+    passing = [n for n in names
+               if n not in failing and cells.get(n, {}).get("works") == "yes"]
+    untested = [n for n in names if n not in failing and n not in passing]
+    if failing:
+        return todo("not working: " + ", ".join(failing) + when)
+    if untested:
+        if not passing:
+            # Nobody has a proven answer for ANY of the requested names --
+            # see the docstring. This is what lets `suspend` (no probe, ever)
+            # leave TODO on a tick instead of being stuck there forever.
+            return unknown()
+        # A genuine mix: some names pass, some don't have a proven answer.
+        # That IS actionable, unlike the all-untested case above.
+        no_probe = [n for n in untested if n in cells]
+        unmentioned = [n for n in untested if n not in cells]
+        bits = []
+        if no_probe:
+            # The row exists but nothing measured it -- either there is no
+            # read-only probe for it (suspend, by design) or one hasn't run
+            # yet. Either way the matrix does NOT "say nothing" -- it has an
+            # opinion, just not a yes/no one.
+            bits.append("no read-only probe: " + ", ".join(no_probe))
+        if unmentioned:
+            bits.append("not in the matrix: " + ", ".join(unmentioned))
+        return todo("not tested (" + "; ".join(bits) + ")" + when)
+    # age is None means `at` was missing, null, or not a number -- we
+    # cannot establish when this was measured. A DONE we cannot date is
+    # exactly the confidently-wrong-in-the-optimistic-direction claim this
+    # module exists to delete, so an unknown age is treated as STALE, not
+    # as fresh: never invent an age or assume "probably recent". This is
+    # deliberately asymmetric -- `failing`/`untested` above still report as
+    # they do with an unknown age, because a broken timestamp does not make
+    # an untested or failing capability MORE true. Only the positive claim
+    # needs a verifiable age to stand on, same as Task 5's device state: no
+    # usable cache reading means never done.
+    if age is None:
+        return todo("matrix has no usable timestamp for " + ", ".join(names)
+                    + " — re-run `porthole matrix`")
+    if age > max_age:
+        return todo("matrix is stale (probed {} ago, cap {}) — re-run "
+                    "`porthole matrix`".format(_ago(age), _ago(max_age)))
+    return done("working: " + ", ".join(names) + when)
+
+
+def probe_from_matrix(*names):
+    """A milestone probe over one or more matrix capabilities.
+
+    Reads the CACHE, never the device: `brief --no-device` must work offline,
+    and `porthole matrix` is what refreshes it.
+    """
+    def probe(ctx):
+        blob = _read_run_json(ctx, "matrix.json")
+        at = blob.get("at") if isinstance(blob, dict) else None
+        age = (time.time() - at) if isinstance(at, (int, float)) else None
+        try:
+            max_age = float(_cfg(ctx, "PORTHOLE_MATRIX_MAX_AGE_S")
+                            or MATRIX_MAX_AGE_S)
+        except (TypeError, ValueError):
+            max_age = MATRIX_MAX_AGE_S
+        return verdict_from_matrix(blob, list(names), age, max_age)
+    return probe
 
 
 def probe_kernel_pkg(ctx):
@@ -553,11 +716,6 @@ def probe_identity(ctx):
         import porthole
         return done(porthole.resolve_phone(ctx.cfg))
     return todo("porthole init has not been run")
-
-
-# How old a cached device state may be and still be reported as a fact. Past
-# this the honest answer is that nobody has looked recently.
-STATE_MAX_AGE_S = 300.0
 
 
 def reachable_verdict(forced: str, cached):
@@ -812,17 +970,20 @@ MILESTONES = [
         why="Until it does, every boot verdict comes from a log rather than a "
             "screen — and a screen can lie either way.",
         how="porthole brain search display",
-        playbook="brain/playbooks/30-display.md", safe=True),
+        playbook="brain/playbooks/30-display.md",
+        probe=probe_from_matrix("display"), safe=True),
     Milestone(
         "suspend", "subsystems", "Suspend and resume survive a cycle",
         why="This dominates whether the port is a daily driver.",
         how="porthole run --lock tk-suspend-cycle.sh",
-        playbook="brain/playbooks/40-suspend.md", safe=False),
+        playbook="brain/playbooks/40-suspend.md",
+        probe=probe_from_matrix("suspend"), safe=False),
     Milestone(
         "radios", "subsystems", "Wifi, bluetooth, modem",
         why="The last things that make a phone a phone.",
         how="porthole brain search wifi",
-        playbook="brain/playbooks/50-wifi-bt-modem.md", safe=True),
+        playbook="brain/playbooks/50-wifi-bt-modem.md",
+        probe=probe_from_matrix("wifi", "bluetooth", "modem"), safe=True),
 
     # -- 5. give it back -----------------------------------------------------
     Milestone(

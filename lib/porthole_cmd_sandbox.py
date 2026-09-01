@@ -363,6 +363,22 @@ def _up_argv(root, image, mounts, device) -> list[str]:
     # ph-build.sh and the pmaports lookup would both have read a directory that
     # does not exist in here.
     argv += ["-e", "PORTHOLE_PMB_DIR=/pmb"]
+    # The fifth, and the one that cost a flash. config.env names the HOST's
+    # platform-tools fastboot; in here that path does not exist, so every
+    # `fastboot devices` exited 127 with EMPTY STDOUT -- byte-for-byte what a
+    # phone that is NOT in the bootloader looks like. A `fast` build reached
+    # "ALL CHECKS PASSED - safe to flash", sent the phone to the bootloader,
+    # then burned its whole budget and timed out after 181.2s reporting that it
+    # never got there, with the phone sitting in fastboot the entire time. The
+    # image's own fastboot is on PATH, so name it bare.
+    #
+    # ADB is the same shape -- config.env names the host's platform-tools adb
+    # too -- and is deliberately left for its own change: nothing in lib/ or
+    # tools/ ever EXECUTES $ADB (doctor only checks the path, init only writes
+    # it), so in here it is a latent host path rather than a live one. Verified
+    # read-only 2026-09-01: the image does carry a working /usr/bin/adb from
+    # android-tools, so `adb` is the right value when that change is made.
+    argv += ["-e", "FASTBOOT=fastboot"]
     for src, dst, opts in mounts:
         argv += ["-v", f"{src}:{dst}:{opts}"]
     argv += [image, "sleep", "infinity"]

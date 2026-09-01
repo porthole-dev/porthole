@@ -415,9 +415,73 @@ def test_kernel_provenance_is_a_milestone_in_the_packaging_phase():
 def test_provenance_verdict_maps_the_three_states():
     import porthole_milestones as ms
 
-    assert ms.verdict_for_provenance("done", "aport r22").state == ms.DONE
+    assert ms.verdict_for_provenance("done", "aport r22", age=30.0).state == ms.DONE
     assert ms.verdict_for_provenance("todo", "behind").state == ms.TODO
     assert ms.verdict_for_provenance("blocked", "tree build").state == ms.BLOCKED
+
+
+def test_a_stale_provenance_reading_is_not_believed_forever():
+    """Flash the phone and a `done` from before the flash must not keep
+    printing as fact. Same rule as the matrix's own expiry, one module over:
+    the age has to change the STATE, not just decorate the evidence."""
+    import porthole_milestones as ms
+
+    fresh = ms.verdict_for_provenance("done", "running aport r22", age=30.0)
+    assert fresh.state == ms.DONE, fresh
+    stale = ms.verdict_for_provenance(
+        "done", "running aport r22", age=ms.PROVENANCE_MAX_AGE_S + 1)
+    assert stale.state != ms.DONE, stale
+    assert "ago" in stale.evidence, stale.evidence
+
+
+def test_an_undated_provenance_done_is_not_believed():
+    """`at` missing, null, or the wrong type reaches here as age=None -- a
+    DONE that cannot be dated is the same optimistic-direction mistake as an
+    expired one."""
+    import porthole_milestones as ms
+
+    verdict = ms.verdict_for_provenance("done", "running aport r22", age=None)
+    assert verdict.state != ms.DONE, verdict
+
+
+def test_a_stale_provenance_age_does_not_improve_a_todo_or_blocked():
+    """The asymmetry: only the POSITIVE claim needs a date to stand on. A
+    todo/blocked reading is exactly as true regardless of how old (or
+    undated) the cache is -- age must never upgrade it."""
+    import porthole_milestones as ms
+
+    for age in (None, ms.PROVENANCE_MAX_AGE_S + 1, 30.0):
+        assert ms.verdict_for_provenance("todo", "behind", age=age).state == ms.TODO
+        assert (ms.verdict_for_provenance("blocked", "tree build", age=age).state
+                == ms.BLOCKED)
+
+
+def test_probe_kernel_provenance_reads_the_at_written_by_brief():
+    """End-to-end through the cache read, not just the pure function: a
+    kernel-provenance.json with a fresh `at` is DONE; the same blob with an
+    old `at` is not."""
+    import json
+    import tempfile
+    import time
+
+    import porthole_milestones as ms
+
+    working = {"state": "done", "evidence": "running aport r22"}
+    with tempfile.TemporaryDirectory() as tmp:
+        rundir = pathlib.Path(tmp) / ".run"
+        rundir.mkdir()
+        (rundir / "kernel-provenance.json").write_text(
+            json.dumps({**working, "at": time.time()}))
+        verdict = ms.probe_kernel_provenance(FakeCtx(root=tmp))
+    assert verdict.state == ms.DONE, verdict
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rundir = pathlib.Path(tmp) / ".run"
+        rundir.mkdir()
+        (rundir / "kernel-provenance.json").write_text(
+            json.dumps({**working, "at": time.time() - ms.PROVENANCE_MAX_AGE_S - 1}))
+        verdict = ms.probe_kernel_provenance(FakeCtx(root=tmp))
+    assert verdict.state != ms.DONE, verdict
 
 
 def test_brief_probes_the_device_before_it_evaluates_milestones():
@@ -463,6 +527,205 @@ def test_brief_probes_the_device_before_it_evaluates_milestones():
     assert state_lineno < port_state_lineno, (
         "cmd_brief must probe the device before evaluating milestones; "
         "the probe warms the cache the milestone probes read")
+
+
+def test_a_matrix_question_mark_never_advances_a_milestone():
+    """The rule the whole matrix rests on.
+
+    `?` means nobody looked. Reading it as done is confidently wrong in the
+    direction of "you are further along than you are", which is what
+    `porthole next` exists to stop. This used to assert only `!= DONE`,
+    which passed just as well for the bug (state == TODO) as for the fix
+    (state == UNKNOWN) -- pin the exact state, not just the one thing it
+    must not be.
+    """
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "?"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert verdict.state == ms.UNKNOWN, verdict
+
+
+def test_an_all_untested_matrix_capability_is_unknown_not_todo():
+    """`suspend` has no `works:` probe and BY DESIGN never can -- the spec
+    forbids a probe that induces a suspend -- so its row is `works: ?`
+    forever, on every device. TODO here would mean this milestone could
+    never leave TODO on a tick, ever. UNKNOWN is what lets a human's tick
+    stand, same as no matrix at all."""
+    blob = {"at": 0, "capabilities": [{"name": "suspend", "present": "yes",
+                                       "works": "?"}]}
+    verdict = ms.verdict_from_matrix(blob, ["suspend"], age=30.0)
+    assert verdict.state == ms.UNKNOWN, verdict
+
+
+def test_an_all_untested_matrix_capability_does_not_mark_a_tick_stale():
+    """The half that was never pinned: UNKNOWN alone is not the fix unless
+    `evaluate()` actually leaves the tick alone. Break this by reverting
+    verdict_from_matrix to return `todo(...)` for the all-`?` case and this
+    must fail: `stale` would flip True and the milestone would demote from
+    DONE (manual) to TODO (stale) on every single evaluation forever."""
+    blob = {"at": 0, "capabilities": [{"name": "suspend", "present": "yes",
+                                       "works": "?"}]}
+    probe = lambda ctx: ms.verdict_from_matrix(blob, ["suspend"], age=30.0)
+    row = one(probe, ticks={"x": True})
+    assert row["state"] == ms.DONE, row
+    assert row["source"] == "manual", row
+    assert row["source"] != "stale", row
+
+
+def test_a_matrix_real_failure_still_returns_todo():
+    """A real `no` is an actual finding, unlike an untested `?` -- it must
+    still demote, and still mark a tick stale."""
+    blob = {"at": 0, "capabilities": [{"name": "suspend", "present": "yes",
+                                       "works": "no"}]}
+    verdict = ms.verdict_from_matrix(blob, ["suspend"], age=30.0)
+    assert verdict.state == ms.TODO, verdict
+    probe = lambda ctx: verdict
+    row = one(probe, ticks={"x": True})
+    assert row["state"] == ms.TODO, row
+    assert row["source"] == "stale", row
+
+
+def test_a_mixed_matrix_result_still_returns_todo():
+    """Some names pass, some are untested -- that mix IS actionable, unlike
+    "we haven't tried any of them", so it must stay TODO (and still mark a
+    tick stale)."""
+    blob = {"at": 0, "capabilities": [
+        {"name": "wifi", "present": "yes", "works": "yes"},
+        {"name": "bluetooth", "present": "yes", "works": "?"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi", "bluetooth"], age=30.0)
+    assert verdict.state == ms.TODO, verdict
+    assert "bluetooth" in verdict.evidence, verdict.evidence
+    probe = lambda ctx: verdict
+    row = one(probe, ticks={"x": True})
+    assert row["state"] == ms.TODO, row
+    assert row["source"] == "stale", row
+
+
+def test_a_matrix_cell_that_works_makes_the_milestone_done():
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "yes"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert verdict.state == ms.DONE, verdict
+    assert "30s ago" in verdict.evidence, verdict.evidence
+
+
+def test_a_milestone_over_several_capabilities_needs_all_of_them():
+    # `radios` is wifi AND bluetooth AND modem. Two out of three is not done.
+    blob = {"at": 0, "capabilities": [
+        {"name": "wifi", "present": "yes", "works": "yes"},
+        {"name": "bluetooth", "present": "yes", "works": "yes"},
+        {"name": "modem", "present": "yes", "works": "no"}]}
+    verdict = ms.verdict_from_matrix(
+        blob, ["wifi", "bluetooth", "modem"], age=30.0)
+    assert verdict.state != ms.DONE, verdict
+    assert "modem" in verdict.evidence, verdict.evidence
+
+
+def test_no_matrix_at_all_is_unknown_so_a_tick_still_counts():
+    """Before anyone runs `porthole matrix` the tick is the only signal.
+
+    UNKNOWN keeps the previous behaviour exactly, so landing the matrix does
+    not un-tick a box somebody earned.
+    """
+    verdict = ms.verdict_from_matrix({}, ["wifi"], age=None)
+    assert verdict.state == ms.UNKNOWN, verdict
+
+
+def test_a_stale_matrix_says_so_rather_than_being_believed():
+    """A DONE verdict must not stand forever. `?` in ago beside DONE at 30s
+    and DONE at three weeks old would look identical -- so the age has to
+    change the STATE, not just decorate the evidence string. Past the cap
+    (24h, ms.MATRIX_MAX_AGE_S) a would-be DONE reverts to TODO."""
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "yes"}]}
+    fresh = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert fresh.state == ms.DONE, fresh
+    stale = ms.verdict_from_matrix(blob, ["wifi"],
+                                   age=ms.MATRIX_MAX_AGE_S + 1)
+    assert stale.state != ms.DONE, stale
+    assert "ago" in stale.evidence, stale.evidence
+
+
+def test_an_unknown_age_is_treated_as_stale_not_fresh():
+    """An `at` that is missing, null, or not a number means the age cannot
+    be established -- and a DONE that cannot be dated is the same
+    confidently-wrong-in-the-optimistic-direction claim `?` and a missing
+    cell already are. `probe_from_matrix` passes `age=None` in exactly this
+    case; asserting only that some evidence string appears would repeat
+    round 1's weak-test problem, so this checks the STATE."""
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes",
+                                       "works": "yes"}]}
+    fresh = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert fresh.state == ms.DONE, fresh
+    for bad_age in (None,):
+        verdict = ms.verdict_from_matrix(blob, ["wifi"], age=bad_age)
+        assert verdict.state != ms.DONE, (bad_age, verdict)
+
+
+def test_probe_from_matrix_does_not_invent_an_age_from_a_bad_at():
+    """End-to-end through `probe_from_matrix`, not just the pure function:
+    `at` missing or the wrong type must reach `verdict_from_matrix` as
+    `age=None`, never as an invented 0 (which would read as "just now" --
+    the most optimistic reading possible)."""
+    import json
+
+    working = {"capabilities": [{"name": "wifi", "present": "yes",
+                                 "works": "yes"}]}
+    for at in (None, "soon"):
+        with tempfile.TemporaryDirectory() as tmp:
+            rundir = pathlib.Path(tmp) / ".run"
+            rundir.mkdir()
+            (rundir / "matrix.json").write_text(
+                json.dumps({**working, "at": at}))
+            verdict = ms.probe_from_matrix("wifi")(FakeCtx(root=tmp))
+        assert verdict.state != ms.DONE, (at, verdict)
+    # Control: the same matrix with a real, fresh timestamp IS done -- so
+    # the assertion above is about the bad `at`, not about this matrix
+    # being unable to be done at all.
+    with tempfile.TemporaryDirectory() as tmp:
+        import time
+        rundir = pathlib.Path(tmp) / ".run"
+        rundir.mkdir()
+        (rundir / "matrix.json").write_text(
+            json.dumps({**working, "at": time.time()}))
+        verdict = ms.probe_from_matrix("wifi")(FakeCtx(root=tmp))
+    assert verdict.state == ms.DONE, verdict
+
+
+def test_a_null_capabilities_matrix_does_not_raise():
+    """A corrupt cache must degrade to a verdict, never a traceback -- that
+    is the difference between `porthole next` reporting "nobody has looked"
+    and `porthole next` crashing every session until someone deletes the
+    file by hand."""
+    for capabilities in (None, "not a list", [1, 2, "x"], 42):
+        blob = {"at": 0, "capabilities": capabilities}
+        verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+        assert verdict.state != ms.DONE, (capabilities, verdict)
+
+
+def test_radios_with_an_unprofiled_capability_is_not_done():
+    """A name the matrix never mentions is not evidence of success -- it is
+    exactly as unproven as `?`. Dropping it silently (the old
+    `if n in cells` filter) let `radios` report done with modem never
+    touched."""
+    blob = {"at": 0, "capabilities": [
+        {"name": "wifi", "present": "yes", "works": "yes"},
+        {"name": "bluetooth", "present": "yes", "works": "yes"}]}
+    verdict = ms.verdict_from_matrix(
+        blob, ["wifi", "bluetooth", "modem"], age=30.0)
+    assert verdict.state != ms.DONE, verdict
+    assert "modem" in verdict.evidence, verdict.evidence
+
+
+def test_a_cell_missing_works_is_treated_as_untested():
+    """`works` absent from a cell is not "yes" and must not be read as one --
+    `c.get("works") == "no"` and `== "?"` both silently pass a bare
+    `{"name": "wifi"}` cell straight to DONE. A single untested capability is
+    the all-untested case (see test_an_all_untested_matrix_capability_is_
+    unknown_not_todo), so this reads as UNKNOWN, not a manufactured TODO."""
+    blob = {"at": 0, "capabilities": [{"name": "wifi", "present": "yes"}]}
+    verdict = ms.verdict_from_matrix(blob, ["wifi"], age=30.0)
+    assert verdict.state == ms.UNKNOWN, verdict
 
 
 def main():

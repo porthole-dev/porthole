@@ -677,7 +677,7 @@ _ph_assert_no_devpkgs() {
 	if [ "$stale" -ne 0 ]; then
 		echo "REFUSING: $stale envkernel (_p) kernel apks are in the local repo." >&2
 		echo "apk sorts _p<timestamp> ABOVE -rNN, so one of those would be installed" >&2
-		echo "instead of what you just built. Run tkpurge-devpkgs first." >&2
+		echo "instead of what you just built. Run 'porthole build purge' first." >&2
 		return 1
 	fi
 
@@ -815,13 +815,30 @@ tkbuild() {
 	_ph_assert_no_devpkgs || return 1
 	_ph_assert_must_ship || return 1
 	_ph_make || return 1
+	# _ph_make just ran `pmbootstrap build --envkernel`, which packages the tree
+	# under a dev version (<ver>_p<timestamp>-r0) and indexes it -- so the repo
+	# that was clean when _ph_assert_no_devpkgs ran above is not clean any more.
+	# apk sorts _p<timestamp> ABOVE -rNN, so the `pmbootstrap install` below
+	# would resolve the world file's release request against that apk instead.
+	# Reproduced on a real build 2026-08-31: `install` refused with
+	#   ERROR: unable to select packages:
+	#     linux-postmarketos-qcom-msm8998-7.2-7.2.2-r22:
+	#       breaks: .pmbootstrap-...[linux-postmarketos-qcom-msm8998-7.2><...]
+	# against packages/edge/aarch64/linux-...-7.2-7.2.2_p20260831223057-r0.apk --
+	# an apk the SAME build had produced three minutes earlier. Same hazard
+	# _ph_install_kernel_release documents and purges before its own build
+	# (~line 746); tkbuild has to purge here for the same reason.
+	tkpurge-devpkgs || return 1
 	# Password comes from the environment so it is not committed. Set it once:
 	#   export TK_PMOS_PASSWORD=...
 	: "${TK_PMOS_PASSWORD:?set TK_PMOS_PASSWORD (the rootfs user password) before tkbuild}"
+	echo ">> installing the kernel into the rootfs chroot (pmbootstrap install) --"
+	echo ">>   mkfs + package installs, normally minutes, no progress signal"
 	pmbootstrap install --password "$TK_PMOS_PASSWORD" || return 1
 	# install just reminted the filesystem UUIDs, so any recorded set is now a
 	# lie -- and tkflash-boot would patch the fresh export back to the old ones.
 	rm -f "$_PH_REPO/.device-uuids"
+	echo ">> exporting the built image (pmbootstrap export)"
 	pmbootstrap export || return 1
 
 	echo
@@ -1031,8 +1048,10 @@ tkflash-boot() {
 
 	# Get there ourselves. tkpush-modules has to run while the phone is UP,
 	# so the caller cannot have parked it in the bootloader beforehand.
-	"$FASTBOOT" devices 2>/dev/null | grep -q fastboot || \
-		"$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
+	# tk_in_fastboot, not a hand-rolled `"$FASTBOOT" devices | grep`: the
+	# hand-rolled copy cannot tell "no device" from "no fastboot binary" -- both
+	# are empty stdout -- and it has no timeout either. See ph_need_fastboot.
+	tk_in_fastboot || "$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
 
 	local img; img=$(readlink -f /tmp/postmarketOS-export/boot.img)
 	# The DTB to verify boot.img AGAINST. Defaults to the envkernel tree build,
@@ -1196,6 +1215,7 @@ tkbuild-kernel() {
 	# -r: the rootfs chroot, not the build chroot. -U -u: refresh the index and
 	# upgrade, so it picks up the apk just built rather than a cached older one.
 	_ph_install_kernel_release || return 1
+	echo ">> exporting the built image (pmbootstrap export)"
 	pmbootstrap export || return 1
 
 	# Against the apk that was installed, NOT the tree: this rung flashes the
@@ -1331,6 +1351,7 @@ tkupgrade-kernel() {
 	fi
 	_PH_INSTALLED_APK="$repo/$_PH_KPKG-$ver.apk"
 
+	echo ">> exporting the built image (pmbootstrap export)"
 	pmbootstrap export || return 1
 
 	# Against the apk that was installed, NOT the tree: this rung ships the

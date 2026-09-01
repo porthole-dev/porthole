@@ -534,7 +534,10 @@ class PkgTracker(Tracker):
         return fraction(self.history, self.key, self.elapsed, 0)
 
 
-def line_of(snap, width: int = 18) -> str:
+_LINE_WIDTH = 100  # matches status_report's own `last`-truncation budget
+
+
+def line_of(snap, width: int = 18, now=None) -> str:
     """The one-line view, from a snapshot rather than from a live tracker.
 
     Module-level so that something following the status FILE renders exactly
@@ -555,9 +558,33 @@ def line_of(snap, width: int = 18) -> str:
     # have no step count to have a rate over.
     tail = "" if "rate" not in snap else \
         " {:>6}".format("--/s" if not rate else "{:.1f}/s".format(rate))
-    return "{} {} {:<10}{} {:>7} eta {:>7}".format(
+    base = "{} {} {:<10}{} {:>7} eta {:>7}".format(
         bar(frac, width), pct, phase, tail,
         fmt_dur(snap.get("elapsed")), fmt_dur(snap.get("eta")))
+    # `stall_note()` had exactly one caller -- `status_report`, reached only
+    # after a run has already stopped -- so a `watch`ed build never showed
+    # it: `watch` renders THIS function while the run is still live. Without
+    # it, a healthy `pmbootstrap install` silent for minutes looked identical
+    # to a hang. Appended here, not on a second line: `watch` repaints in
+    # place on a tty and a second line would corrupt the redraw.
+    last = snap.get("last")
+    if not last:
+        return base
+    age = snap.get("last_age")
+    if age is None and snap.get("last_at") is not None:
+        age = (time.time() if now is None else now) - snap["last_at"]
+    note = stall_note(last, age or 0.0)
+    if not note:
+        return base
+    sep = " · "
+    room = _LINE_WIDTH - len(base) - len(sep)
+    if room < 20:
+        return base
+    if len(note) > room:
+        # Cut on a word boundary -- a note truncated mid-word reads as
+        # corrupted rather than merely shortened.
+        note = note[:room].rsplit(" ", 1)[0]
+    return base + sep + note
 
 
 def publish_pending(rundir, rung: str, pid: int,

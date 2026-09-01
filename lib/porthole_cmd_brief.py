@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import time
 
 import porthole
 import porthole_rules as rules
@@ -111,8 +112,12 @@ def cmd_brief(args, ctx) -> int:
 
                 info = prov.running(ctx.device(), cfg.get("PORTHOLE_KERNEL_PKG", ""))
                 verdict, evidence = prov.compare(info, *_build.aport_version(ctx))
+                # "at" is what lets probe_kernel_provenance() age this claim
+                # out: without it a "done" read here kept printing verbatim
+                # forever, including past a reflash that made it false.
                 kernel = {"state": verdict, "evidence": evidence,
-                          "build_version": info.get("build_version", "")}
+                          "build_version": info.get("build_version", ""),
+                          "at": time.time()}
                 _write_run_json(ctx, "kernel-provenance.json", kernel)
             except Exception:  # noqa: BLE001 -- brief must never fail on this
                 kernel = {}
@@ -277,6 +282,20 @@ def cmd_brief(args, ctx) -> int:
             ctx.out.kv("next", port["next"]["title"], w)
             if port["next"]["command"]:
                 ctx.out.kv("", ctx.out.paint(port["next"]["command"], "cyan"), w)
+            m = port.get("matrix")
+            if isinstance(m, dict) and m:
+                # Defensive: a summary without "at" (an old cache, or one
+                # `porthole matrix` hasn't written yet) must still render --
+                # just without an age, never a crash in the first command an
+                # agent runs.
+                age = ""
+                at = m.get("at")
+                if isinstance(at, (int, float)):
+                    import porthole_milestones as ms
+                    age = ", probed {} ago".format(ms._ago(time.time() - at))
+                ctx.out.kv("works", f"{m.get('works', 0)}/{m.get('total', 0)} "
+                                    f"capabilities "
+                                    f"({m.get('untested', 0)} untested{age})", w)
             for item in port.get("stale", [])[:3]:
                 ctx.out.warn(f"{item['title']}: {item['detail']}")
             ctx.out.blank()
@@ -373,8 +392,22 @@ def _port_state(ctx, device: str) -> dict:
         return {}
     try:
         import porthole_cmd_next as nxt
+        import porthole_milestones as ms
         _, summary, has_markers = nxt.collect(ctx)
-        return {**summary, "checklist_has_markers": has_markers}
+        blob = ms._read_run_json(ctx, "matrix.json")
+        matrix = blob.get("summary") if isinstance(blob, dict) else None
+        matrix = dict(matrix) if isinstance(matrix, dict) else {}
+        # Carry the cache's own timestamp through: a summary with no age
+        # attached renders identically at 30 seconds and three weeks old,
+        # which is the same claim-that-stands-forever bug the milestone
+        # layer had. "at" is a raw timestamp (not pre-formatted) so a
+        # machine consumer of `brief --json` can age it too, the same way
+        # `render()` below does for a human.
+        at = blob.get("at") if isinstance(blob, dict) else None
+        if isinstance(at, (int, float)):
+            matrix["at"] = at
+        return {**summary, "checklist_has_markers": has_markers,
+                "matrix": matrix}
     except Exception:  # noqa: BLE001
         return {}
 
