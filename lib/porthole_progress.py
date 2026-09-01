@@ -969,8 +969,29 @@ NDJSON_KEYS = ("rung", "phase", "state", "pid", "elapsed", "progress", "eta",
               "note")
 
 
+def orphaned(snap, foreign: str) -> bool:
+    """Is `foreign` the very build this status file was following?
+
+    Two different facts wear the same symptom -- a live build and a status
+    file nobody is updating -- and the answer decides which sentence is true:
+
+      the tracker died      `porthole aports build webkit2gtk-6.0` published
+                            this file, its process was killed, and the build
+                            kept running because the workspace outlives the
+                            client that started it. The numbers here are real
+                            but frozen, and the flock died with the holder.
+      it never came through  a `sandbox shell --command` build. Nothing was
+                            ever published for it and nothing ever will be.
+
+    `rung` is `pkg:<name>`; the probe reports the bare `<name>`. Pure, so the
+    wording each case gets is testable without a container.
+    """
+    rung = (snap or {}).get("rung") or ""
+    return bool(foreign) and rung.split(":", 1)[-1] == foreign
+
+
 def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
-          tty=None, start_hint: str = "") -> int:
+          tty=None, start_hint: str = "", probe=None) -> int:
     """Follow a status file until the run stops. Returns EX_OK when the run
     finished `done`, non-zero otherwise.
 
@@ -1014,6 +1035,11 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     kind (e.g. "porthole pkg build <aport>") -- only the CALLER knows that,
     so this function never guesses one from `status_name`. Without it, the
     "nothing has ever published here" error falls back to generic wording.
+
+    `probe`, if given, answers "is something building that never published
+    here?" -- it returns a name, or "". Only the caller can ask that (it means
+    a `podman exec ps` in the workspace), and it is asked ONCE, only when
+    there is nothing live to attach to.
 
     Polling a file, not sleeping through the run: the sleep here is between
     reads of a real signal, which is what brain/laws/poll-never-sleep.md asks
@@ -1077,6 +1103,37 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     # `continue`.
     last_note = 0.0
     snap = snapshot()
+
+    # A build that did not come through porthole -- `sandbox shell --command
+    # 'pmbootstrap build ...'`, a hand-rolled podman exec -- takes no lock and
+    # writes no status file. The newest snapshot is then the PREVIOUS run's,
+    # and every word this loop says about it is true and completely wrong
+    # about what the machine is doing: measured, a watch during a live webgtk
+    # build reported "finished 24m ago" and exited 0. So when there is nothing
+    # live to attach to, ask before concluding nothing is happening.
+    if probe and (snap is None or is_stale(snap)):
+        foreign = probe() or ""
+        if foreign and orphaned(snap, foreign):
+            stopped = finished_at(snap)
+            frozen = fmt_dur(time.time() - stopped) if stopped else "a while"
+            raise Bail(
+                f"{foreign} is still building, but nothing is following it "
+                f"any more -- the porthole run that published {status_name} "
+                f"is gone, and its last numbers are {frozen} old",
+                EX_FAIL,
+                f"the build outlived its tracker: it runs in the workspace, "
+                f"which survives the client that started it. Its own output "
+                f"is the only live witness now -- and the buildroot lock died "
+                f"with the tracker, so nothing else may build until it ends.")
+        if foreign:
+            raise Bail(
+                f"{foreign} is building, but it never published "
+                f"{status_name} -- there is nothing here to follow",
+                EX_FAIL,
+                f"it was started outside `porthole pkg build`, so it took no "
+                f"lock either. Follow its own output, or wait for it and "
+                + (start_hint or "start the next one through porthole"))
+
     while (snap is None or is_stale(snap)) and (appear is None
                                                 or time.time() < appear):
         line = waiting_line(snap)

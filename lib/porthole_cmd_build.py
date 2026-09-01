@@ -1449,11 +1449,16 @@ def _watch(ctx, args) -> int:
         sys.stdout.write(line)
         sys.stdout.flush()
 
+    from porthole_buildroot import running_build
+
+    # Lazy on purpose -- see `pkg`'s `_watch`: the probe is one `podman exec`,
+    # asked only when there is nothing live here to follow.
     return progress.watch(rundir, "build-status.json",
                           getattr(args, "interval", 1.0), out,
                           ndjson=getattr(args, "json", False),
                           start_hint="start one with `porthole build <action> "
-                                     "--yes` or `--detach`")
+                                     "--yes` or `--detach`",
+                          probe=lambda: running_build(ctx, True))
 
 
 def tree_banner(rung: str, tree, release: str) -> str:

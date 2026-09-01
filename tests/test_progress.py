@@ -1092,5 +1092,86 @@ def main():
     return 1 if failed else 0
 
 
+def test_watch_says_when_a_build_outlived_the_run_that_was_tracking_it():
+    """Measured, on a real webkit build: `porthole aports build webkit2gtk-6.0`
+    published .run/pkg-status.json, its own process was then killed, and the
+    build kept going inside the workspace -- `podman exec`'s server side
+    outlives its client. The file froze at 83.9% and stayed `running` with a
+    dead pid. "webkit2gtk-6.0 finished 47m ago" was wrong; so is "it never
+    came through porthole", because it did. The rung is what tells them
+    apart, and the reader has to be told the lock died with the holder."""
+    with tempfile.TemporaryDirectory() as rundir:
+        frozen = time.time() - 47 * 60
+        snap = {"rung": "pkg:webkit2gtk-6.0", "phase": "build",
+                "state": "running", "pid": 999999999, "elapsed": 6832.5,
+                "progress": 0.839, "eta": 17012.0, "compile_lines": 7907,
+                "last": "[7907/9429] Building CXX", "last_at": frozen,
+                "last_age": 41.0, "started": frozen - 6832.5}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        try:
+            progress.watch(rundir, "x-status.json", 0.01, [].append,
+                           tty=False, probe=lambda: "webkit2gtk-6.0")
+            raise AssertionError("expected Bail: the tracker is gone")
+        except progress.Bail as exc:
+            assert "still building" in exc.message, exc.message
+            assert "never" not in exc.message, "it DID come through porthole"
+            assert "lock" in exc.hint, "the released flock is the danger"
+
+
+def test_a_different_package_building_is_not_this_run_orphaned():
+    """`orphaned` is what keeps the two sentences apart, so it must not call
+    somebody else's build the resurrection of this one."""
+    snap = {"rung": "pkg:phoc"}
+    assert progress.orphaned(snap, "phoc")
+    assert not progress.orphaned(snap, "webkit2gtk-6.0")
+    assert not progress.orphaned(None, "phoc")
+    assert not progress.orphaned(snap, "")
+
+
+def test_watch_names_a_build_that_never_published_instead_of_the_last_run():
+    """The sandbox is compiling right now, started outside porthole -- through
+    `sandbox shell --command`, which takes no lock and writes no status file.
+    The newest snapshot is then somebody else's finished run, and reporting it
+    ("webgtk finished 24m ago", exit 0) is true about the file and wrong about
+    the machine. The probe is what turns that into an answer."""
+    with tempfile.TemporaryDirectory() as rundir:
+        finished = time.time() - 24 * 60
+        snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
+                "pid": 1, "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
+                "compile_lines": 42, "last": "DONE!", "last_at": finished,
+                "last_age": 0.0, "started": finished - 5.0}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        try:
+            progress.watch(rundir, "x-status.json", 0.01, [].append,
+                           tty=False, probe=lambda: "webgtk")
+            raise AssertionError("expected Bail: webgtk is building")
+        except progress.Bail as exc:
+            assert "webgtk" in exc.message, exc.message
+            assert "never published" in exc.message, exc.message
+            assert exc.code != progress.EX_OK
+
+
+def test_watch_does_not_probe_while_a_run_of_its_own_is_live():
+    """The probe is a `podman exec` -- asked only when there is nothing here
+    to follow, never once per poll of a healthy build."""
+    with tempfile.TemporaryDirectory() as rundir:
+        now = time.time()
+        snap = {"rung": "pkg:phoc", "phase": "build", "state": "done",
+                "pid": os.getpid(), "elapsed": 5.0, "progress": 1.0,
+                "eta": 0.0, "compile_lines": 42, "last": "DONE!",
+                "last_at": now, "last_age": 0.0, "started": now}
+        (pathlib.Path(rundir) / "x-status.json").write_text(json.dumps(snap))
+        asked = []
+
+        def probe():
+            asked.append(1)
+            return "webgtk"
+
+        rc = progress.watch(rundir, "x-status.json", 0.01, [].append,
+                            tty=False, probe=probe)
+        assert rc == progress.EX_OK
+        assert not asked, "probed a run that was speaking for itself"
+
+
 if __name__ == "__main__":
     sys.exit(main())

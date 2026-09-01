@@ -859,9 +859,22 @@ def _watch(ctx, args) -> int:
         sys.stdout.write(line)
         sys.stdout.flush()
 
+    # Same probe `_build` uses to refuse to start on top of a foreign build:
+    # one that came through `sandbox shell --command` publishes no status, and
+    # without this `watch` reports the previous run as though it were the news.
+    #
+    # A LAMBDA, and not `_workspace_usable` first: `progress.watch` asks only
+    # when there is nothing live to follow, so a healthy watch pays no podman
+    # at all -- computing the argument up front put half a second of `podman
+    # ps` plus `inspect` on every invocation, including the ones that attach
+    # to a running build immediately. And the question here is "is anything
+    # building in the workspace", not "is the workspace wired for THIS
+    # device": a container built for another phone still owns the buildroot
+    # and still publishes nothing, so `running_build` asks it either way.
     return progress.watch(rundir, "pkg-status.json", args.interval, out,
                           start_hint="start one with "
-                                     "`porthole pkg build <aport>`")
+                                     "`porthole pkg build <aport>`",
+                          probe=lambda: running_build(ctx, True))
 
 
 def _outdated(ctx) -> int:
