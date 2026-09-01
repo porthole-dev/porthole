@@ -8,6 +8,7 @@ drawn at all -- which is the whole reason the second line is status rather
 than permanent furniture, and the install path, which writes into somebody
 else's git repo and must not dirty it.
 """
+import contextlib
 import json
 import os
 import pathlib
@@ -68,6 +69,26 @@ def _write(repo, snap):
     (repo / ".run" / "build-status.json").write_text(json.dumps(snap))
 
 
+@contextlib.contextmanager
+def _only_these_logs(*dirs):
+    """Point every pmbootstrap work dir at a temp one.
+
+    Both of them, or the machine's own log.txt -- which on a porting host is
+    being written all the time -- decides the test.
+    """
+    saved = {name: os.environ.get(name) for name, _ in sl.PMB_LOGS}
+    for index, (name, _) in enumerate(sl.PMB_LOGS):
+        os.environ[name] = str(dirs[min(index, len(dirs) - 1)])
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 def test_no_status_file_draws_no_row():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _fake_repo(pathlib.Path(tmp))
@@ -111,6 +132,85 @@ def test_an_old_result_expires():
                       "eta": None, "last": "boom",
                       "last_at": now - sl.LINGER_S - 1})
         assert sl.build_line(repo, 100, now) is None
+
+
+def test_a_build_that_outlived_its_tracker_still_gets_a_row():
+    """Measured on this host: a webkit build ran for two hours at 88% with a
+    status line that said nothing, because the porthole run that published
+    .run/pkg-status.json had been killed and `liveness` therefore called the
+    snapshot stale. The workspace log was being appended to the whole time."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _fake_repo(pathlib.Path(tmp))
+        now = 1000.0
+        pmb = pathlib.Path(tmp) / "pmb"
+        pmb.mkdir()
+        (pmb / "log.txt").write_text(
+            "[8100/9429] Building CXX object a.cpp.o\n"
+            "[8522/9429] Building CXX object b.cpp.o\n")
+        os.utime(pmb / "log.txt", (now - 3, now - 3))
+        # frozen mid-build: state says running, the pid is long gone
+        _write(repo, {"rung": "pkg:webkit2gtk-6.0", "phase": "build",
+                      "state": "running", "pid": 999999999, "elapsed": 6832.0,
+                      "progress": 0.839, "eta": None, "last": "[7907/9429]",
+                      "last_at": now - 2900, "started": now - 9700})
+        with _only_these_logs(pmb):
+            snap, reattached = sl.build_snapshot(repo, now)
+            row = sl.build_line(repo, 100, now)
+    assert reattached and snap is not None
+    # the LOG's numbers, not the frozen file's 83.9%
+    assert snap["steps"] == "8522/9429", snap
+    assert "webkit2gtk-6.0" in row and "90%" in row, row
+    assert "reattached" in row, row
+
+
+def test_an_unrelated_checkout_does_not_claim_the_machines_build():
+    """The log belongs to the machine's workspace, not to this repo. A fresh
+    one on its own says only "something is building somewhere", whose name
+    could only be guessed -- so it takes a frozen `running` snapshot HERE to
+    make those numbers this repo's build."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _fake_repo(pathlib.Path(tmp))
+        now = 1000.0
+        pmb = pathlib.Path(tmp) / "pmb"
+        pmb.mkdir()
+        (pmb / "log.txt").write_text("[10/20] Building CXX object a.cpp.o\n")
+        os.utime(pmb / "log.txt", (now - 3, now - 3))
+        with _only_these_logs(pmb):
+            assert sl.build_line(repo, 100, now) is None
+            # ...and a FINISHED build here does not adopt them either.
+            _write(repo, {"rung": "fast", "state": "done", "pid": os.getpid(),
+                          "elapsed": 5.0, "progress": 1.0, "eta": 0.0,
+                          "last": "DONE!", "last_at": now - 9000})
+            assert sl.build_line(repo, 100, now) is None
+
+
+def test_the_row_is_coloured_even_though_stdout_is_not_a_terminal():
+    """The status line is chrome the harness paints, not a pipe somebody is
+    capturing -- `detect_style` would see stdout is not a tty and turn colour
+    off, which is right everywhere else and wrong here. NO_COLOR still wins,
+    and colour must never change how wide the row is."""
+    import porthole_progress as pp
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _fake_repo(pathlib.Path(tmp))
+        now = 1000.0
+        _write(repo, {"rung": "fast", "phase": "make", "state": "running",
+                      "pid": os.getpid(), "elapsed": 12.0, "progress": 0.5,
+                      "eta": 30.0, "last": "  CC drivers/foo.o",
+                      "last_at": now, "steps": "10/20"})
+        row = sl.build_line(repo, 100, now)
+        assert "\033[" in row, row
+        assert pp.visible_len(row) <= 100
+        saved = os.environ.get("NO_COLOR")
+        os.environ["NO_COLOR"] = "1"
+        try:
+            plain = sl.build_line(repo, 100, now)
+        finally:
+            if saved is None:
+                del os.environ["NO_COLOR"]
+            else:
+                os.environ["NO_COLOR"] = saved
+        assert "\033[" not in plain, plain
+        assert pp.visible_len(row) == len(plain)
 
 
 def test_the_settings_carry_a_refresh_interval():
