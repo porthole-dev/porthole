@@ -19,16 +19,57 @@ def tool_version(name: str) -> str:
     path = shutil.which(name)
     if not path:
         return "not found"
-    for flags in (["--version"], ["version"]):
+    # `-V` BEFORE the bare `version` subcommand, and both after `--version`.
+    # ssh has no `--version` (it answers `unknown option -- -` on stderr,
+    # which this reported verbatim as ssh's version for as long as the row
+    # existed) -- and it reads a bare `version` as a HOSTNAME and tries to
+    # connect to it, which is a network round trip inside `porthole version`
+    # and printed `Pseudo-terminal will not be allocated` as the answer.
+    for flags in (["--version"], ["-V"], ["version"]):
         try:
             proc = subprocess.run([path, *flags], capture_output=True,
                                   text=True, timeout=5)
-            line = (proc.stdout or proc.stderr).strip().splitlines()
-            if line:
-                return line[0][:60]
         except (OSError, subprocess.TimeoutExpired):
             continue
+        lines = [line.strip() for line
+                 in (proc.stdout or proc.stderr).strip().splitlines()
+                 if line.strip()]
+        # A refusal invalidates the whole ATTEMPT, not just its first line: a
+        # usage message is many lines and the second of ssh's is
+        # `[-c cipher_spec] [-D [bind_address:]port] ...`, which is no more a
+        # version than the `unknown option` above it.
+        if lines and _plausible(lines[0]):
+            return lines[0][:60]
     return path
+
+
+# What a tool says when it did not understand the flag. Any of these means
+# "ask again differently", never "this is the version".
+_REFUSALS = ("unknown option", "unrecognized option", "invalid option",
+             "usage:", "usage :")
+
+# Bump when `tool_version` changes how it asks or what it accepts. The cache
+# below is keyed on this as well as on the binary, so an answer this code
+# would no longer give cannot outlive it.
+PROBE = 2
+
+
+def _is_refusal(line: str) -> bool:
+    low = line.lower()
+    return any(low.startswith(bad) or bad in low[:40] for bad in _REFUSALS)
+
+
+def _plausible(line: str) -> bool:
+    """Does this line actually look like a version?
+
+    A digit is the cheap, general test -- every version string has one and
+    none of the things this kept mistaking for one does: a refusal, a usage
+    line, an ssh connection banner. Pure, so the wording of the next tool's
+    excuse can be added to a test rather than discovered on somebody's
+    terminal.
+    """
+    return bool(line) and not _is_refusal(line) and any(c.isdigit()
+                                                        for c in line)
 
 
 def _tool_versions(names) -> dict:
@@ -39,9 +80,13 @@ def _tool_versions(names) -> dict:
     tried and made it WORSE -- the pool cost 70ms and saved nothing, because
     one probe dominates and threads cannot make it finish sooner.
 
-    So cache instead, keyed on the resolved path plus its mtime and size. A
-    tool's version changes when its binary does, which is exactly what that
-    key tracks; nothing else can change it.
+    So cache instead, keyed on the resolved path plus its mtime and size --
+    and on `PROBE`, which is the half that was missing. A tool's version
+    changes when its binary does, and also when the code that ASKS changes:
+    fixing ssh's row (`unknown option -- -`, cached against a binary that has
+    not moved in months) would otherwise have reached nobody who had run this
+    before, because the wrong answer was keyed on a binary that is still
+    identical.
     """
     import hashlib
     import pathlib
@@ -65,7 +110,8 @@ def _tool_versions(names) -> dict:
         try:
             st = os.stat(path)
             key = hashlib.sha256(
-                f"{path}:{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest()[:16]
+                f"{PROBE}:{path}:{st.st_mtime_ns}:{st.st_size}".encode()
+            ).hexdigest()[:16]
         except OSError:
             out[name] = tool_version(name)
             continue
