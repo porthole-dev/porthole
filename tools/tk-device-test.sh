@@ -49,6 +49,20 @@ case $h in *state=FROZEN*agent=T*|*agent=T*state=FROZEN*) ;;
     *) echo "FAIL: holder must record the state: $h"; exit 1 ;; esac
 echo "PASS: tk-device.sh state gate"
 
+# --- A caller that names no --need-* is not asking about the device, it wants
+# --- the mutex. state= in the holder file only annotates it, so a $FASTBOOT
+# --- that cannot run (ph_need_fastboot exits 69) must degrade to unknown
+# --- rather than take the run down. CI installs no fastboot, which is exactly
+# --- this case, and it cost every suite here a red tick.
+set +e
+h2=$(FASTBOOT=/nonexistent/fastboot TK_DEVICE_LOCK="$lock2" TK_AGENT=U \
+     "$here/tk-device.sh" bash -c "cat '$lock2.holder'" 2>/dev/null); rc2=$?
+set -e
+[ "$rc2" -eq 0 ] || { echo "FAIL: an unrunnable fastboot blocked the mutex, rc=$rc2"; exit 1; }
+case $h2 in *state=unknown*) ;;
+    *) echo "FAIL: an unprobed state must read unknown, got: $h2"; exit 1 ;; esac
+echo "PASS: tk-device.sh takes the mutex when fastboot cannot run"
+
 # --- tk_boot_id must treat a transient failure as "unknown", not as a new
 # --- boot_id. A fake ssh that fails once and then succeeds stands in for the
 # --- ~7.9 s sshd stall that ate a baseline on 2026-08-19; no phone needed.

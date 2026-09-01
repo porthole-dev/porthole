@@ -259,6 +259,13 @@ ph_timed() {
 
 # --------------------------------------------------------------- probes ----
 
+# ph_have_fastboot -- can $FASTBOOT be executed? Asked quietly: it RETURNS,
+# for the callers that want to ANNOTATE what the device is doing rather than
+# insist on it. tk-device.sh's holder file is the one that matters -- a caller
+# that named no --need-* is not asking about the device at all, it wants the
+# mutex, and neither a refusal nor its four lines of advice belong there.
+ph_have_fastboot() { command -v "$FASTBOOT" >/dev/null 2>&1; }
+
 # ph_need_fastboot -- refuse, loudly, if $FASTBOOT cannot be executed.
 #
 # It EXITS 69 (EX_UNAVAILABLE) rather than returning non-zero, and that is the
@@ -278,7 +285,7 @@ ph_timed() {
 # covers both forms $FASTBOOT takes: a bare name is looked up on PATH, a path
 # must exist AND be executable.
 ph_need_fastboot() {
-    command -v "$FASTBOOT" >/dev/null 2>&1 && return 0
+    ph_have_fastboot && return 0
     echo "porthole: FASTBOOT='$FASTBOOT' is not an executable command" >&2
     echo "porthole: the TOOL is missing, not the phone -- nothing was probed." >&2
     echo "porthole: point FASTBOOT at a fastboot that exists here, or install" >&2
