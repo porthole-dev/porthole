@@ -18,6 +18,7 @@ generic notes as well.
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [android-interaction-boost-is-the-remaining-perf-delta](findings/android-interaction-boost-is-the-remaining-perf-delta.md) | `soc:msm8998` | Android's INTERACTION boost is the remaining perf delta -- the scaling infrastructure already has vendor parity |
+| [app-jank-is-app-shaped-once-the-stack-is-clean](findings/app-jank-is-app-shaped-once-the-stack-is-clean.md) | `device:google-taimen` | With the display/decode stack clean, the remaining jank is app-shaped -- GJS GC in Maps, main-thread layout in WebKit 2.48, init CPU in browser launches |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
 | [ap-accepts-us-intermittently](findings/ap-accepts-us-intermittently.md) | `device:google-taimen` | TEST-SSID does accept this client -- intermittently, with the stock frame |
 | [ap-refuses-us-our-assocreq-is-clean](findings/ap-refuses-us-our-assocreq-is-clean.md) | `device:google-taimen` | TEST-SSID refuses this client, and our association request is not the reason |
@@ -87,6 +88,7 @@ generic notes as well.
 |---|---|---|
 | [a-444-test-clip-makes-working-hardware-decode-look-broken](traps/a-444-test-clip-makes-working-hardware-decode-look-broken.md) | `generic` | A 4:4:4 test clip makes working hardware decode look broken |
 | [a-board-name-is-not-a-soc-name](traps/a-board-name-is-not-a-soc-name.md) | `generic` | A vendor's reference board is not the SoC, and tools will accept it silently |
+| [a-build-outlives-the-porthole-run-that-tracks-it](traps/a-build-outlives-the-porthole-run-that-tracks-it.md) | `generic` | A build survives the porthole run that started it, and takes the buildroot lock to the grave |
 | [a-fresh-kernel-cannot-ram-boot-against-installed-modules](traps/a-fresh-kernel-cannot-ram-boot-against-installed-modules.md) | `generic` | A freshly built kernel cannot RAM-boot against the modules already on the device |
 | [a-full-zap-inside-the-workspace-unmounts-it](traps/a-full-zap-inside-the-workspace-unmounts-it.md) | `generic` | pmbootstrap zap inside the workspace tears down porthole's own bind mounts, and the build then refuses about a version |
 | [a-hard-hang-writes-nothing-to-disk](traps/a-hard-hang-writes-nothing-to-disk.md) | `generic` | A hard hang writes nothing to disk — capture on the host, before you trigger |
@@ -174,8 +176,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 26
-- `generic` — 91
+- `device:google-taimen` — 27
+- `generic` — 92
 - `soc:gs201` — 1
 - `soc:msm8998` — 18
 - `soc:qcom` — 1
