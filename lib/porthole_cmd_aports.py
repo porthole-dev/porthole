@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 
 from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
@@ -479,14 +480,79 @@ def pmb(ctx, *args, timeout=1800, capture=False):
     return _pmb_run(ctx, cmd, timeout, capture)
 
 
+def _pmb_argv(cmd, usable: bool, same_tree: bool) -> list[str]:
+    """pmbootstrap, run where the buildroot it needs actually is. Pure.
+
+    The HOST pmbootstrap wants a sudo the rootless setup deliberately does not
+    have, so every verb in here that shelled out to it failed on a machine
+    where the identical call inside the workspace succeeds. `aports build` was
+    moved to `porthole pkg` for exactly this reason and the rest were left
+    behind, so `aports checksum` failed on a correct APKBUILD and blamed the
+    APKBUILD (#25). Routing in ONE place is what stops the next verb inheriting
+    it.
+
+    `same_tree` is not paranoia. The workspace mounts the work dir's own
+    pmaports at /pmb/cache_git/pmaports and pmbootstrap in there can see no
+    other, while the host may be pointed at a per-device worktree by
+    PORTHOLE_PMAPORTS. Routing then checksums a DIFFERENT checkout from the one
+    the verb just edited and reports success -- the wrong-aport failure this
+    repo has already paid for twice. Different trees: stay on the host, where
+    at least the tree is the right one and the error is honest.
+    """
+    if not (usable and same_tree):
+        return list(cmd)
+    import porthole_cmd_sandbox as sandbox
+
+    return sandbox._exec_argv(
+        [" ".join(shlex.quote(a) for a in cmd)], tty=False)
+
+
+def _same_path(a, b) -> bool:
+    """Same directory, symlinks and `..` resolved. A missing path resolves
+    fine and simply is not equal to anything that exists."""
+    try:
+        return pathlib.Path(a).resolve() == pathlib.Path(b).resolve()
+    except OSError:
+        return False
+
+
+def _mounted_pmaports(cfg) -> pathlib.Path:
+    """The pmaports the workspace can see -- `porthole sandbox up` mounts this
+    path and only this one (porthole_cmd_sandbox._up)."""
+    return pathlib.Path(cfg.get("PORTHOLE_PMB_DIR") or
+                        pathlib.Path.home() / ".local/var/pmbootstrap"
+                        ).expanduser() / "cache_git" / "pmaports"
+
+
 def _pmb_run(ctx, cmd, timeout, capture):
+    import porthole_cmd_build as build
+
+    usable, why_not = build._workspace_usable(ctx)
+    host_tree = pmap.find_pmaports(ctx.cfg)
+    mounted = _mounted_pmaports(ctx.cfg)
+    same_tree = bool(host_tree) and _same_path(host_tree, mounted)
+    routed = usable and same_tree
+    # WHERE it ran is the first thing you need when it fails in a way that
+    # makes no sense -- the same reason the build verb says it in cyan.
+    if routed:
+        ctx.out(ctx.out.paint("  in the workspace (container)", "cyan"))
+    elif usable:
+        ctx.out(ctx.out.paint(
+            f"  on the host: the workspace sees {mounted}, "
+            f"not {host_tree}", "yellow"))
+    else:
+        ctx.out(ctx.out.paint(f"  on the host ({why_not})", "grey"))
+    argv = _pmb_argv(cmd, usable, same_tree)
     try:
         if capture:
-            proc = subprocess.run(cmd, capture_output=True, text=True,
+            proc = subprocess.run(argv, capture_output=True, text=True,
                                   timeout=timeout)
             return proc.returncode, proc.stdout, proc.stderr
-        return subprocess.run(cmd, timeout=timeout).returncode, "", ""
+        return subprocess.run(argv, timeout=timeout).returncode, "", ""
     except FileNotFoundError:
+        if routed:
+            raise Bail("podman is not installed", EX_FAIL,
+                       "`porthole doctor` names how to install it") from None
         raise Bail("pmbootstrap is not installed", EX_FAIL,
                    "pipx install pmbootstrap   (`porthole doctor` checks this)"
                    ) from None
@@ -786,9 +852,13 @@ def cmd_checksum(args, ctx, pmaports) -> int:
         rc, _, _ = pmb(ctx, "checksum", *_resolve_pkgs(args, ctx, pmaports),
                        timeout=900)
     if rc != 0:
-        raise Bail("checksum failed", EX_FAIL,
-                   "a source in the APKBUILD could not be fetched — check the "
-                   "URL, and that every local file listed actually exists")
+        # NOT "a source could not be fetched". That was a guess dressed as a
+        # diagnosis, and on a rootless host -- where the real cause was
+        # pmbootstrap wanting sudo -- it sent a session chasing a URL problem
+        # that did not exist. pmbootstrap streams its own error; point at it.
+        raise Bail(f"checksum failed -- pmbootstrap exited {rc}", EX_FAIL,
+                   "its error is above; porthole does not know the cause and "
+                   "will not invent one")
     ctx.out(ctx.out.paint("  checksums updated", "green"))
     for name in _resolve_pkgs(args, ctx, pmaports):
         directory = _pkg_dir(pmaports, name)
