@@ -30,7 +30,8 @@ import threading
 import time
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
+from porthole_cli import (Bail, EX_FAIL, EX_OK, EX_STATE, EX_UNAVAILABLE,
+                          EX_USAGE)
 
 # Each verb maps to a shell function ph-build.sh defines. The names are kept
 # from the taimen toolbox because they are what every runbook prints and what
@@ -53,6 +54,36 @@ from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
 # `auto` has no shell function; it chooses one. Keeping it out leaves that
 # invariant absolute instead of adding an exemption a real typo could hide in.
 AUTO_DESC = "build the cheapest rung that covers what actually changed"
+
+# tkmod's non-zero outcomes that are NOT build failures, per its own case
+# statement in tools/ph-build.sh -- which already says "the build is fine and
+# installed; nothing was torn down" and was then contradicted one level up.
+#
+# `porthole build mod drivers/gpu/drm/msm/msm.ko msm --yes` compiled cleanly,
+# installed the module, and printed exactly that. The verb answered
+# `porthole: tkmod failed ... `pmbootstrap log` has more` -- advice for a
+# compile error -- and the agent reading it went up the ladder and rebooted
+# the device, which is the expensive mistake the ladder exists to prevent.
+# The build had succeeded. Only the LOAD had not happened, and one reboot
+# runs it.
+#
+# EX_STATE (76), not EX_FAIL (1), and brain/laws/exit-codes-are-an-api.md is
+# why: 1 means "the thing under test failed -- this is a result about your
+# work", which is false here and is the sentence the agent acted on. 76 means
+# "the device is in the wrong state; do not retry, something must move it",
+# which is precisely true -- the thing that must move it is a reboot.
+#
+# 5 is deliberately absent: "loaded, but the stack did not come back up" is a
+# device left worse than it was found, and that is a failure.
+TKMOD_INSTALLED_NOT_LOADED = {
+    3: ("installed, but not loaded this boot -- something still holds it",
+        "the copy on disk IS the module you just built. One reboot runs it "
+        "(`porthole run tools/tk-reboot.sh`); do NOT go up to a flashing "
+        "rung, the build is done"),
+    4: ("installed, but not loaded -- this module carries the ssh link",
+        "nothing was torn down and the build is fine. Reboot to run it, or "
+        "re-run over a transport this module does not carry"),
+}
 
 ACTIONS = {
     "mod": ("tkmod",
@@ -974,7 +1005,16 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
                 sys.stdout.write("\r\033[2K")
                 sys.stdout.flush()
         rc = proc.wait()
-        tracker.finish(rc == 0 and not killed)
+        # An installed-but-not-loaded module is not a failed build, here
+        # either: `watch`, `status` and the status line all render this
+        # file, and FAILED in three more places is the same wrong
+        # sentence three more times.
+        # `rung`, not the shell function name: _stream is one level below the
+        # table's owner and never sees `tkmod`. The mod rung is the only one
+        # that can produce these codes, and `rung` is "mod" for exactly it.
+        tracker.finish(not killed and (
+            rc == 0 or (rung == "mod"
+                        and rc in TKMOD_INSTALLED_NOT_LOADED)))
 
     if killed:
         raise Bail(f"{rung} timed out after {timeout}s", EX_FAIL,
@@ -1537,6 +1577,9 @@ def cmd_build(args, ctx) -> int:
     rc = _run(ctx, func, args.timeout, extra,
               host=getattr(args, "host", False), rung=action)
     if rc != 0:
+        outcome = TKMOD_INSTALLED_NOT_LOADED.get(rc) if func == "tkmod" else None
+        if outcome:
+            raise Bail(f"{what}: {outcome[0]}", EX_STATE, outcome[1])
         raise Bail(f"{func} failed", EX_FAIL,
                    "the output above is the build's; `pmbootstrap log` has more")
     ctx.out(ctx.out.paint(f"  {what}: done", "green"))

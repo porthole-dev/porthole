@@ -444,6 +444,60 @@ def test_host_paths_are_not_resent_into_the_container():
     assert "PORTHOLE_WORKDIR" not in argv, argv
 
 
+# ------------------------------------- an installed module is not a failure --
+#
+# `porthole build mod drivers/gpu/drm/msm/msm.ko msm --yes` compiled, pushed
+# and installed msm.ko, and said so. Then the verb printed `porthole: tkmod
+# failed` -- and the agent reading that went UP the ladder and rebooted the
+# device, which is the single expensive mistake the ladder exists to prevent.
+# ph-build.sh already knew better: its own case statement says "the build is
+# fine and installed; nothing was torn down". One level up threw that away.
+
+def test_an_installed_but_unloaded_module_is_not_a_failed_build():
+    """Exit 3: something holds it, so the copy on disk is new and not running.
+
+    EX_STATE, per brain/laws/exit-codes-are-an-api.md: 1 says "the thing under
+    test failed", which is a claim about the porter's work and is false here.
+    76 says "the device is in the wrong state, something must move it" -- and
+    the thing that must move it is one reboot.
+    """
+    import porthole_cmd_build as build
+    from porthole_cli import EX_STATE
+    assert set(build.TKMOD_INSTALLED_NOT_LOADED) == {3, 4}
+    for rc in (3, 4):
+        headline, hint = build.TKMOD_INSTALLED_NOT_LOADED[rc]
+        assert "installed" in headline, headline
+        assert "fail" not in (headline + hint).lower(), (rc, headline, hint)
+    assert "reboot" in build.TKMOD_INSTALLED_NOT_LOADED[3][1].lower()
+    # Say the thing the agent got wrong, in the words it got wrong.
+    assert "rung" in build.TKMOD_INSTALLED_NOT_LOADED[3][1]
+    # ...and the call site raises with that code rather than EX_FAIL.
+    src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
+    site = src.split("outcome = TKMOD_INSTALLED_NOT_LOADED.get(rc)", 1)[1][:300]
+    raise_line = [ln for ln in site.splitlines() if "raise Bail" in ln][0]
+    assert "EX_STATE" in raise_line, raise_line
+    assert EX_STATE == 76
+
+
+def test_a_real_build_failure_is_still_a_failure():
+    """The positive control. A mapping that turned every non-zero into a
+    state would "pass" the test above while hiding every compile error."""
+    import porthole_cmd_build as build
+    assert 1 not in build.TKMOD_INSTALLED_NOT_LOADED
+    # 5 is `loaded, but the stack did not come back` -- a device left worse
+    # than it was found, which is a failure however the build went.
+    assert 5 not in build.TKMOD_INSTALLED_NOT_LOADED
+
+
+def test_the_status_file_agrees_with_the_exit_code():
+    """`watch`, `status` and the status line all render this file. FAILED
+    there is the same wrong sentence in three more places."""
+    src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
+    call = src.split("tracker.finish(", 1)[1].split(")))", 1)[0]
+    assert "TKMOD_INSTALLED_NOT_LOADED" in call, \
+        "tracker.finish still calls an installed module a failed build"
+
+
 def test_module_arguments_survive_the_trip():
     import porthole_cmd_build as build
     argv = build._container_cmd("tkmod", ["drivers/media/i2c/imx179.ko", "imx179"], {})
