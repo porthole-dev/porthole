@@ -97,9 +97,18 @@ alone, because a full-frame diff counts UI damage and a vsync count measures
 page redraws, not video updates -- that distinction is what made the browser
 look "objectively clean" while the user watched it stutter.
 
-**What would overturn this** — a WebKit build where the post-`appsink`
-compositing keeps up, or evidence that phoc mishandles the specific buffer
-protocol both `waylandsink` and WebKit use while the GL sinks avoid it. The
-next step is tracing WebKit's compositor, not more environment variables:
-three in a row (codec ranks, dmabuf disable, force-SHM) each cost a relaunch
-and taught nothing.
+**OVERTURNED THE SAME DAY, by its own clause.** "Evidence that phoc
+mishandles the specific buffer protocol both waylandsink and WebKit use"
+arrived that evening: phoc advertised implicit-only dmabuf modifiers
+([[waylandsink-5fps-was-two-upstream-policies-colliding]], fixed by
+temp/phoc 0003/r51), and VP9 was additionally decoding below realtime on
+the 1 MB/s DDR fallback vote
+([[the-sigkill-venus-wedge-was-vp9-bandwidth-starvation]], fixed by aport
+0203). Re-measured on the fixed stack: a bare fullscreen VP9 <video> in
+Epiphany runs at **60 panel vsync/s with ~1% WebProcess CPU**, and page
+scrolling flings at 0 dropped / 0 jank / max 19.6 ms. Part 2's "WebKit's
+compositor is the browser's ceiling" is dead; part 1's sink table remains
+valid history for the unpatched stack. The custom-build refutation was also
+re-verified at runtime: jsc runs a 30M-iteration loop in 259 ms (JIT
+compiled; the riscv64-only C_LOOP block never applies to aarch64, and
+cloopfix.patch only fixes compilation of the interpreter file).
