@@ -39,12 +39,33 @@ dma-only 3/run -- which is WHY Android ships them as one hint.
 - *"zram/VM tuning lags Android."* Backwards: pmOS runs 5.6 G lz4 swappiness
   180 vs Android's 2 G lz4 swappiness 100; page-cluster 0 both.
 
-**Remaining real deltas, none proven to jank yet**: no LAUNCH hint (Android
-pins the big cluster at max for 5 s on app launch + read_ahead_kb 2048 during
-boot); schedutil single rate_limit_us=2000 vs Android's asymmetric 500/20000;
-Android's schedtune top-app boost=10 + background cpuset confinement to cpu0-1
-(approximable with cgroup uclamp.min / AllowedCPUs); skin-temp stepped
-throttling vs our junction 85C trip.
+**The LAUNCH hint measures too** (same session, later): firing Android's
+LAUNCH floors (little 1900800, big pinned at table max) for 5 s when an
+app-*.{scope,slice} cgroup appears in the session's app.slice cut cold-launch
+medians 200->140 ms (TextEditor) and 1360->1240 ms (Clocks); warm unchanged.
+Both hints ship as powerhintd (tools/powerhintd.py + the taimen unit).
+
+**Also ruled out, same session**: Android's cpuset topology and priority
+boosts do NOT translate. Under a steady 4-thread system.slice spin, grid-fling
+with powerhintd and DEFAULT cgroup config holds 59.6 fps / 1 jank -- there is
+nothing to fix. During app-launch churn the fling does collapse (26-30%
+dropped, 233 ms p99), and confining system.slice to cpu0-3, CPUWeight=1000 on
+the user slice, and SCHED_RR 10 on phoc+phosh each changed NOTHING (26.6-30.3%
+dropped throughout); that collapse correlates with launch I/O+init, not CPU
+contention, and its root cause is unestablished. Do not re-derive "confine
+background like Android" without a measurement this table refutes.
+
+**Remaining deltas, none proven to jank**: schedutil single rate_limit_us=2000
+vs Android's asymmetric 500/20000 (left at default; the fling is at the 60 Hz
+ceiling with INTERACTION active, so there is nothing left for it to win);
+Android's schedtune top-app boost=10 (cgroup uclamp needs
+CONFIG_UCLAMP_TASK_GROUP, not in this kernel -- a flash, prepare only on
+evidence); Android's INTERACTION cpubw floor of 5195 MB/s (our icc-bwmon is
+interrupt-driven and ramps faster than Android's 50 ms bw_hwmon polling -- no
+userspace floor knob exists and none is needed); Android disables CPU
+retention idle states outright (ours stay enabled; the 44 us QoS hold already
+forbids them during interaction); skin-temp stepped throttling vs our junction
+85C trip.
 
 **How it was established** — taimen factory vendor.raw read with debugfs (no
 root): /etc/powerhint.json is the entire hint table, /etc/init/hw/init.taimen.rc

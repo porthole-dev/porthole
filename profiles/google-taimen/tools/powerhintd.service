@@ -1,0 +1,38 @@
+# scope: vendor:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
+#
+# Android-parity power hints for taimen. Values are the vendor's own
+# powerhint.json entries snapped to the mainline OPP tables:
+#   INTERACTION  little 1134000 -> 1171200, big 1132800 (exists as-is)
+#   LAUNCH       little 1900800 (as-is), big 2457600 -> table max 2361600
+#   44 us        PowerHAL's PMQoSCpuDmaLatency
+# Measured basis:
+# brain/findings/android-interaction-boost-is-the-remaining-perf-delta.md
+
+[Unit]
+Description=Android-style power hints (INTERACTION, LAUNCH) for the phosh session
+Documentation=file:/usr/local/sbin/powerhintd
+
+[Service]
+Type=exec
+ExecStart=/usr/local/sbin/powerhintd \
+    --latency-us 44 \
+    --interaction-hold 3 \
+    --interaction /sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq=1171200 \
+    --interaction /sys/devices/system/cpu/cpufreq/policy4/scaling_min_freq=1132800 \
+    --launch-hold 5 \
+    --launch /sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq=1900800 \
+    --launch /sys/devices/system/cpu/cpufreq/policy4/scaling_min_freq=2361600 \
+    --app-slice /sys/fs/cgroup/user.slice/user-10000.slice/user@10000.service/app.slice
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectControlGroups=no
+ProtectKernelTunables=no
+
+[Install]
+WantedBy=multi-user.target
