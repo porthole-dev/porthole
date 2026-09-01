@@ -71,7 +71,7 @@ advantage here and still lost.
 
 - **The kernel/display path.** 60 fps through two other sinks, and the
   compositor measures 56.7 fps / p50 16.7 ms / 98.8% at 60 Hz under load
-  (`tools/tk-framprobe.py`).
+  (`profiles/google-taimen/tools/tk-framprobe.py`).
 - **Decode.** venus does 1080p30 H.264 at 381% of realtime (VP9: 118%).
 - **GPU capacity.** `glimagesink` performs the same 1080p `glupload` +
   `glcolorconvert` at 59 fps. Do not blame the colour-convert pass.

@@ -14,7 +14,7 @@ first-learned: 2026-09-01
 `2ec05b8d72f0` (send the pageflip at **rd_ptr**, the interrupt msm8998 actually
 has -- CTL_START does not exist here) and **removing `FD_MESA_DEBUG=sysmem`
 from the session**, which was costing the compositor the rest. Measured with
-`tools/tk-framprobe.py`:
+`profiles/google-taimen/tools/tk-framprobe.py`:
 
     baseline (7.2 as shipped)  31.4 fps  p50 30.5 ms   0.8% at 60 Hz
     + rd_ptr pageflip patch    39.5 fps  p50 22.4 ms  28.2% at 60 Hz

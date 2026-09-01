@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: device:google-taimen
 # needs: on-device, inside the graphical session (GTK4 + pygobject)
+# env: -
 # exits: 0 ok
 """What frame interval does the compositor actually give a client?
 
