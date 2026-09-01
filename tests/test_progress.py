@@ -988,6 +988,93 @@ def test_the_non_tty_watch_does_not_flood_the_log_with_the_second_row():
     assert text.count("reboot 1/4") == 2, text
 
 
+# ------------------------------ the bar when the baseline is exhausted --
+#
+# fraction() returns None once a run overruns the history it was measured
+# against, and it is right to: clamping to 0.99 there reported "99%, eta 7s"
+# for the fourteen remaining minutes of a 14m42s build. But the fallback was
+# NO ANSWER AT ALL for the rest of the run, which on a full compile is most of
+# it. Three screenshots from one session -- at 1m42s, 4m38s and 6m09s -- all
+# showed `[ unknown ] -- <phase>  eta --`. One defect, seen three times.
+
+def _snap(**kw):
+    base = {"rung": "fast", "phase": "package", "state": "running",
+            "progress": None, "elapsed": 278.0, "eta": None,
+            "last": "  CC arch/arm64/kernel/signal32.o", "last_at": NOW}
+    base.update(kw)
+    return base
+
+
+NOW = 1_000_000.0
+
+
+def test_no_fraction_falls_back_to_a_phase_position():
+    line = progress.line_of(_snap(), now=NOW)
+    assert "2/5" in line, line
+    assert "unknown" not in line, line
+    # A position, never dressed up as a percentage.
+    assert "40%" not in line, line
+
+
+def test_the_position_advances_with_the_phase():
+    seen = [progress.line_of(_snap(phase=p), now=NOW)
+            for p in ("make", "package", "install", "export", "flash")]
+    assert ["1/5", "2/5", "3/5", "4/5", "5/5"] == \
+        [l.split("]")[1].split()[0] for l in seen], seen
+
+
+def test_a_real_fraction_still_wins():
+    """THE POSITIVE CONTROL. A fallback that replaced the measurement would
+    pass every assertion above while throwing away the only real number."""
+    line = progress.line_of(_snap(progress=0.62, phase="make"), now=NOW)
+    assert "62%" in line and "1/5" not in line, line
+
+
+def test_a_rung_with_no_phase_table_says_unknown_rather_than_guessing():
+    line = progress.line_of(_snap(rung="tkflash", phase="flash"), now=NOW)
+    assert "unknown" in line, line
+    line = progress.line_of(_snap(phase="nonsense"), now=NOW)
+    assert "unknown" in line, line
+
+
+def test_a_finished_run_is_not_still_in_its_last_phase():
+    """`fast done [ unknown ] -- install  6m09s eta --` sat on screen after
+    the phone had been flashed AND rebooted, and an agent went on polling a
+    build that had been over for minutes."""
+    line = progress.line_of(_snap(state="done", phase="install"), now=NOW)
+    assert "done" in line and "install" not in line, line
+    assert "100%" in line, line
+    line = progress.line_of(_snap(state="failed", phase="install"), now=NOW)
+    assert "failed" in line and "install" not in line, line
+
+
+def test_a_stopped_run_cannot_be_stalled():
+    line = progress.line_of(_snap(state="done", last_at=NOW - 9999), now=NOW)
+    assert "no output for" not in line, line
+
+
+def test_packaging_is_allowed_to_be_quiet():
+    """pmbootstrap relays to log.txt, and packaging a kernel -- strip, then
+    compress every module -- is silent for minutes on purpose. A flat 90s
+    bound warned about a build that was working, which teaches the reader to
+    distrust the one line that stops them killing a healthy one."""
+    assert progress.stall_note("  CC foo.o", 120.0, "package") == ""
+    # ...and the compile phase is still held to the tight bound.
+    assert progress.stall_note("  CC foo.o", 120.0, "make") != ""
+    # The positive control: packaging that is REALLY stuck still reports.
+    assert progress.stall_note("  CC foo.o", 900.0, "package") != ""
+
+
+def test_a_note_too_cut_to_read_is_dropped_rather_than_stubbed():
+    """`-- the...` stops before the only clause carrying the reassurance."""
+    tight = progress.line_of(_snap(phase="make", last_at=NOW - 400),
+                             now=NOW, budget=85)
+    assert "no output" not in tight, tight
+    wide = progress.line_of(_snap(phase="make", last_at=NOW - 400),
+                            now=NOW, budget=140)
+    assert "no output for" in wide and "still running" in wide, wide
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -190,11 +190,10 @@ def build_line(repo: pathlib.Path, width: int, now=None):
     state = pp.liveness(best)
     if state != "running" and now - (best.get("last_at") or 0) > LINGER_S:
         return None      # old news; the row would be clutter, not status
-    tag = {"running": "", "done": "done ", "failed": "FAILED ",
-           "stale": "STALE "}.get(state, "")
-    body = pp.line_of(best, budget=max(40, width - 12))
-    return pp.clip("{:<8}{}{}".format(best.get("rung") or "build", tag, body),
-                   width)
+    # No state tag here: line_of renders the finished states itself now, and
+    # `fast done ... done` reads as a rendering bug.
+    body = pp.line_of(best, budget=max(40, width - 10))
+    return pp.clip("{:<8}{}".format(best.get("rung") or "build", body), width)
 
 
 def session_line(inp, repo: pathlib.Path) -> str:

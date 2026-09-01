@@ -166,6 +166,43 @@ def is_compile_line(line: str) -> bool:
     return bool(_COMPILE.match(line))
 
 
+# Which phases each rung actually runs, in order. A fact about
+# tools/ph-build.sh's own functions -- not about a device -- so it belongs in
+# a table here rather than in a profile, exactly like ACTIONS.
+#
+# This exists to answer "how far along" when NOTHING else can. fraction()
+# returns None the moment a run overruns its baseline, and it is right to:
+# clamping to 0.99 there reported "99%, eta 7s" for the fourteen remaining
+# minutes of a 14m42s build. But the fallback was no answer at all, for the
+# whole rest of the run -- which on a full compile is most of it. Reported
+# from a real session as `[ unknown ] -- package 1m42s eta --`, then the same
+# bar at 4m38s and again at 6m09s: three screenshots of one defect.
+#
+# A phase position is not a percentage and is not presented as one -- it
+# renders as `3/5`. It cannot be fooled by a run being bigger than the last,
+# because it measures where the run IS rather than how much is left.
+RUNG_PHASES = {
+    "mod":     ("make", "push"),
+    "boot":    ("make", "verify", "flash"),
+    "fast":    ("make", "package", "install", "export", "flash"),
+    "kernel":  ("make", "package", "install", "export", "verify", "flash"),
+    "upgrade": ("make", "package", "install", "export", "verify", "flash"),
+}
+
+
+def phase_position(rung, phase):
+    """(n, total) -- where a run is in its rung's phase sequence, or None.
+
+    None for a rung with no table and for a phase it does not list, because a
+    made-up position is exactly the fabricated confidence this whole module
+    refuses elsewhere.
+    """
+    phases = RUNG_PHASES.get((rung or "").split("|")[0])
+    if not phases or phase not in phases:
+        return None
+    return phases.index(phase) + 1, len(phases)
+
+
 def fmt_dur(seconds) -> str:
     """`2m41s`, `18s`, `--` -- short enough to sit in a one-line status."""
     if seconds is None:
@@ -611,7 +648,6 @@ def line_of(snap, width: int = 18, now=None,
     how a watcher ends up disagreeing with the thing it is watching.
     """
     frac = snap.get("progress")
-    pct = "--" if frac is None else "{:>3d}%".format(int(frac * 100))
     # A ninja step that is Generating rather than Building is shown as such.
     # It is the single most useful thing on this line during a stall: the
     # counter is not moving, and "generating" says that is expected while
@@ -619,6 +655,27 @@ def line_of(snap, width: int = 18, now=None,
     phase = snap.get("phase") or "starting"
     phase = {"generate": "generating", "link": "linking"}.get(
         snap.get("step"), phase) if phase == "build" else phase
+
+    # A FINISHED RUN IS NOT STILL IN ITS LAST PHASE. `fast done [ unknown ]
+    # -- install  6m09s eta --` sat on screen after the phone had been
+    # flashed AND rebooted, and an agent went on polling a build that had
+    # been over for minutes -- which is the cost of a label that outlives
+    # what it describes. The state is in the snapshot; use it.
+    state = (snap or {}).get("state") or "running"
+    if state == "done":
+        frac, phase = 1.0, "done"
+    elif state in ("failed", "stale"):
+        phase = state
+
+    pct = "--" if frac is None else "{:>3d}%".format(int(frac * 100))
+    # No fraction: say where the run IS instead of saying nothing. Rendered as
+    # `3/5`, never as a percentage, because it is a position and not a
+    # measurement of work remaining.
+    if frac is None:
+        spot = phase_position(snap.get("rung"), phase)
+        if spot:
+            frac = spot[0] / float(spot[1])
+            pct = "{}/{}".format(*spot)
     rate = snap.get("rate")
     # Rate is shown for package builds and omitted for kernel rungs, which
     # have no step count to have a rate over.
@@ -634,14 +691,21 @@ def line_of(snap, width: int = 18, now=None,
     # to a hang. Appended here, not on a second line: `watch` repaints in
     # place on a tty and a second line would corrupt the redraw.
     last = snap.get("last")
-    if not last:
+    # A run that has stopped cannot be stalled, and saying "no output for
+    # 1m39s" about a finished build is noise wearing the costume of a
+    # warning.
+    if not last or state != "running":
         return base
-    note = stall_note(last, last_age_of(snap, now) or 0.0)
+    note = stall_note(last, last_age_of(snap, now) or 0.0, phase)
     if not note:
         return base
     sep = " · "
     room = budget - len(base) - len(sep)
-    if room < 20:
+    # 20 left room for `no output for 1m39s -- the…`, which is a fragment
+    # rather than a sentence: it stops before the only clause that carries
+    # the reassurance. Below what a useful cut needs, say nothing -- the bar
+    # and the activity line are still there.
+    if room < 36:
         return base
     if len(note) > room:
         # Cut on a word boundary, and SAY it was cut -- a sentence that stops
@@ -770,7 +834,17 @@ _STALL_NOTES = (
 )
 
 
-def stall_note(last: str, silence: float) -> str:
+# How long each phase may legitimately say nothing before the display owes
+# the reader a reason. `pmbootstrap` relays its real output to log.txt rather
+# than stdout, and packaging a kernel -- strip, then compress every module --
+# is quiet for minutes on purpose. A flat 90 s bound reported "no output for
+# 1m39s -- the process is still running" against a build that was compiling
+# perfectly happily, which teaches the reader to distrust the one line that
+# exists to stop them killing a healthy build.
+_PHASE_PATIENCE = {"package": 420.0, "install": 300.0, "export": 300.0}
+
+
+def stall_note(last: str, silence: float, phase: str = "") -> str:
     """Why nothing has been said for a while, or "" if it is too soon to ask.
 
     Never renders a bar as [??????] with `eta --` and no explanation. The
@@ -778,7 +852,7 @@ def stall_note(last: str, silence: float) -> str:
     taking so long" anxiety, and the anxiety is what makes people kill builds
     that were working.
     """
-    if silence < STALL_AFTER_S:
+    if silence < _PHASE_PATIENCE.get(phase, STALL_AFTER_S):
         return ""
     for pattern, note in _STALL_NOTES:
         if pattern.search(last or ""):
