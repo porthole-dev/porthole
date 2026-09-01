@@ -443,6 +443,64 @@ def test_patches_checks_dropped_patches_before_it_unlinks_anything():
         f"on patches it has already deleted")
 
 
+# ------------------------------------------- where pmbootstrap actually runs --
+#
+# `porthole aports checksum <pkg>` shelled out to the HOST pmbootstrap, which
+# wants a sudo the rootless setup deliberately does not have, while the same
+# call inside the workspace succeeded on the identical APKBUILD. `aports build`
+# had already been moved off that path; checksum, lint, bump and the checksum
+# inside `aports patches` had not (#25). The routing is one pure function so
+# every one of them is decided in the same place.
+
+def test_a_usable_workspace_runs_pmbootstrap_inside_it():
+    import porthole_cmd_aports as aports
+    import porthole_cmd_sandbox as sandbox
+
+    argv = aports._pmb_argv(["pmbootstrap", "-y", "checksum", "phoc"],
+                            usable=True, same_tree=True)
+    assert argv[:2] == ["podman", "exec"], argv
+    assert sandbox.CONTAINER in argv, argv
+    assert "pmbootstrap -y checksum phoc" in " ".join(argv), argv
+
+
+def test_no_workspace_still_runs_on_the_host():
+    # The host path is the fallback, not a casualty: a machine with working
+    # sudo and no container must keep working exactly as before.
+    import porthole_cmd_aports as aports
+
+    cmd = ["pmbootstrap", "-y", "checksum", "phoc"]
+    assert aports._pmb_argv(cmd, usable=False, same_tree=True) == cmd
+
+
+def test_a_workspace_that_mounts_another_pmaports_is_not_used():
+    """The guard that matters. The container sees /pmb/cache_git/pmaports and
+    nothing else, so routing a checksum there when the host is pointed at a
+    per-device worktree would checksum a DIFFERENT tree from the one just
+    edited -- and report success."""
+    import porthole_cmd_aports as aports
+
+    cmd = ["pmbootstrap", "-y", "checksum", "phoc"]
+    assert aports._pmb_argv(cmd, usable=True, same_tree=False) == cmd
+
+
+def test_the_routed_command_survives_a_space():
+    # It crosses as a shell line, so an unquoted argument would arrive as two.
+    import porthole_cmd_aports as aports
+
+    argv = aports._pmb_argv(["pmbootstrap", "-y", "checksum", "a b"],
+                            usable=True, same_tree=True)
+    assert "'a b'" in argv[-1], argv
+
+
+def test_the_mounted_pmaports_is_the_one_sandbox_up_mounts():
+    """Read from the same config key `porthole sandbox up` derives it from, so
+    the two cannot drift into disagreeing about which tree is inside."""
+    import porthole_cmd_aports as aports
+
+    got = aports._mounted_pmaports({"PORTHOLE_PMB_DIR": "/w/pmb"})
+    assert str(got) == "/w/pmb/cache_git/pmaports", got
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
