@@ -61,6 +61,8 @@ check something itself, this file is a second opinion.
       It pins the tree and the config the port actually builds.
 - [ ] The kernel patch series applies <!-- series-applies -->
       A series that cannot apply makes every aport build fail for a reason nothing surfaces, and work drifts to a tree that does not carry the patches. taimen lost a whole subsystem this way.
+- [ ] The kernel on the device is the one the checkout builds <!-- kernel-provenance -->
+      A tree build carries none of the aport's patches, and their absence is silent -- no module, no /dev node, nothing in dmesg. taimen lost venus this way and the only symptom was a missing /dev/video7.
 - [ ] The packages build <!-- builds -->
       A package that builds on your host is the first thing anyone else can reproduce.
 

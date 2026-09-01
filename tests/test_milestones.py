@@ -405,6 +405,21 @@ def test_series_applies_says_how_many_patches_it_checked():
     assert "199" in verdict.evidence, verdict.evidence
 
 
+def test_kernel_provenance_is_a_milestone_in_the_packaging_phase():
+    import porthole_milestones as ms
+
+    assert "kernel-provenance" in ms.BY_ID, sorted(ms.BY_ID)
+    assert ms.BY_ID["kernel-provenance"].phase == "packaging"
+
+
+def test_provenance_verdict_maps_the_three_states():
+    import porthole_milestones as ms
+
+    assert ms.verdict_for_provenance("done", "aport r22").state == ms.DONE
+    assert ms.verdict_for_provenance("todo", "behind").state == ms.TODO
+    assert ms.verdict_for_provenance("blocked", "tree build").state == ms.BLOCKED
+
+
 def test_brief_probes_the_device_before_it_evaluates_milestones():
     """The order is load-bearing, not tidiness.
 
