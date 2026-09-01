@@ -1,0 +1,22 @@
+# scope: vendor:google-taimen
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
+#
+# Android-parity INTERACTION boost for taimen. The floors are Android's
+# powerhint.json INTERACTION values snapped to the mainline OPP tables
+# (little 1134000 -> 1171200; big 1132800 exists as-is); 44 us is Android's
+# PMQoSCpuDmaLatency. Measured basis:
+# brain/findings/android-interaction-boost-is-the-remaining-perf-delta.md
+[Unit]
+Description=tk-touchboost: hold CPU floors + PM QoS while the screen is touched
+
+[Service]
+ExecStart=/usr/local/sbin/tk-touchboost --hold 3 --latency-us 44 \
+    /sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq=1171200 \
+    /sys/devices/system/cpu/cpufreq/policy4/scaling_min_freq=1132800
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -17,6 +17,7 @@ generic notes as well.
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
+| [android-interaction-boost-is-the-remaining-perf-delta](findings/android-interaction-boost-is-the-remaining-perf-delta.md) | `soc:msm8998` | Android's INTERACTION boost is the remaining perf delta -- the scaling infrastructure already has vendor parity |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
 | [ap-accepts-us-intermittently](findings/ap-accepts-us-intermittently.md) | `device:google-taimen` | TEST-SSID does accept this client -- intermittently, with the stock frame |
 | [ap-refuses-us-our-assocreq-is-clean](findings/ap-refuses-us-our-assocreq-is-clean.md) | `device:google-taimen` | TEST-SSID refuses this client, and our association request is not the reason |
@@ -173,5 +174,5 @@ generic notes as well.
 - `device:google-taimen` — 23
 - `generic` — 91
 - `soc:gs201` — 1
-- `soc:msm8998` — 17
+- `soc:msm8998` — 18
 - `soc:qcom` — 1
