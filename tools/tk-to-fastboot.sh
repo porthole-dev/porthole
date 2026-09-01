@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: any (probes state; handles BOOTED and FASTBOOT)
-# env: FASTBOOT, TK_ATTEMPT, TK_NO_SYSCALL, TK_POLL, TK_SWALLOWED_MAX, TK_TIMEOUT, TK_TRIES
+# env: FASTBOOT, PORTHOLE_USB_FASTBOOT_ID, PORTHOLE_USB_GADGET_ID, TK_ATTEMPT,
+#      TK_NO_SYSCALL, TK_POLL, TK_SWALLOWED_MAX, TK_TIMEOUT, TK_TRIES
 # exits: 0 ok · 1 failed · 3 see source
 # Get the phone INTO the bootloader, and return the instant it lands (~9s).
 #
@@ -52,6 +53,13 @@
 #   - back in pmOS: ssh answers with a *different* boot_id than the one we
 #     snapshotted. Comparing boot_ids rather than "does ssh answer" matters,
 #     because the pre-reboot session keeps answering for a second or two.
+#   - IN THE BOOTLOADER BUT NOT ON THE BUS: neither of the above ever becomes
+#     true, because the phone is not enumerated at all. This is a real state
+#     and it is indistinguishable from the two failures above unless something
+#     reads the bus -- ph_usb_state does, and every message below switches on
+#     it. Observed 2026-09-01: the phone reached the bootloader screen and its
+#     USB did not come up on this host until the cable was replugged, 26
+#     minutes of which were spent following advice for a different fault.
 #
 # Usage: tk-to-fastboot.sh [timeout_seconds]   (default 180, or $TK_TIMEOUT)
 #   env: TK_ATTEMPT   seconds to wait per reboot        (default 60)
@@ -122,7 +130,7 @@ while [ "$burned" -lt "$TRIES" ] && [ "$swallowed" -lt "$SWALLOWED_MAX" ]; do
         echo ">> reboot $((burned + 1))/$TRIES: burning a boot retry (boot_id ${OLD_ID%%-*})"
         tk_request_reboot
     else
-        echo ">> phone not answering -- watching for the bootloader"
+        echo ">> phone not answering -- watching for the bootloader (usb: $(ph_usb_state))"
     fi
 
     att_deadline=$(tk_deadline_ms "$ATTEMPT_S")
@@ -150,6 +158,20 @@ while [ "$burned" -lt "$TRIES" ] && [ "$swallowed" -lt "$SWALLOWED_MAX" ]; do
     fi
 
     tk_expired "$DEADLINE" && break
+
+    # "Swallowed" is a claim that the phone IGNORED the request and kept
+    # running. A phone that has left the USB bus ignored nothing -- it
+    # rebooted, and the host simply cannot see where it landed. Spending the
+    # give-up budget on that reads as "the phone is up but not acting on
+    # reboot requests", which is the opposite of what is happening, and it
+    # ends in advice for the wrong fault.
+    if [ "$(ph_usb_state)" = absent ]; then
+        echo ">> the phone is GONE FROM THE USB BUS -- it did reboot, and nothing has"
+        echo ">> enumerated since. Not a swallowed request, so no budget spent."
+        OLD_ID=""
+        continue
+    fi
+
     swallowed=$(( swallowed + 1 ))
     echo ">> nothing happened in ${ATTEMPT_S}s -- request swallowed, no retry consumed" \
          "($swallowed/$SWALLOWED_MAX)"
@@ -157,7 +179,10 @@ while [ "$burned" -lt "$TRIES" ] && [ "$swallowed" -lt "$SWALLOWED_MAX" ]; do
 done
 
 if tk_expired "$DEADLINE"; then
-    echo ">> TIMED OUT after $(tk_since "$START")s -- never reached the bootloader"
+    # NOT "never reached the bootloader" -- that is a claim about the phone,
+    # and this script cannot make it. What it can say is that the bootloader
+    # never answered here, which is true whichever of the three states holds.
+    echo ">> TIMED OUT after $(tk_since "$START")s -- the bootloader never answered"
     echo ">> ($burned retries burned; a full counter needs ~4 boots, raise the timeout)"
 elif [ "$swallowed" -ge "$SWALLOWED_MAX" ]; then
     echo ">> GAVE UP after $(tk_since "$START")s -- $swallowed reboot requests were swallowed"
@@ -166,9 +191,49 @@ else
     echo ">> GAVE UP after $burned reboots / $(tk_since "$START")s -- never reached the bootloader"
     echo ">> the retry counter should have hit 0 by now; something is re-arming slot b"
 fi
+# The advice depends entirely on which of the three states the bus is in, and
+# for two of them "power the phone off and hold Power + Volume-Down" is wrong
+# -- in one case actively destructive, since it throws away a bootloader the
+# phone had already reached.
 echo ">>"
-echo ">> DO THIS BY HAND: power the phone off, then hold Power + Volume-Down"
-echo ">> until the bootloader screen appears. Verify with:"
-echo ">>   $FASTBOOT devices"
+case $(ph_usb_state) in
+absent)
+    echo ">> THE USB BUS IS EMPTY: no ${PORTHOLE_USB_FASTBOOT_ID:-bootloader} and no"
+    echo ">> ${PORTHOLE_USB_GADGET_ID:-gadget} device is enumerated on this host. If the"
+    echo ">> phone is showing the bootloader screen then it GOT THERE and its USB"
+    echo ">> never came up -- which is exactly what this looks like from here."
+    echo ">>"
+    echo ">> DO THIS FIRST: unplug the cable and plug it back in. That is the"
+    echo ">> whole fix, it costs seconds, and it keeps the bootloader you have."
+    echo ">> Then confirm with:"
+    echo ">>   $FASTBOOT devices"
+    ;;
+fastboot)
+    echo ">> BUT $PORTHOLE_USB_FASTBOOT_ID IS ON THE BUS: the phone IS in the bootloader"
+    echo ">> and \`$FASTBOOT devices\` still lists nothing, so fastboot cannot OPEN"
+    echo ">> the device. That is a host problem, not a phone problem: a missing"
+    echo ">> udev rule for that ID, or another process holding the interface."
+    echo ">> Replugging the cable clears a stale claim. Do NOT reboot the phone."
+    ;;
+gadget)
+    echo ">> $PORTHOLE_USB_GADGET_ID IS STILL ON THE BUS: the phone never left pmOS, so"
+    echo ">> the reboot request is being dropped rather than lost in transit."
+    echo ">>"
+    echo ">> DO THIS BY HAND: power the phone off, then hold Power + Volume-Down"
+    echo ">> until the bootloader screen appears. Verify with:"
+    echo ">>   $FASTBOOT devices"
+    ;;
+*)
+    echo ">> DO THIS BY HAND: power the phone off, then hold Power + Volume-Down"
+    echo ">> until the bootloader screen appears. Verify with:"
+    echo ">>   $FASTBOOT devices"
+    echo ">>"
+    echo ">> (This profile names no PORTHOLE_USB_FASTBOOT_ID / _GADGET_ID, so"
+    echo ">> porthole cannot tell you whether the phone is on the bus at all."
+    echo ">> Filling those in is what makes this message specific -- and the"
+    echo ">> difference between replugging a cable and rebooting a phone that"
+    echo ">> was already where you wanted it.)"
+    ;;
+esac
 tk_expired "$DEADLINE" && exit 1
 exit 3

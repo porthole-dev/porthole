@@ -309,6 +309,58 @@ tk_in_fastboot() {
     [ -n "$out" ]
 }
 
+# ph_usb_state -> fastboot | gadget | absent | unknown
+#
+# WHAT IS ON THE USB BUS. That is a different question from what the phone is
+# doing, and it is the one the wait loops needed and never asked. `fastboot
+# devices` stays the only thing that can say "the bootloader is talking to
+# me"; it cannot tell a phone that is still booting from a phone that is not
+# plugged in at all. This can.
+#
+# Paid for on taimen 2026-09-01. A `fast` build asked for the bootloader; the
+# phone left pmOS -- the host kernel logged `usb 1-2: USB disconnect` one
+# second after the request -- and then NOTHING enumerated on that port for 26
+# minutes, while the phone sat on the bootloader screen the whole time.
+# porthole polled its 180s, concluded "never reached the bootloader" and told
+# the operator to power the phone off and hold Power + Volume-Down. The actual
+# fix was to unplug the cable and plug it back in, which is the one thing the
+# message did not say. The bus knew the whole time: no 18d1:* device at all.
+# Nothing looked. brain/findings/a-phone-in-the-bootloader-can-be-off-the-bus.md
+#
+# sysfs, not lsusb: no binary that can be missing, no usb.ids label text to be
+# fooled by -- being fooled by that label IS PORTHOLE_USB_LIES_AS_FASTBOOT --
+# and it reads identically inside the rootless workspace, where /sys is
+# mounted. PORTHOLE_USB_SYSFS relocates the root so this is testable with no
+# phone; nothing else should set it.
+#
+# `unknown` when the profile names no IDs, or when there is no usb sysfs to
+# read. A guess is worse than silence here: the entire value of the helper is
+# that an operator can act on "absent" without checking it by hand.
+ph_usb_state() {
+    local root=${PORTHOLE_USB_SYSFS:-/sys/bus/usb/devices}
+    local fb=${PORTHOLE_USB_FASTBOOT_ID:-} gd=${PORTHOLE_USB_GADGET_ID:-}
+    if [ ! -d "$root" ] || { [ -z "$fb" ] && [ -z "$gd" ]; }; then
+        echo unknown
+        return 0
+    fi
+    local ids="" d v p
+    for d in "$root"/*/; do
+        v=$(cat "$d/idVendor" 2>/dev/null) || continue
+        p=$(cat "$d/idProduct" 2>/dev/null) || continue
+        [ -n "$v" ] && [ -n "$p" ] && ids="$ids $v:$p"
+    done
+    # The bootloader is checked first: on a device where the two IDs are both
+    # present (a hub with the phone behind it mid-switch) the bootloader is
+    # the state a caller is waiting for, so it is the state worth reporting.
+    if [ -n "$fb" ]; then
+        case " $ids " in *" $fb "*) echo fastboot; return 0 ;; esac
+    fi
+    if [ -n "$gd" ]; then
+        case " $ids " in *" $gd "*) echo gadget; return 0 ;; esac
+    fi
+    echo absent
+}
+
 # Echo the running kernel's boot_id, or nothing (non-zero) if unreachable.
 #
 # IT RETRIES, AND THAT IS LOAD-BEARING. A single timed-out read returns empty,
