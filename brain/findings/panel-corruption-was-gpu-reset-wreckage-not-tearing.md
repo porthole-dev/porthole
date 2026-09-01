@@ -41,6 +41,15 @@ The corruption story was never about wayland modifiers. CPU rendering stays;
 (0-1 jank / max 22-47 ms vs 4 janks / max 100 ms; drag equal) and the
 launcher now ships 2.
 
+**It happened AGAIN the same night, from a launch-path hole**: benchmark
+launches via ssh (`setsid epiphany`) bypass the .desktop Exec= env, so they
+ran Skia-on-GPU despite the launcher override and faulted the a540 a second
+time (EE0011C1, SkiaGPUWorker, t=3349) -- flashing status icons and the
+degraded phosh again. The guard now lives in
+`~/.config/environment.d/50-webkit-skia-cpu.conf`, which the systemd user
+manager applies to EVERY launch path. A .desktop Exec= env is a per-icon
+patch, not a policy; anything load-bearing belongs in environment.d.
+
 **What this rules out** — the rd_ptr patch tearing transfers (no artifact
 occurred outside the reset's blast radius; its pending_kickoff_cnt gate
 stands); the compositor dmabuf fix regressing (grim clean, session fling
