@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-# shellcheck shell=sh   # sourced, and by whatever /bin/sh the phone has
 # Reading the module stack, for tkmod's reload path. SOURCED, never run:
 # tkmod pastes this into its remote script, and the tests source it against a
 # fixture sysfs.
 #
+# shellcheck shell=sh   # sourced, and by whatever /bin/sh the phone has
 # scope: generic
 # needs: on-device (tkmod pastes it into its remote script; the tests source it
 #        here against a fixture sysfs)

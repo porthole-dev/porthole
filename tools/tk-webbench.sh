@@ -55,12 +55,25 @@ open(sys.argv[1], "w").write(
     'padding:2px 10px;margin:4px 6px 0 0;font-size:13px}</style></head>'
     f'<body><header>Heavy Feed Benchmark</header>{"".join(cards)}</body></html>')
 PYEOF
+# The three instruments this reads its numbers from. Unchecked, a missing one
+# made every `grep` below match nothing and the run printed a fault delta and a
+# temperature with no frame stats at all -- a null from a path that never
+# executed, which brain/laws/a-null-from-an-unexecuted-path-is-not-a-refutation
+# exists to stop being read as "this variant janks less".
+for _i in tk-gesture-bench.py tk-touch.py tk-ui.py; do
+	[ -f "/tmp/$_i" ] || { echo "missing /tmp/$_i -- push it first"; exit 1; }
+done
+
 P=$(pgrep -x phosh | head -1)
 [ -n "$P" ] || { echo "no phosh session"; exit 1; }
 eval "$(sudo -n tr '\0' '\n' < /proc/"$P"/environ |
 	grep -E '^(WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' |
 	sed 's/^/export /')"
-E=$(pgrep -x epiphany); [ -n "$E" ] && kill "$E" && sleep 3
+# Unquoted on purpose: pgrep answers with one PID per line and a second
+# Epiphany left running is a second set of WebProcesses competing for the GPU,
+# which is the one thing an A/B must not have.
+# shellcheck disable=SC2046
+pgrep -x epiphany >/dev/null && { kill $(pgrep -x epiphany); sleep 3; }
 F0=$(sudo -n dmesg | grep -c "a5xx.*fault")
 env $ENVS setsid epiphany --new-window "file://$PAGE" >/dev/null 2>&1 &
 sleep 10
