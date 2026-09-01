@@ -142,6 +142,12 @@ has gone. `porthole build watch --json` emits one JSON object per update on
 stdout, line-buffered, which is what an agent can consume; a redrawn terminal
 bar is not. Start long builds with `--detach` and wait on the watcher.
 
+**Never run the redrawing form inside a tool call.** `watch` without `--json`
+paints with carriage returns, and a tool call captures that into a pipe. The
+human gets the smeared, column-overlapped mess it produced on 2026-09-01
+rather than a bar. A repainting display has to be drawn by something the
+human's terminal owns -- see the status line below.
+
 Three hand-rolled poll loops were written against `--json` in a single session
 and one of them timed out at ten minutes, reporting nothing, while the build
 was still healthy.
@@ -214,14 +220,30 @@ reasons; `--raw` overrides it if you genuinely mean to bypass all of them.
 **Run it in the background and let the harness tell you it finished -- but
 that puts the bar somewhere the HUMAN CANNOT SEE.** A background task's
 stdout is a log file or a buffer the harness reads, not a terminal in front of
-a person. `porthole pkg watch` exists precisely so the developer is never
-blind to a build that is running because you decided not to poll it, and it
-only works if they know to type it. So every time you start a build, you MUST
-put `porthole pkg watch` in your reply to the human as a command they can run
-right now -- not "if you must watch", not only when they ask, every time,
-full stop. Do not poll the status yourself in a loop, though: that still
-spends a request per check to re-read a number that moved 1%. Say the command
-to the human; do not read it back to yourself.
+a person.
+
+**The fix is a status line, not a command you ask the human to type.**
+`porthole statusline` renders `.run/build-status.json` -- the same bar `watch`
+draws, from the same renderer -- into the agent's own status row, on a
+2-second timer that keeps ticking while you are idle. It costs no tokens and
+needs nothing from the human. This repo is wired up in `.claude/settings.json`;
+any other project (a device workdir, say) takes one command, once:
+
+    porthole statusline --install
+
+So the whole obligation reduces to: **start the build detached and stop
+talking about progress.**
+
+    porthole build fast --yes --detach
+    porthole pkg build <pkg> --detach
+
+On a harness with no status line, fall back to the old contract: put
+`porthole build watch` (or `pkg watch`) in your reply as a command the human
+can run in their own terminal, every time, not only when they ask.
+
+Either way, do not poll the status yourself in a loop: that spends a request
+per check to re-read a number that moved 1%. The human's display is not your
+display.
 
 The percentage is real (ninja states its total), but **the ETA is deliberately
 absent during generator steps.** A `[N/M]` counter stalls dead on
@@ -557,6 +579,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `next` | where am I in this port, and what is the one next thing | yes | no |
 | `brief` | everything an agent needs to start a session, in one call | yes | no |
 | `slots` | read A/B slot policy from the device, never guess it | yes | no |
+| `statusline` | render the build bar for an agent's status line, or install it | yes | no |
 | `matrix` | what works on this device, tested separately from what exists | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
 | `pkg` | find, fork and build a userspace aport, with a real progress bar | yes | needs --yes |
