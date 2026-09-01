@@ -55,6 +55,10 @@ DEFAULTS = {
     "PORTHOLE_WORKDIR": "",
     "PORTHOLE_NO_MUX": "0",
     "PORTHOLE_MUX_PERSIST": "60s",
+    # A phone that stops answering mid-command must produce an error, not a
+    # wait: 15s x 4 is ~60s to give up. See TK_SSH_OPTS in lib/porthole.sh.
+    "PORTHOLE_SSH_ALIVE_INTERVAL": "15",
+    "PORTHOLE_SSH_ALIVE_COUNT": "4",
     # Device facts, defaulted to the conservative answer. A device with no
     # profile is assumed to have no A/B slots, because the failure mode of
     # wrongly assuming slots is flashing a partition that does not exist.
@@ -62,6 +66,7 @@ DEFAULTS = {
     # Build and verify inputs that cannot be guessed from the tree.
     "PORTHOLE_DTS_INCLUDES": "",
     "PORTHOLE_DTS_DEPS": "",
+    "PORTHOLE_MOD_NO_RELOAD": "",
     "PORTHOLE_DTC_BASELINE": "",
     "PORTHOLE_DTC_IGNORE": "",
     "PORTHOLE_KERNEL_TREE": "",

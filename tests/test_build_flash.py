@@ -463,12 +463,15 @@ def test_an_installed_but_unloaded_module_is_not_a_failed_build():
     """
     import porthole_cmd_build as build
     from porthole_cli import EX_STATE
-    assert set(build.TKMOD_INSTALLED_NOT_LOADED) == {3, 4}
-    for rc in (3, 4):
+    # 7 joins them: the module is on PORTHOLE_MOD_NO_RELOAD, so tkmod
+    # installed it and deliberately did not unload the running one (#26).
+    assert set(build.TKMOD_INSTALLED_NOT_LOADED) == {3, 4, 7}
+    for rc in (3, 4, 7):
         headline, hint = build.TKMOD_INSTALLED_NOT_LOADED[rc]
         assert "installed" in headline, headline
         assert "fail" not in (headline + hint).lower(), (rc, headline, hint)
     assert "reboot" in build.TKMOD_INSTALLED_NOT_LOADED[3][1].lower()
+    assert "reboot" in build.TKMOD_INSTALLED_NOT_LOADED[7][1].lower()
     # Say the thing the agent got wrong, in the words it got wrong.
     assert "rung" in build.TKMOD_INSTALLED_NOT_LOADED[3][1]
     # ...and the call site raises with that code rather than EX_FAIL.

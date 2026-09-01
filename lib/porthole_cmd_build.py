@@ -93,6 +93,11 @@ TKMOD_INSTALLED_NOT_LOADED = {
     4: ("installed, but not loaded -- this module carries the ssh link",
         "nothing was torn down and the build is fine. Reboot to run it, or "
         "re-run over a transport this module does not carry"),
+    7: ("installed, but not loaded -- unloading this one is not safe here",
+        "PORTHOLE_MOD_NO_RELOAD lists it because its rmmod does more than "
+        "unload; on venus_core a live reload hard-reset the SoC (#26). "
+        "Nothing was torn down. One reboot runs the new module "
+        "(`porthole run tools/tk-reboot.sh`)"),
 }
 
 ACTIONS = {
