@@ -168,15 +168,102 @@ def _snap(rundir: pathlib.Path, name: str):
         return None
 
 
-def build_line(repo: pathlib.Path, width: int, now=None):
-    """The build row, or None when there is nothing worth a row.
+# Where pmbootstrap writes its log, host side, for each of the two work dirs
+# a build can use. Read from the environment only -- the status line runs
+# every two seconds and must not parse config, shell out, or ask podman
+# anything. A `stat` is free; `podman exec` is not.
+PMB_LOGS = (("PORTHOLE_SANDBOX_PMB_DIR", "~/.local/var/porthole-sandbox"),
+            ("PORTHOLE_PMB_DIR", "~/.local/var/pmbootstrap"))
+
+# The freshness window and the skew allowance are `porthole_progress`'s, so
+# this file and `pkg status` cannot disagree about whether a log is live.
+def _fresh_bounds():
+    import porthole_progress as pp
+
+    return pp.LOG_FRESH_S, pp.CLOCK_SKEW_S
+
+
+def _live_log(now: float):
+    """`(path, mtime)` of a pmbootstrap log written just now, else None."""
+    best = None
+    for env, default in PMB_LOGS:
+        path = pathlib.Path(os.environ.get(env) or default).expanduser()
+        try:
+            mtime = (path / "log.txt").stat().st_mtime
+        except OSError:
+            continue
+        fresh, skew = _fresh_bounds()
+        # Bounded at BOTH ends. A log dated in the future -- clock skew, a
+        # copied tree, a restored backup -- is not evidence that something is
+        # building now, and an unbounded `age <= fresh` accepts every one of
+        # them. Checked here as well as in `reattach_from_log`, because this
+        # is also what PICKS between the two work dirs' logs.
+        if -skew <= now - mtime <= fresh and (best is None
+                                              or mtime > best[1]):
+            best = (path / "log.txt", mtime)
+    return best
+
+
+# Where the reattached row keeps its rate samples. Each status line run is a
+# fresh process, so there is nothing in memory to measure a rate against and
+# the ETA -- the one number somebody watching a four-hour build actually
+# wants -- was permanently `--`. A handful of `(when, done)` pairs on disk is
+# enough, and it is the same shape `porthole_progress.window_rate` consumes.
+SAMPLES_NAME = "statusline-samples.json"
+
+# 180s of window at a 2s refresh is 90 samples; generous enough to survive a
+# slower refresh, small enough that the file stays a few hundred bytes.
+SAMPLES_MAX = 128
+
+
+def _samples(rundir: pathlib.Path, mtime: float, done, now: float):
+    """The rolling `(when, done)` ring, updated with this reading.
+
+    Never raises: an unwritable .run costs the ETA, not the status line.
+    """
+    import porthole_progress as pp
+    path = rundir / SAMPLES_NAME
+    try:
+        kept = [(float(a), int(b))
+                for a, b in json.loads(path.read_text())][-SAMPLES_MAX:]
+    except (OSError, ValueError, TypeError):
+        kept = []
+    # A counter that went backwards is a NEW build. `window_rate` would refuse
+    # the negative rate, but the stale pairs would sit in the window for
+    # minutes afterwards, so the ETA would stay `--` long past the point where
+    # this build could answer it.
+    if done is not None and kept and done < kept[-1][1]:
+        kept = []
+    if done is not None and (not kept or kept[-1] != (mtime, done)):
+        kept.append((mtime, done))
+    kept = [pair for pair in kept if mtime - pair[0] <= pp.RATE_WINDOW]
+    try:
+        path.write_text(json.dumps(kept[-SAMPLES_MAX:]))
+    except OSError:
+        pass
+    return kept
+
+
+def build_snapshot(repo: pathlib.Path, now: float):
+    """`(snapshot, reattached)` for the build worth showing, or `(None, ...)`.
 
     Both status files are considered and the more recent one wins: a kernel
     rung and a package build do not run at once, but the file from the last
     one that did sticks around, and picking by name would show the older.
+
+    THE ORPHAN CASE. A build outlives the porthole run that tracks it --
+    `podman exec` runs it server-side, so a killed agent, a closed session or
+    a timeout takes the tracker and not the work. The status file then freezes
+    mid-build and `liveness` calls it stale, and the row vanished at exactly
+    the moment somebody wanted it: this host spent two hours with a webkit
+    build at 88% and a status line that said nothing at all.
+
+    The log is the witness, the same one `porthole pkg watch` reattaches to.
+    Here the test is only whether it was written seconds ago, because the
+    status line cannot afford to ask the workspace anything -- and a log that
+    is being appended to right now is a build that is running right now.
     """
     import porthole_progress as pp
-    now = time.time() if now is None else now
     rundir = repo / ".run"
     best = None
     for name in ("build-status.json", "pkg-status.json"):
@@ -185,15 +272,102 @@ def build_line(repo: pathlib.Path, width: int, now=None):
             continue
         if best is None or (snap.get("last_at") or 0) > (best.get("last_at") or 0):
             best = snap
-    if not best:
+    if best and pp.liveness(best) == "running":
+        return best, False
+    # ONLY when this checkout's own snapshot froze mid-build. The log belongs
+    # to the machine's workspace, not to this repo, so a fresh one on its own
+    # says "something is building somewhere" -- which in an unrelated
+    # checkout is noise, and whose name could only be guessed. A frozen
+    # `running` snapshot here is what makes the log's numbers this repo's
+    # build, and makes its `rung` the right name for them.
+    if best and (best.get("state") or "") == "running":
+        live = _live_log(now)
+        if live:
+            text, _ = pp.log_tail(live[0])
+            samples = _samples(repo / ".run", live[1],
+                               pp.log_steps(text or "")[0], now)
+            # The freshness rule itself lives in `porthole_progress`, shared
+            # with `pkg watch` and `pkg status`: three copies of "is this
+            # build still alive" would be three chances to disagree.
+            snap = pp.reattach_from_log(live[0], best, now=now,
+                                        samples=samples)
+            if snap is not None:
+                return snap, True
+    if best and now - (best.get("last_at") or 0) <= LINGER_S:
+        return best, False       # old news lingers briefly; then it is clutter
+    return None, False
+
+
+def row_style():
+    """Colour on, because this is chrome the harness paints rather than a
+    pipe -- `detect_style` would see stdout is not a tty and turn it off.
+    NO_COLOR is still honoured, and unicode still follows the encoding.
+    """
+    import porthole_progress as pp
+    base = pp.detect_style()
+    return pp.Style(colour=not os.environ.get("NO_COLOR"),
+                    unicode=base.unicode)
+
+
+def row_segments(snap, reattached: bool, width: int, now: float):
+    """`[(text, tone)]` for the build row.
+
+    Fewer fields than the watch block's -- one line of somebody's chrome is
+    not the place for the rate and the elapsed -- but every number in it comes
+    from the same `porthole_progress` primitives, so the two cannot disagree
+    about what percentage this build is at.
+    """
+    import porthole_progress as pp
+    state = snap.get("state") or "running"
+    if state == "running" and snap.get("pid") is not None:
+        state = pp.liveness(snap)
+    name = str(snap.get("rung") or "build").split(":", 1)[-1]
+    if state != "running":
+        age = pp.fmt_dur(now - (snap.get("last_at") or now))
+        return [(pp.spinner(snap, row_style()) + " ", "state"),
+                (name, "name"), ("  ", "pad"), (state, "state"),
+                ("  ", "pad"), (age + " ago", "dim")]
+    out = [(name, "name"), ("  ", "pad"),
+           (pp.bar(snap.get("progress"), _bar_width(width), row_style()),
+            "state"), ("  ", "pad")]
+    frac = snap.get("progress")
+    out.append(("--" if frac is None else "{:>3d}%".format(int(frac * 100)),
+                "figure"))
+    if snap.get("steps"):
+        out += [("  ", "pad"), (str(snap["steps"]), "dim")]
+    if snap.get("eta"):
+        out += [("  ", "pad"), ("eta ", "dim"),
+                (pp.fmt_dur(snap["eta"]), "figure")]
+    if reattached:
+        out += [("  ", "pad"), ("\u00b7 reattached", "dim")]
+    return out
+
+
+def _bar_width(width: int) -> int:
+    """The bar gives up its width first: a status line shares the row with
+    somebody else's, and the numbers beside it are what carry the meaning."""
+    return max(6, min(18, width // 5))
+
+
+def build_line(repo: pathlib.Path, width: int, now=None):
+    """The build row, or None when there is nothing worth a row."""
+    import porthole_progress as pp
+    now = time.time() if now is None else now
+    snap, reattached = build_snapshot(repo, now)
+    if not snap:
         return None
-    state = pp.liveness(best)
-    if state != "running" and now - (best.get("last_at") or 0) > LINGER_S:
-        return None      # old news; the row would be clutter, not status
-    # No state tag here: line_of renders the finished states itself now, and
-    # `fast done ... done` reads as a rendering bug.
-    body = pp.line_of(best, budget=max(40, width - 10))
-    return pp.clip("{:<8}{}".format(best.get("rung") or "build", body), width)
+    style = row_style()
+    state = snap.get("state") or "running"
+    if state == "running" and snap.get("pid") is not None:
+        state = pp.liveness(snap)
+    colour = pp._STATE_COLOUR.get(state, "cyan")
+    tones = {"name": "bold", "figure": "bold", "dim": "grey", "state": colour}
+    segments = row_segments(snap, reattached, width, now)
+    plain = "".join(text for text, _ in segments)
+    if len(plain) > width:
+        return pp.clip(plain, width)     # no colour on a line that was cut
+    return "".join(pp.tint(text, tones[tone], style) if tone in tones else text
+                   for text, tone in segments)
 
 
 def session_line(inp, repo: pathlib.Path) -> str:
@@ -207,12 +381,14 @@ def session_line(inp, repo: pathlib.Path) -> str:
             capture_output=True, text=True, timeout=1).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         pass
-    bits = [model, pathlib.Path(cwd).name]
+    import porthole_progress as pp
+    style = row_style()
+    bits = [pp.tint(model, "bold", style), pathlib.Path(cwd).name]
     if branch:
         bits.append(branch)
     if isinstance(pct, (int, float)):
-        bits.append("{:.0f}% ctx".format(pct))
-    return " · ".join(bits)
+        bits.append(pp.tint("{:.0f}% ctx".format(pct), "grey", style))
+    return pp.tint(" · ", "grey", style).join(bits)
 
 
 def _render() -> int:

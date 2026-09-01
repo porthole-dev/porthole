@@ -75,13 +75,97 @@ def is_free(workdir) -> bool:
     return True
 
 
+def holder_pid(workdir):
+    """The pid named by the `.holder` sidecar, or None."""
+    for word in lock_holder(workdir).split():
+        if word.startswith("pid="):
+            try:
+                return int(word[4:])
+            except ValueError:
+                return None
+    return None
+
+
+def abandoned(workdir, alive=None) -> str:
+    """The holder of a lock whose owner is gone, or "".
+
+    `flock` is released by the kernel when its holder dies. That is the right
+    behaviour for a crashed build -- nobody is wedged -- and exactly the wrong
+    signal here, because the build itself does NOT die with the porthole run
+    that started it: `podman exec` runs it server-side. So the mutex reads
+    free while the buildroot is in use, which is
+    brain/traps/two-pmbootstrap-builds-destroy-each-other with its safety
+    catch filed off.
+
+    The sidecar is what is left over: it leaks when its writer is killed
+    before the `finally` runs, and it names the pid that died. Free, no
+    podman, and true right now on this machine. It is a HINT and never a
+    refusal on its own -- a leaked sidecar from a build that really is over
+    must not wedge the next one, which is the whole reason the lock is an
+    flock and not a lockfile.
+    """
+    pid = holder_pid(workdir)
+    if pid is None:
+        return ""
+    check = _pid_alive if alive is None else alive
+    return "" if check(pid) else lock_holder(workdir)
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def clear_holder(workdir) -> None:
+    """Drop a sidecar whose build is provably over."""
+    try:
+        _holder_path(workdir).unlink()
+    except OSError:
+        pass
+
+
 @contextlib.contextmanager
-def hold(workdir, what: str, wait: float = 0.0):
-    """Exclusive use of the buildroot for the length of one build."""
+def hold(workdir, what: str, wait: float = 0.0, probe=None):
+    """Exclusive use of the buildroot for the length of one build.
+
+    `probe` answers "is a pmbootstrap running in the workspace?" and is the
+    only guard that binds a build nobody locked -- one started through
+    `sandbox shell --command`, or one whose porthole run was killed while the
+    workspace kept building. It lives HERE rather than in a caller because
+    `checksum` is what destroyed the redfin kernel build: a mutex that only
+    the build verb takes is not a mutex, and the same is true of a probe that
+    only the build verb makes.
+
+    It is asked only when the flock is free but a sidecar says it should not
+    be -- so the common case, an idle buildroot with no leftovers, costs
+    nothing at all.
+    """
     import fcntl
 
     path = pathlib.Path(workdir) / LOCK_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
+    stale = abandoned(workdir)
+    if stale:
+        running = (probe() or "") if probe else ""
+        if running:
+            raise Bail(
+                f"the buildroot is busy: {running} is building, and the run "
+                f"that locked it ({stale.strip()}) is gone",
+                EX_LOCK,
+                "the build outlived its tracker, so the flock was released "
+                "while the buildroot stayed in use. Starting now would delete "
+                "its source tree "
+                "(brain/traps/two-pmbootstrap-builds-destroy-each-other). "
+                "Follow it with `porthole pkg watch` and wait for it.")
+        # Nothing is running: the sidecar is litter from a build that really
+        # did end. Clearing it is what keeps a dead holder from reading as a
+        # live one forever.
+        clear_holder(workdir)
     handle = open(path, "a")
     deadline = time.time() + wait
     while True:

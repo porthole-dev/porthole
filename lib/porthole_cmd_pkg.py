@@ -39,6 +39,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE, EX_USAGE
 
@@ -871,10 +872,73 @@ def _watch(ctx, args) -> int:
     # building in the workspace", not "is the workspace wired for THIS
     # device": a container built for another phone still owns the buildroot
     # and still publishes nothing, so `running_build` asks it either way.
-    return progress.watch(rundir, "pkg-status.json", args.interval, out,
-                          start_hint="start one with "
-                                     "`porthole pkg build <aport>`",
-                          probe=lambda: running_build(ctx, True))
+    # The block owns the screen while it repaints, so nothing else may write
+    # to it: an echoed keystroke -- an idle Enter most of all -- scrolls the
+    # terminal out from under the cursor walk, and the block then duplicates
+    # itself down the screen instead of replacing itself.
+    with progress.quiet_terminal(sys.stdout.isatty()
+                                 and not getattr(args, "json", False)):
+        return progress.watch(
+            rundir, "pkg-status.json", args.interval, out,
+            # `--json` is a flag of this verb and `watch` was silently
+            # ignoring it: an agent that asked for objects got ANSI
+            # repaints down its pipe.
+            ndjson=getattr(args, "json", False),
+            start_hint="start one with `porthole pkg build <aport>`",
+            probe=lambda: running_build(ctx, True),
+            log=lambda: _log_path(ctx),
+            verdict=lambda name, snap: _verdict(ctx, name, out))
+
+
+def _log_path(ctx):
+    """pmbootstrap's log for whichever buildroot this checkout builds in.
+
+    Resolved lazily, and only when a reattach is actually about to happen: it
+    costs a `_workspace_usable` and the common case never needs it.
+    """
+    import porthole_cmd_build as build
+
+    usable, _ = build._workspace_usable(ctx)
+    return build.pmb_workdir(ctx, usable) / "log.txt"
+
+
+def _verdict(ctx, aport: str, out) -> int:
+    """Did the build we reattached to actually produce its apk?
+
+    A reattached watch has no tracker to have written `done` or `failed`, and
+    the alternative to this is believing the log's last line -- which is the
+    exact mistake `_build` refuses to make, because pmbootstrap can print
+    success and write no apk. Same two helpers `_build` uses, so a watcher and
+    the build itself cannot disagree about what "it worked" means.
+    """
+    import porthole_cmd_build as build
+    import porthole_progress as progress
+
+    usable, _ = build._workspace_usable(ctx)
+    arch = ctx.cfg.get("PORTHOLE_ARCH") or "aarch64"
+    directory = find_aport(_find_pmaports(ctx), aport)
+    want = None
+    if directory is not None:
+        want = expected_apk(_packages_dir(ctx, usable), arch,
+                            apkbuild_fields((directory / "APKBUILD").read_text(
+                                errors="replace")))
+    if want is None:
+        out(f"  the build ended. {aport} has no APKBUILD here, so nothing "
+            f"could check what it produced\n")
+        return EX_FAIL
+    if want.exists():
+        age = progress.fmt_dur(time.time() - want.stat().st_mtime)
+        out(f"  the build ended -- {want.name} landed, "
+            f"{want.stat().st_size // 1024} KiB, {age} ago\n")
+        return EX_OK
+    # The TAIL, not the whole file: log.txt is shared and long-lived, and
+    # reading it whole lets a previous run's "is up to date" explain this one
+    # -- the bound `log_since` exists for, kept here.
+    why = why_nothing_built(progress.log_tail(_log_path(ctx))[0] or "", aport)
+    out(f"  the build ended and {want.name} is not there\n")
+    if why:
+        out(f"  {why[0]}\n")
+    return EX_FAIL
 
 
 def _outdated(ctx) -> int:
@@ -911,11 +975,23 @@ def _status(ctx) -> int:
                         lambda: ctx.out("no package build has run in this "
                                         "checkout"))
 
+    # The same question `watch` and the status line ask: the tracker can die
+    # without the build dying, and reporting the frozen file as `stale` is
+    # how this said nothing for two hours about a build sitting at 88%.
+    live = progress.reattach_from_log(_log_path(ctx), snap)
+    if live is not None:
+        snap = dict(live, reattached=True)
+
     def render():
-        head, rows = progress.status_report(snap)
+        head, rows = progress.status_report(
+            snap, alive=(lambda pid: True) if live is not None else None)
         ctx.out("  " + head)
         for label, value in rows:
             ctx.out.kv(label, value, 10)
+        if live is not None:
+            ctx.out.kv("note", "reattached: this build outlived the run that "
+                               "was tracking it, so these numbers come from "
+                               "the workspace log", 10)
 
     return ctx.emit(snap, render)
 
