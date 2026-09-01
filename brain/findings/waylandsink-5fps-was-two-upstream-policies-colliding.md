@@ -5,7 +5,7 @@ scope: device:google-taimen
 subsystem: display
 severity: finding
 confidence: proven
-evidence: WAYLAND_DEBUG protocol trace + /proc wchan sampling + caps logs, 2026-09-01 evening; fixed by pmaports temp/phoc 0003 (pkgrel 51), caps verified populated on the patched compositor
+evidence: WAYLAND_DEBUG protocol trace + /proc wchan sampling + caps logs, 2026-09-01 evening; fixed by pmaports temp/phoc 0003 (pkgrel 51), verified in-session at 60 vsync/s zero-copy
 refutes: phoc starves waylandsink of buffer releases; the cap is a wayland round-trip limit; waylandsink is slow at rendering; the dmabuf handoff itself is broken; venus degraded over the day
 first-learned: 2026-09-01
 ---
@@ -41,8 +41,12 @@ always fine and why the corruption GStreamer fears does not occur here.
 **The fix** — pmaports `temp/phoc` patch 0003 (pkgrel 51) drops the
 workaround branch in the bundled wlroots: the modifier set on this GBM is
 explicit-LINEAR-capable, so xserver#1166 (GBM without modifier support) does
-not apply. Verified on the patched compositor: every format now sends
-0x0 + INVALID, and waylandsink's display caps list all formats.
+not apply. Verified end to end in the unlocked session: every format now
+sends 0x0 + INVALID, waylandsink's display caps list all formats, and
+`playbin + waylandsink sync=true` on the 1080p30 clip runs at **60 panel
+vsyncs/s with 0 late-frame drops and `vqueue:src` asleep in futex_wait** —
+the converter is gone and the path is zero-copy. The session still flings at
+p50 16.6 / p90 18.2 ms on the patched compositor.
 Upstream-bound: wlroots should gate the workaround on a GBM that actually
 lacks modifier support; GStreamer should bind dmabuf v4 and read the
 feedback table.
