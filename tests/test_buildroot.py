@@ -9,6 +9,7 @@ Both failures named the compiler.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 import tempfile
@@ -107,6 +108,49 @@ def test_the_holder_names_the_operation_not_only_the_package():
     with tempfile.TemporaryDirectory() as d:
         with buildroot.hold(d, "aports pkgrel_bump"):
             assert "pkgrel_bump" in buildroot.lock_holder(d)
+
+
+def test_a_dead_holder_plus_a_live_build_refuses_rather_than_deleting_it():
+    """2026-09-01, measured: a webkit build's porthole run was killed and the
+    build kept going inside the workspace -- `podman exec` runs it
+    server-side. flock is released by the kernel when its holder dies, so the
+    mutex read FREE with a nine-thousand-object build in the buildroot, and
+    the next `aports checksum` would have deleted its source tree. The leaked
+    sidecar plus the workspace's process list is what catches it."""
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / ".porthole-buildroot.lock.holder").write_text(
+            "webkit2gtk-6.0 pid=999999999 since=20:36:15\n")
+        assert buildroot.is_free(d), "flock really is free -- that is the trap"
+        assert "webkit2gtk-6.0" in buildroot.abandoned(d)
+        try:
+            with buildroot.hold(d, "aports checksum",
+                                probe=lambda: "webkit2gtk-6.0"):
+                raise AssertionError("must refuse: that build is still alive")
+        except buildroot.Bail as exc:
+            assert exc.code == buildroot.EX_LOCK, exc.code
+            assert "webkit2gtk-6.0" in exc.message
+            assert "outlived its tracker" in exc.hint
+
+
+def test_a_leaked_holder_from_a_finished_build_does_not_wedge_the_next_one():
+    """The other half, and the reason this is a hint and never a refusal on
+    its own: flock was chosen over a lockfile precisely so a crashed build
+    cannot wedge everyone until a human notices. A sidecar whose build is
+    provably over is litter -- clear it and proceed."""
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / ".porthole-buildroot.lock.holder").write_text(
+            "phoc pid=999999999 since=11:02:03\n")
+        with buildroot.hold(d, "aports checksum", probe=lambda: ""):
+            assert "phoc" not in buildroot.lock_holder(d), \
+                "the dead holder must be gone, not inherited"
+        assert buildroot.is_free(d)
+
+
+def test_a_live_holder_is_never_called_abandoned():
+    with tempfile.TemporaryDirectory() as d:
+        with buildroot.hold(d, "phoc"):
+            assert buildroot.abandoned(d) == ""
+            assert buildroot.holder_pid(d) == os.getpid()
 
 
 def main():

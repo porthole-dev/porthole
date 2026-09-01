@@ -472,10 +472,18 @@ def pmb(ctx, *args, timeout=1800, capture=False):
     ctx.out(ctx.out.paint(f"  $ {' '.join(cmd)}", "grey"))
     verb = next((a for a in args if not a.startswith("-")), "")
     if verb in MUTATES_BUILDROOT:
-        workdir = pathlib.Path(
-            ctx.cfg.get("PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
-        ).expanduser()
-        with buildroot.hold(workdir, f"aports {verb}"):
+        # The workdir the command will ACTUALLY run against, not the host's.
+        # `_pmb_argv` routes into the workspace, whose pmbootstrap keeps its
+        # own work dir -- so locking the host path meant `aports checksum`
+        # and a container build took two different lock FILES for one
+        # buildroot, and neither could see the other. Both files exist on a
+        # machine that has ever done both. The mutex was two mutexes.
+        import porthole_cmd_build as build
+
+        usable, _ = build._workspace_usable(ctx)
+        workdir = build.pmb_workdir(ctx, usable)
+        with buildroot.hold(workdir, f"aports {verb}",
+                            probe=lambda: buildroot.running_build(ctx, True)):
             return _pmb_run(ctx, cmd, timeout, capture)
     return _pmb_run(ctx, cmd, timeout, capture)
 
