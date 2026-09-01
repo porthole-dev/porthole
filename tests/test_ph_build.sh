@@ -454,5 +454,54 @@ is "and the install still runs"           "$(saw "$out" REACHED-THE-INSTALL)" "y
 out=$(TK_MOD_SIZE_RATIO=99 guard 3431808 315448)
 is "TK_MOD_SIZE_RATIO raises the bound" "$(saw "$out" REFUSING)" "no"
 
+# --- a failed compile must not read as "nothing to do" -------------------
+#
+# _ph_measure discarded make's exit code and judged the build by its artifacts
+# alone, on the theory that make lies once the tree is built. But a compile
+# error writes NO file: Image.gz keeps its old mtime, .config is not newer than
+# it, no dts is newer than its dtb -- every artifact check passes. `auto` then
+# found nothing rebuilt since the last push, printed "make rebuilt nothing" and
+# exited 0, so a tree that would not compile was indistinguishable from one
+# already up to date (#22).
+#
+# make is a shell FUNCTION here, which is what `eval make` resolves to when no
+# envkernel alias exists -- so this exercises the real _ph_measure with a make
+# whose exit code we choose, and nothing is compiled or mounted.
+measure() { # measure MAKE_RC -> "rc | output"
+    rm -rf "$TMP/mz"
+    mkdir -p "$TMP/mz/tree/.output/arch/arm64/boot/dts/qcom" \
+             "$TMP/mz/tree/arch/arm64/boot/dts/qcom" "$TMP/mz/repo/pmaports/device"
+    printf 'VERSION = 7\nPATCHLEVEL = 2\nSUBLEVEL = 0\n' > "$TMP/mz/tree/Makefile"
+    # The artifact checks must all PASS, so the exit code is the only thing
+    # left that can tell the two cases apart.
+    echo cfg  > "$TMP/mz/tree/.output/.config"
+    echo dts  > "$TMP/mz/tree/arch/arm64/boot/dts/qcom/msm8998-google-taimen.dts"
+    sleep 0.01
+    echo img  > "$TMP/mz/tree/.output/arch/arm64/boot/Image.gz"
+    echo dtb  > "$TMP/mz/tree/.output/arch/arm64/boot/dts/qcom/msm8998-google-taimen.dtb"
+    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" MK_RC="$1" \
+        PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/mz/repo" \
+        PORTHOLE_KERNEL_TREE="$TMP/mz/tree" PORTHOLE_KERNEL_PKG=fakekpkg \
+        bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+                 _ph_announce_tree()      { :; }
+                 _ph_tree_matches_aport() { return 0; }
+                 _ph_defconfig_current()  { return 0; }   # skip the resync
+                 _ph_activate()           { pushd "$_PH_TREE" >/dev/null; }
+                 _ph_stamp_write()        { echo STAMPED; }
+                 make()                   { return "$MK_RC"; }
+                 out=$(_ph_measure 2>&1); echo "$? | $out"' 2>/dev/null
+}
+
+out=$(measure 2)
+is "a failed make fails the measure"    "${out%% *}" "1"
+is "and it says make is why"            "$(saw "$out" "make exited 2")" "yes"
+is "and no build stamp is recorded"     "$(saw "$out" STAMPED)" "no"
+
+# THE POSITIVE CONTROL. A guard that failed every build would satisfy all three
+# assertions above and break every rung.
+out=$(measure 0)
+is "a clean make still succeeds"        "${out%% *}" "0"
+is "and the stamp is recorded"          "$(saw "$out" STAMPED)" "yes"
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
