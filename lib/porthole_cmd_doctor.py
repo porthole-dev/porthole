@@ -746,14 +746,64 @@ def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
     So: set is a failure, and the fix is spelled out.
     """
     value = (ctx.cfg.get("PMB_SUDO") or os.environ.get("PMB_SUDO") or "").strip()
-    if not value:
+    if value:
+        # `unset` alone fixes ONE shell. Reported three times by agents that
+        # each worked around it with `env -u PMB_SUDO` and moved on, which
+        # fixes nothing and hides the check: on the host where this was found
+        # the export came from the desktop session, so every new terminal and
+        # every agent inherited it again.
+        ch.add("host: PMB_SUDO", "fail",
+               f"set to {value} -- a leftover; the privilege broker it named "
+               f"is gone",
+               fix="unset PMB_SUDO"
+                   "    # a build otherwise dies with exit 78 deep inside "
+                   "pmbootstrap, naming nothing."
+                   " If it is back in the next terminal it is exported from "
+                   "your session, not your shell rc -- remove it there")
+    else:
         ch.add("host: PMB_SUDO", "ok", "unset -- nothing here uses it")
+    _check_leftover_broker(ch, value)
+
+
+# Where porthole's own installer used to put the broker. A historical fact
+# about this project rather than a device fact, so naming it here is not the
+# hardcoding rule: there is no config that could supply it, because the verb
+# that wrote it was deleted with it.
+BROKER_PATHS = ("/usr/local/libexec/porthole/ph-sudo",)
+
+
+def _check_leftover_broker(ch: Checks, pmb_sudo: str) -> None:
+    """The broker BINARY, which outlives the export and the design that had it.
+
+    `sandbox/ph-sudo` and the `install`/`audit`/`uninstall` verbs were deleted
+    on 2026-08-29 (docs/SANDBOX-PROVISIONING.md section 8). Deleting the
+    installer did not uninstall anything, and nothing has looked since -- so a
+    host provisioned before that date still carries a setuid-adjacent helper
+    and, in all likelihood, the sudoers entry that makes it work. That entry
+    is standing host privilege, which is the ONE property this whole subsystem
+    exists to remove, and it was left in place by the change that claimed to
+    remove it.
+
+    A warning rather than a failure: it breaks nothing, `porthole` never calls
+    it, and doctor must not fail a host over something it cannot check
+    completely -- /etc/sudoers.d is unreadable without root, so the entry can
+    only be guessed at from the file's presence.
+    """
+    found = [path for path in
+             dict.fromkeys([*BROKER_PATHS, pmb_sudo] if pmb_sudo
+                           else BROKER_PATHS)
+             if path and os.path.exists(path)]
+    if not found:
+        ch.add("host: ph-sudo broker", "ok",
+               "not installed -- no standing host privilege")
         return
-    ch.add("host: PMB_SUDO", "fail",
-           f"set to {value} -- a leftover; the privilege broker it named is gone",
-           fix="unset PMB_SUDO"
-               "    # a build otherwise dies with exit 78 deep inside "
-               "pmbootstrap, naming nothing")
+    ch.add("host: ph-sudo broker", "warn",
+           f"{found[0]} still installed -- the privilege broker was deleted "
+           f"from porthole on 2026-08-29 and never uninstalled here",
+           fix=f"sudo rm -f {' '.join(found)}"
+               "  # then check for its sudoers entry: sudo ls /etc/sudoers.d"
+               " -- that entry is standing root, which the workspace exists"
+               " to do without")
 
 
 def _check_pmos_password(ch: Checks, env) -> None:

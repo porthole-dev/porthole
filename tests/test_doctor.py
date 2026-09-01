@@ -65,13 +65,26 @@ class _Ctx:
         self.cfg = cfg
 
 
+def _row(ch, name):
+    """The row a check emitted, BY NAME.
+
+    `ch.rows[-1]` was the idiom here and it broke the moment _check_pmb_sudo
+    emitted a second row -- three tests failed while asserting nothing about
+    the thing they were testing. A check is allowed to grow rows; a test that
+    reads them positionally is not testing what it says it is.
+    """
+    hits = [r for r in ch.rows if r["name"] == name]
+    assert hits, f"no row named {name!r} in {[r['name'] for r in ch.rows]}"
+    return hits[-1]
+
+
 def test_a_dangling_pmb_sudo_fails_with_a_named_fix():
     """Reported from a real session: the broker was gone, PMB_SUDO still
     pointed at it, and the build died with exit 78 deep inside pmbootstrap
     without anything mentioning PMB_SUDO."""
     ch = doctor.Checks()
     doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": "/nonexistent/ph-sudo"}), {})
-    row = ch.rows[-1]
+    row = _row(ch, "host: PMB_SUDO")
     assert row["status"] == "fail", row
     assert "unset PMB_SUDO" in row["fix"], row["fix"]
     assert "78" in row["fix"], "the fix should name the exit code you would see"
@@ -83,7 +96,7 @@ def test_an_unset_pmb_sudo_is_fine():
     try:
         ch = doctor.Checks()
         doctor._check_pmb_sudo(ch, _Ctx({}), {})
-        assert ch.rows[-1]["status"] == "ok", ch.rows[-1]
+        assert _row(ch, "host: PMB_SUDO")["status"] == "ok", ch.rows
     finally:
         if saved is not None:
             os.environ["PMB_SUDO"] = saved
@@ -96,7 +109,7 @@ def test_any_pmb_sudo_at_all_is_caught():
     that hit this had the variable set; neither could see why."""
     ch = doctor.Checks()
     doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": "/usr/local/libexec/porthole/ph-sudo"}), {})
-    row = ch.rows[-1]
+    row = _row(ch, "host: PMB_SUDO")
     assert row["status"] == "fail", row
     assert "unset PMB_SUDO" in row["fix"], row["fix"]
 
@@ -104,10 +117,45 @@ def test_any_pmb_sudo_at_all_is_caught():
     try:
         ch = doctor.Checks()
         doctor._check_pmb_sudo(ch, _Ctx({}), {})
-        assert ch.rows[-1]["status"] == "ok", ch.rows[-1]
+        assert _row(ch, "host: PMB_SUDO")["status"] == "ok", ch.rows
     finally:
         if saved is not None:
             os.environ["PMB_SUDO"] = saved
+
+
+def test_a_leftover_broker_binary_is_reported_even_with_pmb_sudo_unset():
+    """Deleting the installer uninstalled nothing.
+
+    `sandbox/ph-sudo` and the install/audit/uninstall verbs went on
+    2026-08-29; a host provisioned before then still carries the helper and
+    the sudoers entry that makes it work, which is standing host privilege --
+    the one property the workspace exists to remove. Nothing looked for it
+    until an agent tripped over the export three separate times.
+    """
+    ch = doctor.Checks()
+    doctor._check_leftover_broker(ch, "")
+    row = _row(ch, "host: ph-sudo broker")
+    if any(os.path.exists(p) for p in doctor.BROKER_PATHS):
+        assert row["status"] == "warn", row
+        assert "sudoers" in row["fix"], row["fix"]
+    else:
+        assert row["status"] == "ok", row
+
+    # The positive control: a path that IS there must warn, whatever this
+    # host happens to have installed.
+    ch = doctor.Checks()
+    doctor._check_leftover_broker(ch, __file__)
+    row = _row(ch, "host: ph-sudo broker")
+    assert row["status"] == "warn", row
+    assert __file__ in row["fix"], row["fix"]
+
+    # ...and one that is not there must not.
+    ch = doctor.Checks()
+    doctor._check_leftover_broker(ch, "/nonexistent/ph-sudo")
+    row = _row(ch, "host: ph-sudo broker")
+    expected = "warn" if any(os.path.exists(p)
+                             for p in doctor.BROKER_PATHS) else "ok"
+    assert row["status"] == expected, row
 
 
 def test_nothing_still_ships_or_names_the_privilege_broker():
