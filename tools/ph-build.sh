@@ -533,12 +533,26 @@ _ph_measure() {
 		eval make "$PORTHOLE_DEFCONFIG" || { popd >/dev/null || return 1
 			echo ">> defconfig FAILED"; return 1; }
 	fi
-	# make's exit code can lie once the tree is already built (BTF prep re-runs and
-	# returns non-zero with nothing wrong), so verify artifacts instead of trusting it.
-	eval make -j"$(nproc)"
+	eval make -j"$(nproc)"; local mk=$?
 	# This file is SOURCED, so a failed popd would strand the user's own
 	# interactive shell in the kernel tree.
 	popd >/dev/null || return 1
+
+	# make's verdict, FIRST. This used to be discarded on a claim that BTF prep
+	# re-runs return non-zero with nothing wrong, leaving the artifact checks
+	# below as the only judge -- and they cannot see a failed compile. An object
+	# that does not build writes no file, so Image.gz stays put, .config is not
+	# newer than it, no dts is newer than its dtb: every check passes, `auto`
+	# finds nothing changed since the last push and prints "make rebuilt nothing"
+	# and exits 0. A broken tree read as an up-to-date one. Cost a DRM port an
+	# hour of looking in the wrong module (#22).
+	#
+	# The checks below stay: they answer the opposite question -- make exiting 0
+	# having produced nothing usable -- and neither one covers the other.
+	if [ "$mk" -ne 0 ]; then
+		echo ">> make exited $mk -- the build FAILED, the errors are above" >&2
+		return 1
+	fi
 
 	if [ ! -s "$img" ]; then
 		echo ">> no Image.gz at $img -- real build failure"; return 1
