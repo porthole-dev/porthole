@@ -96,7 +96,7 @@ def test_a_recent_failure_is_still_worth_a_row():
                       "pid": os.getpid(), "elapsed": 12.0, "progress": None,
                       "eta": None, "last": "boom", "last_at": now - 10})
         row = sl.build_line(repo, 100, now)
-        assert row and "FAILED" in row, row
+        assert row and "failed" in row, row
 
 
 def test_an_old_result_expires():
