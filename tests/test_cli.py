@@ -6,9 +6,11 @@ Everything here runs with no device attached. The device-touching parts of
 `doctor` are exercised through PORTHOLE_DEVICE_STATE, which short-circuits the
 probe -- the probe itself is the shell lib's job and is tested there.
 """
+import io
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -285,6 +287,73 @@ def test_run_reports_an_unknown_tool_with_suggestions():
 
 
 # -------------------------------------------------------------------- runner --
+
+def test_a_tools_refusal_is_never_reported_as_its_version():
+    """`porthole version` printed `unknown option -- -` as ssh's version for
+    as long as the row existed: ssh has no `--version`, and the probe took
+    the first line of anything it got. Then, once refusals were skipped, a
+    bare `version` was read by ssh as a HOSTNAME -- a network round trip
+    inside `porthole version`, answering `Pseudo-terminal will not be
+    allocated`. A digit is the general test: every version has one and none
+    of those excuses does."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_version as vv
+
+    assert not vv._plausible("unknown option -- -")
+    assert not vv._plausible("usage: ssh [-46AaCfGgKkMNnqsTtVvXxYy]")
+    assert not vv._plausible(
+        "Pseudo-terminal will not be allocated because stdin is not a")
+    assert not vv._plausible("")
+    assert vv._plausible("OpenSSH_10.2p1, OpenSSL 3.5.7 9 Jun 2026")
+    assert vv._plausible("git version 2.55.0")
+    # ssh is the case that motivated all of it, and it is on every port host.
+    if shutil.which("ssh"):
+        assert "OpenSSH" in vv.tool_version("ssh"), vv.tool_version("ssh")
+    # The cache is keyed on the PROBE as well as on the binary. Without that,
+    # this fix reaches nobody who has run `porthole version` before: the wrong
+    # answer was keyed on a binary that has not moved in months.
+    assert isinstance(vv.PROBE, int)
+    src = (ROOT / "lib" / "porthole_cmd_version.py").read_text()
+    assert "f\"{PROBE}:{path}" in src, "the cache key must include the probe"
+
+
+def test_one_alphabet_for_how_it_went():
+    """Five modules had grown their own `paint(sym("●", "*"), "green")`, and
+    doctor its own ok/warn/FAIL colour table. A reader should not have to
+    learn a second alphabet per verb."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    from porthole_cli import Out
+
+    plain = Out(stream=io.StringIO(), force_colour=False)
+    fancy = Out(stream=io.StringIO(), force_colour=True)
+    # A mark that is off keeps the column's width, or a list of them ceases
+    # to be a column.
+    assert len(plain.mark("active", False)) == len(plain.mark("active"))
+    assert "\033[32m" in fancy.mark("ok")
+    assert "\033[31m" in fancy.mark("fail")
+    # The glyph carries the colour; the WORD only when it is a problem --
+    # `ok` twice in green is emphasis spent on the rows nobody must read.
+    assert "\033[90m" in fancy.status("ok")
+    assert "\033[31m" in fancy.status("fail", "FAIL")
+    assert "\033[33m" in fancy.status("warn")
+    # Both, always: a glyph alone is unreadable in a pasted log, a word alone
+    # is what made a wall of doctor rows impossible to scan.
+    assert "ok" in plain.status("ok")
+    assert plain.status("ok").strip()[0] in "+."
+
+
+def test_a_labelled_row_dims_its_label_not_its_value():
+    """Emphasis is a budget: in `elapsed  2m41s` the label is the half the
+    reader already knows -- they asked for it."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    from porthole_cli import Out
+
+    buf = io.StringIO()
+    Out(stream=buf, force_colour=True).kv("elapsed", "2m41s", 10)
+    line = buf.getvalue()
+    assert "\033[90melapsed" in line, line
+    assert "\033[90m2m41s" not in line, line
+
 
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
