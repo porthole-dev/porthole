@@ -833,11 +833,11 @@ def test_the_watch_block_shows_what_the_run_is_doing_not_a_phase_word():
     retry` is what is HAPPENING, it was already in the status file, and the
     watcher never drew it."""
     lines = progress.watch_lines(STALLED_PUSH, width=100, now=1134.0)
-    assert len(lines) == 2, lines
+    assert len(lines) == 3, lines
     assert all("\n" not in line for line in lines), lines
-    assert "reboot 1/4" not in lines[0], "the summary line never carried it"
-    assert "reboot 1/4: burning a boot retry" in lines[1], lines[1]
-    assert "2m14s" in lines[1], lines[1]
+    assert "reboot 1/4" not in lines[-2], "the summary line never carried it"
+    assert "reboot 1/4: burning a boot retry" in lines[-1], lines[-1]
+    assert "2m14s" in lines[-1], lines[-1]
 
 
 def test_the_quiet_time_keeps_climbing_after_the_writer_stops():
@@ -856,16 +856,16 @@ def test_the_quiet_time_keeps_climbing_after_the_writer_stops():
     now = [1134.0]
     progress.time.time = lambda: now[0]
     try:
-        first = progress.watch_lines(STALLED_PUSH, width=100)[1]
+        first = progress.watch_lines(STALLED_PUSH, width=100)[-1]
         now[0] += 60.0
-        second = progress.watch_lines(STALLED_PUSH, width=100)[1]
+        second = progress.watch_lines(STALLED_PUSH, width=100)[-1]
     finally:
         progress.time.time = real_time
     assert "2m14s" in first, first
     assert "3m14s" in second, second
 
 
-def test_a_run_that_has_said_nothing_yet_still_renders_two_lines():
+def test_a_run_that_has_said_nothing_yet_still_renders_every_row():
     """`publish_pending` stakes the status file with `last: ""` before the
     child speaks, and `watch` run straight after `--detach` reads exactly
     that. A block that loses a row there would smear the repaint."""
@@ -874,8 +874,9 @@ def test_a_run_that_has_said_nothing_yet_still_renders_two_lines():
                "compile_lines": 0, "last": "", "last_at": 1000.0,
                "last_age": 0.0, "started": 1000.0}
     lines = progress.watch_lines(pending, width=100, now=1000.0)
-    assert len(lines) == 2, lines
-    assert lines[1].strip(), "the second row must never be blank"
+    assert len(lines) == 3, lines
+    assert all(line.strip() for line in lines), lines
+    assert "auto" in lines[0], "the block must say WHAT is building"
 
 
 def test_the_block_is_clipped_to_the_terminal_width():
@@ -885,8 +886,8 @@ def test_the_block_is_clipped_to_the_terminal_width():
     long_line = dict(STALLED_PUSH, last=">> " + "verbose kbuild noise " * 12)
     lines = progress.watch_lines(long_line, width=60, now=1134.0)
     assert all(len(line) <= 60 for line in lines), [len(x) for x in lines]
-    assert lines[1].endswith("…"), lines[1]
-    assert "verbose kbuild noise" in lines[1], lines[1]
+    assert lines[-1].endswith("…"), lines[-1]
+    assert "verbose kbuild noise" in lines[-1], lines[-1]
 
 
 def test_an_unknown_bar_says_so_instead_of_shouting_question_marks():
@@ -908,9 +909,9 @@ def test_the_stall_note_sits_beside_the_activity_not_instead_of_it():
     packaging = dict(STALLED_PUSH, phase="package",
                      last="[14:49:08] DONE!", last_at=1000.0)
     lines = progress.watch_lines(packaging, width=140, now=2200.0)
-    assert "compress" in lines[0] or "packag" in lines[0].lower(), lines[0]
-    assert "DONE!" in lines[1], lines[1]
-    assert "20m00s" in lines[1], lines[1]
+    assert "compress" in lines[-2] or "packag" in lines[-2].lower(), lines[-2]
+    assert "DONE!" in lines[-1], lines[-1]
+    assert "20m00s" in lines[-1], lines[-1]
 
 
 def _running(rundir, **over):
@@ -1171,6 +1172,204 @@ def test_watch_does_not_probe_while_a_run_of_its_own_is_live():
                             tty=False, probe=probe)
         assert rc == progress.EX_OK
         assert not asked, "probed a run that was speaking for itself"
+
+
+def test_a_snapshot_is_rebuilt_from_the_log_when_no_tracker_is_left():
+    """The whole point: the tracker is gone and the build is 87% done. The
+    log says so, and it was on the host's disk the entire time. These lines
+    are the shape of the real webkit2gtk log this was written against --
+    note there is no clock in them, which is why the rate is sampled."""
+    text = "\n".join([
+        "[8100/9429] Building CXX object Source/WebCore/a.cpp.o",
+        "[8206/9429] Building CXX object Source/WebCore/c.cpp.o",
+    ])
+    snap = progress.snapshot_from_log(text, "webkit2gtk-6.0", mtime=1000.0,
+                                      now=1041.0)
+    assert snap["rung"] == "pkg:webkit2gtk-6.0"
+    assert snap["steps"] == "8206/9429"
+    assert 0.87 < snap["progress"] < 0.88, snap["progress"]
+    assert snap["last_age"] == 41.0
+    # Nothing here knows when the build began, and a number would be a lie.
+    assert snap["elapsed"] is None and snap["started"] is None
+    assert snap["pid"] is None
+    # One reading has no speed.
+    assert snap["rate"] is None and snap["eta"] is None
+    # The renderers must survive every one of those Nones.
+    assert "87%" in progress.line_of(snap), progress.line_of(snap)
+    for line in progress.watch_lines(snap, width=100):
+        assert line.strip()
+
+
+def test_the_rate_is_the_tracker_s_own_window_not_a_second_one():
+    """One way of getting a rate, whoever is counting. `window_rate` already
+    refuses an answer when the span is too short or the steps too few, which
+    is what stopped a build paused inside one emulated generator step from
+    reporting 74 hours -- a reattached watcher inherits that refusal instead
+    of reinventing it."""
+    text = "[8206/9429] Building CXX object c.cpp.o"
+    samples = [(1000.0, 8129), (1120.0, 8206)]
+    snap = progress.snapshot_from_log(text, "webkit2gtk-6.0", mtime=1120.0,
+                                      now=1120.0, samples=samples)
+    assert abs(snap["rate"] - 77 / 120.0) < 0.001, snap["rate"]
+    assert 1850 < snap["eta"] < 1950, snap["eta"]
+    # Too few samples, too short a span: no rate, and so no ETA.
+    thin = progress.snapshot_from_log(text, "webkit2gtk-6.0", mtime=1000.0,
+                                      now=1000.0, samples=[(1000.0, 8206)])
+    assert thin["rate"] is None and thin["eta"] is None
+
+
+def test_a_log_with_no_steps_yet_still_yields_a_usable_snapshot():
+    """Early in a build -- dependencies, fetching -- there is no `[n/N]` at
+    all. A watcher must still paint something rather than crash."""
+    text = "[23:19:31] (native) install alpine-sdk\n[23:19:40] >>> fetching"
+    snap = progress.snapshot_from_log(text, "phoc", mtime=5.0, now=6.0)
+    assert snap["progress"] is None and snap["steps"] is None
+    assert snap["last"].startswith(">>>")
+    assert progress.line_of(snap)
+
+
+def test_reattach_follows_a_log_and_stops_when_the_build_leaves_the_workspace():
+    """The loop itself, with a fake workspace: the log advances, the watcher
+    paints what it says, and the ONLY thing that ends it is the process list
+    -- a quiet log is not an ending, because packaging is silent for
+    minutes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        log = pathlib.Path(tmp) / "log.txt"
+        log.write_text("[8100/9429] Building CXX object a.cpp.o\n")
+        alive = [True]
+        ticks = []
+
+        def probe():
+            ticks.append(1)
+            return "webkit2gtk-6.0" if alive[0] else ""
+
+        def clock():
+            # Far enough past the log's mtime that the probe is due every
+            # time round, so the test does not sit through PROBE_AFTER_S.
+            return time.time() + 3600
+
+        lines = []
+
+        def out(line):
+            lines.append(line)
+            if len(lines) == 2:  # the build ends while we are watching
+                log.write_text("[9429/9429] Linking CXX shared library\n")
+                alive[0] = False
+
+        snap = progress.reattach(log, "webkit2gtk-6.0", probe, 0.01,
+                                 out, tty=False, banner="  reattached",
+                                 now=clock)
+    assert ticks, "must have asked the workspace whether it was still there"
+    assert snap["steps"] == "9429/9429", snap
+    assert any("reattached" in line for line in lines)
+    assert any("9429" in line for line in lines), lines
+
+
+def test_a_quiet_log_is_not_treated_as_an_ending():
+    """PROBE_AFTER_S exists so the free signal (the log moving) carries the
+    common case and the podman exec is spent only on the ambiguous one."""
+    assert progress.PROBE_AFTER_S >= 15
+
+
+UTF = progress.Style(colour=False, unicode=True)
+FANCY = progress.Style(colour=True, unicode=True)
+
+
+def test_the_chrome_sits_at_the_bottom_dim_and_never_wraps():
+    """Both halves used to print at the TOP in full brightness, before the
+    bar -- so the eye met two lines of chrome first, and on a narrow terminal
+    the longer one wrapped INTO the bar. They are the least important text on
+    screen: last, grey, one line, clipped rather than wrapped."""
+    foot = progress.footer_of("reattached: tracker gone", tty=True)
+    assert "Ctrl-C" in foot and "keeps running" in foot
+    assert "reattached" in foot
+    assert "\n" not in foot
+    # No terminal: no keyboard to tell about, and an agent gets no prose.
+    assert progress.footer_of("reattached: tracker gone", tty=False) == ""
+    # Narrow: the reassuring clause goes first, then the hint entirely. The
+    # reason survives longest -- it is the half a reader cannot reconstruct.
+    wide = progress.footer_of("reattached: tracker gone", True, 200)
+    snug = progress.footer_of("reattached: tracker gone", True, 52)
+    tiny = progress.footer_of("reattached: tracker gone", True, 20)
+    assert "keeps running" in wide
+    assert "Ctrl-C" in snug and "keeps running" not in snug
+    assert tiny == "reattached: tracker gone"
+
+    snap = dict(STALLED_PUSH)
+    rows = progress.watch_lines(snap, width=60, now=1134.0, style=FANCY,
+                                footer=foot)
+    assert len(rows) == 4, rows
+    assert all(progress.visible_len(row) <= 60 for row in rows)
+    # The footer is the LAST row, and the only colour on it is grey.
+    assert "Ctrl-C" in rows[-1]
+    assert rows[-1].startswith("\033[90m"), rows[-1]
+    # ...and the block keeps its shape when there is nothing to say.
+    assert len(progress.watch_lines(snap, width=60, now=1134.0)) == 3
+
+
+def test_the_eye_lands_on_the_percentage_and_the_eta():
+    """Emphasis is a budget. The percentage, the ETA and the name are what
+    somebody opens this to read; the rate, the elapsed and every label are
+    context and are dimmed."""
+    snap = {"rung": "pkg:webkit2gtk-6.0", "phase": "build",
+            "state": "running", "pid": None, "elapsed": None,
+            "progress": 0.87, "eta": 1800.0, "compile_lines": 8206,
+            "last": "[8206/9429] Building CXX", "last_at": 1000.0,
+            "last_age": 1.0, "started": None, "rate": 0.1,
+            "step": "compile", "steps": "8206/9429"}
+    rows = progress.watch_lines(snap, width=96, now=1001.0, style=FANCY)
+    bold, grey = "\033[1m", "\033[90m"
+    assert bold + "webkit2gtk-6.0" in rows[0], rows[0]
+    assert grey + "pkg:" in rows[0], "the namespace is context, not the name"
+    assert bold + "  87%" in rows[1], rows[1]
+    assert bold + " 30m00s" in rows[1], "the ETA is what they are waiting for"
+    assert grey in rows[1], "the labels and the rate must be dimmed"
+    # Colour must not change how wide any of it is.
+    plain = progress.watch_lines(snap, width=96, now=1001.0, style=UTF)
+    assert [progress.visible_len(r) for r in rows] == [len(r) for r in plain]
+
+
+def test_the_header_is_built_from_segments_not_reparsed_text():
+    """The painter used to look for the state at the end of the line it had
+    just built, and for a `/` in the last word. The moment the step count
+    arrived it printed `webkit2gtk-6.0    8358358/9429running` -- a renderer
+    that reverse-engineers its own output is a bug waiting for its next
+    field."""
+    snap = {"rung": "pkg:webkit2gtk-6.0", "state": "running",
+            "steps": "8358/9429"}
+    plain = progress.header_of(snap, 110)
+    assert plain.count("8358") == 1, plain
+    assert "8358/9429   running" in plain, plain
+    assert len(plain) == 110 - 2 or len(plain) <= 110, plain
+    painted = progress._paint_header(snap, 110, "cyan", FANCY)
+    assert progress.visible_len(painted) == len(plain)
+    assert painted.count("8358") == 1, painted
+
+    # As the terminal narrows: steps go first, then the state, never the name.
+    assert "8358/9429" in progress.header_of(snap, 60)
+    assert "8358/9429" not in progress.header_of(snap, 36)
+    assert "running" in progress.header_of(snap, 36)
+    tiny = progress.header_of(snap, 20)
+    assert "webkit" in tiny and len(tiny) <= 20, tiny
+
+
+def test_the_line_the_build_printed_is_not_dimmed_like_the_chrome():
+    """The activity text and the footer were rendering in the same grey, so
+    the two most different things on screen -- what the build is doing, and
+    how to quit -- looked identical."""
+    snap = dict(STALLED_PUSH, steps="8/9")
+    rows = progress.watch_lines(snap, width=100, now=1134.0, style=FANCY,
+                                footer="Ctrl-C stops watching")
+    activity, footer = rows[2], rows[3]
+    assert footer.startswith("\033[90m"), footer
+    # The age is dim; the build's own words are not.
+    assert "\033[90m" in activity, activity
+    assert activity.rstrip().endswith("\033[0m") is False or \
+        "reboot" in progress._ANSI.sub("", activity)
+    plain_text = progress._ANSI.sub("", activity)
+    said = plain_text.split("ago", 1)[1]
+    assert said.strip(), said
+    assert "\033[90m" + said not in activity, "the build's line must not be grey"
 
 
 if __name__ == "__main__":

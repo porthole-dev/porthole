@@ -25,11 +25,13 @@ user-facing ETA is testable without running a build.
 from __future__ import annotations
 
 import collections
+import contextlib
 import json
 import os
 import pathlib
 import re
 import shutil
+import sys
 import time
 
 from porthole_cli import Bail, EX_FAIL, EX_OK
@@ -203,6 +205,49 @@ def phase_position(rung, phase):
     return phases.index(phase) + 1, len(phases)
 
 
+# What the terminal on the other end can actually render. Same two questions
+# `porthole_cli.Out` asks -- colour only on a tty with NO_COLOR unset, unicode
+# only when the encoding can carry it -- asked here too because this module
+# renders without a `ctx`, and a bring-up host is often a minimal container
+# where a block character is a UnicodeEncodeError rather than cosmetics.
+Style = collections.namedtuple("Style", "colour unicode")
+PLAIN = Style(colour=False, unicode=False)
+
+
+def detect_style(stream=None) -> Style:
+    stream = sys.stdout if stream is None else stream
+    try:
+        tty = stream.isatty()
+    except (AttributeError, ValueError):
+        tty = False
+    enc = (getattr(stream, "encoding", None) or "ascii").lower()
+    return Style(colour=bool(tty) and not os.environ.get("NO_COLOR")
+                 and os.environ.get("TERM") != "dumb",
+                 unicode="utf" in enc)
+
+
+_ANSI = re.compile(r"\033\[[0-9;]*m")
+
+
+def visible_len(text: str) -> int:
+    """Width on screen: an escape sequence occupies no columns.
+
+    `clip` and the stall-note budget both measure with this. Measuring a
+    coloured string with `len` overstates it by the length of its escapes,
+    which cuts the line short of the terminal -- and, worse, can cut INSIDE a
+    sequence and leave the rest of the screen dyed.
+    """
+    return len(_ANSI.sub("", text))
+
+
+def tint(text: str, colour: str, style) -> str:
+    """Colour, if this terminal has any. Never widens the visible text."""
+    codes = {"red": "31", "green": "32", "yellow": "33", "cyan": "36",
+             "grey": "90", "bold": "1"}
+    code = codes.get(colour)
+    return f"\033[{code}m{text}\033[0m" if (style.colour and code) else text
+
+
 def fmt_dur(seconds) -> str:
     """`2m41s`, `18s`, `--` -- short enough to sit in a one-line status."""
     if seconds is None:
@@ -217,7 +262,13 @@ def fmt_dur(seconds) -> str:
     return "{}h{:02d}m".format(seconds // 3600, (seconds % 3600) // 60)
 
 
-def bar(fraction, width: int = 18) -> str:
+# The eighth-blocks, in order. `""` first: a leading edge less than an eighth
+# of a cell wide is no edge at all, not a whole one.
+_EIGHTHS = ("", "\u258f", "\u258e", "\u258d", "\u258c", "\u258b", "\u258a",
+            "\u2589")
+
+
+def bar(fraction, width: int = 18, style=None) -> str:
     """A bar, or the word `unknown` when there is no fraction to draw.
 
     NOT `[??????????????????]`, which is what this drew for every kernel rung
@@ -227,12 +278,28 @@ def bar(fraction, width: int = 18) -> str:
     nothing was measured -- without the alarm, and an empty bar was never an
     option because empty reads as 0%, which is a measurement nobody made.
     Same width either way, so the columns after it do not move.
+
+    ASCII stays exactly as it was -- `[====>   ]` is what a log, a pipe and
+    every existing test see. The block form is for a terminal that asked for
+    it, and it is the same measurement drawn at eight times the resolution.
     """
+    style = PLAIN if style is None else style
     if fraction is None:
         return "[" + "unknown".center(width)[:width] + "]"
-    filled = int(max(0.0, min(1.0, fraction)) * width)
-    return "[" + "=" * filled + ">" * (1 if filled < width else 0) + \
-           " " * (width - filled - (1 if filled < width else 0)) + "]"
+    fraction = max(0.0, min(1.0, fraction))
+    if not style.unicode:
+        filled = int(fraction * width)
+        return "[" + "=" * filled + ">" * (1 if filled < width else 0) + \
+               " " * (width - filled - (1 if filled < width else 0)) + "]"
+    # Eighths, so the leading edge moves eight times per cell instead of
+    # once. On a nine-thousand-step build a whole cell is 500 steps: a bar
+    # that only moves in cells sits still for ten minutes at a time, which is
+    # indistinguishable from the frozen one this whole change is about.
+    cells = fraction * width
+    full = int(cells)
+    edge = _EIGHTHS[int((cells - full) * 8)] if full < width else ""
+    body = "\u2588" * full + edge
+    return "[" + body + "\u2500" * (width - visible_len(body)) + "]"
 
 
 def estimate_total(history: dict, rung: str):
@@ -625,7 +692,12 @@ def clip(text: str, width) -> str:
     """Cut to the terminal's width. `watch` repaints in place, and a line that
     wraps leaves its overflow behind on the next redraw -- the smear reads as
     a corrupted display, which is worse than the truncation it came from."""
-    if not width or len(text) <= width:
+    if not width or visible_len(text) <= width:
+        return text
+    # Cutting a coloured string by index can land inside an escape sequence
+    # and dye the rest of the screen, so a line with colour in it is cut on
+    # its plain text and re-tinted by the caller instead.
+    if _ANSI.search(text):
         return text
     return text[:max(0, width - 1)] + "\u2026"
 
@@ -640,7 +712,7 @@ def term_width(default: int = 100) -> int:
 
 
 def line_of(snap, width: int = 18, now=None,
-            budget: int = _LINE_WIDTH) -> str:
+            budget: int = _LINE_WIDTH, style=None) -> str:
     """The one-line view, from a snapshot rather than from a live tracker.
 
     Module-level so that something following the status FILE renders exactly
@@ -676,14 +748,18 @@ def line_of(snap, width: int = 18, now=None,
         if spot:
             frac = spot[0] / float(spot[1])
             pct = "{}/{}".format(*spot)
+    # A finished run has no ETA. `fast done [ unknown ] eta 6s` is the same
+    # class of lie as the phase that outlived its run, one field over: a
+    # forward-looking claim about something that already happened.
+    eta = snap.get("eta") if state == "running" else None
     rate = snap.get("rate")
     # Rate is shown for package builds and omitted for kernel rungs, which
     # have no step count to have a rate over.
     tail = "" if "rate" not in snap else \
         " {:>6}".format("--/s" if not rate else "{:.1f}/s".format(rate))
     base = "{} {} {:<10}{} {:>7} eta {:>7}".format(
-        bar(frac, width), pct, phase, tail,
-        fmt_dur(snap.get("elapsed")), fmt_dur(snap.get("eta")))
+        bar(frac, width, style), pct, phase, tail,
+        fmt_dur(snap.get("elapsed")), fmt_dur(eta))
     # `stall_note()` had exactly one caller -- `status_report`, reached only
     # after a run has already stopped -- so a `watch`ed build never showed
     # it: `watch` renders THIS function while the run is still live. Without
@@ -715,20 +791,192 @@ def line_of(snap, width: int = 18, now=None,
     return base + sep + note
 
 
-def watch_lines(snap, width=None, now=None):
-    """The block `watch` paints: the numbers, then what is actually happening.
+# A spinner has one job: say that this display is alive and the work is
+# moving. The first cut here indexed the frame by the build's own last line,
+# so on a package that lands a step every ten seconds it sat perfectly still
+# -- honest, and indistinguishable from a hung terminal, which is the wrong
+# trade for the one glyph whose entire purpose is to move.
+#
+# So it turns on the clock, and STOPS when the silence stops being normal --
+# `stall_note` already knows what normal is for each phase, and the mark it
+# freezes into is the same one a failed run gets. A spinning spinner beside a
+# climbing age means "working"; a frozen mark beside it means "not, and here
+# is why", which is the distinction the reader actually needs.
+_SPIN = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
+_SPIN_ASCII = "|/-\\"
+_MARKS = {"done": ("\u2714", "+"), "failed": ("\u2718", "x"),
+          "stale": ("\u2049", "!")}
+SPIN_FPS = 10.0
 
-    Two lines, always the same two, so an in-place repaint can walk back up a
-    known number of rows -- and so the block never shrinks and leaves a stale
-    row behind it on screen.
+
+def spinner(snap, style=None, now=None) -> str:
+    """The one-character state mark at the head of the activity row. Pure."""
+    style = PLAIN if style is None else style
+    snap = snap or {}
+    state = snap.get("state") or "running"
+    if state != "running":
+        fancy, plain = _MARKS.get(state, ("\u00b7", "."))
+        return fancy if style.unicode else plain
+    now = time.time() if now is None else now
+    age = last_age_of(snap, now) or 0.0
+    if stall_note(snap.get("last") or "", age, snap.get("phase") or ""):
+        return "\u2049" if style.unicode else "!"
+    frames = _SPIN if style.unicode else _SPIN_ASCII
+    return frames[int(now * SPIN_FPS) % len(frames)]
+
+
+_STATE_COLOUR = {"running": "cyan", "done": "green", "failed": "red",
+                 "stale": "yellow"}
+
+
+def header_segments(snap, width):
+    """`[(text, tone)]` for the header row: what is building, how far through
+    it, and how it is going. Pure.
+
+    SEGMENTS, not a formatted string, because the painter used to re-parse the
+    line it had just built -- looking for the state at the end and a `/` in
+    the last word -- and got it wrong the moment the step count arrived,
+    printing `...webkit2gtk-6.0    8358358/9429running`. A renderer that has
+    to reverse-engineer its own output is a bug waiting for its next field.
+
+    Drops the step count before the state, and the state before the name, as
+    the terminal narrows: the name is the one thing on this row that cannot
+    be inferred from anything else on screen.
+    """
+    snap = snap or {}
+    name = str(snap.get("rung") or "?")
+    state = snap.get("state") or "running"
+    steps = str(snap.get("steps") or "")
+    for want_steps, want_state in ((steps, state), ("", state), ("", "")):
+        right = [(part, tone) for part, tone
+                 in ((want_steps, "steps"), (want_state, "state")) if part]
+        wide = sum(len(part) for part, _ in right) + 3 * (len(right) - 1)
+        room = width - 2 - len(name) - max(0, wide) - 2
+        if room < 2:
+            continue
+        out = [("  ", "pad")]
+        prefix, sep, target = name.rpartition(":")
+        if sep:
+            out.append((prefix + sep, "dim"))
+        out.append((target, "name"))
+        out.append((" " * (room + 2), "pad"))
+        for index, (part, tone) in enumerate(right):
+            if index:
+                out.append(("   ", "pad"))
+            out.append((part, tone))
+        return out
+    return [("  ", "pad"), (clip(name, max(0, width - 2)), "name")]
+
+
+def header_of(snap, width) -> str:
+    """The header row as plain text."""
+    return "".join(text for text, _ in header_segments(snap, width))
+
+
+def watch_lines(snap, width=None, now=None, style=None, footer=""):
+    """The block `watch` paints: what is building, how far, what it is doing,
+    and -- last and quietest -- how to leave.
+
+    A FIXED number of rows, so an in-place repaint can walk back up a known
+    number of them and the block never leaves a stale row on screen. Three,
+    or four when there is a footer; a caller either passes one every repaint
+    or never.
+
+    EMPHASIS IS A BUDGET. The eye should land on the percentage, the ETA and
+    the name, in that order -- those are the three things somebody opens this
+    to read. Everything else is context: the rate, the elapsed, the labels and
+    the whole footer are dimmed, and the chrome that used to sit at the TOP in
+    full brightness (the exit hint, the reattach explanation) now sits at the
+    bottom in grey, where it can be read once and then ignored.
+
+    Colour is applied AFTER clipping, and only to segments whose plain width
+    is already known: `clip` measures with `len`, and a line cut in the middle
+    of an escape sequence dyes the rest of the terminal.
     """
     width = term_width() if width is None else width
+    style = detect_style() if style is None else style
+    # `liveness` answers by asking about a pid, so it can only be consulted
+    # when there IS one. A log-derived snapshot has none -- nothing published
+    # it -- and running it through `liveness` calls a build we are watching
+    # advance `stale`, which is both wrong and the exact word this display
+    # exists to stop misapplying.
+    state = (snap or {}).get("state") or "running"
+    if state == "running" and (snap or {}).get("pid") is not None:
+        state = liveness(snap)
+    colour = _STATE_COLOUR.get(state, "cyan")
+
+    head = clip(header_of(snap, width), width)
     # `budget` is the note's room on the summary line, and it is the caller's
     # width rather than the hardcoded 100 the build's own painter uses: a
     # terminal wider than that was cutting the explanation mid-sentence.
-    return [clip("  " + line_of(snap, now=now, budget=max(40, width - 2)),
-                 width),
-            clip("  " + activity_of(snap, now), width)]
+    body = clip("  " + line_of(snap, now=now, budget=max(40, width - 2),
+                               style=style), width)
+    mark = spinner(snap, style, now)
+    tail = clip("  {}  {}".format(mark, activity_of(snap, now)), width)
+    rows = [head, body, tail]
+    if footer:
+        rows.append(clip("  " + footer, width))
+
+    if style.colour:
+        rows[0] = _paint_header(snap, width, colour, style)
+        rows[1] = _paint_body(body, colour, style)
+        cut = tail.find(mark)
+        if cut >= 0:
+            # The age is context and is dimmed; the line the build actually
+            # printed is NOT -- it was rendering in the same grey as the
+            # footer, so the two most different things on screen (what the
+            # build is doing, and how to quit) looked identical.
+            rest = tail[cut + len(mark):]
+            ago = rest.find("ago")
+            if ago >= 0:
+                rest = tint(rest[:ago + 3], "grey", style) + rest[ago + 3:]
+            rows[2] = tail[:cut] + tint(mark, colour, style) + rest
+        if footer:
+            rows[3] = tint(rows[3], "grey", style)
+    return rows
+
+
+def _paint_header(snap, width, colour, style) -> str:
+    """Tint per segment. Emphasis budget: the name and the step count are what
+    the reader came for, the namespace is context, the state carries the one
+    colour that means something."""
+    tones = {"name": "bold", "steps": "bold", "dim": "grey", "state": colour}
+    return "".join(tint(text, tones[tone], style) if tone in tones else text
+                   for text, tone in header_segments(snap, width))
+
+
+def _paint_body(body: str, colour: str, style) -> str:
+    """The bar in the state's colour, the percentage and the ETA bold, and
+    every label and secondary number grey.
+
+    Segment boundaries come from `line_of`'s own fixed format -- `[bar] pct
+    phase rate elapsed eta VALUE` -- so this reads positions rather than
+    guessing them, and a change to that format shows up as a test failure
+    here rather than as a smear on somebody's terminal.
+    """
+    close = body.find("]")
+    if close < 0:
+        return body
+    indent = body[:len(body) - len(body.lstrip())]
+    bar_part = indent + tint(body[len(indent):close + 1], colour, style)
+    rest = body[close + 1:]
+    # `{:>4}%` -- the percentage is the first token after the bar.
+    pct_end = rest.find("%")
+    if pct_end < 0:
+        return bar_part + rest
+    pct = tint(rest[:pct_end + 1], "bold", style)
+    rest = rest[pct_end + 1:]
+    # The ETA's value is everything after the last ` eta `; its label, and
+    # everything between the phase and it, is context.
+    label = rest.rfind(" eta ")
+    if label < 0:
+        return bar_part + pct + tint(rest, "grey", style)
+    middle = tint(rest[:label + 5], "grey", style)
+    value, _, note = rest[label + 5:].partition(" \u00b7 ")
+    tail = tint(value, "bold", style)
+    if note:
+        tail += tint(" \u00b7 " + note, "grey", style)
+    return bar_part + pct + middle + tail
 
 
 def publish_pending(rundir, rung: str, pid: int,
@@ -969,6 +1217,105 @@ NDJSON_KEYS = ("rung", "phase", "state", "pid", "elapsed", "progress", "eta",
               "note")
 
 
+# ---------------------------------------------------------- reattaching --
+#
+# The status file was never the source of truth, and treating it as one is
+# what let a live build read as a finished one. pmbootstrap's own log.txt is
+# the truth: the container writes it into a host-visible mount, it is
+# append-only, every line carries a clock, and the `[n/N]` lines in it are
+# the very same ones PkgTracker counts. A tracker that dies -- an agent's
+# command timeout, a closed session, an outage -- destroys no progress at
+# all. It only stops somebody READING a file that is still being written.
+#
+# So a watcher that finds nothing live re-derives a snapshot from that file
+# instead of giving up. Same shape as the tracker's own, so every renderer
+# below works on it unchanged.
+
+# How much of the tail to read. log.txt is shared across every build the
+# workspace has ever run -- 11 MiB here -- and only the end describes now.
+LOG_TAIL_BYTES = 65536
+
+# log.txt carries NO clock: pmbootstrap stamps the lines it relays to its
+# stdout, not the ones it writes here (checked against 11 MiB of a real
+# webkit log -- zero stamped lines). So the rate cannot be read out of the
+# file; it is MEASURED, by sampling the step count across two polls of it.
+# That is what the live tracker does too, which is the point: one way of
+# getting a rate, whoever is doing the counting.
+
+
+def log_steps(text: str):
+    """`(done, total)` from the last `[n/N]` in a log tail, else `(None, None)`.
+
+    From the END backwards: the tail holds thousands of step lines and only
+    the last one is now.
+    """
+    for line in reversed(text.splitlines()):
+        step = ninja_progress(line)
+        if step:
+            return step
+    return None, None
+
+
+def snapshot_from_log(text: str, name: str, mtime, now=None,
+                      samples=None) -> dict:
+    """A tracker-shaped snapshot re-derived from a log tail. Pure.
+
+    Everything unknowable without the run that started the build is `None`
+    and says so: there is no pid to ask about, and nothing here knows when
+    the build began -- `elapsed` from a log tail would be a guess, and
+    `fmt_dur(None)` already renders "--". The ETA is not a guess either: it
+    is `previous`'s measured rate applied to the steps that remain, and
+    absent on the first reading because one sample cannot have a speed.
+
+    `samples` is the `(when, done)` deque the caller has been filling from
+    this log -- the same shape and the same `window_rate` the live tracker
+    uses, so a reattached watcher and the build's own bar cannot quote
+    different speeds for one build. The clock in it is the LOG's mtime, not
+    the watcher's: a log that has not been touched has not advanced, and
+    dividing by the watcher's own elapsed time reports a slowdown that is
+    really just silence.
+    """
+    now = time.time() if now is None else now
+    done, total = log_steps(text)
+    # The TRACKER's window and the tracker's thresholds, not a second rate of
+    # this module's own: `window_rate` already refuses the answer when the
+    # span is too short or the steps too few, which is what stops a build
+    # that paused inside one emulated generator step from reporting 74 hours.
+    rate = window_rate(samples or (), mtime)
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    last = lines[-1] if lines else ""
+    progress = None
+    if done is not None and total:
+        # Same clamp as `fraction`: a bar that reads 100% before the build
+        # ends is the reason nobody trusts the next one.
+        progress = min(done / float(total), 0.999)
+    eta = None
+    if rate and total and done is not None and total > done:
+        eta = (total - done) / rate
+    return {"rung": f"pkg:{name}", "phase": pkg_phase_of(last, "build"),
+            "state": "running", "pid": None, "elapsed": None,
+            "progress": progress, "eta": eta,
+            "compile_lines": done or 0, "last": _STAMP.sub("", last.lstrip()),
+            "last_at": mtime, "last_age": max(0.0, now - mtime),
+            "started": None, "rate": rate,
+            "step": step_kind(last),
+            "steps": None if done is None else f"{done}/{total}"}
+
+
+def log_tail(path, limit: int = LOG_TAIL_BYTES):
+    """`(text, mtime)` for the end of a log, or `(None, None)`."""
+    try:
+        stat = os.stat(path)
+        with open(path, "rb") as handle:
+            if stat.st_size > limit:
+                handle.seek(stat.st_size - limit)
+            # Reading from a byte offset can land mid-character; the first
+            # partial line is dropped by the caller's splitlines anyway.
+            return handle.read().decode("utf-8", "replace"), stat.st_mtime
+    except OSError:
+        return None, None
+
+
 def orphaned(snap, foreign: str) -> bool:
     """Is `foreign` the very build this status file was following?
 
@@ -990,8 +1337,206 @@ def orphaned(snap, foreign: str) -> bool:
     return bool(foreign) and rung.split(":", 1)[-1] == foreign
 
 
+# How often a reattached watch asks the workspace whether the build is still
+# there. Not every tick: that question costs a `podman exec` and the answer
+# changes once. The log's own mtime is the free signal in between -- a build
+# that is writing is a build that is running -- so the probe is only spent
+# when the log has gone quiet.
+PROBE_AFTER_S = 30.0
+
+
+
+
+@contextlib.contextmanager
+def quiet_terminal(enabled: bool):
+    """No echo, no cursor, for as long as a block is being repainted.
+
+    Three reported defects, one cause. A watch repaints by walking the cursor
+    back a KNOWN number of rows -- so anything else that writes to the
+    terminal moves the ground under it. Press Enter while watching and the
+    screen scrolls one line: the walk-back now lands a row short, the repaint
+    lands on top of the previous frame instead of over it, and the block
+    duplicates itself down the screen. Every keystroke echoed into the middle
+    of the bar does the same thing on a smaller scale, and the cursor itself
+    sits blinking in the middle of the display.
+
+    So while the block owns the screen, the terminal stops echoing (the keys
+    still reach us -- `setcbreak` leaves ISIG alone, so Ctrl-C is exactly as
+    interruptible as before) and the cursor is hidden. Both are restored on
+    the way out, including out through Ctrl-C, because a terminal left with
+    ECHO off is a broken shell and that is a far worse bug than the one this
+    fixes.
+    """
+    if not enabled:
+        yield
+        return
+    try:
+        import termios
+        import tty as ttymod
+        fd = sys.stdin.fileno()
+        saved = termios.tcgetattr(fd)
+    except Exception:  # noqa: BLE001 -- no tty, no termios, nothing to do
+        yield
+        return
+    try:
+        ttymod.setcbreak(fd)
+        sys.stdout.write("\033[?25l")
+        sys.stdout.flush()
+        yield
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        finally:
+            sys.stdout.write("\033[?25h")
+            sys.stdout.flush()
+
+
+def paced(interval: float, tty: bool, ndjson: bool, repaint) -> None:
+    """Wait one poll, keeping the display moving while we do.
+
+    Reading the log ten times a second to animate one glyph would be silly;
+    painting ten times a second between reads is not, and it is the
+    difference between a spinner that spins and one that stutters once per
+    second. Off a terminal there is nothing to animate and this is a plain
+    sleep.
+    """
+    if not tty or ndjson:
+        time.sleep(interval)
+        return
+    end = time.time() + interval
+    while True:
+        left = end - time.time()
+        if left <= 0:
+            return
+        time.sleep(min(1.0 / SPIN_FPS, left))
+        repaint()
+
+
+def footer_of(reason: str, tty: bool, width: int = 0) -> str:
+    """The block's quietest row: why this watch is where it is, and how to
+    leave it. Pure.
+
+    Both halves used to be printed at the TOP, in full brightness, before the
+    bar -- so the first thing the eye met was two lines of chrome, and on a
+    narrow terminal the longer one wrapped INTO the bar. They are the least
+    important text on screen: read once, then ignored. So they are last, they
+    are grey, and they are one line that gets clipped rather than wrapped.
+
+    Terminal only: a pipe has no keyboard, and an agent reading ndjson gets
+    nothing out of prose but a parse error.
+    """
+    if not tty:
+        return ""
+    reason = reason.strip()
+    # The reassuring clause is the first thing to go when the terminal is
+    # narrow: "Ctrl-C stops watching" already answers the question, and the
+    # reason -- which explains why this display looks unusual at all -- is
+    # the half a reader cannot reconstruct for themselves.
+    for hint in ("Ctrl-C stops watching, the build keeps running",
+                 "Ctrl-C stops watching"):
+        line = "  \u00b7  ".join([part for part in (reason, hint) if part])
+        if len(line) + 2 <= (width or len(line) + 2):
+            return line
+    return reason or "Ctrl-C stops watching"
+
+
+def reattach_banner(snap, name: str, status_name: str) -> str:
+    """Why this watch is reading a log instead of a status file. Pure.
+
+    Two different histories reach the same place, and the reader has to be
+    told which one they are in -- one of them means the buildroot mutex is
+    lying to everyone else on the machine. SHORT, because this is footer text
+    now: it shares one clipped line with the exit hint, and the full account
+    of the lock is in the final report and in the trap note.
+    """
+    if orphaned(snap, name):
+        return "reattached \u00b7 no tracker \u00b7 lock released"
+    return "reattached \u00b7 not started here \u00b7 no lock held"
+
+
+def reattach(log_path, name: str, probe, interval: float, out,
+             ndjson: bool = False, tty: bool = False, banner: str = "",
+             now=None) -> dict:
+    """Follow a build through its log until it ends. Returns the last snapshot.
+
+    This is the answer to "why can I not just join it?". Nothing about a
+    build's progress lives in the process that started it -- the numbers are
+    in a file that the workspace keeps writing whether or not anyone is
+    watching. So a watcher attaches to the FILE, and a tracker that died
+    (outage, timeout, closed session) costs a reader nothing but the elapsed
+    time it can no longer know.
+
+    Read-only, deliberately: it publishes no status file and takes no lock.
+    The build it found belongs to whoever started it, and a watcher that
+    started writing on their behalf would be inventing an owner.
+    """
+    painted = [0]
+
+    def paint(lines):
+        up = "\033[{}A".format(painted[0] - 1) if painted[0] > 1 else ""
+        painted[0] = len(lines)
+        out(up + "\n".join("\r\033[2K" + text for text in lines))
+
+    # On a terminal the explanation belongs in the block's footer, dim and
+    # out of the way, where it is repainted with everything else and cannot
+    # wrap into the bar. Off a terminal there is no block to put it in and no
+    # keyboard to tell about, so it is said once, plainly, and never again.
+    foot = ""
+    if banner and not ndjson:
+        if tty:
+            foot = footer_of(banner, tty=True, width=term_width())
+        else:
+            out(banner + "\n")
+    samples = collections.deque(maxlen=4096)
+    snap, last_note, asked = {}, 0.0, time.time()
+    while True:
+        text, mtime = log_tail(log_path)
+        if text is None:
+            break
+        clock = time.time() if now is None else now()
+        if log_steps(text)[0] is not None:
+            sample = (mtime, log_steps(text)[0])
+            if not samples or samples[-1] != sample:
+                samples.append(sample)
+        snap = snapshot_from_log(text, name, mtime, now=clock,
+                                 samples=samples)
+        if ndjson:
+            out(json.dumps({**snap, "note": banner}) + "\n")
+        elif tty:
+            paint(watch_lines(snap, now=clock))
+        elif clock - last_note > max(interval, 15):
+            last_note = clock
+            out("\n".join(watch_lines(snap, now=clock)) + "\n")
+        # The log going quiet is the only hint that the build may be over,
+        # and it is not proof: packaging is legitimately silent for minutes.
+        # The workspace's process list is the proof, and it is only worth
+        # asking for once the free signal has stopped moving.
+        if clock - mtime >= PROBE_AFTER_S and clock - asked >= PROBE_AFTER_S:
+            asked = clock
+            if not probe():
+                # One last read before leaving. The lines a build writes as
+                # it finishes -- the final link, abuild's own markers -- land
+                # between the previous tick and the process disappearing, and
+                # a final report that stops short of them describes a build
+                # that was still going.
+                text, mtime = log_tail(log_path)
+                if text is not None:
+                    snap = snapshot_from_log(text, name, mtime, now=clock,
+                                             samples=samples)
+                break
+        # `now()` per repaint, not the tick's `clock`: reusing one timestamp
+        # for all ten frames of a second is why the spinner stood still.
+        paced(interval, bool(tty), ndjson,
+              lambda: paint(watch_lines(snap, now=now() if now else None,
+                                        footer=foot)))
+    if tty and not ndjson and painted[0]:
+        out("\r\033[2K" + "\033[1A\r\033[2K" * max(0, painted[0] - 1))
+    return snap
+
+
 def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
-          tty=None, start_hint: str = "", probe=None) -> int:
+          tty=None, start_hint: str = "", probe=None, log=None,
+          verdict=None) -> int:
     """Follow a status file until the run stops. Returns EX_OK when the run
     finished `done`, non-zero otherwise.
 
@@ -1041,6 +1586,14 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     a `podman exec ps` in the workspace), and it is asked ONCE, only when
     there is nothing live to attach to.
 
+    `log` is that build's log file -- a path, or a callable returning one --
+    and it is what turns "there is a build I cannot follow" into "there is a
+    build, here it is". With it, a named foreign build is followed through
+    `reattach` instead of refused. `verdict(name, snap)` then decides the
+    exit code from the ARTIFACT once the build ends, because a reattached
+    watcher has no tracker to have written `done` or `failed`; without one
+    the run is reported and the exit is non-zero, since nothing verified it.
+
     Polling a file, not sleeping through the run: the sleep here is between
     reads of a real signal, which is what brain/laws/poll-never-sleep.md asks
     for rather than what it forbids.
@@ -1074,6 +1627,7 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
         out("\r\033[2K" + "\033[1A\r\033[2K" * max(0, painted[0] - 1))
         painted[0] = 0
 
+    foot = footer_of("", bool(tty) and not ndjson, term_width())
     started_watching = time.time()
     # How long to wait for a run to START, and it depends on who is
     # watching. `watch` is advertised as "costs nothing to leave open", and a
@@ -1113,6 +1667,25 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     # live to attach to, ask before concluding nothing is happening.
     if probe and (snap is None or is_stale(snap)):
         foreign = probe() or ""
+        if foreign and log:
+            # There IS something to follow -- it is just not in the status
+            # file. Everything below this point (the two Bails) is what
+            # happens only when the log cannot be reached at all.
+            path = log() if callable(log) else log
+            text, _ = log_tail(path) if path else (None, None)
+            if text is not None:
+                snap = reattach(path, foreign, probe, interval, out,
+                                ndjson=ndjson, tty=tty,
+                                banner=reattach_banner(snap, foreign,
+                                                       status_name))
+                if verdict:
+                    return verdict(foreign, snap)
+                if not ndjson:
+                    head, rows = status_report(snap, alive=lambda pid: False)
+                    out("  " + head + "\n")
+                    for label, value in rows:
+                        out(f"  {label:<10}  {value}\n")
+                return EX_FAIL
         if foreign and orphaned(snap, foreign):
             stopped = finished_at(snap)
             frozen = fmt_dur(time.time() - stopped) if stopped else "a while"
@@ -1204,7 +1777,8 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
                 out("\n".join(watch_lines(snap)) + "\n")
             if live != "running":
                 break
-            time.sleep(interval)
+            paced(interval, bool(tty), ndjson,
+                  lambda: paint(watch_lines(snap, footer=foot)))
             snap = snapshot() or snap
         if tty and not ndjson:
             unpaint()
