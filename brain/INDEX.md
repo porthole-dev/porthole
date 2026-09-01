@@ -35,6 +35,7 @@ generic notes as well.
 | [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
 | [nothing-polls-an-idle-link-on-ath10k](findings/nothing-polls-an-idle-link-on-ath10k.md) | `generic` | ath10k turns off mac80211's idle connection polling, then disables the firmware keepalive too |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
+| [panel-corruption-was-gpu-reset-wreckage-not-tearing](findings/panel-corruption-was-gpu-reset-wreckage-not-tearing.md) | `device:google-taimen` | The panel corruption and degraded phosh were one GPU reset's wreckage -- not display tearing, and not the rd_ptr patch |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
@@ -173,7 +174,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 25
+- `device:google-taimen` — 26
 - `generic` — 91
 - `soc:gs201` — 1
 - `soc:msm8998` — 18
