@@ -133,6 +133,8 @@ unset _ph_profile
 : "${PORTHOLE_SSH_PORT:=22}"
 : "${PORTHOLE_POLL:=0.5}"
 : "${PORTHOLE_CONNECT_TIMEOUT:=2}"
+: "${PORTHOLE_SSH_ALIVE_INTERVAL:=15}"
+: "${PORTHOLE_SSH_ALIVE_COUNT:=4}"
 : "${PORTHOLE_NO_MUX:=0}"
 : "${PORTHOLE_MUX_PERSIST:=60s}"
 : "${PORTHOLE_HAS_AB_SLOTS:=0}"
@@ -177,7 +179,16 @@ export PHONE HOST FASTBOOT TK_POLL TK_AGENT
 # StrictHostKeyChecking=no plus a /dev/null known-hosts file is MANDATORY, not
 # laziness: host keys change on essentially every boot, and with BatchMode a
 # real known_hosts turns every tool into an outright failure.
+# ServerAlive, not just ConnectTimeout. ConnectTimeout covers reaching the
+# phone; it says nothing about a session already running when the phone goes
+# away. A `porthole build mod` on venus reset the SoC mid-command on
+# 2026-09-01 and the ssh sat there for 8 minutes while `build status` reported
+# "install, running, no output for 7m13s" -- a hang the operator had to kill by
+# hand (issue #26). A phone that stops answering is exactly what a bring-up
+# tool must expect, so every device call gets ~60s and then an error.
 TK_SSH_OPTS=(-o "ConnectTimeout=$PORTHOLE_CONNECT_TIMEOUT"
+             -o "ServerAliveInterval=$PORTHOLE_SSH_ALIVE_INTERVAL"
+             -o "ServerAliveCountMax=$PORTHOLE_SSH_ALIVE_COUNT"
              -o StrictHostKeyChecking=no
              -o UserKnownHostsFile=/dev/null
              -o LogLevel=ERROR

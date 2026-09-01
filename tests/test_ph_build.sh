@@ -19,6 +19,7 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); }
 bad() { FAIL=$((FAIL+1)); echo "FAIL $1"; echo "     $2"; }
 is()  { if [ "$2" = "$3" ]; then ok; else bad "$1" "got '$2', want '$3'"; fi; }
+saw() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 
@@ -379,6 +380,90 @@ is "the module name reached the payload" \
    "$(grep -c 'ms_stack ath10k_core' "$TMP/payload.sh")" "1"
 
 
+# --- issue #26: a module whose unload resets the SoC is never unloaded -----
+#
+# `porthole build mod venus-core.ko venus_core --yes` installed the module and
+# then reloaded it under a live venus_dec/venus_enc stack. venus_core's rmmod
+# is a firmware shutdown; the device's journal stops mid-line at 19:33:13 with
+# no shutdown sequence and the phone came back from a cold boot two minutes
+# later, taking the run's own evidence with it.
+#
+# PORTHOLE_MOD_NO_RELOAD names the modules that must never come off. The
+# decision is device knowledge, so it is profile data; the ENFORCEMENT is here,
+# and this runs the script the phone would actually receive.
+is "the no-reload list is decided before the first rmmod" \
+   "$(before 'noreload=' 'sudo rmmod')" "ok"
+
+noreload() { # noreload LIST -> "rc | output | calls"
+    local dir; dir=$(mktemp -d)
+    mkdir -p "$dir/bin" "$dir/sys/module/venus_core/holders/venus_dec" \
+             "$dir/sys/module/venus_dec"
+    # Everything that would touch a real device, recorded instead of run.
+    for c in rmmod insmod modprobe depmod tee; do
+        printf '#!/bin/sh\necho "%s $*" >> "$CALLS"\nexit 0\n' "$c" \
+            > "$dir/bin/$c"
+        chmod +x "$dir/bin/$c"
+    done
+    printf '#!/bin/sh\nexec "$@"\n' > "$dir/bin/sudo"; chmod +x "$dir/bin/sudo"
+    # A READ, so it is not recorded -- the assertion below is that the call log
+    # is empty. Stubbed at all because the payload runs `inst=$(find
+    # /lib/modules/$(uname -r) ...)` under `set -e`, and a real find on a path
+    # that does not exist here would end the script before the decision.
+    printf '#!/bin/sh\nexit 0\n' > "$dir/bin/find"; chmod +x "$dir/bin/find"
+    printf '#!/bin/sh\necho 9.9.9-test\n' > "$dir/bin/uname"; chmod +x "$dir/bin/uname"
+    : > "$dir/calls"
+
+    # The script tkmod would send, rendered exactly as the phone gets it.
+    { printf 'ssh() { printf "%%s\\n" "${@: -1}"; }\nTK_SSH_OPTS=(-q)\nphone=fake\n'
+      printf 'name=venus_core\n_PH_REPO_ROOT=%s\nmodstack=$_PH_REPO_ROOT/tools/tk-modstack.sh\n' "$ROOT"
+      printf '%s\n' "$reload" | tr -d '\t'; } > "$dir/emit.sh"
+    PORTHOLE_MOD_NO_RELOAD="$1" bash "$dir/emit.sh" > "$dir/payload.sh" 2>/dev/null
+
+    local out rc
+    out=$(SYS="$dir/sys" CALLS="$dir/calls" PATH="$dir/bin:$PATH" \
+          sh "$dir/payload.sh" 2>&1); rc=$?
+    printf '%s | %s | %s' "$rc" "$out" "$(tr '\n' ',' < "$dir/calls")"
+    rm -rf "$dir"
+}
+
+out=$(noreload "venus_core venus_dec venus_enc")
+is "a listed module is not reloaded"      "${out%% *}" "7"
+is "and it says so"                       "$(saw "$out" "no-reload list")" "yes"
+# THE POINT. The reset happened during the unload, so the assertion that
+# matters is not what was printed -- it is that rmmod was never reached.
+is "and nothing was unloaded"             "$(saw "$out" "rmmod")" "no"
+# The recorded-calls field, not the output: ">> stack above venus_core:venus_dec"
+# is an announcement, and the whole claim is that NOTHING ran on the device.
+is "nor did anything else touch the device" "${out##*| }" ""
+
+# A module reachable through the stack counts too: the leaf is often what
+# actually holds the firmware down.
+out=$(noreload "venus_dec")
+is "a listed module in the STACK also stops the reload" "${out%% *}" "7"
+is "and still nothing ran on the device"  "${out##*| }" ""
+
+# THE POSITIVE CONTROL. An empty list must leave `mod` -- the rung the ladder
+# says to try first -- doing exactly what it did before.
+out=$(noreload "")
+is "an unlisted module is still reloaded" "$(saw "$out" "rmmod venus_core")" "yes"
+is "and the new one is inserted"          "$(saw "$out" "insmod")" "yes"
+
+
+# --- issue #26: loaded-without-srcversion is not "not loaded" --------------
+#
+# This kernel has no MODULE_SRCVERSION_ALL and venus declares no
+# MODULE_VERSION, so /sys/module/venus_core/srcversion never exists. Reading
+# that absence as "the module is not loaded" reports a working module as a
+# failed push, and the comparison it is waiting on can never conclude.
+verify=$(sed -n "/^	local proof=0$/,/^	\[ \"\$proof\" -eq 0 \]/p" tools/ph-build.sh)
+is "verify tests for the module before its srcversion" \
+   "$(printf '%s\n' "$verify" | grep -c 'if \[ ! -d /sys/module/')" "1"
+is "a missing srcversion is its own answer" \
+   "$(printf '%s\n' "$verify" | grep -c 'exit 2')" "1"
+is "and that answer is not a failed build" \
+   "$(printf '%s\n' "$verify" | grep -c '\-eq 2 \]')" "1"
+
+
 # --- tkbuild purges the envkernel _p apk before install --------------------
 #
 # _ph_make ends with `pmbootstrap build --envkernel`, which packages the tree
@@ -429,8 +514,6 @@ guard() { # guard NEW_BYTES OLD_BYTES [EXT] -> the device-side script's output
         echo "REACHED-THE-INSTALL"' ) 2>&1
     rm -rf "$dir"
 }
-
-saw() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 out=$(guard 3431808 315448)
 is "an 11x module is refused"           "$(saw "$out" REFUSING)" "yes"

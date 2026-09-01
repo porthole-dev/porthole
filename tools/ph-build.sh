@@ -1672,7 +1672,29 @@ tkmod() {
 		# as it was, with the new build on disk for the next boot.
 		if carrier=\$(ms_conflict $name); then held=1; else held=; fi
 
-		if [ -z \"\$held\" ]; then
+		# Modules whose unload is not merely an unload. venus_core's rmmod is
+		# a firmware shutdown, and on 2026-09-01 reloading it under a live
+		# venus_dec/venus_enc stack took the SoC down hard: the journal stops
+		# mid-line at 19:33:13, there is no shutdown sequence, the phone came
+		# back from a cold boot two minutes later, and every /tmp artefact of
+		# the run went with it (issue #26).
+		#
+		# A PROFILE list, because which modules do this is a device fact --
+		# a firmware handoff, a remoteproc, a regulator the panel hangs off --
+		# and nothing in sysfs says so before you try it. The whole stack is
+		# checked and not just the named module: the leaf is often what
+		# actually holds the firmware down.
+		#
+		# Decided here, beside the transport guard, so both are settled BEFORE
+		# anything comes off the device.
+		noreload=
+		for m in $name \$stack; do
+			case \" ${PORTHOLE_MOD_NO_RELOAD:-} \" in
+			*\" \$m \"*) noreload=\$m ;;
+			esac
+		done
+
+		if [ -z \"\$held\" ] && [ -z \"\$noreload\" ]; then
 			for h in \$stack; do
 				ms_unbind \$h
 				sudo rmmod \$h 2>/dev/null || true
@@ -1749,6 +1771,19 @@ tkmod() {
 			echo '>>   build. insmod below still loads it for this boot.'
 		fi
 
+		# Both refusals land HERE, after the install: the whole point is that
+		# the new build is on disk and one reboot runs it.
+		if [ -n \"\$noreload\" ]; then
+			echo \">> NOT reloading: \$noreload is on this device's no-reload list.\"
+			echo \">>   PORTHOLE_MOD_NO_RELOAD names modules whose unload does more\"
+			echo \">>   than unload. On venus_core it is a firmware shutdown, and\"
+			echo \">>   doing it under a live stack hard-reset the SoC -- no console,\"
+			echo \">>   no pstore, and the run's own evidence lost with it (#26).\"
+			echo \">> Nothing was torn down. The copy on disk IS updated -- reboot\"
+			echo \">> to run it.\"
+			exit 7
+		fi
+
 		# Refused above: the install has happened, nothing has been unloaded,
 		# and the session that would have had to survive the reload is intact.
 		if [ -n \"\$held\" ]; then
@@ -1801,6 +1836,10 @@ tkmod() {
 		4) echo ">> not reloaded: this module carries the link you are on."
 		   echo ">>   the build is fine and installed; nothing was torn down."
 		   return 4 ;;
+		7) echo ">> not reloaded: this module is on this device's no-reload list."
+		   echo ">>   the build is fine and installed; nothing was torn down."
+		   echo ">>   Reboot to run it (\`porthole run tools/tk-reboot.sh\`)."
+		   return 7 ;;
 		# The module IS the new one, so the proof below still runs and still
 		# means something. The stack being down is reported after it.
 		5) stack_down=1 ;;
@@ -1826,15 +1865,30 @@ tkmod() {
 		_ph_pushed_write   # it did reach the device; only the proof is missing
 		return 0
 	fi
+	# An ABSENT module and a module that simply exposes no srcversion are not
+	# the same answer, and reading the second as the first said ">> NOT loaded"
+	# about a module that was loaded and working. venus is the case: the kernel
+	# has no MODULE_SRCVERSION_ALL and venus declares no MODULE_VERSION, so
+	# /sys/module/venus_core/srcversion never exists and the comparison can
+	# never conclude (issue #26). insmod took the file just pushed, so what is
+	# running IS the new build; only the proof is unavailable. Say that.
+	local proof=0
 	ssh "${TK_SSH_OPTS[@]}" "$phone" "
+		if [ ! -d /sys/module/$sysname ]; then
+			echo '>> $name is NOT loaded (/sys/module/$sysname absent)'; exit 1; fi
 		got=\$(cat /sys/module/$sysname/srcversion 2>/dev/null)
 		if [ -z \"\$got\" ]; then
-			echo '>> $name is NOT loaded (/sys/module/$sysname absent)'; exit 1; fi
+			echo '>> $name is loaded, but this kernel exposes no srcversion for it'
+			echo '>>   -- no MODULE_SRCVERSION_ALL, and the module declares no'
+			echo '>>   MODULE_VERSION. WHICH build is running cannot be proved from'
+			echo '>>   here; insmod accepted the file just pushed, so it is this one.'
+			exit 2; fi
 		if [ \"\$got\" != '$want' ]; then
 			echo \">> STALE: running $name is srcversion \$got, built is $want\"
 			echo '>> the old module never unloaded -- something still holds it'
 			exit 1; fi
-		echo '>> verified: running $name is the build just pushed ($want)'" || return 1
+		echo '>> verified: running $name is the build just pushed ($want)'" || proof=$?
+	[ "$proof" -eq 0 ] || [ "$proof" -eq 2 ] || return 1
 	_ph_pushed_write
 	[ -z "$stack_down" ] || {
 		echo ">> ...but the stack above $name did not come back. Reboot."
