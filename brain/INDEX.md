@@ -58,6 +58,7 @@ generic notes as well.
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
 | [venus-wedges-on-the-first-vbif-write](findings/venus-wedges-on-the-first-vbif-write.md) | `device:google-taimen` | msm8998 TZ refuses venus resume with -EINVAL, mainline swallows it, and the whole block stays dark |
 | [vht-capa-overrides-cannot-touch-channel-width](findings/vht-capa-overrides-cannot-touch-channel-width.md) | `generic` | wpa_supplicant's vht_capa cannot change Supported Channel Width Set or Extended NSS BW -- mac80211 drops it |
+| [waylandsink-5fps-was-two-upstream-policies-colliding](findings/waylandsink-5fps-was-two-upstream-policies-colliding.md) | `device:google-taimen` | The waylandsink 5 fps cap was two upstream policies colliding -- wlroots hides LINEAR from v3 clients, GStreamer refuses INVALID |
 | [waylandsink-delivers-5fps-where-other-sinks-do-60](findings/waylandsink-delivers-5fps-where-other-sinks-do-60.md) | `device:google-taimen` | waylandsink delivers 5 fps where glimagesink and gtk4paintablesink do 60 -- and WebKit's compositor is the browser's ceiling, not venus |
 | [what-a-rootless-workspace-cannot-do](findings/what-a-rootless-workspace-cannot-do.md) | `generic` | Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs |
 | [where-the-build-minutes-actually-go](findings/where-the-build-minutes-actually-go.md) | `generic` | Every rung pays ~14s to activate envkernel, and that dwarfs the compile |
@@ -171,7 +172,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 23
+- `device:google-taimen` — 24
 - `generic` — 91
 - `soc:gs201` — 1
 - `soc:msm8998` — 18
