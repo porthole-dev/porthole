@@ -510,6 +510,15 @@ def _run(args, out: Out, root: pathlib.Path) -> int:
     ctx = Ctx(root, args, out)
     try:
         return args._spec["run"](args, ctx)
+    except porthole.FastbootUnavailable as exc:
+        # 69, not 1: no verb should have to restate this. A tool that could
+        # not run is not a measurement that came back negative.
+        out.error(str(exc))
+        print(out.paint(
+            f"  {out.sym('→', '->')} point FASTBOOT at a fastboot that exists "
+            f"here, or install one -- `porthole doctor` names how.", "cyan"),
+            file=sys.stderr)
+        return EX_UNAVAILABLE
     except Bail as exc:
         out.error(exc.message)
         if exc.hint:

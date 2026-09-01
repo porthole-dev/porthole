@@ -1387,9 +1387,9 @@ def _watch(ctx, args) -> int:
 
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
 
-    # A raw sink, not `ctx.out`: `progress.watch` bakes its own line ending
-    # into every string it emits (a bare `\r\033[2K` prefix for a tty
-    # redraw-in-place, a trailing `\n` otherwise), matching `pkg`'s `_watch`.
+    # A raw sink, not `ctx.out`: `progress.watch` bakes its own cursor
+    # handling into every string it emits (the walk back up the repainted
+    # block on a tty, a trailing `\n` otherwise), matching `pkg`'s `_watch`.
     def out(line):
         sys.stdout.write(line)
         sys.stdout.flush()

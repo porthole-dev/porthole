@@ -12,6 +12,7 @@ extrapolated from noise.
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import time
@@ -27,7 +28,7 @@ def test_a_build_with_no_history_admits_it_does_not_know():
     a number reads as knowledge, which is worse than an empty one."""
     assert progress.fraction({}, "fast", elapsed=30, compile_seen=10) is None
     assert progress.eta({}, "fast", elapsed=30, frac=None) is None
-    assert "?" in progress.bar(None)
+    assert "unknown" in progress.bar(None)
 
 
 def test_history_gives_a_fraction_from_the_compile_count():
@@ -51,7 +52,7 @@ def test_overrunning_the_baseline_reads_as_unknown_not_as_almost_done():
     history = {"auto": {"total": 44, "compile_lines": 6}}
     assert progress.fraction(history, "auto", elapsed=5, compile_seen=300) is None
     assert progress.eta(history, "auto", elapsed=300, frac=None) is None
-    assert "?" in progress.bar(None)
+    assert "unknown" in progress.bar(None)
 
 
 def test_an_eta_is_not_reported_as_zero_once_the_last_total_is_passed():
@@ -528,7 +529,9 @@ def test_line_of_carries_the_stall_note_watch_actually_renders():
              "pid": 1, "elapsed": 133.0, "progress": None, "eta": None,
              "last": "Executing postmarketos-base-systemd-91-r1.trigger",
              "last_age": 133.0, "last_at": 1000.0}
-    line = progress.line_of(stale)
+    # `now` pinned: the age comes from `last_at` now, so a fixture that left
+    # it to the wall clock would be asking about 1970.
+    line = progress.line_of(stale, now=1133.0)
     assert "\n" not in line
     assert "no output for" in line or "install" in line.lower(), line
 
@@ -538,9 +541,9 @@ def test_line_of_stays_quiet_on_a_healthy_fast_moving_build():
              "pid": 1, "elapsed": 133.0, "progress": 0.4, "eta": 10.0,
              "last": "  CC  drivers/gpu/drm/msm/msm_drv.o",
              "last_age": 2.0, "last_at": 1000.0}
-    line = progress.line_of(fresh)
+    line = progress.line_of(fresh, now=1002.0)
     assert "\n" not in line
-    assert line == progress.line_of(dict(fresh, last=""))
+    assert line == progress.line_of(dict(fresh, last=""), now=1002.0)
 
 
 def test_feed_advances_last_at():
@@ -797,6 +800,192 @@ def test_watch_says_something_before_the_first_sleep_and_gives_up_on_a_ceiling()
         assert lines, "must say something before the ceiling, never silent"
     finally:
         progress.wait_ceiling = real_ceiling
+
+
+# ------------------------------------------- what `watch` actually paints --
+#
+# Reported, verbatim: "it's been stale full of ??? and info like package --
+# this watch is pretty much useless from a watching pov, the developer should
+# receive much more real time and not stale information". The observed render,
+# unchanged for minutes:
+#
+#     [??????????????????] -- push         4m16s eta      --
+#
+# while the status file it was reading held `>> reboot 1/4: burning a boot
+# retry (boot_id c1db939c)`. Nothing was missing from the data. The renderer
+# threw it away.
+
+# The reported case, as a fixture: a rung with no usable history (progress
+# unknown), in a coarse phase, whose last line landed a couple of minutes ago.
+STALLED_PUSH = {"rung": "auto", "phase": "push", "state": "running", "pid": 1,
+                "elapsed": 256.0, "progress": None, "eta": None,
+                "compile_lines": 0,
+                "last": ">> reboot 1/4: burning a boot retry "
+                        "(boot_id c1db939c)",
+                # last_age is what the writer froze into the file; last_at is
+                # when it happened. They disagree here ON PURPOSE -- see
+                # test_the_quiet_time_keeps_climbing_after_the_writer_stops.
+                "last_age": 0.1, "last_at": 1000.0, "started": 800.0}
+
+
+def test_the_watch_block_shows_what_the_run_is_doing_not_a_phase_word():
+    """The defect itself. `push` is a phase; `>> reboot 1/4: burning a boot
+    retry` is what is HAPPENING, it was already in the status file, and the
+    watcher never drew it."""
+    lines = progress.watch_lines(STALLED_PUSH, width=100, now=1134.0)
+    assert len(lines) == 2, lines
+    assert all("\n" not in line for line in lines), lines
+    assert "reboot 1/4" not in lines[0], "the summary line never carried it"
+    assert "reboot 1/4: burning a boot retry" in lines[1], lines[1]
+    assert "2m14s" in lines[1], lines[1]
+
+
+def test_the_quiet_time_keeps_climbing_after_the_writer_stops():
+    """The difference between quiet and hung, and the reason the age is taken
+    from `last_at` rather than from the `last_age` the writer stamped in.
+
+    A build that wedges stops republishing, so `last_age` in the file is
+    frozen at whatever it was -- 0.1s here -- and a watcher reading that field
+    renders the same thing forever, which is precisely the "looks stale"
+    complaint. Derived from the stamp, the number climbs on every repaint
+    whatever the writer is doing.
+
+    The clock is moved, the snapshot is NOT: same dict, two renders, and the
+    age must differ by the minute that passed."""
+    real_time = progress.time.time
+    now = [1134.0]
+    progress.time.time = lambda: now[0]
+    try:
+        first = progress.watch_lines(STALLED_PUSH, width=100)[1]
+        now[0] += 60.0
+        second = progress.watch_lines(STALLED_PUSH, width=100)[1]
+    finally:
+        progress.time.time = real_time
+    assert "2m14s" in first, first
+    assert "3m14s" in second, second
+
+
+def test_a_run_that_has_said_nothing_yet_still_renders_two_lines():
+    """`publish_pending` stakes the status file with `last: ""` before the
+    child speaks, and `watch` run straight after `--detach` reads exactly
+    that. A block that loses a row there would smear the repaint."""
+    pending = {"rung": "auto", "phase": "", "state": "running", "pid": 1,
+               "elapsed": 0.0, "progress": None, "eta": None,
+               "compile_lines": 0, "last": "", "last_at": 1000.0,
+               "last_age": 0.0, "started": 1000.0}
+    lines = progress.watch_lines(pending, width=100, now=1000.0)
+    assert len(lines) == 2, lines
+    assert lines[1].strip(), "the second row must never be blank"
+
+
+def test_the_block_is_clipped_to_the_terminal_width():
+    """`watch` repaints in place. A line wider than the terminal wraps, and
+    the wrapped remainder is not walked back over on the next repaint -- it
+    stays on screen as a smear that reads as a corrupted display."""
+    long_line = dict(STALLED_PUSH, last=">> " + "verbose kbuild noise " * 12)
+    lines = progress.watch_lines(long_line, width=60, now=1134.0)
+    assert all(len(line) <= 60 for line in lines), [len(x) for x in lines]
+    assert lines[1].endswith("…"), lines[1]
+    assert "verbose kbuild noise" in lines[1], lines[1]
+
+
+def test_an_unknown_bar_says_so_instead_of_shouting_question_marks():
+    """`[??????????????????]` was the render for every rung without history --
+    the common case -- and it reads as a broken terminal. What it must NOT
+    become is something that implies a measurement nobody made: no fill, no
+    percentage, and the same width so the columns after it do not move."""
+    unknown, measured = progress.bar(None), progress.bar(0.5)
+    assert "?" not in unknown, unknown
+    assert "unknown" in unknown, unknown
+    assert "=" not in unknown and ">" not in unknown, unknown
+    assert len(unknown) == len(measured), (unknown, measured)
+
+
+def test_the_stall_note_sits_beside_the_activity_not_instead_of_it():
+    """The previous implementer chose the note INSTEAD of the raw line. The
+    note explains a silence; only the line says what the silence is in the
+    middle of. Both, on their own rows."""
+    packaging = dict(STALLED_PUSH, phase="package",
+                     last="[14:49:08] DONE!", last_at=1000.0)
+    lines = progress.watch_lines(packaging, width=140, now=2200.0)
+    assert "compress" in lines[0] or "packag" in lines[0].lower(), lines[0]
+    assert "DONE!" in lines[1], lines[1]
+    assert "20m00s" in lines[1], lines[1]
+
+
+def _running(rundir, **over):
+    """The reported case as a live status file, timestamped now."""
+    now = time.time()
+    snap = dict(STALLED_PUSH, pid=os.getpid(), last_at=now - 134.0,
+                started=now - 256.0, **over)
+    path = pathlib.Path(rundir) / "x-status.json"
+    path.write_text(json.dumps(snap))
+    return path, snap
+
+
+def test_watch_walks_back_over_every_row_it_painted_on_a_tty():
+    """The bug this repo has shipped before: a tty-only render defect that no
+    test could see, because tests have no tty. So drive `watch` with
+    `tty=True` and assert the escape sequences.
+
+    The invariant is arithmetic, not a literal: every newline written during
+    an in-place repaint must be walked back up before the next one, or the
+    rows above the last are frozen on screen -- which is exactly what "looks
+    stale" looks like. Painting the second row with a bare `\r`, or clearing
+    only the bottom row on the way out, both break it."""
+    with tempfile.TemporaryDirectory() as rundir:
+        path, snap = _running(rundir)
+        captured = []
+
+        def sink(text):
+            captured.append(text)
+            if sum("\033[2K" in t for t in captured) == 2:
+                # Let it repaint a few times, then stop the loop.
+                path.write_text(json.dumps(dict(snap, state="done")))
+
+        rc = progress.watch(rundir, "x-status.json", 0.01, sink, tty=True)
+    assert rc == progress.EX_OK
+    block = "".join(t for t in captured if "\033[2K" in t)
+    assert "reboot 1/4" in block, block
+    assert block.count("\n") >= 2, "expected more than one repaint"
+    walked = sum(int(n) for n in re.findall(r"\033\[(\d+)A", block))
+    assert walked == block.count("\n"), (walked, block.count("\n"), repr(block))
+
+
+def test_the_non_tty_watch_does_not_flood_the_log_with_the_second_row():
+    """Off a tty this lands in a detached build's spawn log, which a periodic
+    bar line had already made close to pure noise. The block is throttled to
+    one every fifteen seconds however fast the loop spins -- so ten renders
+    must still produce ONE block. The count is 2 because the closing
+    `status_report` prints the same line once more, and that one is not part
+    of the loop."""
+    real_time, real_sleep = progress.time.time, progress.time.sleep
+    clock, spins = [10_000.0], [0]
+    with tempfile.TemporaryDirectory() as rundir:
+        path, snap = _running(rundir)
+        snap = dict(snap, last_at=clock[0] - 134.0, started=clock[0] - 256.0)
+        path.write_text(json.dumps(snap))
+        captured = []
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+            spins[0] += 1
+            if spins[0] >= 10:
+                path.write_text(json.dumps(dict(snap, state="done")))
+
+        progress.time.time = lambda: clock[0]
+        progress.time.sleep = fake_sleep
+        try:
+            rc = progress.watch(rundir, "x-status.json", 1.0, captured.append,
+                                tty=False)
+        finally:
+            progress.time.time, progress.time.sleep = real_time, real_sleep
+    assert rc == progress.EX_OK
+    assert spins[0] == 10, ("the loop must really have spun ten times, or "
+                            "this proves nothing", spins[0])
+    text = "".join(captured)
+    assert "\033" not in text, "no escape sequences off a tty"
+    assert text.count("reboot 1/4") == 2, text
 
 
 def main():

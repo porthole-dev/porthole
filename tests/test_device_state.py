@@ -313,5 +313,52 @@ def main():
     return 1 if failed else 0
 
 
+# ------------------------------------------- a tool that could not run --
+#
+# The shell side learned this the hard way (ph_need_fastboot, tools/tk-lib.sh).
+# These pin the Python twin: `wait_fastboot` polls until its deadline, so a
+# $FASTBOOT that cannot run made it insist for a full budget that a phone
+# sitting in the bootloader had never arrived.
+
+
+def _real_probe(dev, path):
+    """`dev` with the REAL in_fastboot, pointed at `path`."""
+    dev.fastboot = path
+    dev.in_fastboot = porthole.Device.in_fastboot.__get__(dev)
+    return dev
+
+
+def test_a_fastboot_that_cannot_run_refuses_instead_of_saying_no():
+    dev = _real_probe(device(), "/nonexistent/fastboot")
+    try:
+        dev.in_fastboot()
+    except porthole.FastbootUnavailable as exc:
+        assert "/nonexistent/fastboot" in str(exc), exc
+        assert "not the phone" in str(exc), exc
+    else:
+        raise AssertionError("answered 'no' for a tool that never ran")
+
+
+def test_wait_fastboot_refuses_at_once_rather_than_polling_its_budget():
+    """The 181.2s failure, in one assertion."""
+    dev = _real_probe(device(), "/nonexistent/fastboot")
+    dev.poll = 0.01
+    start = time.monotonic()
+    try:
+        dev.wait_fastboot(time.monotonic() + 5)
+    except porthole.FastbootUnavailable:
+        pass
+    else:
+        raise AssertionError("polled its whole budget instead of refusing")
+    spent = time.monotonic() - start
+    assert spent < 1.0, f"took {spent:.1f}s -- it polled"
+
+
+def test_a_fastboot_that_RAN_and_found_nothing_is_still_a_real_no():
+    """The positive control: the guard must not swallow a genuine answer."""
+    dev = _real_probe(device(), "/bin/true")
+    assert dev.in_fastboot() is False
+
+
 if __name__ == "__main__":
     sys.exit(main())

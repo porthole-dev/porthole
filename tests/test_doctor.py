@@ -404,5 +404,58 @@ def test_a_build_does_not_inherit_pmb_sudo():
     assert env.get("PATH") == "/usr/bin", "the rest of the environment stands"
 
 
+# ------------------------- does $FASTBOOT resolve where builds actually run --
+#
+# Checking it on the HOST is a different question, and answering the host's is
+# what let a `fast` build compile, reach "safe to flash", send the phone to the
+# bootloader, and then spend 181.2s insisting it never got there.
+
+
+class _FakeSandbox:
+    CONTAINER = "porthole-sandbox"
+
+
+def _fastboot_row(monkey_run):
+    """Run the workspace fastboot check with podman stubbed."""
+    import subprocess as sp
+    saved = sp.run
+    sp.run = monkey_run
+    try:
+        ch = doctor.Checks()
+        doctor._workspace_fastboot_row(ch, _FakeSandbox())
+        return ch.rows[-1]
+    finally:
+        sp.run = saved
+
+
+class _Proc:
+    def __init__(self, rc, out=""):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
+def test_a_workspace_fastboot_that_resolves_is_ok():
+    row = _fastboot_row(lambda *a, **k: _Proc(0, "/usr/bin/fastboot\n"))
+    assert row["status"] == "ok", row
+    assert "/usr/bin/fastboot" in row["detail"], row
+
+
+def test_a_host_path_that_the_container_lacks_is_a_failure():
+    """127 with empty stdout is byte-for-byte a phone that is NOT in the
+    bootloader, which is exactly why doctor has to ask before the build does."""
+    row = _fastboot_row(lambda *a, **k: _Proc(127, ""))
+    assert row["status"] == "fail", row
+    assert "does not resolve inside the workspace" in row["detail"], row
+    assert "sandbox" in row["fix"], row["fix"]
+
+
+def test_a_check_that_could_not_run_is_not_a_finding_about_fastboot():
+    """69 doctrine: the check not happening is not the check failing."""
+    def boom(*a, **k):
+        raise OSError("podman went away")
+    row = _fastboot_row(boom)
+    assert row["status"] == "warn", row
+    assert "could not ask" in row["detail"], row
+
+
 if __name__ == "__main__":
     sys.exit(main())

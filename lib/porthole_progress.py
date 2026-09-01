@@ -29,6 +29,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import time
 
 from porthole_cli import Bail, EX_FAIL, EX_OK
@@ -180,9 +181,18 @@ def fmt_dur(seconds) -> str:
 
 
 def bar(fraction, width: int = 18) -> str:
-    """A bar, or an honest empty one when there is no fraction to draw."""
+    """A bar, or the word `unknown` when there is no fraction to draw.
+
+    NOT `[??????????????????]`, which is what this drew for every kernel rung
+    without history -- the common case. Eighteen question marks read as a
+    broken terminal, and reported as one: "it's not good looking this state,
+    an user may think it's stale". The word says exactly the same thing --
+    nothing was measured -- without the alarm, and an empty bar was never an
+    option because empty reads as 0%, which is a measurement nobody made.
+    Same width either way, so the columns after it do not move.
+    """
     if fraction is None:
-        return "[" + "?" * width + "]"
+        return "[" + "unknown".center(width)[:width] + "]"
     filled = int(max(0.0, min(1.0, fraction)) * width)
     return "[" + "=" * filled + ">" * (1 if filled < width else 0) + \
            " " * (width - filled - (1 if filled < width else 0)) + "]"
@@ -537,7 +547,63 @@ class PkgTracker(Tracker):
 _LINE_WIDTH = 100  # matches status_report's own `last`-truncation budget
 
 
-def line_of(snap, width: int = 18, now=None) -> str:
+def last_age_of(snap, now=None):
+    """How long since the run last said anything, or None.
+
+    From `last_at` -- an absolute stamp -- in preference to `last_age`, which
+    is a number frozen at the instant the writer published it. The difference
+    is the whole point of the field to a reader: `last_age` stops growing the
+    moment the writer stops, so a wedged or killed build shows the same age
+    forever, which is exactly the "is this thing stale?" doubt this is meant
+    to settle. Derived from a stamp, the number keeps climbing whatever the
+    writer is doing, and a reader can tell quiet from dead by watching it.
+    """
+    at = (snap or {}).get("last_at")
+    if isinstance(at, (int, float)):
+        return max(0.0, (time.time() if now is None else now) - at)
+    age = (snap or {}).get("last_age")
+    return age if isinstance(age, (int, float)) else None
+
+
+def activity_of(snap, now=None) -> str:
+    """What the run is DOING, with the age of that fact. Pure.
+
+    The reported defect: `[??????] -- push 4m16s eta --`, unchanged for
+    minutes, while the status file held `>> reboot 1/4: burning a boot retry`.
+    The information was already recorded and the watcher simply never drew it,
+    so a coarse phase word was all the reader got. This is that line.
+
+    The age leads because it is the field that MOVES. A render that looks
+    identical whether the build is working or dead is the complaint; a number
+    that ticks every second is the answer to it.
+    """
+    age = fmt_dur(last_age_of(snap, now))
+    last = ((snap or {}).get("last") or "").strip()
+    if not last:
+        return "{:>7} ago  (nothing said yet)".format(age)
+    return "{:>7} ago  {}".format(age, last)
+
+
+def clip(text: str, width) -> str:
+    """Cut to the terminal's width. `watch` repaints in place, and a line that
+    wraps leaves its overflow behind on the next redraw -- the smear reads as
+    a corrupted display, which is worse than the truncation it came from."""
+    if not width or len(text) <= width:
+        return text
+    return text[:max(0, width - 1)] + "\u2026"
+
+
+def term_width(default: int = 100) -> int:
+    """Columns available for a repainted line, minus one.
+
+    The last column is left alone deliberately: writing into it makes most
+    terminals wrap immediately, which is the smear `clip` exists to avoid.
+    """
+    return max(40, shutil.get_terminal_size((default, 24)).columns - 1)
+
+
+def line_of(snap, width: int = 18, now=None,
+            budget: int = _LINE_WIDTH) -> str:
     """The one-line view, from a snapshot rather than from a live tracker.
 
     Module-level so that something following the status FILE renders exactly
@@ -570,21 +636,35 @@ def line_of(snap, width: int = 18, now=None) -> str:
     last = snap.get("last")
     if not last:
         return base
-    age = snap.get("last_age")
-    if age is None and snap.get("last_at") is not None:
-        age = (time.time() if now is None else now) - snap["last_at"]
-    note = stall_note(last, age or 0.0)
+    note = stall_note(last, last_age_of(snap, now) or 0.0)
     if not note:
         return base
     sep = " · "
-    room = _LINE_WIDTH - len(base) - len(sep)
+    room = budget - len(base) - len(sep)
     if room < 20:
         return base
     if len(note) > room:
-        # Cut on a word boundary -- a note truncated mid-word reads as
-        # corrupted rather than merely shortened.
-        note = note[:room].rsplit(" ", 1)[0]
+        # Cut on a word boundary, and SAY it was cut -- a sentence that stops
+        # dead at "the process is" reads as a broken renderer, which is the
+        # impression this whole line exists to remove.
+        note = note[:room - 1].rsplit(" ", 1)[0] + "\u2026"
     return base + sep + note
+
+
+def watch_lines(snap, width=None, now=None):
+    """The block `watch` paints: the numbers, then what is actually happening.
+
+    Two lines, always the same two, so an in-place repaint can walk back up a
+    known number of rows -- and so the block never shrinks and leaves a stale
+    row behind it on screen.
+    """
+    width = term_width() if width is None else width
+    # `budget` is the note's room on the summary line, and it is the caller's
+    # width rather than the hardcoded 100 the build's own painter uses: a
+    # terminal wider than that was cutting the explanation mid-sentence.
+    return [clip("  " + line_of(snap, now=now, budget=max(40, width - 2)),
+                 width),
+            clip("  " + activity_of(snap, now), width)]
 
 
 def publish_pending(rundir, rung: str, pid: int,
@@ -747,9 +827,7 @@ def status_report(snap, alive=None, now=None):
         rows.append(("phase", "none reached" if reached in ("", "starting")
                      else reached))
     if snap.get("last"):
-        age = snap.get("last_age")
-        if age is None and snap.get("last_at"):
-            age = now - snap["last_at"]
+        age = last_age_of(snap, now)
         label = str(snap["last"])[:100]
         if age is not None and age >= STALL_AFTER_S:
             label = "({} ago) {}".format(fmt_dur(age), label)
@@ -831,10 +909,11 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     `out` is a LINE SINK (one positional argument, e.g. `print`) rather than
     a terminal, so this loop is testable without a tty and reusable by any
     verb that publishes a status file shaped like `porthole_progress`'s.
-    Every line this function emits carries its own line ending -- a bare
-    `\\r\\033[2K` prefix (no trailing newline) for a tty redraw-in-place, a
-    trailing `\\n` for everything else -- so `out` itself never has to know
-    which mode is active.
+    Every string this function emits carries its own cursor handling -- on
+    a tty, one write per repaint containing the walk back up to the top of
+    the block (`\\033[NA`), a `\\r\\033[2K` per row and no trailing newline;
+    a trailing `\\n` for everything else -- so `out` itself never has to
+    know which mode is active.
 
     `ndjson=True` emits one JSON object per update instead of a bar, and
     skips the final `status_report` block: an agent can consume a stream: it
@@ -880,6 +959,21 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
         except (OSError, ValueError):
             return None
 
+    # `watch` paints a BLOCK now -- the numbers, then what the run is doing --
+    # so a redraw has to walk back up to the top of it. A bare `\r` would
+    # rewrite only the bottom row and leave the one above it frozen on screen,
+    # which is the very appearance of staleness this change exists to remove.
+    painted = [0]
+
+    def paint(lines):
+        up = "\033[{}A".format(painted[0] - 1) if painted[0] > 1 else ""
+        painted[0] = len(lines)
+        out(up + "\n".join("\r\033[2K" + text for text in lines))
+
+    def unpaint():
+        out("\r\033[2K" + "\033[1A\r\033[2K" * max(0, painted[0] - 1))
+        painted[0] = 0
+
     started_watching = time.time()
     # How long to wait for a run to START, and it depends on who is
     # watching. `watch` is advertised as "costs nothing to leave open", and a
@@ -923,14 +1017,14 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
                 obj["note"] = line
                 out(json.dumps(obj) + "\n")
         elif tty:
-            out("\r\033[2K" + line)
+            paint([line])
         elif last_note == 0.0 or time.time() - last_note > max(interval, 15):
             last_note = time.time()
             out(line + "\n")
         time.sleep(0.25 if snap is None else interval)
         snap = snapshot()
     if tty and not ndjson:
-        out("\r\033[2K")
+        unpaint()
 
     if snap is None:
         # Generic on purpose: this function has no verb of its own, only a
@@ -965,16 +1059,24 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
                 # speaking for itself via the rest of the fields.
                 out(json.dumps({**snap, "note": snap.get("note", "")}) + "\n")
             elif tty:
-                out("\r\033[2K  " + line_of(snap))
+                # `watch_lines` measures the terminal itself, on every
+                # repaint, so a resized window stops wrapping on the next
+                # tick rather than at the next run.
+                paint(watch_lines(snap))
             elif time.time() - last_note > max(interval, 15):
+                # Off a tty this is somebody's log -- a detached build's spawn
+                # log, or CI. Two lines every fifteen seconds, on the same
+                # throttle the single line used to have: the activity line is
+                # the reason to read the log at all, and doubling a line
+                # nobody prints more than four times a minute is not a flood.
                 last_note = time.time()
-                out("  " + line_of(snap) + "\n")
+                out("\n".join(watch_lines(snap)) + "\n")
             if live != "running":
                 break
             time.sleep(interval)
             snap = snapshot() or snap
         if tty and not ndjson:
-            out("\r\033[2K")
+            unpaint()
 
     if not ndjson:
         head, rows = status_report(snap)
