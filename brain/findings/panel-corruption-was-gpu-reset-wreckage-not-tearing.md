@@ -50,7 +50,20 @@ degraded phosh again. The guard now lives in
 manager applies to EVERY launch path. A .desktop Exec= env is a per-icon
 patch, not a policy; anything load-bearing belongs in environment.d.
 
+**Frequency is exonerated too** (tested with consent, same night): capped
+to 670 MHz the identical Skia-GPU workload faulted 2x and 4x per benchmark
+round — the same rate as 710. Nine faults total this boot across three
+signatures (D301B1C1, EE0011C1 repeatedly). This is a freedreno/mesa a540
+rasterization bug (the persisted corruption block has the wrong-stride /
+tile-readback stripe signature -- GMEM/UBWC handling), NOT a marginal bin
+and NOT thermal. Downclocking buys nothing; GPU rasterization (WebKit
+Skia-GPU, and by extension Firefox WebRender-GL) stays closed on this
+device until the driver bug is found. The upstream report needs a minimal
+repro (a Skia or piglit case) plus these signatures; mesa 26.1.6,
+kernel 7.2.2 #26, adreno 540.1.
+
 **What this rules out** — the rd_ptr patch tearing transfers (no artifact
 occurred outside the reset's blast radius; its pending_kickoff_cnt gate
 stands); the compositor dmabuf fix regressing (grim clean, session fling
-still p50 16.7 / 0-jank); "a clean screenshot means the user is wrong".
+still p50 16.7 / 0-jank); "a clean screenshot means the user is wrong";
+GPU frequency marginality (670 == 710 fault rate).
