@@ -50,6 +50,7 @@ DEVICES = "/proc/bus/input/devices"
 ABS_MT_POSITION_X = 0x35
 EVENT_SIZE = struct.calcsize("llHHi")
 IN_CREATE = 0x100
+IN_IGNORED = 0x8000
 
 
 def find_touchscreen():
@@ -203,9 +204,14 @@ def main():
                 buf = os.read(ino_fd, 4096)
                 off = 0
                 while off < len(buf):
-                    _, _, _, ln = struct.unpack_from("iIII", buf, off)
+                    _, mask, _, ln = struct.unpack_from("iIII", buf, off)
                     name = buf[off + 16:off + 16 + ln].rstrip(b"\0").decode()
                     off += 16 + ln
+                    if mask & IN_IGNORED:
+                        # watched cgroup destroyed (session restart);
+                        # re-arm lazily on the next touch
+                        watched = False
+                        continue
                     if name.startswith("app-"):
                         hints.fire("LAUNCH", args.launch_hold)
             hints.reap()
