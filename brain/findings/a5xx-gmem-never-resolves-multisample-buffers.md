@@ -1,12 +1,12 @@
 ---
-id: the-a5xx-gmem-path-does-not-flush-the-ccu
-title: GPU rasterisation is visibly wrong on a540 because the a5xx GMEM path never flushes the CCU
+id: a5xx-gmem-never-resolves-multisample-buffers
+title: GPU rasterisation is visibly wrong on a540 because the a5xx GMEM store never resolves multisample buffers
 scope: soc:msm8998
 subsystem: gpu
 severity: finding
 confidence: proven
 evidence: "taimen 2026-09-02, mesa 26.1.6, kernel #30. Local page (no network, no video): 80 cards x 5 filled SVG paths = 400 composited layers, WEBKIT_LAYERS_TILE_SIZE=1440x1024, scrolled. Rendered by the CPU rasteriser it is the reference; compared pixel for pixel: sysmem 0 differing px, default GMEM 3604, repeat 4218, nobin 3693, FD_MESA_DEBUG=flush 7645 and 10070, tile 1024x1024 3951, tile 512x512 (single bin, no tiling) 2954. Corruption is a solid rectangular band of unrelated coverage across a shape."
-refutes: "the Skia-GPU corruption on a540 is UBWC; it is GMEM binning; it is the trailing partial bin or tile alignment; it is blur/backdrop-filter; it is texture tiling (notile); it is a shader or ir3 bug"
+refutes: "the Skia-GPU corruption on a540 is UBWC; it is GMEM binning; it is the trailing partial bin or tile alignment; it is blur/backdrop-filter; it is texture tiling (notile); it is a shader or ir3 bug; it is a missing CCU flush at end of batch; enabling RB_CLEAR_CNTL.MSAA_RESOLVE fixes it"
 first-learned: 2026-09-02
 ---
 
@@ -69,12 +69,62 @@ sysmem is the only correct mode, and the only one that flushes the CCU.
 `FD_MESA_DEBUG=flush` making it *worse* is consistent: it produces more
 batches, and the defect is once per GMEM batch.
 
-**Candidate patch** (written, NOT yet validated on hardware -- validating needs
-a mesa rebuild, which needs an Alpine aports tree this workspace does not have):
-`taimen/vendor-patches/mesa/0001-freedreno-a5xx-flush-the-CCU-at-the-end-of-a-GMEM-ba.patch`
-adds the two `PC_CCU_FLUSH_*_TS` events to `fd5_emit_tile_fini()`, mirroring
-`fd5_emit_sysmem_fini()`. **Do not present it as fixed until the diff above
-reads 0 with a patched mesa.**
+**The mechanism, narrowed to the shape.** The defect follows the *shape*, not
+the position on screen. Same page, four icon slots:
+
+| page | differing px | where |
+|---|---|---|
+| thumb, flag, bookmark, **triangle** | 4614 | only the triangle's column |
+| **all four triangles** | 9078 | all four columns |
+
+The triangle is the only one of the four with long diagonal edges, i.e. the
+only one with many partially covered pixels. `emit_gmem2mem_surf()` stores
+GMEM with the resolve hardcoded off and the condition commented out beside it:
+
+```c
+//	bool msaa_resolve = pfb->samples > 1;
+bool msaa_resolve = false;
+```
+
+GMEM holds samples interleaved, so storing a multisample buffer without
+resolving smears rows -- which is exactly the horizontal band of coverage seen
+across the triangle, and exactly why axis-aligned icons survive.
+
+**The framebuffers really are multisampled.** Proven by the negative: if
+`samples` were 1 the patched builds below would be no-ops, and they are not --
+they change the image drastically.
+
+**Two patch attempts, both measured, both WRONG** (device reverted to stock
+after each):
+
+| build | change | mixed | all-tri |
+|---|---|---|---|
+| r1 stock | -- | 4614 | 9078 |
+| r2 | `PC_CCU_FLUSH_COLOR_TS`/`DEPTH_TS` in `fd5_emit_tile_fini()` | 4237 | -- |
+| r3 | `msaa_resolve = batch->framebuffer.samples > 1` | 32384 | 68265 |
+| r4 | r3 + RAS at source samples, DEST forced `MSAA_ONE` (the split a4xx makes) | 78914 | 68530 |
+
+r2 changed nothing, so the CCU-flush theory is dead. r3 and r4 made it far
+worse, so the resolve needs state this note does not know.
+
+**What is still true**: `FD_MESA_DEBUG=sysmem` is pixel-exact (0 differing px)
+and cuts the worst frame stall from ~2000 ms to ~720 ms.
+
+**What the next person needs** -- not another guess. The correct a5xx GMEM
+store sequence for a multisample buffer is only knowable from a command-stream
+trace of the Qualcomm blob (how freedreno was reverse engineered in the first
+place); the vendor *kernel* (`ref/downstream-wahoo`, kgsl) confirms only
+`gmem_size = SZ_1M` for a540, which mainline already matches, and contains no
+resolve logic because the resolve lives in the proprietary userspace driver.
+a6xx is not a usable model either -- it resolves implicitly through its blit
+event type, with no equivalent flag.
+
+**Building mesa to test this is now a solved problem**: `pmaports/temp/mesa`
+carries Alpine's aport (26.1.6) plus a patch, ~20 min per iteration. Two traps
+are baked into that aport copy: pmbootstrap does not evaluate `case "$CARCH"`
+blocks, so conditional makedepends must be hoisted to the top level
+(porthole#54), and its crossdirect cross-compiles C/C++ but not Rust, so the
+nouveau/rusticl Rust components must be dropped or they link as x86-64.
 
 **Meanwhile**, `FD_MESA_DEBUG=sysmem` gives correct GPU rasterisation on this
 device, measured: worst frame stall 721/716 ms against 1987/1832 ms for the
