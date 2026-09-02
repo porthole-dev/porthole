@@ -23,6 +23,15 @@ sys.path.insert(0, str(ROOT / "lib"))
 import porthole_progress as progress  # noqa: E402
 
 
+def _at(stamp: str) -> float:
+    """Local wall clock for `YYYY-MM-DD HH:MM:SS`.
+
+    LOCAL, because pmbootstrap's `(pid) [HH:MM:SS]` is: the log carries a time
+    of day and no date, and the day it belongs to is the reader's.
+    """
+    return time.mktime(time.strptime(stamp, "%Y-%m-%d %H:%M:%S"))
+
+
 def test_a_build_with_no_history_admits_it_does_not_know():
     """The first run of a rung has nothing to predict from. A bar that invents
     a number reads as knowledge, which is worse than an empty one."""
@@ -1266,9 +1275,114 @@ def test_reattach_follows_a_log_and_stops_when_the_build_leaves_the_workspace():
 
 
 def test_a_quiet_log_is_not_treated_as_an_ending():
-    """PROBE_AFTER_S exists so the free signal (the log moving) carries the
-    common case and the podman exec is spent only on the ambiguous one."""
+    """PROBE_AFTER_S exists so the free signal (the build ADVANCING) carries
+    the common case and the podman exec is spent only on the ambiguous one."""
     assert progress.PROBE_AFTER_S >= 15
+
+
+# Verbatim from ~/.local/var/porthole-sandbox/log.txt, 2026-09-01, the 5.5 h
+# webkit2gtk-6.0 build that died on its last step. The three lines below the
+# counter are the ones nothing was reading.
+FAILED_TAIL = """\
+[9427/9429] Linking CXX executable bin/MiniBrowser
+[9428/9429] Generating WebKitWebProcessExtension-6.0.typelib
+ninja: subcommand failed
+>>> ERROR: webkit2gtk-6.0: build failed
+(246720) [23:59:46] ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(246720) [23:59:46] ERROR: Couldn't build aarch64/webkit2gtk-6.0-2.52.6-r50.apk!
+"""
+
+# ...and what the next morning's unrelated `pmbootstrap chroot -- ls` appended
+# to the very same file, eight hours later. This is the whole bug: it moves
+# the mtime and says nothing whatever about webkit.
+NEIGHBOUR = """\
+(328393) [06:42:32] pmbootstrap v3.11.1
+(328393) [06:42:37] NOTE: chroot is still active
+(328393) [06:42:37] DONE!
+"""
+
+
+def test_the_log_says_how_the_build_ended_and_nothing_was_reading_it():
+    """The reported defect, in one assert. A build that FAILED read as
+    `running` forever because the only question anyone asked of the log was
+    how recently it had been touched."""
+    state, when, said = progress.log_outcome(
+        FAILED_TAIL, "webkit2gtk-6.0", now=_at("2026-09-02 08:44:00"))
+    assert state == "failed", state
+    # The last thing THIS BUILD said -- not the last line in a file it shares
+    # with every other build in the workspace.
+    assert said == ">>> ERROR: webkit2gtk-6.0: build failed", said
+    # Its own clock, from pmbootstrap's stamp -- not the file's mtime, which
+    # by then belonged to something else entirely.
+    assert when == _at("2026-09-01 23:59:46"), when
+
+
+def test_a_neighbours_ending_is_not_this_builds():
+    """log.txt is the WORKSPACE's, so it holds the endings of every build
+    before this one. Only what was written after the newest `[n/N]` can be
+    attributed, and only if it names this package."""
+    assert progress.log_outcome(FAILED_TAIL, "phoc")[0] is None
+    # The marker is real, but it is above the counter: a previous build's.
+    stale = (">>> ERROR: webkit2gtk-6.0: build failed\n"
+             "[100/9429] Building CXX object a.cpp.o\n")
+    assert progress.log_outcome(stale, "webkit2gtk-6.0")[0] is None
+    # abuild's other verdict, for the same reasons.
+    built = ("[9429/9429] Linking CXX shared library lib/libwebkit2gtk.so\n"
+             ">>> webkit2gtk-6.0*: Create webkit2gtk-6.0-2.52.6-r50.apk\n")
+    assert progress.log_outcome(built, "webkit2gtk-6.0")[0] == "done"
+
+
+def test_an_ending_outranks_the_mtime_of_a_log_every_build_shares():
+    """A fresh mtime is not evidence this build lives, and a stale one is not
+    evidence it died -- both are facts about a file the whole workspace
+    writes to. `>>> ERROR: ...: build failed` is evidence, at any age."""
+    frozen = {"rung": "pkg:webkit2gtk-6.0", "state": "running",
+              "pid": 999999999, "elapsed": 6832.0, "started": 1.0}
+    now = _at("2026-09-02 08:44:00")
+    with tempfile.TemporaryDirectory() as tmp:
+        log = pathlib.Path(tmp) / "log.txt"
+        # Touched ten seconds ago by the neighbour, so every old rule called
+        # this a live build and drew it at 99%.
+        log.write_text(FAILED_TAIL + NEIGHBOUR)
+        os.utime(log, (now - 10, now - 10))
+        snap = progress.reattach_from_log(log, frozen, now=now)
+        assert snap["state"] == "failed", snap
+        assert snap["last_at"] == _at("2026-09-01 23:59:46"), snap["last_at"]
+        assert snap["eta"] is None
+        assert progress.liveness(snap) == "failed"
+
+        # ...and the same log gone quiet still reports the ending, where
+        # before the staleness rule threw the answer away with the file.
+        os.utime(log, (now - 9000, now - 9000))
+        assert progress.reattach_from_log(log, frozen,
+                                          now=now)["state"] == "failed"
+
+
+def test_a_watch_reaches_its_verdict_without_waiting_for_the_workspace():
+    """`porthole pkg watch` reported that the build was done and never once
+    said whether it worked. The probe that ends a reattached watch was gated
+    behind the LOG going quiet, and on a workspace anybody is using it never
+    does -- so the loop sat on a finished build until somebody killed it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        log = pathlib.Path(tmp) / "log.txt"
+        log.write_text("[9427/9429] Linking CXX executable bin/MiniBrowser\n")
+        asked = []
+        ticks = [0]
+
+        def probe():
+            asked.append(True)
+            return "webkit2gtk-6.0"          # the workspace still says yes
+
+        def clock():
+            ticks[0] += 1
+            if ticks[0] == 3:
+                log.write_text(FAILED_TAIL)
+            return 1000.0 + ticks[0]
+
+        snap = progress.reattach(log, "webkit2gtk-6.0", probe, 0.001,
+                                 lambda _line: None, tty=False, now=clock)
+    assert snap["state"] == "failed", snap
+    assert not asked, "the log already answered; nothing to ask podman"
 
 
 UTF = progress.Style(colour=False, unicode=True)

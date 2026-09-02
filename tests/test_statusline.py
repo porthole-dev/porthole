@@ -15,6 +15,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "lib"))
@@ -161,6 +162,45 @@ def test_a_build_that_outlived_its_tracker_still_gets_a_row():
     assert snap["steps"] == "8522/9429", snap
     assert "webkit2gtk-6.0" in row and "90%" in row, row
     assert "reattached" in row, row
+
+
+def test_a_build_that_failed_overnight_does_not_still_read_as_running():
+    """Reported with a screenshot: `webkit2gtk-6.0 [====] 99% 9428/9429 .
+    reattached`, still on screen the next morning. The build had failed at
+    23:59; every unrelated `pmbootstrap chroot` since had refreshed the one
+    mtime that was keeping it there, and the row has no clock of its own to
+    contradict it with."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _fake_repo(pathlib.Path(tmp))
+        now = time.time()
+        failed_at = now - 8 * 3600
+        stamp = time.strftime("%H:%M:%S", time.localtime(failed_at))
+        pmb = pathlib.Path(tmp) / "pmb"
+        pmb.mkdir()
+        (pmb / "log.txt").write_text(
+            "[9428/9429] Generating WebKitWebProcessExtension-6.0.typelib\n"
+            ">>> ERROR: webkit2gtk-6.0: build failed\n"
+            f"(246720) [{stamp}] ERROR: Couldn't build webkit2gtk-6.0.apk!\n"
+            f"(328393) [{time.strftime('%H:%M:%S')}] DONE!\n")
+        os.utime(pmb / "log.txt", (now - 10, now - 10))   # touched just now
+        _write(repo, {"rung": "pkg:webkit2gtk-6.0", "phase": "build",
+                      "state": "running", "pid": 999999999, "elapsed": 6832.0,
+                      "progress": 0.839, "eta": None, "last": "[7907/9429]",
+                      "last_at": now - 36000, "started": now - 42000})
+        with _only_these_logs(pmb):
+            assert sl.build_line(repo, 100, now) is None
+
+            # ...but the same failure, minutes old, is exactly what the row
+            # is for: it is the result somebody has been waiting hours for.
+            just_now = time.strftime("%H:%M:%S", time.localtime(now - 60))
+            (pmb / "log.txt").write_text(
+                "[9428/9429] Generating WebKitWebProcessExtension-6.0.typelib\n"
+                ">>> ERROR: webkit2gtk-6.0: build failed\n"
+                f"(246720) [{just_now}] ERROR: Couldn't build it!\n")
+            os.utime(pmb / "log.txt", (now - 10, now - 10))
+            row = sl.build_line(repo, 100, now)
+    assert row and "webkit2gtk-6.0" in row and "failed" in row, row
+    assert "99%" not in row, row
 
 
 def test_an_unrelated_checkout_does_not_claim_the_machines_build():
