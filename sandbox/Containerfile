@@ -101,6 +101,11 @@ RUN pmbootstrap install --help 2>&1 | grep -q -- '--no-image' \
 # This comes AFTER the assertions above on purpose: those must exercise the
 # real binary, not a wrapper pointing at a config that does not exist yet.
 RUN printf '%s\n' '#!/bin/sh' \
+      '# The one guard every build routes through. A chroot whose /dev was' \
+      '# half-unmounted looks perfectly healthy -- and stays that way until' \
+      '# something opens /dev/urandom, which on a webkit build is five hours' \
+      '# in. See porthole-devnodes below for what leaves it that way.' \
+      'porthole-devnodes' \
       'exec /usr/bin/pmbootstrap --as-root --config /pmb/pmbootstrap_v3.cfg "$@"' \
       > /usr/local/bin/pmbootstrap \
  && chmod +x /usr/local/bin/pmbootstrap \
@@ -198,10 +203,34 @@ RUN printf '%s\n' \
       'cfg=${XDG_CONFIG_HOME:-$HOME/.config}/pmbootstrap_v3.cfg' \
       'mkdir -p "$(dirname "$cfg")"' \
       '[ -e "$cfg" ] || ln -sf /pmb/pmbootstrap_v3.cfg "$cfg"' \
+      '# EVERY node, not just dev/null. pmbootstrap unmounts a chroot by' \
+      '# walking the per-node submounts one at a time, and it dies partway' \
+      '# through -- at dev/shm, `umount: not mounted`, exit 32. Whatever it' \
+      '# got through before that is GONE, back to the podman placeholder' \
+      '# FILES underneath (mode 700, root, regular). Measured 2026-09-01:' \
+      '# zero, urandom and tty went; null, full and random survived. So a' \
+      '# probe that asks only about dev/null calls a chroot healthy that has' \
+      '# no /dev/urandom at all.' \
+      '#' \
+      '# And nothing else re-checks, ever: the mknod shim never runs because' \
+      '# pmbootstrap skips a node whose path already exists, and its own' \
+      '# major/minor verification is skipped by the init_done marker. Every' \
+      '# later build in that chroot runs with three dead nodes until' \
+      '# something opens one -- a 5.5 h webkit2gtk-6.0 build died on its' \
+      '# LAST step because WebKit could not read /dev/urandom, and the' \
+      '# SIGSEGV read as a qemu-user bug. porthole issue #33.' \
+      'nodes="null zero full random urandom tty"' \
       'for d in /pmb/chroot_*/dev; do' \
       '  [ -d "$d" ] || continue' \
-      '  [ -c "$d/null" ] && continue' \
-      '  mount --rbind /dev "$d" 2>/dev/null || true' \
+      '  for n in $nodes; do' \
+      '    [ -c "$d/$n" ] && continue' \
+      '    mount --rbind /dev "$d" 2>/dev/null || true' \
+      '    break' \
+      '  done' \
+      '  for n in $nodes; do' \
+      '    [ -c "$d/$n" ] && continue' \
+      '    echo "porthole: $d/$n is not a device node -- a build in this chroot will fail late and blame itself" >&2' \
+      '  done' \
       'done' \
  > /usr/local/bin/porthole-devnodes \
  && chmod +x /usr/local/bin/porthole-devnodes
