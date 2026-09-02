@@ -42,6 +42,30 @@ verdict() { # verdict TREE_VERSION TREE_PATCHLEVEL APORT_PKGVER -> "rc tree apor
                  echo "$? $_PH_TREE_V $_PH_APORT_V"'
 }
 
+# --------------------------------------------------------- the ABI guard ----
+# #37: MODVERSIONS only speaks at insmod, and tkmod installs BEFORE it loads --
+# so on a PORTHOLE_MOD_NO_RELOAD module the refusal arrived at the next boot,
+# with the shipped module already overwritten and no copy left. The check runs
+# before the first write now. tk-modcrc.py is stubbed to its three answers; the
+# branch table is what this tests, not CRC arithmetic.
+abi() { # abi MODCRC_RC [SSH_RC] -> _ph_mod_abi_check's return code
+    mkdir -p "$TMP/fake/tools"
+    printf '#!/bin/sh\necho "CRC mismatches: 3"\nexit %s\n' "$1" \
+        > "$TMP/fake/tools/tk-modcrc.py"
+    chmod +x "$TMP/fake/tools/tk-modcrc.py"
+    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+        PORTHOLE_DEVICE=google-taimen SSH_RC="${2:-0}" TMPFAKE="$TMP/fake" \
+        bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+                 _PH_REPO_ROOT=$TMPFAKE
+                 ssh() { [ "$SSH_RC" = 0 ] || return "$SSH_RC"; echo module-bytes; }
+                 _ph_mod_abi_check /dev/null venus_dec user@host >/dev/null 2>&1
+                 echo $?'
+}
+is "a CRC mismatch refuses before anything is written" "$(abi 1)"  "8"
+is "agreeing CRCs push"                                "$(abi 0)"  "0"
+is "no objcopy to read __versions is not a refusal"    "$(abi 69)" "0"
+is "nothing installed to compare against is not a refusal" "$(abi 1 9)" "0"
+
 # The case that cost a build: a major version apart.
 is "6.18 tree vs 7.2.2 aport is a mismatch" "$(verdict 6 18 7.2.2)" "1 6.18 7.2"
 

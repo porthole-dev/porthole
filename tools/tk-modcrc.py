@@ -3,7 +3,7 @@
 # scope: generic
 # needs: BOOTED
 # env: -
-# exits: 0 ok · non-zero on failure
+# exits: 0 same ABI · 1 CRC mismatch · 69 cannot compare
 """Compare the __versions (modversions) sections of two .ko files.
 
 Run this BEFORE tk-push-module.sh. Exit 0 only when every symbol the new
@@ -24,6 +24,14 @@ symlink apk does not resolve; use /usr/lib/modules/...
 """
 import struct, subprocess, sys, tempfile, os
 
+
+def cannot(msg):
+    """Exit 69, not 1. `1` is a RESULT about the modules -- "these two disagree"
+    -- and a caller that gates an install on this must not read "there is no
+    objcopy here" as that answer. brain/laws/exit-codes-are-an-api.md."""
+    print(msg, file=sys.stderr)
+    sys.exit(69)
+
 # Resolve config through the shared lib: this is what supplies $PHONE, the
 # mandatory ssh flags (host keys change every boot) and connection
 # multiplexing. A tool that builds its own ssh command line gets none of them.
@@ -42,11 +50,11 @@ def versions(ko):
                           capture_output=True).returncode == 0:
             break
     else:
-        sys.exit(f'could not extract __versions from {ko}')
+        cannot(f'could not extract __versions from {ko}')
     data = open(tmp, 'rb').read()
     os.unlink(tmp)
     if not data or len(data) % 64:
-        sys.exit(f'{ko}: __versions is {len(data)} bytes, not a multiple of 64')
+        cannot(f'{ko}: __versions is {len(data)} bytes, not a multiple of 64')
     return {data[i+8:i+64].split(b'\0')[0].decode(): struct.unpack('<Q', data[i:i+8])[0]
             for i in range(0, len(data), 64)}
 

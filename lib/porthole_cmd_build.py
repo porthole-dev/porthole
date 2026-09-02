@@ -79,10 +79,20 @@ AUTO_DESC = "build the cheapest rung that covers what actually changed"
 # built does not belong in the set on the device and wrote nothing. A failure,
 # unlike 3 and 4 -- but a diagnosed one, and "tkmod failed, pmbootstrap log has
 # more" would send the reader to a compile log that is perfectly clean.
+#
+# 8 is the same shape as 6 and for the same reason: MODVERSIONS only speaks at
+# insmod, and this path installs BEFORE it loads -- so on a no-reload module the
+# ABI refusal used to arrive at the next boot with the shipped module already
+# overwritten and no copy of it left (#37). Checked before the first write now,
+# and a refusal here means the device was not touched at all.
 TKMOD_REFUSED = {
     6: ("refused to push a module that does not match its siblings",
         "nothing was written and nothing was unloaded. `porthole build fast "
         "--yes` installs the whole set from one package; see issue #20"),
+    8: ("refused to push a module built against a different config",
+        "its MODVERSIONS CRCs disagree with the module it would replace, so "
+        "the running kernel would refuse it. Nothing was written. `porthole "
+        "build fast --yes` builds and installs the whole set from one config"),
 }
 
 TKMOD_INSTALLED_NOT_LOADED = {

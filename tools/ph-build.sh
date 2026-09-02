@@ -1592,6 +1592,65 @@ _ph_ssh_diagnose() {
 	esac
 }
 
+# Will the module about to be installed load into the kernel that is running?
+#
+# MODVERSIONS is supposed to make an ABI skew a loud refusal, and it does -- at
+# INSMOD. This path installs first and loads second, so on a module that is
+# never loaded (PORTHOLE_MOD_NO_RELOAD) the refusal arrives at the NEXT BOOT,
+# by which time the module it replaced is overwritten and there is no copy of it
+# left. taimen lost hardware video decode exactly that way on 2026-09-02 and got
+# it back only by extracting the shipped .ko out of the aport apk by hand (#37).
+# The reload path is no better off: insmod is loud, but the install has already
+# happened by the time it speaks.
+#
+# The reference is the module we are about to DESTROY. It loaded into this
+# kernel, so its __versions ARE the running kernel's CRCs -- no /proc/config.gz
+# diff, and no guessing which config the packaged set was built from.
+#
+# "Cannot tell" is not a refusal: no installed copy (a first push), no objcopy
+# on this host, an unreadable section. A guard that refuses when it cannot
+# answer blocks every legitimate first push, which is how guards get disabled.
+_ph_mod_abi_check() {
+	local ko=$1 name=$2 phone=$3 ref out rc
+	ref=$(mktemp -t "porthole-$name-ref.XXXXXX") || return 0
+	# Decompressed ON THE DEVICE: it already knows which form it ships, and
+	# xz/gzip are there because that is how the modules got there.
+	ssh "${TK_SSH_OPTS[@]}" "$phone" "
+		f=\$(find /lib/modules/\$(uname -r) -type f \
+			\( -name '$name.ko'    -o -name '${name//_/-}.ko' \
+			-o -name '$name.ko.xz' -o -name '${name//_/-}.ko.xz' \
+			-o -name '$name.ko.gz' -o -name '${name//_/-}.ko.gz' \) \
+			2>/dev/null | head -1)
+		[ -n \"\$f\" ] || exit 9
+		case \$f in
+		*.xz) xzcat \"\$f\" ;;
+		*.gz) zcat \"\$f\" ;;
+		*)    cat \"\$f\" ;;
+		esac" > "$ref" 2>/dev/null
+	if [ $? -ne 0 ] || [ ! -s "$ref" ]; then
+		rm -f "$ref"; return 0        # nothing installed to compare against
+	fi
+	out=$("$_PH_REPO_ROOT/tools/tk-modcrc.py" "$ref" "$ko" 2>&1); rc=$?
+	rm -f "$ref"
+	if [ $rc -eq 69 ]; then
+		echo ">> ABI check skipped: $out"
+		return 0
+	fi
+	[ $rc -eq 1 ] || return 0
+	echo ">> REFUSING: $name does not share an ABI with the copy it would"
+	echo ">> replace. Symbols they both import carry different MODVERSIONS"
+	echo ">> CRCs, so the running kernel would answer \`disagrees about"
+	echo ">> version of symbol\` and modprobe would fail -- at the next boot,"
+	echo ">> if this module is one that is installed but not reloaded."
+	printf '%s\n' "$out" | sed -n '/CRC mismatches/,$p' | sed 's/^/>>   /'
+	echo ">> This is a CONFIG skew, not a code error: the tree's .config is"
+	echo ">> not the one the installed set was built from, so every CRC moved."
+	echo ">> \`porthole build fast --yes\` builds and installs the whole set"
+	echo ">> from one config, which is the rung that fixes this."
+	echo ">> NOTHING was written; the module on the device is untouched."
+	return 8
+}
+
 tkmod() {
 	local rel=$1 name=$2 phone=${PHONE:-$PORTHOLE_USER@$HOST}
 	[ -n "$rel" ] && [ -n "$name" ] || { echo ">> usage: tkmod <path/to/mod.ko> <modname>"; return 1; }
@@ -1618,11 +1677,30 @@ tkmod() {
 	popd >/dev/null || return 1
 
 	local ko="$_PH_OUT/$rel"
+	if [ ! -f "$ko" ]; then
+		# `make modules` builds the WHOLE tree, so a shorthand path
+		# ("venus-dec.ko" rather than the full drivers/... one) has already
+		# produced the artefact -- it is only this lookup that fails, at the
+		# end, after the build has been spent. Resolve it by name instead of
+		# charging a rebuild for a shorthand (#37).
+		local found
+		found=$(find "$_PH_OUT" -type f -name "$(basename "$rel")" 2>/dev/null)
+		case $(printf '%s' "$found" | grep -c .) in
+		1) ko=$found; echo ">> $rel -> ${ko#"$_PH_OUT"/}" ;;
+		0) ;;
+		*) echo ">> $(basename "$rel") is ambiguous under $_PH_OUT:"
+		   printf '>>   %s\n' $found
+		   echo ">> name the one you mean, path and all"; return 1 ;;
+		esac
+	fi
 	[ -f "$ko" ] || { echo ">> no module at $ko"; return 1; }
 
 	# Every copy that leaves here is staged and stripped -- the hot insmod one
 	# AND the .ko.xz written over the installed module below.
 	ko=$(_ph_stage_module "$ko" "$name") || return 1
+
+	# Decided BEFORE the first byte is written, like the size guard below.
+	_ph_mod_abi_check "$ko" "$name" "$phone" || return $?
 
 	# TK_SSH_OPTS, like every other device call in this file. It carries
 	# -i "$PORTHOLE_SSH_KEY" -o IdentitiesOnly=yes (lib/porthole.sh:188), and
