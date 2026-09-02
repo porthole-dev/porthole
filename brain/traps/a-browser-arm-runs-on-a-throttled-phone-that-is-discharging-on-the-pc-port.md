@@ -25,10 +25,20 @@ Meanwhile the charger reports `Charging` but the PC port is an SDP:
 The load (panel + throttled CPU + GPU at 710 MHz + wifi) draws more, so the
 battery nets -290 to -360 mA (`bms current_now`): 28% at 16:50 became 6% and
 3.52 V at 17:47, followed by a reboot with nothing in pstore or the journal
--- a brown-out under a load spike, not a crash. A wall charger negotiates
-DCP/PD and 1.5 A or more; the PC port never will.
+-- a brown-out under a load spike, not a crash.
 
-**Do** -- charge from a wall charger and reach the phone over wifi
+**The port was never the problem.** The PMIC reports `TYPE_C_STATUS_1 =
+0x20` (UFP_TYPEC_RD3P0: the host advertises 3 A on CC) next to
+`APSD_RESULT = SDP`; mainline `qcom_smbx` sets the input limit from BC1.2
+alone and never reads the Rp bits it defines. Writing the advertised
+current by hand -- `echo 3000000 > /sys/class/power_supply/pmi8998-charger/current_max`
+-- took USBIN from 470 mA to 1.35 A and the battery from -300 to +915 mA
+on the same PC port, no reboot. Kernel patch 0208 (`power: supply:
+qcom_smbx: honour the Type-C current advertisement`) makes it permanent
+from r28 on; before that kernel, the sysfs write is the fix and it does
+not survive a reboot.
+
+**Do** -- on a kernel before r28, write `current_max` after every boot; reach the phone over wifi if the port is needed for a charger
 (`HOST=<wlan ip>`; every tool takes it from the environment), keep the
 session's arms short, and read `cat /sys/class/power_supply/bms/capacity`
 before a long unattended loop. **Do not** infer "fps does not track the CPU
