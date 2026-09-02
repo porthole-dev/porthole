@@ -25,7 +25,7 @@ rm -f ~/.local/share/epiphany/session_state.xml
 F0=$(sudo -n dmesg | grep -c "gpu fault")
 setsid systemd-run --user --scope --quiet --slice=app.slice -u app-gnome-org.gnome.Epiphany-$$.scope env WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2 WEBKIT_GST_VIDEO_DECODING_LIMIT=2560x1440@60 WEBKIT_LAYERS_TILE_SIZE=1440x1024 WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 WAYLAND_DEBUG=1 $X epiphany "https://www.youtube.com/watch?v=aqz-KE-bpKQ" >/tmp/eph.log 2>/tmp/wl.log </dev/null &
 # wait for the player's <video> to exist with data (YouTube creates it late), then start it and prove it advances
-for i in $(seq 1 40); do sleep 2; st=$(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v?v.readyState:-1' 2>/dev/null); [ "${st:--1}" -ge 1 ] 2>/dev/null && break; done
+for _ in $(seq 1 40); do sleep 2; st=$(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v?v.readyState:-1' 2>/dev/null); [ "${st:--1}" -ge 1 ] 2>/dev/null && break; done
 echo "[$L] title: $(python3 /tmp/tk-webeval.py 'document.title' 2>/dev/null | cut -c1-50)  video readyState=$st"
 python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v.muted=true; v.play(); "play"' >/dev/null 2>&1
 sleep 8

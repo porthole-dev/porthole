@@ -21,8 +21,8 @@
 L=/usr/lib/libwebkitgtk-6.0.so.4.16.10; T=/sys/kernel/tracing
 sudo -n sh -c "echo > $T/uprobe_events"
 sudo -n sh -c "printf 'p:wk/frame $L:0x226f588\nr:wk/frame_ret $L:0x226f588\np:wk/didrender $L:0x226cc7c\np:wk/framedone $L:0x226d59c\n' >> $T/uprobe_events"
-P=$(pgrep WebKitWebProc | tail -1)
 sudo -n perf record -q -o /tmp/tl.data -a -e wk:frame -e wk:frame_ret -e wk:didrender -e wk:framedone -e drm_msm_gpu:msm_gpu_submit -e drm_msm_gpu:msm_gpu_submit_retired -- sleep ${1:-5} 2>&1 | grep -v '^\['
+# shellcheck disable=SC2024  # sudo is for perf; the redirect target is /tmp and needs none
 sudo -n perf script -i /tmp/tl.data -F tid,time,event,trace 2>/dev/null > /tmp/tl.txt
 sudo -n sh -c "echo > $T/uprobe_events"
 python3 - <<'PY'

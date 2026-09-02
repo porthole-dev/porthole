@@ -15,10 +15,12 @@
 # 33 of them full-width tiles from three page-sized layers: the GPU half of
 # the frame is overdraw, not the video.
 # ADDR: webkit2gtk-6.0 2.52.6-r52, build-id 473546012ccb99255f7949aa90e5ad3d131a4c92
+L=/usr/lib/libwebkitgtk-6.0.so.4.16.10; T=/sys/kernel/tracing
 sudo -n sh -c "echo > $T/uprobe_events"
 sudo -n sh -c "printf 'p:wk/frame $L:0x226f588\np:wk/dt $L:0x22dd91c w=+8(%%x2):u32 h=+12(%%x2):u32\np:wk/dtid $L:0x22ddd4c w=+8(%%x3):u32 h=+12(%%x3):u32\np:wk/nv12 $L:0x22df044 w=+8(%%x4):u32 h=+12(%%x4):u32\np:wk/acq $L:0x22d85b0 w=+0(%%x1):u32 h=+4(%%x1):u32\n' >> $T/uprobe_events"
 P=$(pgrep WebKitWebProc | tail -1)
 sudo -n perf record -q -o /tmp/fill.data -p $P -e wk:frame -e wk:dt -e wk:dtid -e wk:nv12 -e wk:acq -- sleep ${1:-3} 2>&1 | grep -v '^\['
+# shellcheck disable=SC2024  # sudo is for perf; the redirect target is /tmp and needs none
 sudo -n perf script -i /tmp/fill.data -F event,trace 2>/dev/null > /tmp/fill.txt
 sudo -n sh -c "echo > $T/uprobe_events"
 python3 - <<'PY'
