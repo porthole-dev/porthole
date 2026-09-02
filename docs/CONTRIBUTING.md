@@ -139,10 +139,18 @@ breaks somebody's muscle memory silently.
 Author and committer are the human. One logical change per commit, and the
 body explains **why**.
 
-**Commits carry no trailers.** No `Signed-off-by:`, no `Co-Authored-By:`, no
-generated-with line. If you are working through an AI assistant, that is your
+**Commits carry no trailers, and neither do pull request bodies.** No
+`Signed-off-by:`, no `Co-Authored-By:`, no `Claude-Session:`, no generated-with
+line, no session URL. If you are working through an AI assistant, that is your
 business and not the log's — and an assistant must never sign off on your
 behalf, because a sign-off is an assertion only you can make.
+
+The body matters as much as the message because that is where the ban leaked:
+the commit hook stripped the trailers out of #52's message and the same lines
+were published in the body. `lib/porthole_trailers.py` holds the one pattern
+list; the hook strips a message with it and the `trailers` CI job fails a pull
+request whose body or log matches it. `make trailers` runs the same check
+locally.
 
 A cherry-picked commit keeps its original author — `git cherry-pick -x`. On a
 community port a lot of the early device tree is someone else's work, and

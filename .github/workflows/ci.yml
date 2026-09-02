@@ -3,7 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+  # `edited` is not a default type, and without it the trailers job below
+  # scans the body once at open and never again -- so a clean PR edited
+  # afterwards keeps a stale green. The cost is that every job reruns on a
+  # title or body edit, which on this repo's volume is cheaper than the hole.
   pull_request:
+    types: [opened, edited, synchronize, reopened]
 
 permissions:
   contents: read
@@ -75,3 +80,25 @@ jobs:
       # before pushing, so it runs here too -- on the bare runner it imitates.
       - name: make smoke
         run: make smoke
+
+  trailers:
+    name: no attribution trailers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The one job that needs the whole log. Every other job scans the
+          # tree, where depth 1 is enough; this one asserts that no commit
+          # message in the history carries a trailer, and at depth 1 that
+          # claim would cover a single commit and still report green.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The body goes through the environment, never through the shell command
+      # line: it is attacker-controlled text on a fork pull request, and
+      # `${{ }}` inside a run: block is substituted before bash ever sees it.
+      - name: make trailers
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: make trailers

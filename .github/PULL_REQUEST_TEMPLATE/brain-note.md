@@ -25,5 +25,10 @@ Over-claiming portability is worse than scoping narrowly.
 
 - [ ] `porthole brain lint` passes
 - [ ] the symptom is described before the cause (people search by symptom)
-- [ ] `porthole brain reindex` run
-- [ ] no trailers on the commit — no `Signed-off-by:`, no AI attribution
+- [ ] `porthole brain reindex` run **and the result committed** — the index is
+      what an agent is pointed at first, and eight commits have added a note
+      without it
+- [ ] no trailers on the commit **and none in this body** — no `Signed-off-by:`,
+      no AI attribution, no "generated with" line, no session URL
+- [ ] **the measurement is finished, not in progress.** This note is filed
+      because the work is done, not to mark that it started

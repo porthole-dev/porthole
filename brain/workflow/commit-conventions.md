@@ -62,9 +62,18 @@ For what a kernel aport should be *based on*, see
 
 ## On AI attribution
 
-Whether to add a `Co-Authored-By` trailer for an AI assistant is the human's
-call and varies by project. What does not vary: **omit it on commits bound for
-upstream kernel or distribution trees**, where it can make review harder — which
-defeats the point of upstreaming.
+Whether to add a `Co-Authored-By` trailer for an AI assistant varies by
+project. **In this repository it is banned outright** — on a commit message and
+on a pull request body alike, along with `Signed-off-by:`, `Claude-Session:`,
+any generated-with line and any bare session URL. See AGENTS.md section 5;
+`lib/porthole_trailers.py` is what enforces it.
+
+This paragraph used to say the trailer was "the human's call", which
+contradicted AGENTS.md and gave an agent reading only this note a rule that
+said yes. That drift is the point of the note, not a footnote to it.
+
+What does not vary anywhere: **omit it on commits bound for upstream kernel or
+distribution trees**, where it can make review harder — which defeats the point
+of upstreaming.
 
 Related: [[90-upstreaming]].

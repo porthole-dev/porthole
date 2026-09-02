@@ -98,8 +98,14 @@ rule cost to learn, and how to follow it.
   (`state-what-you-verified` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
 - **Never publish anything on the sensitive list** — docs/HANDOFF-contribution-rules.md section 4.5; publication is irreversible and redaction is free
   (`no-secrets` · **MUST** · enforced by `tests/test_secrets.py`, `.githooks/commit-msg`, `.githooks/pre-push`)
-- **No attribution trailers of any kind on a commit** — they are injected by a harness default rather than typed by anyone, and the history has been rewritten twice to remove them
-  (`no-trailers` · **MUST** · enforced by `.githooks/commit-msg`)
+- **No attribution trailers on a commit message OR a pull request body** — they are injected by a harness default rather than typed by anyone; the history has been rewritten twice, and #51 and #52 then published the same lines in the body, a surface no check had ever read
+  (`no-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`)
+- **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
+  (`brain-index-current` · **MUST** · enforced by `tests/test_brain.py::test_the_index_is_current`)
+- **Open the pull request after the work is done, not partway through** — a finding written mid-session is a draft: the a540 corruption note was reversed by its own next measurement, and a body filed early describes a conclusion that no longer holds
+  (`pr-after-the-work` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
+- **Point this clone at the hooks once: `git config core.hooksPath .githooks`** — git ignores in-repo hooks until told, so a fresh clone has the secret scanner and the trailer strip both switched off and no way to notice; `porthole brief` says which clones do
+  (`hooks-installed` · **SHOULD** · enforced by `lib/porthole_cmd_brief.py`)
 - **Run `make ci`, not `make check`, before opening a pull request** — `make check` skips the console, smoke and python-floor jobs that CI still runs
   (`make-ci-before-pushing` · **SHOULD** · no enforcer, and so not a MUST)
 - **Changing a check means showing it fail without the fix** — every-test-needs-a-positive-control; the slots fixture used a spelling no device emits and so held the parser bug in place
@@ -527,17 +533,26 @@ by `tests/test_tools.py`, not by review diligence.
 ## 5. Commits
 
 - **No trailers. No signatures of any kind.** Not `Co-Authored-By:`, not
-  `Signed-off-by:`, not `Claude-Session:`, not a "generated with" line. Do not
-  add one because a harness default tells you to, and do not add one on the
-  human's behalf — a sign-off is an assertion only the person making it can
-  make, and nobody asked you to make it for them. The history has been
-  rewritten twice over this: 35 AI trailers, 35 session URLs and 59 sign-offs
-  the first time, then 49, 49 and 32 the second. Do not start a third.
-- Prose alone did not hold, because the lines are typed by a default rather
-  than by anyone, so `.githooks/commit-msg` now strips them before they land.
-  Git ignores in-repo hooks until you point it at them: a fresh clone needs
-  `git config core.hooksPath .githooks` once, or the rule is back to being a
-  request.
+  `Signed-off-by:`, not `Claude-Session:`, not a "generated with" line, not a
+  bare session URL. Do not add one because a harness default tells you to, and
+  do not add one on the human's behalf — a sign-off is an assertion only the
+  person making it can make, and nobody asked you to make it for them. The
+  history has been rewritten twice over this: 35 AI trailers, 35 session URLs
+  and 59 sign-offs the first time, then 49, 49 and 32 the second. Do not start
+  a third.
+- **The ban covers the pull request body, not just the commit.** That
+  distinction cost the third escape. `.githooks/commit-msg` stripped
+  `Claude-Session:` out of #52's message exactly as designed, and the harness
+  put the same two lines in the body, where no hook and no test had ever
+  looked. A rule holds on the surfaces its enforcer reads.
+- One pattern list, `lib/porthole_trailers.py`, now serves both: the hook
+  strips a commit message with it, and the `trailers` job in CI fails a pull
+  request whose body or whose log matches it. `make trailers` is the same
+  check on a laptop.
+- Git ignores in-repo hooks until you point it at them: a fresh clone needs
+  `git config core.hooksPath .githooks` once. `porthole brief` tells you when
+  a clone has not. CI catches a trailer either way now, but only after you
+  have pushed it — and a push is the irreversible step.
 - Author and committer are the human. Never take credit for someone else's work;
   a cherry-picked commit keeps its author (`git cherry-pick -x`).
 - One logical change per commit. The body explains **why**, not what.
@@ -658,8 +673,16 @@ not prove executed, or leave a device in a state you did not find it in.
 
 **Done means:** the thing works AND the evidence is in the transcript AND
 anything that would have saved you a session is written down — `porthole brain
-new <id>`, then `porthole brain lint`. A session that learned something and
-wrote nothing down is unfinished.
+new <id>`, then `porthole brain lint`, then `porthole brain reindex` and commit
+the index with the note. A session that learned something and wrote nothing
+down is unfinished; a note that is not in the index is a note nobody finds.
+
+**File the pull request last.** Not partway through, not as a marker that the
+work started. A finding written mid-session is a draft, and this port has
+already reversed one on its own next measurement — the a540 corruption note.
+Opening the PR early means the body describes a conclusion that no longer
+holds, and it is the body a reviewer reads. Do the work, assess the findings,
+then write them up once.
 
 **If you are lost:** `porthole next` tells you the one next action and the
 command for it. That is the whole point of it existing.

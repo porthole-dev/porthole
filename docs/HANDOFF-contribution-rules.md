@@ -93,7 +93,7 @@ Binding, and each needs a named enforcer:
 
 | rule | enforcer today | needed |
 |---|---|---|
-| no trailers of any kind | `.githooks/commit-msg` | also a CI check, since the hook is opt-in |
+| no trailers of any kind, on a commit **or a pull request body** | `.githooks/commit-msg`, `tests/test_trailers.py`, the `trailers` job in `ci.yml` | done — the hook is still opt-in, the CI check is not |
 | author and committer are the human | nothing | CI: flag a commit whose author is a bot or a generic identity |
 | one logical change per commit | nothing | stays advisory — not machine-decidable |
 | body explains why, not what | nothing | stays advisory |
@@ -461,10 +461,15 @@ three of ten and silently omitted seven, including one that cost a day. So the
 test asserts what actually matters: **every law on disk reaches an agent**.
 
 **The hook-only gap is declared, not hidden.** `test_every_must_is_enforced_in_ci_or_is_a_declared_hook_only_gap`
-holds a set with exactly one member — `no-trailers` — because a hook runs only
-for someone who ran `git config core.hooksPath .githooks`. Naming it means it
-cannot be forgotten, and means a second one cannot join it unnoticed. Shrinking
-that set to empty is §6 step 1.
+held a set with exactly one member — `no-trailers` — because a hook runs only
+for someone who ran `git config core.hooksPath .githooks`. Naming it meant it
+could not be forgotten, and meant a second one could not join it unnoticed.
+
+That set is now empty, and it took the predicted leak to empty it. The hook did
+its job on #52's commit message and the harness published the same two lines in
+the pull request body, a surface neither the hook nor any test had ever read —
+so the gap was not only "opt-in", it was also "message-shaped". `no-trailers`
+now names three enforcers and covers both surfaces.
 
 **One leak found while wiring it.** `porthole brief --json` published
 `"ssh_target": "<user>@<ipv4>"` — the maintainer's login, in the machine-readable
@@ -647,10 +652,12 @@ generated views.
 
 What is left:
 
-1. A CI check that the trailer ban holds regardless of local hook config. It is
-   the same defect the secrets rule had — an opt-in hook — and it is now the
-   only member of `test_rules.py`'s `HOOK_ONLY` set. That set reaching empty is
-   what finishes this.
+1. ~~A CI check that the trailer ban holds regardless of local hook config.~~
+   Done: `lib/porthole_trailers.py`, `tests/test_trailers.py` and the
+   `trailers` job in `ci.yml`. `HOOK_ONLY` is empty. The check that finally
+   forced it covered a surface this list never mentioned — the pull request
+   body — which is the lesson worth keeping: an enforcer covers the surfaces
+   it reads, and "the rule is enforced" is only ever true per surface.
 2. `AGENTS.md` shrunk: the generated block is authoritative now, so the ten
    narrative subsections under §1 can lose their restatements and keep their
    reasoning. `docs/CONTRIBUTING.md` updated to point at the manifest.

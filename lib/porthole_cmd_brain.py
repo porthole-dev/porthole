@@ -220,7 +220,14 @@ def cmd_brain(args, ctx) -> int:
     return 0
 
 
-def write_index(root: pathlib.Path, notes: list[Note]) -> int:
+def render_index(root: pathlib.Path, notes: list[Note]) -> str:
+    """The index as text, so a check can compare without writing.
+
+    Split out of write_index() for tests/test_brain.py: eight commits added a
+    brain note and never ran the reindex, which leaves the index a stale claim
+    about what the port knows -- and the index is what an agent is pointed at
+    first. Comparing means rendering, and rendering must not touch the tree.
+    """
     lines = [
         "# Brain index",
         "",
@@ -231,7 +238,6 @@ def write_index(root: pathlib.Path, notes: list[Note]) -> int:
         "generic notes as well.",
         "",
     ]
-    unparsed = [n for n in notes if not n.meta.get("id")]
     for section in SECTIONS:
         chosen = [n for n in notes if n.path.parent.name == section
                   or n.path.parent.parent.name == section]
@@ -252,7 +258,13 @@ def write_index(root: pathlib.Path, notes: list[Note]) -> int:
         lines.append(f"- `{scope}` — {count}")
     lines.append("")
 
-    (root / "brain" / "INDEX.md").write_text("\n".join(lines), encoding="utf-8")
+    return "\n".join(lines)
+
+
+def write_index(root: pathlib.Path, notes: list[Note]) -> int:
+    unparsed = [n for n in notes if not n.meta.get("id")]
+    (root / "brain" / "INDEX.md").write_text(render_index(root, notes),
+                                             encoding="utf-8")
     print(f"wrote brain/INDEX.md — {len(notes)} notes")
     if unparsed:
         # Not fatal: a note with no frontmatter is still readable. But it will
