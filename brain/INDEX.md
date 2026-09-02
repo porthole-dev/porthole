@@ -66,6 +66,7 @@ generic notes as well.
 | [what-a-rootless-workspace-cannot-do](findings/what-a-rootless-workspace-cannot-do.md) | `generic` | Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs |
 | [where-the-build-minutes-actually-go](findings/where-the-build-minutes-actually-go.md) | `generic` | Every rung pays ~14s to activate envkernel, and that dwarfs the compile |
 | [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
+| [youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput](findings/youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput.md) | `device:google-taimen` | YouTube's judder on taimen is 2160p60 being served, plus venus clocked for 30 fps because vdec had no VIDIOC_G_PARM -- not the compositor, not buffer counts |
 
 ## laws
 
@@ -93,10 +94,12 @@ generic notes as well.
 | [a-full-zap-inside-the-workspace-unmounts-it](traps/a-full-zap-inside-the-workspace-unmounts-it.md) | `generic` | pmbootstrap zap inside the workspace tears down porthole's own bind mounts, and the build then refuses about a version |
 | [a-hard-hang-writes-nothing-to-disk](traps/a-hard-hang-writes-nothing-to-disk.md) | `generic` | A hard hang writes nothing to disk — capture on the host, before you trigger |
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
+| [a-launch-that-skips-the-user-manager-loses-environment-d](traps/a-launch-that-skips-the-user-manager-loses-environment-d.md) | `generic` | A browser launched from ssh, systemd-run --scope, or set-environment does not get environment.d -- and on taimen that means Skia-GPU |
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
 | [a-module-parameter-that-does-not-exist-is-ignored](traps/a-module-parameter-that-does-not-exist-is-ignored.md) | `generic` | A module parameter that does not exist is silently ignored |
 | [a-module-reload-does-not-reset-this-cards-audio-state](traps/a-module-reload-does-not-reset-this-cards-audio-state.md) | `device:google-taimen` | A module reload re-registers the card and leaves capture broken — audio needs a reboot |
 | [a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist](traps/a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist.md) | `generic` | A noarch or all dependency makes pmbootstrap ask for gcc-<native>, and every fresh workspace dies on its first packaging rung |
+| [a-partial-chroot-umount-leaves-placeholder-device-nodes](traps/a-partial-chroot-umount-leaves-placeholder-device-nodes.md) | `generic` | A partial chroot umount in the workspace leaves /dev/urandom, /dev/zero and /dev/tty as empty root-only files -- and a 5.5 h build dies on the last step |
 | [a-ram-booted-kernel-cannot-survive-a-long-sleep](traps/a-ram-booted-kernel-cannot-survive-a-long-sleep.md) | `generic` | A RAM-booted kernel cannot survive a long sleep — suspend work needs a flashed slot |
 | [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
 | [a-sideloaded-device-apk-can-eat-the-radio-stack](traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md) | `generic` | A sideloaded device apk can eat the radio stack |
@@ -109,6 +112,7 @@ generic notes as well.
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
 | [apr-service-inherits-a-protection-domain-the-board-deletes](traps/apr-service-inherits-a-protection-domain-the-board-deletes.md) | `soc:qcom` | A new APR service inherits a protection domain the board deletes |
 | [base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork](traps/base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork.md) | `generic` | Base a kernel aport on pristine kernel.org or a pinned tag — never an untagged vendor fork |
+| [build-mod-against-an-aport-kernel-fails-at-the-next-boot](traps/build-mod-against-an-aport-kernel-fails-at-the-next-boot.md) | `generic` | build mod from the tree against a kernel that ships from the aport is refused by MODVERSIONS -- and on a no-reload module the refusal lands at the next boot, with the shipped module already gone |
 | [busybox-reboot-eats-the-mode-string](traps/busybox-reboot-eats-the-mode-string.md) | `generic` | busybox `reboot bootloader` silently discards the word "bootloader |
 | [critical-chain-shows-the-longest-path-not-the-floor](traps/critical-chain-shows-the-longest-path-not-the-floor.md) | `generic` | systemd-analyze critical-chain shows the longest path, not the floor |
 | [dmesg-can-be-empty-about-boot](traps/dmesg-can-be-empty-about-boot.md) | `generic` | dmesg can be empty about boot while the journal still has everything |
@@ -176,8 +180,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 27
-- `generic` — 92
+- `device:google-taimen` — 28
+- `generic` — 95
 - `soc:gs201` — 1
 - `soc:msm8998` — 18
 - `soc:qcom` — 1
