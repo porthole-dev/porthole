@@ -55,6 +55,20 @@ def test_overrunning_the_baseline_reads_as_unknown_not_as_almost_done():
     assert "unknown" in progress.bar(None)
 
 
+def test_the_bar_does_not_reset_when_the_compile_count_takes_over():
+    """Reported 2026-09-02 from the status line: `fast` climbed to 50% through
+    pmbootstrap's quiet prologue on elapsed-against-last-total, then the first
+    `CC` line arrived, the compile count took over at 1/4335, and the bar read
+    0%. A bar that resets is read as a build that restarted. Unknown until the
+    thing being counted starts."""
+    history = {"fast": {"total": 400, "compile_lines": 4335}}
+    assert progress.fraction(history, "fast", elapsed=200, compile_seen=0) is None
+    assert "unknown" in progress.bar(None)
+    # ...and once it starts, it is the compile count and nothing else.
+    frac = progress.fraction(history, "fast", elapsed=200, compile_seen=4335 // 2)
+    assert abs(frac - 0.5) < 0.01, frac
+
+
 def test_an_eta_is_not_reported_as_zero_once_the_last_total_is_passed():
     """`max(0.0, total - elapsed)` pinned a long build at "eta 0s" forever."""
     history = {"kernel": {"total": 600, "compile_lines": 0}}

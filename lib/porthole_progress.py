@@ -325,10 +325,21 @@ def fraction(history: dict, rung: str, elapsed: float,
     remaining minutes of a 14m42s build. An exhausted baseline does not mean
     almost done, it means this run is not the run we measured -- unknown, the
     same answer as no history at all.
+
+    And when a rung has a compile baseline, the elapsed fallback is NOT used to
+    fill in its quiet prologue. It reads the same way -- a bar climbing from 0%
+    -- but it is a different measurement, and the handover between the two ran
+    backwards: `fast` sat at 50% through pmbootstrap's setup, then the first
+    `CC` line arrived and the compile count, which is the honest one, put it at
+    0%. A bar that resets is read as a build that restarted. Unknown until the
+    thing being counted starts is the same answer this function gives everywhere
+    else it cannot see.
     """
     runs = (history or {}).get(rung) or {}
     lines = runs.get("compile_lines")
-    if isinstance(lines, int) and lines > 0 and compile_seen > 0:
+    if isinstance(lines, int) and lines > 0:
+        if compile_seen <= 0:
+            return None
         return compile_seen / float(lines) if compile_seen < lines else None
     total = estimate_total(history, rung)
     if total:
