@@ -53,7 +53,12 @@ abi() { # abi MODCRC_RC [SSH_RC] -> _ph_mod_abi_check's return code
     printf '#!/bin/sh\necho "CRC mismatches: 3"\nexit %s\n' "$1" \
         > "$TMP/fake/tools/tk-modcrc.py"
     chmod +x "$TMP/fake/tools/tk-modcrc.py"
+    # PORTHOLE_WORKDIR is `${...:?}` at the top of ph-build.sh, so a host with
+    # no ~/.config/porthole kills the shell before a line of this runs -- which
+    # is every CI runner, and is why this passed on a developer laptop and
+    # nowhere else. Supplied here, like `verdict` above does.
     env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+        PORTHOLE_WORKDIR="$TMP/repo" PORTHOLE_KERNEL_TREE="$TMP/tree" \
         PORTHOLE_DEVICE=google-taimen SSH_RC="${2:-0}" TMPFAKE="$TMP/fake" \
         bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
                  _PH_REPO_ROOT=$TMPFAKE

@@ -75,7 +75,7 @@ def cmd_ui(args, ctx) -> int:
             o.blank()
             width = max(len(u["name"]) for u in shown)
             for ui in shown:
-                mark = o.paint(o.sym("●", "*"), "green") if ui["current"] else " "
+                mark = o.mark("active", ui["current"])
                 note = "" if ui["available"] else o.paint("  [not for your arch]", "red")
                 o(f" {mark} {ui['name']:<{width}}  "
                   f"{o.paint(ui['description'][:56], 'grey')}{note}")

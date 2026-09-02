@@ -1144,9 +1144,15 @@ def status_report(snap, alive=None, now=None):
         rows.append(("eta", fmt_dur(snap.get("eta"))))
     else:
         head = _HEADLINE.get(live, live)
-        started = snap.get("started")
-        if isinstance(started, (int, float)) and isinstance(elapsed, (int, float)):
-            head += "  {} ago".format(fmt_dur(now - (started + elapsed)))
+        # `last_at` when there is no started/elapsed to add up: a snapshot
+        # re-read from a log has no idea when the build BEGAN, and reporting
+        # `FAILED` with no when at all is the half-answer this row exists to
+        # replace.
+        stopped = finished_at(snap)
+        if stopped is None and isinstance(snap.get("last_at"), (int, float)):
+            stopped = snap["last_at"]
+        if stopped is not None:
+            head += "  {} ago".format(fmt_dur(now - stopped))
         # Not "starting": this run is over. A build that reached no phase at
         # all -- because it had nothing to do -- says so, rather than claiming
         # it is about to begin.
@@ -1267,6 +1273,84 @@ def log_steps(text: str):
     return None, None
 
 
+# HOW A BUILD ENDS, IN ITS OWN WORDS.
+#
+# log.txt is the WORKSPACE's log, not a build's: every pmbootstrap invocation
+# appends to it, and a two-second `chroot -- ls` refreshes its mtime exactly
+# as a four-hour compile does. Treating that mtime as "the build I am
+# following is still running" is what pinned a status line to `webkit2gtk-6.0
+# 99% 9428/9429 . reattached` for ten hours after the build had already
+# FAILED, and what kept `pkg watch` from ever reaching its verdict: the probe
+# that ends a reattached watch was gated behind the log going quiet, and on a
+# workspace anybody is using it never does.
+#
+# The log had the answer the whole time, three lines below the last step:
+#
+#     [9428/9429] Generating WebKitWebProcessExtension-6.0.typelib
+#     ninja: subcommand failed
+#     >>> ERROR: webkit2gtk-6.0: build failed
+#
+# Both markers NAME the package, which is what makes one of them this build's
+# ending rather than a neighbour's in a log every build shares.
+_BUILT = re.compile(r"^>>> (?P<name>\S+?)\*?: Create \S+\.apk\b")
+_FAILED = re.compile(r"^>>> ERROR: (?P<name>\S+): build failed\b")
+
+# pmbootstrap stamps its OWN lines `(pid) [HH:MM:SS]`. The build output it
+# relays carries no clock at all, so this is the only time-of-day in the file
+# -- and abuild's ending is always followed by one, because pmbootstrap says
+# what it made of it.
+_LOG_STAMP = re.compile(r"^\((\d+)\) \[(\d\d):(\d\d):(\d\d)\]")
+
+
+def log_outcome(text: str, name: str, now=None):
+    """`(state, when, line)` for how `name`'s build ended, else three Nones.
+
+    Only what was written AFTER the last `[n/N]`: the tail of a shared log
+    holds the endings of every build before this one, and the newest step
+    line is the boundary between them. No step line means ninja never
+    started here, and then nothing in this tail can be attributed -- the
+    honest answer is that this cannot say.
+
+    Pure, so the wording of abuild's two verdicts is a test rather than
+    something rediscovered at the end of a four-hour build.
+    """
+    lines = text.splitlines()
+    for index in range(len(lines) - 1, -1, -1):
+        if ninja_progress(lines[index]):
+            break
+    else:
+        return None, None, None
+    for offset, line in enumerate(lines[index + 1:], index + 1):
+        for pattern, state in ((_FAILED, "failed"), (_BUILT, "done")):
+            match = pattern.match(line)
+            if match and match.group("name") == name:
+                return state, _stamped_at(lines[offset:], now), line.rstrip()
+    return None, None, None
+
+
+def _stamped_at(lines, now=None):
+    """Wall clock for the first `(pid) [HH:MM:SS]` stamp in `lines`, or None.
+
+    The file carries a time of day and no date, so the day has to come from
+    somewhere: the most recent instant with that clock reading that is not in
+    the future. A build that ended at 23:59 and is read at 08:44 the next
+    morning is eight hours ago, and saying `0s ago` -- which is what the log's
+    mtime says, because something unrelated touched it -- is the whole defect
+    this exists to stop.
+    """
+    now = time.time() if now is None else now
+    for line in lines:
+        match = _LOG_STAMP.match(line)
+        if not match:
+            continue
+        day = time.localtime(now)
+        when = time.mktime((day.tm_year, day.tm_mon, day.tm_mday,
+                            int(match.group(2)), int(match.group(3)),
+                            int(match.group(4)), 0, 0, -1))
+        return when - 86400.0 if when > now else when
+    return None
+
+
 def snapshot_from_log(text: str, name: str, mtime, now=None,
                       samples=None) -> dict:
     """A tracker-shaped snapshot re-derived from a log tail. Pure.
@@ -1303,8 +1387,18 @@ def snapshot_from_log(text: str, name: str, mtime, now=None,
     eta = None
     if rate and total and done is not None and total > done:
         eta = (total - done) / rate
+    # A build that said how it ended is not still running, whatever the file's
+    # mtime says -- and its `last_at` is the moment IT spoke, not the moment
+    # something else appended to the log it happens to share.
+    state, ended, said = log_outcome(text, name, now)
+    if state:
+        # `last` is the last thing THIS BUILD said, not the last line in a
+        # file it shares. Without that, a failed webkit reported the neighbour
+        # that touched the log next -- `DONE!` -- as its own final word.
+        eta, last = None, said
+        mtime = ended if ended is not None else mtime
     return {"rung": f"pkg:{name}", "phase": pkg_phase_of(last, "build"),
-            "state": "running", "pid": None, "elapsed": None,
+            "state": state or "running", "pid": None, "elapsed": None,
             "progress": progress, "eta": eta,
             "compile_lines": done or 0, "last": _STAMP.sub("", last.lstrip()),
             "last_at": mtime, "last_age": max(0.0, now - mtime),
@@ -1345,9 +1439,14 @@ def reattach_from_log(log_path, snap, now=None, samples=None):
     three chances to disagree about whether a build is alive.
 
     Returns None unless all of it holds: the snapshot froze mid-build (it says
-    `running`), its process is gone, and the log is being written right now.
-    A snapshot that ended properly is not an orphan, and a quiet log is not a
-    running build.
+    `running`), its process is gone, and the log either says how the build
+    ENDED or is being written right now. A snapshot that ended properly is not
+    an orphan, and a quiet log is not a running build.
+
+    The ending outranks the freshness test, and has to: the mtime says only
+    that SOMETHING wrote to a log every build in the workspace shares, so a
+    fresh one is not evidence this build lives and a stale one is not evidence
+    it died. `>>> ERROR: webkit2gtk-6.0: build failed` is evidence, at any age.
     """
     if not snap or (snap.get("state") or "") != "running":
         return None
@@ -1357,9 +1456,11 @@ def reattach_from_log(log_path, snap, now=None, samples=None):
     if text is None:
         return None
     now = time.time() if now is None else now
-    if not -CLOCK_SKEW_S <= now - mtime <= LOG_FRESH_S:
-        return None
+    if now - mtime < -CLOCK_SKEW_S:
+        return None            # a log dated in the future is a broken clock
     name = str(snap.get("rung") or "build").split(":", 1)[-1]
+    if now - mtime > LOG_FRESH_S and not log_outcome(text, name, now)[0]:
+        return None
     return snapshot_from_log(text, name, mtime, now=now, samples=samples)
 
 
@@ -1536,6 +1637,7 @@ def reattach(log_path, name: str, probe, interval: float, out,
             out(banner + "\n")
     samples = collections.deque(maxlen=4096)
     snap, last_note, asked = {}, 0.0, time.time()
+    moved, steps = time.time(), None
     while True:
         text, mtime = log_tail(log_path)
         if text is None:
@@ -1554,11 +1656,23 @@ def reattach(log_path, name: str, probe, interval: float, out,
         elif clock - last_note > max(interval, 15):
             last_note = clock
             out("\n".join(watch_lines(snap, now=clock)) + "\n")
-        # The log going quiet is the only hint that the build may be over,
-        # and it is not proof: packaging is legitimately silent for minutes.
-        # The workspace's process list is the proof, and it is only worth
-        # asking for once the free signal has stopped moving.
-        if clock - mtime >= PROBE_AFTER_S and clock - asked >= PROBE_AFTER_S:
+        # The build said how it went. Nothing a process list could add to
+        # that, and waiting for one is how this loop used to sit on a
+        # finished build until somebody Ctrl-C'd it.
+        if (snap.get("state") or "running") != "running":
+            break
+        # Otherwise the build has to have stopped ADVANCING before the
+        # workspace is worth a `podman exec ps` -- which is not the same
+        # question as whether the log was touched. log.txt belongs to the
+        # workspace, so an unrelated `pmbootstrap chroot` refreshes its mtime
+        # and used to reset this gate: on a machine anybody was using, the
+        # probe never fired and the watch never reached its verdict. The step
+        # count is this build's own signal, and packaging is legitimately
+        # still for minutes -- which is exactly when the probe is worth its
+        # half second.
+        if steps != snap.get("steps"):
+            moved, steps = clock, snap.get("steps")
+        if clock - moved >= PROBE_AFTER_S and clock - asked >= PROBE_AFTER_S:
             asked = clock
             if not probe():
                 # One last read before leaving. The lines a build writes as

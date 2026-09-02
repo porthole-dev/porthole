@@ -1026,13 +1026,17 @@ def cmd_doctor(args, ctx) -> int:
                "distro_family": family, "checks": ch.rows}
 
     def render():
-        mark = {"ok": ("ok", "green"), "warn": ("warn", "yellow"),
-                "fail": ("FAIL", "red"), "skip": ("skip", "grey")}
+        # `out.status` rather than a colour table of this file's own: the
+        # glyph and the colour for "ok" have to mean the same thing here, in
+        # the build display and in every listing, or a reader learns a second
+        # alphabet per verb.
         width = max(len(r["name"]) for r in ch.rows)
         for row in ch.rows:
-            label, colour = mark[row["status"]]
-            ctx.out(f"  {ctx.out.paint(f'{label:>4}', colour)}  "
-                    f"{row['name']:<{width}}  {row['detail']}")
+            word = "FAIL" if row["status"] == "fail" else row["status"]
+            ctx.out("  {}  {}  {}".format(
+                ctx.out.status(row["status"], word),
+                ctx.out.paint("{:<{}}".format(row["name"], width), "grey"),
+                row["detail"]))
             if row["fix"]:
                 ctx.out(ctx.out.paint(f"        fix: {row['fix']}", "cyan"))
             elif row["doc"]:

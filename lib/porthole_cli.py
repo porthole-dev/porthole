@@ -65,6 +65,18 @@ class Out:
     COLOURS = {"red": "31", "green": "32", "yellow": "33", "blue": "34",
                "magenta": "35", "cyan": "36", "grey": "90", "bold": "1"}
 
+    # ONE vocabulary for "how did it go", because five modules had grown their
+    # own. `porthole_progress` paints a finished build ✔ green and a failed
+    # one ✘ red; `doctor` wrote `  ok` in green and `FAIL` in red; `devices`,
+    # `use`, `ui`, `soc` and `channel` each hand-rolled the same
+    # `paint(sym("●", "*"), "green")` for "this is the active one". A reader
+    # should not have to learn a second alphabet per verb.
+    MARKS = {"ok": ("\u2714", "+"), "warn": ("\u26a0", "!"),
+             "fail": ("\u2718", "x"), "active": ("\u25cf", "*"),
+             "skip": ("\u00b7", "."), "note": ("\u2192", "->")}
+    TONES = {"ok": "green", "warn": "yellow", "fail": "red",
+             "active": "green", "skip": "grey", "note": "cyan"}
+
     def __init__(self, stream=None, force_colour: bool | None = None):
         self.stream = stream or sys.stdout
         if force_colour is None:
@@ -83,6 +95,33 @@ class Out:
     def sym(self, fancy: str, plain: str) -> str:
         return fancy if self.unicode else plain
 
+    def mark(self, kind: str, on: bool = True) -> str:
+        """The one-glyph verdict, in its own colour -- or a blank the same
+        width, so a column of them stays a column."""
+        fancy, plain = self.MARKS.get(kind, ("\u00b7", "."))
+        glyph = self.sym(fancy, plain)
+        if not on:
+            return " " * len(glyph)
+        return self.paint(glyph, self.TONES.get(kind, "grey"))
+
+    def status(self, kind: str, text: str = "", width: int = 4) -> str:
+        """`✔ ok` -- the glyph for the eye, the word for the grep.
+
+        Both, deliberately: a glyph alone is unreadable in a log somebody
+        pastes into an issue, and a word alone is what made a wall of doctor
+        rows impossible to scan.
+        """
+        word = (text or kind)[:max(width, len(text or kind))]
+        # The glyph always carries its colour; the WORD only does when it is
+        # a problem. `✔ ok` twice over in green spends the emphasis budget on
+        # the rows nobody needs to read, and a wall of them is exactly the
+        # scanning problem the glyph was added to fix.
+        tone = self.TONES.get(kind, "grey")
+        return "{}  {}".format(
+            self.mark(kind),
+            self.paint("{:>{}}".format(word, width),
+                       tone if kind in ("warn", "fail") else "grey"))
+
     def __call__(self, *parts):
         print(*parts, file=self.stream)
 
@@ -93,13 +132,22 @@ class Out:
         print(self.paint(text, "bold"), file=self.stream)
 
     def kv(self, key: str, value: str, width: int = 0, note: str = ""):
-        line = f"  {key:<{width}}  {value}"
+        """A labelled row. The LABEL is dimmed, not the value.
+
+        Emphasis is a budget, and in a row like `elapsed  2m41s` the label is
+        the half the reader already knows -- they asked for it. Dimming it is
+        what lets a column of values read as the content rather than as a
+        wall of evenly-lit text. Same rule the build display follows one
+        module over.
+        """
+        line = "  {}  {}".format(self.paint("{:<{}}".format(key, width),
+                                            "grey"), value)
         if note:
             line += self.paint(f"   {note}", "grey")
         print(line, file=self.stream)
 
     def hint(self, text: str):
-        print(self.paint(f"  {self.sym('→', '->')} {text}", "cyan"),
+        print("  {} {}".format(self.mark("note"), self.paint(text, "cyan")),
               file=self.stream)
 
     def warn(self, text: str):

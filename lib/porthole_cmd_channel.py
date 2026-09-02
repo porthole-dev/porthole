@@ -67,7 +67,7 @@ def cmd_channel(args, ctx) -> int:
             o.blank()
             width = max((len(k) for k in chans), default=8)
             for name, info in chans.items():
-                mark = o.paint(o.sym("●", "*"), "green") if name == now else " "
+                mark = o.mark("active", name == now)
                 tag = ""
                 if name == meta.get("recommended"):
                     tag = o.paint("  (recommended)", "cyan")
