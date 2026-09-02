@@ -568,11 +568,13 @@ def cmd_submit(args, ctx, root) -> int:
         else f"brain: {len(ids)} notes")
 
     steps = [
-        ("git switch -c " + topic, f"a branch for the note"),
+        ("git fetch origin main", "the base a note belongs on"),
+        (f"git switch -c {topic} origin/main", "a branch for the note"),
         ("git add brain/", "stage it"),
         (f'git commit -s -m "{subject}"', "sign off (DCO)"),
         (f"git push -u origin {topic}", "publish the branch"),
-        ('gh pr create --fill', "open the pull request"),
+        ("gh pr create --fill", "open the pull request"),
+        ("git switch -", "put the checkout back where it was"),
     ]
 
     if not args.yes:
@@ -588,30 +590,55 @@ def cmd_submit(args, ctx, root) -> int:
         ctx.out.hint("porthole brain submit --yes")
         return 0
 
+    # origin/main, NEVER HEAD. `git switch -c` with no start point branches
+    # from whatever is checked out, and this repo is a SHARED checkout with
+    # several agents in it -- so five brain files arrived as a PR carrying an
+    # unrelated branch's three commits and inheriting its red CI (#41). A note
+    # has no dependency on anyone's work in progress; main is its base.
     _, current = git("rev-parse", "--abbrev-ref", "HEAD")
     if current != topic:
-        git("switch", "-c", topic, check=True)
-    git("add", "brain", check=True)
-    git("commit", "-s", "-m", subject, check=True)
-    ctx.out(ctx.out.paint(f"  committed on {topic}", "green"))
+        git("fetch", "origin", "main")
+        rc, _ = git("switch", "-c", topic, "origin/main")
+        if rc != 0:
+            raise Bail(f"could not branch {topic} from origin/main", 1,
+                       "the working tree holds changes that do not carry "
+                       "across -- commit or stash them, then submit again")
 
-    if args.no_push:
-        ctx.out.hint(f"git push -u origin {topic}")
+    # And put the checkout BACK, on every path out of here. Publishing a note
+    # must not move HEAD under whoever else is working in this tree: the submit
+    # that cost #41 left the checkout on the note's branch, mid-task, for
+    # another agent to notice and undo by hand.
+    try:
+        git("add", "brain", check=True)
+        git("commit", "-s", "-m", subject, check=True)
+        ctx.out(ctx.out.paint(f"  committed on {topic}", "green"))
+
+        if args.no_push:
+            ctx.out.hint(f"git push -u origin {topic}")
+            return 0
+
+        rc, _ = git("push", "-u", "origin", topic)
+        if rc != 0:
+            ctx.out.warn("push failed -- the commit is safe on the local branch")
+            return 1
+        ctx.out(ctx.out.paint(f"  pushed {topic}", "green"))
+
+        import shutil as _shutil
+        if _shutil.which("gh"):
+            # Before the switch back: gh reads the PR's head from HEAD.
+            subprocess.run(["gh", "pr", "create", "--fill"], cwd=root)
+        else:
+            ctx.out.hint("open a pull request for " + topic +
+                         "  (install `gh` to have this done for you)")
         return 0
-
-    rc, _ = git("push", "-u", "origin", topic)
-    if rc != 0:
-        ctx.out.warn("push failed -- the commit is safe on the local branch")
-        return 1
-    ctx.out(ctx.out.paint(f"  pushed {topic}", "green"))
-
-    import shutil as _shutil
-    if _shutil.which("gh"):
-        subprocess.run(["gh", "pr", "create", "--fill"], cwd=root)
-    else:
-        ctx.out.hint("open a pull request for " + topic +
-                     "  (install `gh` to have this done for you)")
-    return 0
+    finally:
+        if current != topic:
+            rc, _ = git("switch", current)
+            if rc != 0:
+                ctx.out.warn(f"the checkout is on {topic}, not {current} -- "
+                             f"`git switch {current}` when you are ready")
+            else:
+                ctx.out(ctx.out.paint(f"  checkout back on {current}", "grey"))
 
 
 class _LintArgs:
