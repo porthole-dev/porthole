@@ -202,7 +202,18 @@ porthole pkg build webkit2gtk-6.0 --detach   # survives the session
 porthole pkg watch                           # live bar, free to leave open
 porthole pkg status --json                   # one-shot, for you
 porthole pkg outdated                        # what you edited and did not rebuild
+porthole pkg resume webkit2gtk-6.0           # recompile IN the tree that is already there
 ```
+
+**`resume` is the one that saves the afternoon.** `pmbootstrap build` runs
+abuild's whole sequence and deletes `/home/pmos/build` first, so "recompile
+three files and repackage" against a 5.5-hour webkit tree costs 5.5 hours --
+which is why it was done by hand, twice, on 2026-09-02. `porthole pkg resume
+<aport>` runs `abuild build rootpkg update_abuildrepo_index` against the
+intact tree under the same lock, tracker and bar; `--apply-new-patches` puts
+the aport's patches into `src/` (abuild's `prepare` is what a resume skips)
+and `--pkgrel N` bumps the aport AND the build tree's copy, which is the pair
+that has to move together.
 
 - **It takes the buildroot lock.** One workspace has one buildroot per arch and
   `abuild` wipes `$srcdir` before unpacking, so a second pmbootstrap command
