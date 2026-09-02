@@ -80,6 +80,47 @@ They track **media-pipeline activity**, not successful playback: a page whose
 player never started (`readyState 0`, `paused`) but which was churning to load
 media stalled 3898 ms, while a page whose player sat cued and idle had none.
 
+**Named: the stall is software rasterisation.** Correlating the page's own
+stall timestamps with a 50 ms whole-process thread timeline (every thread of
+every WebKit process plus phoc, intersected with the stall windows) gives the
+same signature in 5 of 5 stalls:
+
+| thread | during stall | baseline |
+|---|---|---|
+| WebKitWebProcess main | 76-91% | 69.9% |
+| **SkiaCPUWorker** | **32-46%** | **10.5%** |
+| ThreadedCompositor | 22-36% (*down*) | 54.7% |
+
+`SkiaCPUWorker` runs 3-4.5x above baseline in every stall while the compositor
+thread goes *quiet* waiting on it. A large synchronous software raster job is
+blocking the main thread. Aggregate sampling cannot see this -- the stalls are
+~15% of wall time and idle threads swamp the histogram -- and sampling the
+wrong pid is easy: name-matching finds the `bwrap` wrappers, whose main thread
+never burns CPU. That mistake produced an earlier, wrong "main thread is
+S=100%, blocked on a futex" reading; the page's web process is the one owning a
+`ThreadedCompositor` thread.
+
+**And CPU rasterisation is itself a workaround.** It is on because
+`WEBKIT_SKIA_ENABLE_CPU_RENDERING=1` avoids a540 rendering faults. Measured
+A/B on the same page: GPU rasterisation cuts the worst stall from **2049 ms to
+568 ms** with **zero GPU faults**, but renders **visibly corrupt icons** (the
+like/save/flag glyphs fill with dithered garbage) with page state held
+identical across arms via a DOM `scrollIntoView` before every capture.
+`FD_MESA_DEBUG=noubwc` and `sysmem` do not fix it; noubwc makes it worse.
+
+**UBWC is not involved**, despite being an attractive theory for blocky
+multicolour garbage: `ubwc_ok = is_a6xx(screen)` in freedreno_resource.c, and
+a5xx never registers the modifier `is_format_supported` hook, so a540
+advertises linear only and cannot select a UBWC layout. a5xx also cannot render
+*to* UBWC -- `fd5_gmem.c` emit_mrt() hardcodes RB_MRT_FLAG_BUFFER to zero,
+under a "when we support UBWC" comment. Any A/B of `FD_MESA_DEBUG` on the
+browser also cannot explain corruption in the phosh panel, which is a different
+process that never saw the variable.
+
+So browser smoothness turns on **correct GPU rasterisation on a540 in
+freedreno**, not on a compositor or kernel knob. Until that lands the choice is
+correct-and-stuttery (CPU raster) or smooth-and-corrupt (GPU raster).
+
 **Still open** — what holds the lock. Hardware decode is not obviously it
 (the software-decode arm stalled too, though that arm is confounded: its video
 never played). Next: userspace stacks on the main thread during a stall
