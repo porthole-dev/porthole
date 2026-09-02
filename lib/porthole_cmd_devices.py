@@ -44,13 +44,14 @@ def cmd_devices(args, ctx) -> int:
         width = max(len(r["codename"]) for r in rows)
         swidth = max((len(r["soc"]) for r in rows), default=4)
         for row in rows:
-            mark = ctx.out.paint(ctx.out.sym("●", "*"), "green") if row["active"] else " "
+            mark = ctx.out.mark("active", row["active"])
             done = f"{row['keys_filled']}/{row['keys_total']} keys"
             ctx.out(f" {mark} {row['codename']:<{width}}  {row['soc']:<{swidth}}  "
                     f"{row['name']}  {ctx.out.paint(done, 'grey')}")
         ctx.out.blank()
-        ctx.out(f"{ctx.out.sym('●', '*')} = active. "
-                f"`porthole -d <codename> <verb>` to act on another.")
+        ctx.out(ctx.out.paint(
+            f"{ctx.out.sym('●', '*')} = active. "
+            f"`porthole -d <codename> <verb>` to act on another.", "grey"))
 
     return ctx.emit(rows, render)
 

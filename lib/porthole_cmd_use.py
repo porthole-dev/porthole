@@ -75,7 +75,7 @@ def cmd_use(args, ctx) -> int:
             o = ctx.out
             o.heading("device profiles")
             for name in profiles:
-                mark = o.paint(o.sym("●", "*"), "green") if name == current else " "
+                mark = o.mark("active", name == current)
                 o(f"  {mark} {name}")
             if not profiles:
                 o(o.paint("  none yet", "grey"))

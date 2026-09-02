@@ -103,7 +103,7 @@ def cmd_soc(args, ctx) -> int:
         o.blank()
         width = max(len(d.codename) for d in matches)
         for dev in matches:
-            mark = o.paint(o.sym("●", "*"), "green") if dev.codename == mine else " "
+            mark = o.mark("active", dev.codename == mine)
             cat = {"main": "green", "community": "cyan",
                    "testing": "yellow", "archived": "grey"}.get(dev.category, "grey")
             o(f" {mark} {dev.codename:<{width}}  "
