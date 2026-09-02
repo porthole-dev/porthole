@@ -23,10 +23,15 @@ def cmd_run(args, ctx) -> int:
     tools.update({t.path.stem: t for t in collect(ctx.root, device)
                   if t.path.stem not in tools})
 
-    tool = tools.get(args.tool)
+    # `porthole run tools/tk-reboot.sh` is what the skills, the rung messages
+    # and every runbook print, and it was rejected: the table is keyed on the
+    # bare name. Fixing the caller means fixing every caller forever, so the
+    # lookup takes the basename instead (#37).
+    want = os.path.basename(args.tool)
+    tool = tools.get(want)
     if tool is None:
-        near = [n for n in tools if args.tool in n]
-        raise Bail(f"no tool named {args.tool!r}", EX_FAIL,
+        near = [n for n in tools if want in n]
+        raise Bail(f"no tool named {want!r}", EX_FAIL,
                    f"did you mean: {', '.join(sorted(near)[:5])}?" if near
                    else "`porthole tools` lists them all")
 

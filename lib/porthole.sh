@@ -507,9 +507,38 @@ tk_device_state() {
 
 # --------------------------------------------------------------- actions ----
 
+# Run ONE reboot request and keep what it said. The result lands in
+# TK_REBOOT_WHAT / TK_REBOOT_RC / TK_REBOOT_ERR for the escalation path to name.
+#
+# FOREGROUND, and the far side's stderr is kept. This used to detach the request
+# (`(reboot &); exit 0`) and send both the exit status and the message to
+# /dev/null, so the one failure this device actually has -- a request that is
+# REFUSED and leaves the phone up -- printed nothing at all. Issue #38 escalated
+# twice off that silence and ended in a sysrq reset of a daily-driver rootfs,
+# with no record of why the first attempt failed.
+#
+# Foreground is safe because the two outcomes are distinguishable and both are
+# bounded: a refused reboot answers immediately, which is exactly when its
+# message exists, and a reboot that IS taken kills the connection -- that death
+# is the success signal. `timeout` caps the case where neither happens.
+ph_reboot_try() {
+    TK_REBOOT_WHAT=$1
+    ph_ssh_mux_reset          # the socket must not outlive the sshd
+    TK_REBOOT_ERR=$(timeout 12 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
+        "sudo -n sync; sudo -n $1" 2>&1 >/dev/null </dev/null)
+    TK_REBOOT_RC=$?
+    ph_ssh_mux_reset
+    # ssh announces its own hang-up on every reboot that WORKED. Printing that
+    # would bury the one line that is not noise.
+    TK_REBOOT_ERR=$(printf '%s\n' "$TK_REBOOT_ERR" |
+                    grep -v -e 'closed by remote host' \
+                            -e '^Shared connection to' -e '^Connection to ')
+    [ -z "$TK_REBOOT_ERR" ] || echo ">> the device answered: $TK_REBOOT_ERR" >&2
+    return 0
+}
+
 # Ask the device to reboot. Target is "" (normal) or "bootloader".
-# The reboot is detached on the far side so sshd going away mid-command doesn't
-# leave us blocked; a non-zero exit here is normal and NOT an error.
+# A non-zero exit here is normal and NOT an error -- see ph_reboot_try.
 #
 # TK_FORCE=1 skips service shutdown (`reboot -f`), which on taimen turned a
 # ~45s cycle into ~30s. Opt-in because it bypasses service shutdown; we always
@@ -517,17 +546,16 @@ tk_device_state() {
 # the polite way. Force is deliberately NOT applied to the bootloader path:
 # reaching the bootloader needs the reboot(2) command string to survive, and
 # that is exactly what the force path is least trustworthy about.
+TK_REBOOT_WHAT=""
+TK_REBOOT_RC=0
+TK_REBOOT_ERR=""
 tk_request_reboot() {
-    local target=${1:-} cmd
-    ph_ssh_mux_reset          # the socket must not outlive the sshd
+    local target=${1:-}
     if [ "${TK_FORCE:-0}" = "1" ] && [ -z "$target" ]; then
-        cmd='sudo -n sync; (sudo -n reboot -f >/dev/null 2>&1 &); exit 0'
+        ph_reboot_try "reboot -f"
     else
-        cmd="sudo -n sync; (sudo -n reboot ${target} >/dev/null 2>&1 &); exit 0"
+        ph_reboot_try "reboot${target:+ $target}"
     fi
-    timeout 12 ssh "${TK_SSH_OPTS[@]}" "$PHONE" "$cmd" >/dev/null 2>&1 </dev/null
-    ph_ssh_mux_reset
-    return 0
 }
 
 # The kernel's own reset path, below systemd, below busybox, below anything that
@@ -545,20 +573,55 @@ tk_request_sysrq_reboot() {
     return 0
 }
 
+# WHO is holding a shutdown inhibitor. phrog/greetd take one at the greeter, and
+# `systemctl reboot` REFUSES rather than overriding it -- so at the lock screen a
+# perfectly healthy device answers a plain reboot with "no" and stays up. That is
+# what "swallowed" was on 2026-09-02 (#38), and `systemctl reboot -i` is the fix
+# for it; `reboot -f` and sysrq are not.
+#
+# Printed before the first escalation because it is the only thing that tells
+# "systemd never got the request" apart from "systemd said no".
+ph_report_inhibitors() {
+    local out
+    out=$(timeout 8 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
+        'systemd-inhibit --list 2>/dev/null' </dev/null 2>/dev/null)
+    [ -n "$out" ] || return 0
+    echo ">> shutdown inhibitors held on the device:" >&2
+    printf '%s\n' "$out" | sed 's/^/>>   /' >&2
+}
+
 # ESCALATE, never repeat. Paid for on taimen 2026-08-25: `systemctl reboot`
 # returned 0, `systemctl is-system-running` said `running`, `list-jobs` was
 # empty and the device stayed up -- so re-issuing the identical request every
 # 25s did nothing except burn the entire timeout, three times over. Each retry
-# now drops a level instead: systemd, then reboot -f, then sysrq.
+# drops a level instead.
 #
-# Pass this to tk_wait_ssh as the reissue function.
+# `systemctl reboot -i` is the FIRST step, ahead of `reboot -f`. The ladder used
+# to go straight from the plain request to force and then to sysrq, which took a
+# daily-driver rootfs down uncleanly for what should have been a normal reboot
+# (#38) -- and did it at the greeter, the one place an inhibitor is guaranteed
+# to be held. -i is the answer to a refusal; force and sysrq answer a hang, and
+# a refusal is not a hang.
+#
+# Every message names the window that expired and what the last attempt said, so
+# the escalation is readable after the fact rather than three identical lines.
+#
+# Pass this to tk_wait_ssh as the reissue function; it is called with the number
+# of seconds that just went by without a new boot_id.
 TK_REBOOT_LEVEL=0
 tk_reboot_escalate() {
+    local waited=${1:-?}
     TK_REBOOT_LEVEL=$((TK_REBOOT_LEVEL + 1))
+    echo ">> ${TK_REBOOT_WHAT:-reboot} exited $TK_REBOOT_RC and the device is" \
+         "still on the same boot_id ${waited}s later" >&2
     case $TK_REBOOT_LEVEL in
-        1)  echo ">> reboot not taken -- escalating to reboot -f" >&2
+        1)  ph_report_inhibitors
+            echo ">> escalating to systemctl reboot -i (overrides an inhibitor)" >&2
+            ph_reboot_try "systemctl reboot -i" ;;
+        2)  echo ">> escalating to reboot -f (no service shutdown)" >&2
             TK_FORCE=1 tk_request_reboot ;;
-        *)  echo ">> still up -- escalating to a sysrq reset" >&2
+        *)  echo ">> reboot -f had its own ${waited}s and the device is STILL" \
+                 "up -- escalating to a sysrq reset, which is UNCLEAN" >&2
             tk_request_sysrq_reboot ;;
     esac
 }
@@ -642,9 +705,11 @@ tk_rearm_and_boot() {
 # tk_wait_ssh OLD_BOOT_ID DEADLINE_MS [REISSUE_FN] [REISSUE_AFTER_S]
 #
 # Poll until the device is up on a NEW boot_id. Auto-recovers if it lands in
-# the bootloader instead. If REISSUE_FN is given, it is called when the OLD
-# boot_id is still answering after REISSUE_AFTER_S -- i.e. the reboot request
-# was swallowed and never took effect.
+# the bootloader instead. If REISSUE_FN is given, it is called with
+# REISSUE_AFTER_S when the OLD boot_id is still answering after that many
+# seconds -- i.e. the reboot request was swallowed and never took effect. It is
+# handed the window so its messages can name the timeout that expired rather
+# than leaving the reader to infer it.
 #
 # Exit: 0 up (boot id echoed on stdout), 1 deadline hit.
 tk_wait_ssh() {
@@ -667,8 +732,7 @@ tk_wait_ssh() {
             # either hasn't landed yet or was never acted on.
             if [ -n "$reissue_fn" ] && \
                [ $(( ($(tk_now_ms) - last_request_ms) / 1000 )) -ge "$reissue_after" ]; then
-                echo ">> reboot request looks swallowed, re-issuing" >&2
-                "$reissue_fn"
+                "$reissue_fn" "$reissue_after"
                 last_request_ms=$(tk_now_ms)
             fi
         elif tk_in_fastboot; then
