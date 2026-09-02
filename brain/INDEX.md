@@ -27,6 +27,7 @@ generic notes as well.
 | [envkernel-activation-is-cheap-once-the-chroot-is-warm](findings/envkernel-activation-is-cheap-once-the-chroot-is-warm.md) | `generic` | envkernel activation costs 0.8 s, not 14 s -- the 14 s is a one-off apk add |
 | [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
+| [epiphanys-frame-is-20ms-of-compositor-cpu-plus-a-10ms-gpu-tail-not-a5xx-batches](findings/epiphanys-frame-is-20ms-of-compositor-cpu-plus-a-10ms-gpu-tail-not-a5xx-batches.md) | `soc:msm8998` | Epiphany's frame on m.youtube.com is ~20 ms of TextureMapper CPU walking 315 layers plus a ~10 ms GPU/FrameDone tail, serialized -- the kernel sees two submits per frame, so a5xx batch overhead is not the limit |
 | [epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers](findings/epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers.md) | `device:google-taimen` | Epiphany's window updates at 12-30 fps on YouTube because WebKit's compositor thread spends 35-50 ms per frame on a 237-layer page -- not the video, not GTK, not the GPU clock, not damage tracking |
 | [forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port](findings/forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port.md) | `soc:msm8998` | The Type-C Rp advertisement is ignored, so a 3 A source charges at 500 mA -- and AICL, not the driver, is what bounds the request |
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
@@ -96,6 +97,7 @@ generic notes as well.
 |---|---|---|
 | [a-444-test-clip-makes-working-hardware-decode-look-broken](traps/a-444-test-clip-makes-working-hardware-decode-look-broken.md) | `generic` | A 4:4:4 test clip makes working hardware decode look broken |
 | [a-board-name-is-not-a-soc-name](traps/a-board-name-is-not-a-soc-name.md) | `generic` | A vendor's reference board is not the SoC, and tools will accept it silently |
+| [a-browser-arm-runs-on-a-throttled-phone-that-is-discharging-on-the-pc-port](traps/a-browser-arm-runs-on-a-throttled-phone-that-is-discharging-on-the-pc-port.md) | `device:google-taimen` | Every browser arm runs at 75-78 C with the big cores capped to 1.0-1.5 GHz, and a phone on a PC's USB port discharges under that load until it browns out |
 | [a-build-outlives-the-porthole-run-that-tracks-it](traps/a-build-outlives-the-porthole-run-that-tracks-it.md) | `generic` | A build survives the porthole run that started it, and takes the buildroot lock to the grave |
 | [a-fresh-kernel-cannot-ram-boot-against-installed-modules](traps/a-fresh-kernel-cannot-ram-boot-against-installed-modules.md) | `generic` | A freshly built kernel cannot RAM-boot against the modules already on the device |
 | [a-full-zap-inside-the-workspace-unmounts-it](traps/a-full-zap-inside-the-workspace-unmounts-it.md) | `generic` | pmbootstrap zap inside the workspace tears down porthole's own bind mounts, and the build then refuses about a version |
@@ -190,8 +192,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 29
+- `device:google-taimen` — 30
 - `generic` — 99
 - `soc:gs201` — 1
-- `soc:msm8998` — 23
+- `soc:msm8998` — 24
 - `soc:qcom` — 1
