@@ -94,6 +94,47 @@ def test_an_aport_already_fixed_is_not_warned_about():
     assert pkg.conditional_dep_warning(text) == ""
 
 
+MESA = """\
+pkgname=mesa
+_llvmver=22
+makedepends="
+\tbison
+\tflex
+\t"
+case "$CARCH" in
+armv7|aarch64)
+\tmakedepends="
+\t\t$makedepends
+\t\tclang$_llvmver-dev
+\t\tlibclc-dev~$_llvmver
+\t\trust-bindgen
+\t\t"
+\t;;
+esac
+"""
+
+
+def test_an_append_on_its_own_line_is_still_an_append():
+    """Issue #54: Alpine's mesa opens the quote, then puts `$makedepends` on
+    the NEXT line. The check only looked at the `=` line, so all five packages
+    were invisible to it as well as to pmbootstrap, and the build died 40s
+    later in meson saying `Program 'bindgen' not found`."""
+    assert "rust-bindgen" in pkg.conditional_dep_warning(MESA)
+
+
+def test_the_warning_names_the_package_and_not_the_variable():
+    """`clang$_llvmver-dev` is not a package anyone can go and hoist."""
+    assert "clang22-dev" in pkg.conditional_dep_warning(MESA)
+
+
+def test_a_version_constraint_is_matched_against_the_bare_name():
+    """`libclc-dev~22` appended is installed by `libclc-dev` listed. Warning
+    about it is warning about correct code."""
+    fixed = MESA.replace('makedepends="\n\tbison',
+                         'makedepends="\n\tlibclc-dev\n\tbison')
+    assert "libclc-dev" not in pkg.conditional_dep_warning(fixed)
+
+
 def test_a_multi_line_dependency_list_is_read_whole():
     """Dependency lists wrap across lines. Reading only the first would call
     every package after the newline missing."""
