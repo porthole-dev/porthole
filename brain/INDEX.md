@@ -16,6 +16,7 @@ generic notes as well.
 | [a-phone-in-the-bootloader-can-be-off-the-bus](findings/a-phone-in-the-bootloader-can-be-off-the-bus.md) | `generic` | A phone can reach the bootloader and never enumerate, and porthole read that as never reaching it |
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
+| [a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever](findings/a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever.md) | `soc:msm8998` | A venus firmware assert wedges the video GDSC, and the driver's recovery then retries every 10 ms forever |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [android-interaction-boost-is-the-remaining-perf-delta](findings/android-interaction-boost-is-the-remaining-perf-delta.md) | `soc:msm8998` | Android's INTERACTION boost is the remaining perf delta -- the scaling infrastructure already has vendor parity |
 | [app-jank-is-app-shaped-once-the-stack-is-clean](findings/app-jank-is-app-shaped-once-the-stack-is-clean.md) | `device:google-taimen` | With the display/decode stack clean, the remaining jank is app-shaped -- GJS GC in Maps, main-thread layout in WebKit 2.48, init CPU in browser launches |
@@ -26,6 +27,7 @@ generic notes as well.
 | [envkernel-activation-is-cheap-once-the-chroot-is-warm](findings/envkernel-activation-is-cheap-once-the-chroot-is-warm.md) | `generic` | envkernel activation costs 0.8 s, not 14 s -- the 14 s is a one-off apk add |
 | [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
+| [forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port](findings/forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port.md) | `soc:msm8998` | The Type-C Rp advertisement is ignored, so a 3 A source charges at 500 mA -- and AICL, not the driver, is what bounds the request |
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
@@ -42,9 +44,11 @@ generic notes as well.
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
+| [the-browser-stutter-is-a-blocked-webkit-main-thread](findings/the-browser-stutter-is-a-blocked-webkit-main-thread.md) | `generic` | The browser stutter is a blocked WebKit main thread, not the display stack |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
 | [the-missing-eapol-is-ath10ks-rx-confused-latch](findings/the-missing-eapol-is-ath10ks-rx-confused-latch.md) | `device:google-taimen` | The missing 4-way handshake is ath10k's rx_confused latch: one split A-MSDU disables data RX for the life of the firmware |
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
+| [the-msm8998-thermal-trip-is-a-cliff](findings/the-msm8998-thermal-trip-is-a-cliff.md) | `soc:msm8998` | The mainline msm8998 thermal zone is a cliff -- one passive trip, no limit, 2.36 GHz to 500 MHz in about 7 s |
 | [the-reserved-vht-width-pair-is-why-the-ap-refused](findings/the-reserved-vht-width-pair-is-why-the-ap-refused.md) | `soc:msm8998` | The reserved VHT channel-width pair was the refusal -- clamping it associates 8/8 |
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
 | [the-sigkill-venus-wedge-was-vp9-bandwidth-starvation](findings/the-sigkill-venus-wedge-was-vp9-bandwidth-starvation.md) | `device:google-taimen` | The "SIGKILL wedges venus until reboot" was VP9 bandwidth starvation misread -- venus survives SIGKILL on both codecs |
@@ -98,6 +102,7 @@ generic notes as well.
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
 | [a-module-parameter-that-does-not-exist-is-ignored](traps/a-module-parameter-that-does-not-exist-is-ignored.md) | `generic` | A module parameter that does not exist is silently ignored |
 | [a-module-reload-does-not-reset-this-cards-audio-state](traps/a-module-reload-does-not-reset-this-cards-audio-state.md) | `device:google-taimen` | A module reload re-registers the card and leaves capture broken — audio needs a reboot |
+| [a-new-window-lands-in-recents-when-the-phosh-grid-is-open](traps/a-new-window-lands-in-recents-when-the-phosh-grid-is-open.md) | `generic` | With the phosh app grid open, a launched app goes straight to recents -- and every measurement of it is void |
 | [a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist](traps/a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist.md) | `generic` | A noarch or all dependency makes pmbootstrap ask for gcc-<native>, and every fresh workspace dies on its first packaging rung |
 | [a-partial-chroot-umount-leaves-placeholder-device-nodes](traps/a-partial-chroot-umount-leaves-placeholder-device-nodes.md) | `generic` | A partial chroot umount in the workspace leaves /dev/urandom, /dev/zero and /dev/tty as empty root-only files -- and a 5.5 h build dies on the last step |
 | [a-ram-booted-kernel-cannot-survive-a-long-sleep](traps/a-ram-booted-kernel-cannot-survive-a-long-sleep.md) | `generic` | A RAM-booted kernel cannot survive a long sleep — suspend work needs a flashed slot |
@@ -146,6 +151,7 @@ generic notes as well.
 | [usb-ids-cannot-tell-booted-from-bootloader](traps/usb-ids-cannot-tell-booted-from-bootloader.md) | `generic` | lsusb can label a running pmOS USB gadget as "fastboot |
 | [wait-long-enough-before-calling-a-boot-failed](traps/wait-long-enough-before-calling-a-boot-failed.md) | `generic` | Wait long enough before calling a boot failed |
 | [watchdog-out-of-range-disarms-instead-of-clamping](traps/watchdog-out-of-range-disarms-instead-of-clamping.md) | `generic` | An out-of-range watchdog timeout turns the watchdog OFF, it does not clamp |
+| [wayland-debug-is-not-a-free-instrument](traps/wayland-debug-is-not-a-free-instrument.md) | `generic` | WAYLAND_DEBUG=1 grows a multi-hundred-MB tmpfs log inside the process you are measuring |
 
 ## playbooks
 
@@ -181,7 +187,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 28
-- `generic` — 95
+- `generic` — 98
 - `soc:gs201` — 1
-- `soc:msm8998` — 18
+- `soc:msm8998` — 21
 - `soc:qcom` — 1
