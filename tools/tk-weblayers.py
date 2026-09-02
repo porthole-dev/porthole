@@ -55,7 +55,7 @@ for l in layers:
 rows.sort(reverse=True)
 print("composited layers: %d   total composited area: %.1f Mpx   (screen 1440x2880 = 4.1 Mpx)" % (len(layers), area / 1e6))
 reason_count = collections.Counter()
-for r in rows: 
+for r in rows:
     for k in r[6].split(","): reason_count[k] += 1
 print("reasons:", reason_count.most_common(12))
 print("largest layers (area, w x h, reasons):")
