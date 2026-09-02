@@ -1,0 +1,38 @@
+name: issue trailers
+
+# The third surface. .githooks/commit-msg holds commit messages, the trailers
+# job in ci.yml holds pull request bodies, and issue #54 was filed with
+# "Generated with [Claude Code]" and a session URL through the one surface
+# neither of them reads. AGENTS.md section 5: a rule holds on the surfaces its
+# enforcer reads.
+#
+# `edited` for the same reason ci.yml gives: without it a body is checked once
+# at open and a trailer pasted in afterwards stays.
+on:
+  issues:
+    types: [opened, edited]
+
+# The one workflow in this repo that writes. It writes exactly one thing: the
+# body of the issue that triggered it, with the offending lines deleted.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  issue-trailers:
+    name: no attribution trailers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Through the environment, never the command line: an issue body is
+      # attacker-controlled text from anyone with a GitHub account, and
+      # `${{ }}` inside a run: block is substituted before bash sees it.
+      - name: make issue-trailers
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: make issue-trailers

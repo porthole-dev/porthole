@@ -23,7 +23,7 @@ TEST_JOBS ?= 8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
-.PHONY: help test console smoke lint floor check ci trailers distros fmt tools-doc brain-index clean install-completion docs docs-serve rules
+.PHONY: help test console smoke lint floor check ci trailers issue-trailers distros fmt tools-doc brain-index clean install-completion docs docs-serve rules
 
 help:            ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -129,6 +129,23 @@ trailers:        ## CI job "trailers": no attribution trailer in any commit mess
 	@# PR_BODY; locally this is the commit-log half, which is the half a
 	@# laptop can check. AGENTS.md section 5.
 	@$(PY) lib/porthole_trailers.py --ci && echo "trailers                     ok"
+
+issue-trailers:  ## CI job "issue trailers": strip trailers from issue $$ISSUE's body
+	@# The third publishing surface, and the one issue #54 went out through:
+	@# the commit hook and the pull request body check both held, and an agent
+	@# filed an issue carrying the two lines anyway. lib/porthole_trailers.py
+	@# says why a commit message is stripped rather than rejected -- the lines
+	@# are a harness default, not an argument anyone is having -- and an issue
+	@# body is the same case, only more so: a red run on an issue event
+	@# appears nowhere anybody is looking.
+	@body=$$(mktemp) && trap 'rm -f "$$body"' EXIT && \
+	printf '%s' "$$ISSUE_BODY" > "$$body" && \
+	if $(PY) lib/porthole_trailers.py --scan "$$body"; then \
+	  echo "issue trailers               ok"; \
+	else \
+	  $(PY) lib/porthole_trailers.py --strip "$$body" && \
+	  gh issue edit "$$ISSUE" --body-file "$$body" >/dev/null && \
+	  echo "issue trailers               stripped a trailer from #$$ISSUE"; fi
 
 brain-index:     ## regenerate brain/INDEX.md
 	@./bin/porthole brain reindex

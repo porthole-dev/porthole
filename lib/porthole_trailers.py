@@ -8,6 +8,7 @@ because the other halves each covered only part of the surface:
     prose in AGENTS.md          covered everything, enforced nothing
     .githooks/commit-msg        enforced it, on commit messages, opt-in
     nothing at all              pull request bodies
+    nothing at all              issue bodies
 
 The history has been rewritten twice over trailers (35 trailers, 35 session
 URLs and 59 sign-offs the first time; 49, 49 and 32 the second). The third
@@ -147,24 +148,40 @@ def scan_history(root):
     return hits
 
 
-def report(hits, out=sys.stderr):
+def report(hits, out=None):
+    # Bound at call time, not at def time: a default of sys.stderr is captured
+    # at import and cannot be redirected, which makes the finding untestable
+    # without printing it into the middle of a passing suite.
+    out = out or sys.stderr
     for where, line, rule, hit in hits:
         print(f"{where}:{line}: {rule.name}: {hit!r}\n    {rule.why}", file=out)
     if hits:
         print(f"\n{len(hits)} finding(s). AGENTS.md section 5: no trailers and "
-              "no signatures of any kind, on a commit or a pull request body. "
+              "no signatures of any kind, on a commit message, a pull request "
+              "body or an issue body. "
               "Remove the lines; do not reword them.", file=out)
     return 1 if hits else 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--scan", metavar="FILE",
+                    help="scan one body; 0 clean, 1 carries a trailer")
     ap.add_argument("--strip", metavar="FILE",
                     help="rewrite a commit message file in place")
     ap.add_argument("--ci", action="store_true",
                     help="scan every reachable commit message, and $PR_BODY "
                          "when the workflow set it")
     args = ap.parse_args(argv)
+
+    if args.scan:
+        # No history, no environment: one blob, and an exit code the caller
+        # branches on. .github/workflows/issue-trailers.yml asks this before
+        # it edits, because "the file changed" is not the same question --
+        # strip() normalises line endings, and GitHub hands out CRLF, so a
+        # clean body would compare unequal forever and edit itself in a loop.
+        p = pathlib.Path(args.scan)
+        return report(scan(p.read_text(errors="replace"), args.scan))
 
     if args.strip:
         p = pathlib.Path(args.strip)
