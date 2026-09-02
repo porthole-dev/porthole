@@ -629,5 +629,111 @@ def test_only_this_run_of_the_shared_log_is_read():
     assert pkg.why_nothing_built(pkg.log_since(tmp, 0), "phosh") is not None
 
 
+# ------------------------------------------------------------- resume --
+#
+# `pmbootstrap build` deletes /home/pmos/build before it starts, so
+# "recompile three files and repackage" costs a full build -- 5.5 hours for
+# webkit2gtk-6.0. `pkg resume` runs abuild against the tree that is already
+# there. Everything below is a gotcha that was paid for by hand on
+# 2026-09-02 (porthole-dev/porthole#46); each one is here so it is paid once.
+
+
+def test_a_resume_runs_abuild_in_the_tree_instead_of_replacing_it():
+    line = pkg.resume_line("aarch64")
+    assert line.startswith("cd /home/pmos/build &&"), line
+    assert "abuild -d -D postmarketOS build rootpkg" in line, line
+    # The one thing a resume must never do, in any form.
+    assert "rm -rf src" not in line and "pmbootstrap build" not in line, line
+
+
+def test_a_leftover_pkg_dir_is_removed_before_abuild_runs():
+    """A pkg/ from an earlier rootpkg makes the -lang split fail with "file
+    already exists" -- after the compile, which is the expensive place."""
+    line = pkg.resume_line("aarch64")
+    assert "rm -rf pkg" in line, line
+    assert line.index("rm -rf pkg") < line.index("abuild"), line
+
+
+def test_the_abuild_environment_is_pmbootstraps_and_not_a_guess():
+    """SUDO_APK is how abuild installs with no root; CARCH is what makes the
+    package the target's rather than the emulating host's."""
+    assert pkg.abuild_env("aarch64") == {
+        "CARCH": "aarch64", "SUDO_APK": "abuild-apk --no-progress"}
+    line = pkg.resume_line("aarch64")
+    assert "CARCH=aarch64" in line, line
+    assert "SUDO_APK='abuild-apk --no-progress'" in line, line
+
+
+def test_a_pkgrel_bump_reaches_the_copy_abuild_actually_reads():
+    """Bumping only the aport produces an apk with the old -rN: abuild reads
+    the build tree's APKBUILD, not pmaports'."""
+    line = pkg.resume_line("aarch64", pkgrel=53)
+    assert "sed -i 's/^pkgrel=.*/pkgrel=53/' APKBUILD" in line, line
+    assert line.index("pkgrel=53") < line.index("abuild"), line
+    assert "sed" not in pkg.resume_line("aarch64"), "unasked-for edit"
+
+
+def test_patches_go_where_abuilds_prepare_would_have_put_them():
+    """$builddir is abuild's and only the APKBUILD knows it -- webkit's is
+    src/webkitgtk-$pkgver, which is not $pkgname-$pkgver. And a patch already
+    in the tree must be a skip, not a failure, or a resume is not repeatable."""
+    line = pkg.resume_line("aarch64", patches=True)
+    assert ". ./APKBUILD" in line and "${builddir:-" in line, line
+    assert "patch -N -p1" in line, line
+    assert line.index("patch -N") < line.index("abuild"), line
+    assert "patch" not in pkg.resume_line("aarch64").split("abuild")[0]
+
+
+def test_an_armv7_resume_runs_under_linux32():
+    assert pkg.resume_line("armv7").rsplit("&&", 1)[1].strip().startswith(
+        "linux32 ")
+    assert "linux32" not in pkg.resume_line("aarch64")
+
+
+def test_a_resume_enters_the_buildroot_chroot_as_the_build_user():
+    """Without -b it would run in the NATIVE chroot, where the tree is not;
+    without --user abuild refuses to run as root; and the default output mode
+    hands the terminal to the child instead of the tracker's log."""
+    cmd = pkg.resume_cmd("aarch64", "true")
+    assert cmd[:2] == ["pmbootstrap", "chroot"], cmd
+    assert cmd[cmd.index("-b") + 1] == "aarch64", cmd
+    assert "--user" in cmd, cmd
+    assert cmd[cmd.index("--output") + 1] == "log", cmd
+    assert cmd[-3:] == ["sh", "-c", "true"], cmd
+
+
+def test_a_tree_belonging_to_another_package_is_named_not_resumed(tmp=None):
+    """One buildroot, one tree: whatever built last owns it. Resuming over it
+    is two-pmbootstrap-builds-destroy-each-other with one build."""
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    (tmp / "APKBUILD").write_text(APKBUILD)
+    assert pkg.tree_holds(tmp, "webkit2gtk-6.0") == "phoc"
+    assert pkg.tree_holds(tmp, "phoc") == "phoc"
+    assert pkg.tree_holds(tmp / "gone", "phoc") == ""
+
+
+def test_a_detached_resume_is_still_a_resume():
+    """The flags that change what the build DOES have to be forwarded by hand,
+    and two already were not once (--force, --wait)."""
+
+    class Args:
+        action = "resume"
+        timeout, force, wait = 3600, False, 0.0
+        apply_new_patches, pkgrel, actions = True, 53, "build rootpkg"
+
+    argv = pkg.detach_argv("/w/bin/porthole", "webkit2gtk-6.0", "aarch64",
+                           Args())
+    assert argv[2] == "resume", argv
+    assert "--apply-new-patches" in argv, argv
+    assert argv[argv.index("--pkgrel") + 1] == "53", argv
+    assert argv[argv.index("--actions") + 1] == "build rootpkg", argv
+
+
+def test_only_the_file_copy_attaches_stdin_to_the_container():
+    """A build reading from an attached stdin is a build that can block on it."""
+    assert "-i" in pkg.in_container("true", stdin=True)[:3]
+    assert "-i" not in pkg.in_container("true")
+
+
 if __name__ == "__main__":
     sys.exit(main())

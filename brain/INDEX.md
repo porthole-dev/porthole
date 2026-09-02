@@ -27,6 +27,7 @@ generic notes as well.
 | [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
 | [epiphanys-frame-is-20ms-of-compositor-cpu-plus-a-10ms-gpu-tail-not-a5xx-batches](findings/epiphanys-frame-is-20ms-of-compositor-cpu-plus-a-10ms-gpu-tail-not-a5xx-batches.md) | `soc:msm8998` | Epiphany's frame on m.youtube.com is ~20 ms of TextureMapper CPU walking 315 layers plus a ~10 ms GPU/FrameDone tail, serialized -- the kernel sees two submits per frame, so a5xx batch overhead is not the limit |
+| [epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers](findings/epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers.md) | `device:google-taimen` | Epiphany's window updates at 12-30 fps on YouTube because WebKit's compositor thread spends 35-50 ms per frame on a 237-layer page -- not the video, not GTK, not the GPU clock, not damage tracking |
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
@@ -41,6 +42,7 @@ generic notes as well.
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
+| [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
@@ -64,6 +66,7 @@ generic notes as well.
 | [vht-capa-overrides-cannot-touch-channel-width](findings/vht-capa-overrides-cannot-touch-channel-width.md) | `generic` | wpa_supplicant's vht_capa cannot change Supported Channel Width Set or Extended NSS BW -- mac80211 drops it |
 | [waylandsink-5fps-was-two-upstream-policies-colliding](findings/waylandsink-5fps-was-two-upstream-policies-colliding.md) | `device:google-taimen` | The waylandsink 5 fps cap was two upstream policies colliding -- wlroots hides LINEAR from v3 clients, GStreamer refuses INVALID |
 | [waylandsink-delivers-5fps-where-other-sinks-do-60](findings/waylandsink-delivers-5fps-where-other-sinks-do-60.md) | `device:google-taimen` | waylandsink delivers 5 fps where glimagesink and gtk4paintablesink do 60 -- and WebKit's compositor is the browser's ceiling, not venus |
+| [webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound](findings/webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound.md) | `soc:msm8998` | WebKitGTK's frame loop allows one frame in flight, released from GTK's snapshot(); on a5xx every render pass is a separate kernel submit -- so the compositor's cost is passes, not pixels |
 | [what-a-rootless-workspace-cannot-do](findings/what-a-rootless-workspace-cannot-do.md) | `generic` | Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs |
 | [where-the-build-minutes-actually-go](findings/where-the-build-minutes-actually-go.md) | `generic` | Every rung pays ~14s to activate envkernel, and that dwarfs the compile |
 | [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
@@ -140,6 +143,7 @@ generic notes as well.
 | [the-av1-demotion-deleted-the-v4l2-ranks](traps/the-av1-demotion-deleted-the-v4l2-ranks.md) | `generic` | A second environment.d file setting the same variable deletes the first one's value |
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
+| [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
@@ -182,8 +186,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 29
-- `generic` — 95
+- `device:google-taimen` — 30
+- `generic` — 96
 - `soc:gs201` — 1
-- `soc:msm8998` — 19
+- `soc:msm8998` — 21
 - `soc:qcom` — 1

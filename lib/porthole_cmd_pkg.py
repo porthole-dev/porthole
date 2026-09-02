@@ -479,8 +479,80 @@ def container_cmd(aport: str, arch: str, force: bool = False) -> list[str]:
     return in_container(" ".join(argv))
 
 
-def in_container(call: str) -> list[str]:
+# `abuild build rootpkg update_abuildrepo_index` -- the three actions a resume
+# runs, and the exact line that was typed by hand twice on 2026-09-02 against a
+# 5.5-hour webkit2gtk-6.0 tree. `build` recompiles only what changed, `rootpkg`
+# re-splits the subpackages and makes the apks as fakeroot, and the index
+# refresh is what makes the result installable from the local repo. Any abuild
+# function name is a valid action, which is what --actions is for.
+RESUME_ACTIONS = "build rootpkg update_abuildrepo_index"
+
+# Architectures whose builds run under linux32, copied from pmbootstrap's own
+# `Arch.linux32_required` -- without it uname says aarch64 inside an armv7
+# chroot and configure scripts pick the wrong ABI.
+LINUX32 = ("armhf", "armv7", "x86")
+
+
+def abuild_env(arch: str) -> dict:
+    """What pmbootstrap exports before it runs abuild (pmb/build/backend.py).
+
+    Not "what abuild happens to need": SUDO_APK is how abuild installs into
+    the buildroot with no root at all, and CARCH is what makes it produce a
+    package for the target rather than for whatever qemu is emulating on.
+    """
+    return {"CARCH": arch, "SUDO_APK": "abuild-apk --no-progress"}
+
+
+def resume_line(arch: str, actions: str = RESUME_ACTIONS,
+                patches: bool = False, pkgrel=None) -> str:
+    """The one shell line a resume runs inside the buildroot. Pure, so every
+    gotcha it encodes is a test rather than another hour on a device."""
+    env = " ".join("%s=%s" % (k, shlex.quote(v))
+                   for k, v in sorted(abuild_env(arch).items()))
+    steps = ["cd /home/pmos/build"]
+    if pkgrel is not None:
+        # The BUILD COPY of the APKBUILD is the one abuild reads; bumping only
+        # the aport produces an apk with the old -rN and a repo that then says
+        # nothing changed. (The aport is bumped separately, on the host.)
+        steps.append("sed -i 's/^pkgrel=.*/pkgrel=%d/' APKBUILD" % pkgrel)
+    if patches:
+        # `prepare` is exactly what a resume skips, and applying the patches is
+        # all `prepare` was doing that matters here. $builddir is abuild's and
+        # only the APKBUILD knows it, so source it the way abuild does. `-N`
+        # makes an already-applied patch a skip instead of a failure, which is
+        # what lets this be re-run.
+        steps.append('srcdir=/home/pmos/build/src; . ./APKBUILD; '
+                     'b=${builddir:-$srcdir/$pkgname-$pkgver}; '
+                     'for p in *.patch; do [ -e "$p" ] || continue; '
+                     'echo ">>> patch $p"; patch -N -p1 -d "$b" -i "$PWD/$p"; '
+                     'done; true')
+    # A pkg/ left by an earlier rootpkg makes the -lang split fail with "file
+    # already exists" -- after the compile, which is the expensive place to
+    # find out. rootpkg recreates it.
+    steps.append("rm -rf pkg")
+    abuild = "%s abuild -d -D postmarketOS %s" % (env, actions)
+    steps.append(("linux32 " + abuild) if arch in LINUX32 else abuild)
+    return " && ".join(steps)
+
+
+def resume_cmd(arch: str, line: str) -> list[str]:
+    """`pmbootstrap chroot` into the buildroot, as the build user.
+
+    --output log and not the default: the default hands the terminal to the
+    child, and this output has to reach the tracker through pmbootstrap's
+    log.txt the same way `pkg build`'s does. -b names the BUILDROOT chroot --
+    without it this would run in the native one, where the tree is not.
+    """
+    return ["pmbootstrap", "chroot", "--output", "log", "-b", arch, "--user",
+            "--", "sh", "-c", line]
+
+
+def in_container(call: str, stdin: bool = False) -> list[str]:
     """Wrap one pmbootstrap command line for the workspace container.
+
+    `stdin` attaches ours to the child (podman exec -i). Only the patch copy
+    below needs it, and it is off by default: a build reading from a closed
+    stdin is the behaviour every other caller here already relies on.
 
     PYTHONUNBUFFERED is not a nicety, it is what makes `pkg build` work at
     all. pmbootstrap is Python; writing to a pipe rather than a tty it
@@ -492,8 +564,9 @@ def in_container(call: str) -> list[str]:
     """
     import porthole_cmd_sandbox as sandbox
 
-    return ["podman", "exec", "-e", "PYTHONUNBUFFERED=1", sandbox.CONTAINER,
-            "/bin/bash", "-lc", f"cd /porthole && {call}"]
+    return (["podman", "exec"] + (["-i"] if stdin else [])
+            + ["-e", "PYTHONUNBUFFERED=1", sandbox.CONTAINER,
+               "/bin/bash", "-lc", f"cd /porthole && {call}"])
 
 
 def container_has_upstream() -> bool:
@@ -699,6 +772,186 @@ def _build(ctx, args) -> int:
     return EX_OK
 
 
+def _put_in_tree(ctx, usable: bool, arch: str, local: pathlib.Path) -> int:
+    """Copy one file from the aport into the buildroot's build tree.
+
+    Through `cat` in the chroot rather than a host copy: the tree belongs to
+    the chroot's build user, which on the host is a subuid nobody here can
+    write as, and inside the workspace container it is root that can. One
+    route that works in both, and the file lands owned by the user abuild
+    runs as, which is what a host copy gets wrong even when it is permitted.
+    """
+    cmd = ["pmbootstrap", "chroot", "--output", "interactive", "-b", arch,
+           "--user", "--", "sh", "-c",
+           "cat > /home/pmos/build/%s" % shlex.quote(local.name)]
+    if usable:
+        cmd = in_container(" ".join(shlex.quote(a) for a in cmd), stdin=True)
+    with open(local, "rb") as handle:
+        return subprocess.run(cmd, stdin=handle).returncode
+
+
+def tree_holds(tree: pathlib.Path, aport: str) -> str:
+    """The pkgname the buildroot's tree belongs to, "" if there is no tree.
+
+    One buildroot, one tree: whatever built last owns it. Resuming without
+    asking would run abuild over somebody else's half-built source and blame
+    the compiler, which is the exact failure two-pmbootstrap-builds-destroy-
+    each-other is about. Pure, so the check is a test.
+    """
+    try:
+        text = (tree / "APKBUILD").read_text(errors="replace")
+    except OSError:
+        return ""
+    return apkbuild_fields(text).get("pkgname", "") or aport
+
+
+def _resume(ctx, args) -> int:
+    """Resume a package build from the tree the last one left behind.
+
+    WHY THIS IS NOT `pkg build`
+        `pmbootstrap build` runs abuild's whole sequence -- clean, fetch,
+        unpack, prepare, build, check, rootpkg -- and copy_to_buildpath
+        DELETES /home/pmos/build first. Against a 5.5-hour webkit2gtk-6.0
+        tree, "recompile three files and repackage" therefore costs 5.5
+        hours. That was done by hand twice on 2026-09-02 (porthole-dev/
+        porthole#46), and every gotcha it cost is encoded in resume_line()
+        and in the guards below.
+    """
+    import porthole_cmd_build as build
+    import porthole_progress as progress
+
+    aport = args.target
+    if not aport:
+        raise Bail("which aport?", EX_FAIL,
+                   "porthole pkg resume <aport>, e.g. "
+                   "`porthole pkg resume webkit2gtk-6.0`")
+
+    arch = args.arch or ctx.cfg.get("PORTHOLE_ARCH") or "aarch64"
+    pmaports = _find_pmaports(ctx)
+    directory = find_aport(pmaports, aport)
+    if directory is None:
+        import porthole_pmaports as pmap
+
+        message, hint = missing_aport_hint(
+            pmaports, pmap.find_aports_upstream(pmaports), aport)
+        raise Bail(message, EX_FAIL, hint)
+
+    usable, why_not = build._workspace_usable(ctx)
+    if not usable and not shutil.which("pmbootstrap"):
+        raise Bail(f"no workspace and no pmbootstrap on PATH ({why_not})",
+                   EX_UNAVAILABLE, "run `porthole sandbox up` first")
+    workdir = _pmb_workdir(ctx, usable)
+    tree = workdir / f"chroot_buildroot_{arch}" / "home" / "pmos" / "build"
+
+    holder = tree_holds(tree, aport)
+    if not holder:
+        raise Bail(f"there is no build tree in {tree}", EX_FAIL,
+                   f"a resume needs the tree a previous build left behind; "
+                   f"`porthole pkg build {aport}` makes one from scratch")
+    if holder != aport:
+        raise Bail(f"the buildroot's tree is {holder}, not {aport}", EX_FAIL,
+                   f"resuming would run abuild over {holder}'s source. "
+                   f"`porthole pkg build {aport}` starts a fresh tree")
+
+    if not args.wait and not is_free(workdir):
+        raise Bail(f"the buildroot is busy: "
+                   f"{lock_holder(workdir) or 'another build'}", EX_LOCK,
+                   "two pmbootstrap builds share one buildroot and delete "
+                   "each other's source tree. Wait, or --wait SECONDS.")
+    foreign = running_build(ctx, usable)
+    if foreign:
+        raise Bail(f"a pmbootstrap build is already running: {foreign}",
+                   EX_LOCK,
+                   "it holds no lock (started outside `porthole pkg`), but it "
+                   "owns the buildroot all the same -- resuming now runs "
+                   "abuild over a tree it is still writing")
+
+    # The BUILD copy is what abuild reads, so it is also what says which apk
+    # to expect. --pkgrel is applied to it inside the chroot below.
+    fields = apkbuild_fields((tree / "APKBUILD").read_text(errors="replace"))
+    if args.pkgrel is not None:
+        fields["pkgrel"] = str(args.pkgrel)
+    ctx.out.kv("aport", str(directory.relative_to(pmaports)), 10)
+    ctx.out.kv("tree", str(tree), 10)
+    ctx.out.kv("version", f"{fields.get('pkgver','?')}-r"
+                          f"{fields.get('pkgrel','?')}", 10)
+
+    line = resume_line(arch, args.actions or RESUME_ACTIONS,
+                       patches=args.apply_new_patches, pkgrel=args.pkgrel)
+    cmd = resume_cmd(arch, line)
+    if usable:
+        cmd = in_container(" ".join(shlex.quote(a) for a in cmd))
+        ctx.out(ctx.out.paint("  resuming IN THE WORKSPACE (container)",
+                              "cyan"))
+    else:
+        ctx.out(ctx.out.paint(f"  resuming ON THE HOST ({why_not})", "cyan"))
+
+    tty = sys.stdout.isatty()
+    if args.dry_run or not args.detach:
+        ctx.out(ctx.out.paint(watch_hint(tty), "cyan" if tty else "yellow"))
+    if args.dry_run:
+        print(" ".join(shlex.quote(a) for a in cmd))
+        return EX_OK
+    if args.detach:
+        return _detach(ctx, args, aport, arch)
+
+    # The aport's pkgrel too, and BEFORE the build: the build copy is thrown
+    # away by the next full build, so an aport left at the old -rN is how a
+    # rebuilt package silently reverts to the version this run replaced.
+    if args.pkgrel is not None:
+        apkbuild = directory / "APKBUILD"
+        apkbuild.write_text(re.sub(r"(?m)^pkgrel=.*$", f"pkgrel={args.pkgrel}",
+                                   apkbuild.read_text(errors="replace"),
+                                   count=1))
+        ctx.out.kv("aport pkgrel", str(args.pkgrel), 10)
+
+    if args.apply_new_patches:
+        for patch in sorted(directory.glob("*.patch")):
+            if _put_in_tree(ctx, usable, arch, patch):
+                raise Bail(f"could not copy {patch.name} into the tree",
+                           EX_FAIL, "is the workspace up? `porthole doctor`")
+            ctx.out.kv("patch", patch.name, 10)
+
+    env = dict(os.environ)
+    for key, value in ctx.cfg.items():
+        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
+            env[key] = value
+    env.update(UNBUFFERED)
+
+    packages = _packages_dir(ctx, usable)
+    want = expected_apk(packages, arch, fields)
+    before = want.exists() and want.stat().st_mtime if want else False
+
+    pmb_log = workdir / "log.txt"
+    log_end = pmb_log.stat().st_size if pmb_log.exists() else 0
+    with hold(workdir, aport, args.wait):
+        rc = build._stream(ctx, cmd, env, args.timeout, f"pkg:{aport}",
+                           tracker_cls=progress.PkgTracker, log_prefix="pkg",
+                           follow=pmb_log,
+                           on_kill=_kill_inside if usable else None)
+
+    landed = want.exists() if want else False
+    fresh = landed and (before is False or want.stat().st_mtime != before)
+    if rc != 0:
+        raise Bail(f"{aport} failed to resume", EX_FAIL,
+                   f"the log is in {ctx.root / '.run'}")
+    if not landed:
+        why = why_nothing_built(log_since(pmb_log, log_end), aport)
+        if why:
+            raise Bail(why[0], EX_FAIL, why[1])
+        raise Bail(f"{aport}: abuild reported success but {want.name} is not "
+                   f"there", EX_FAIL, f"looked in {want.parent}")
+    if not fresh:
+        # Loud, because this is the failure mode a resume actually has: abuild
+        # rebuilt nothing and the apk on disk is the one from before.
+        raise Bail(f"{aport}: {want.name} was not rewritten", EX_FAIL,
+                   "abuild found nothing to redo -- bump with --pkgrel N, or "
+                   "touch the sources you edited")
+    ctx.out(ctx.out.paint(
+        f"  {want.name}  ({want.stat().st_size // 1024} KiB)", "green"))
+    return EX_OK
+
+
 def watch_hint(tty: bool) -> str:
     """How to watch this build, said every time a build starts.
 
@@ -776,12 +1029,22 @@ def detach_argv(porthole, aport: str, arch: str, args) -> list:
     bailed EX_LOCK into the spawn log, and left `pkg watch` following a
     "running" snapshot for a build that never started.
     """
-    argv = [str(porthole), "pkg", "build", aport, "--arch", arch,
+    action = getattr(args, "action", None) or "build"
+    argv = [str(porthole), "pkg", action, aport, "--arch", arch,
             "--timeout", str(args.timeout)]
     if getattr(args, "force", False):
         argv.append("--force")
     if getattr(args, "wait", 0):
         argv += ["--wait", str(args.wait)]
+    # A resume that dropped these would recompile without the patches, or
+    # package the pkgrel it was told to replace -- the same "declared flag that
+    # does nothing" the two above were.
+    if getattr(args, "apply_new_patches", False):
+        argv.append("--apply-new-patches")
+    if getattr(args, "pkgrel", None) is not None:
+        argv += ["--pkgrel", str(args.pkgrel)]
+    if getattr(args, "actions", None):
+        argv += ["--actions", args.actions]
     return argv
 
 
@@ -1280,6 +1543,8 @@ def cmd_pkg(args, ctx) -> int:
         return _search(ctx, args)
     if action == "fork":
         return _fork(ctx, args)
+    if action == "resume":
+        return _resume(ctx, args)
     return _build(ctx, args)
 
 
@@ -1298,6 +1563,11 @@ SPEC = {
         "the build outlives the session; `watch` follows it with a live bar in\n"
         "any other terminal, and `status --json` is the one-shot an agent\n"
         "reads instead of polling. Nobody has to sit on the output.\n\n"
+        "RESUME KEEPS THE TREE. `pmbootstrap build` runs abuild's whole\n"
+        "sequence and deletes /home/pmos/build first, so \"recompile three\n"
+        "files and repackage\" costs a full build -- 5.5 hours, for webkit.\n"
+        "`resume` runs abuild's build/rootpkg actions against the tree that\n"
+        "is already there, under the same lock, tracker and bar.\n\n"
         "TWO TREES, AND ONLY ONE OF THEM BUILDS. pmbootstrap keeps pmaports\n"
         "and Alpine's aports side by side, and `pmbootstrap build` reads\n"
         "pmaports only -- so Alpine's twelve thousand packages are present,\n"
@@ -1307,10 +1577,10 @@ SPEC = {
         "See docs/HANDOFF-package-builds.md."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["build", "search", "fork", "status",
-                                  "watch", "outdated", "stop"],
-                      "help": "build | search | fork | status | watch | "
-                              "outdated | stop"}),
+                      "choices": ["build", "resume", "search", "fork",
+                                  "status", "watch", "outdated", "stop"],
+                      "help": "build | resume | search | fork | status | "
+                              "watch | outdated | stop"}),
         (["target"], {"nargs": "?", "metavar": "APORT",
                       "help": "build/fork: the aport. search: text to look for"}),
         (["--arch"], {"metavar": "ARCH",
@@ -1326,6 +1596,16 @@ SPEC = {
                         "help": "build: start it in its own session and return"}),
         (["--force"], {"action": "store_true",
                        "help": "build: rebuild even if the apk is current"}),
+        (["--pkgrel"], {"type": int, "metavar": "N",
+                        "help": "resume: set pkgrel in the aport AND in the "
+                                "build tree's copy"}),
+        (["--apply-new-patches"], {"action": "store_true",
+                                   "help": "resume: copy the aport's *.patch "
+                                           "into the tree and apply them to "
+                                           "src/ (abuild's prepare is skipped)"}),
+        (["--actions"], {"metavar": "LIST",
+                         "help": f"resume: abuild functions to run "
+                                 f"(default: {RESUME_ACTIONS})"}),
         (["--interval"], {"type": float, "default": 1.0,
                           "help": "watch: seconds between reads (default 1)"}),
         (["--wait"], {"type": float, "default": 0.0, "metavar": "SECONDS",
@@ -1342,6 +1622,8 @@ SPEC = {
         "porthole pkg fork gnome-calculator --yes",
         "porthole pkg build phoc",
         "porthole pkg build webkit2gtk-6.0 --detach",
+        "porthole pkg resume webkit2gtk-6.0",
+        "porthole pkg resume webkit2gtk-6.0 --apply-new-patches --pkgrel 53",
         "porthole pkg watch",
         "porthole pkg outdated",
         "porthole pkg status --json",
