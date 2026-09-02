@@ -291,7 +291,15 @@ def build_snapshot(repo: pathlib.Path, now: float):
             # build still alive" would be three chances to disagree.
             snap = pp.reattach_from_log(live[0], best, now=now,
                                         samples=samples)
-            if snap is not None:
+            # A reattached snapshot can say the build ENDED -- the log names
+            # its own verdict -- and then it lingers like any other finished
+            # run and then goes away. Without this the row kept a build that
+            # failed overnight at `99% . reattached` all the next morning,
+            # because every unrelated `pmbootstrap chroot` in the workspace
+            # refreshed the one mtime that was keeping it on screen.
+            if snap is not None and (
+                    (snap.get("state") or "running") == "running"
+                    or now - (snap.get("last_at") or 0) <= LINGER_S):
                 return snap, True
     if best and now - (best.get("last_at") or 0) <= LINGER_S:
         return best, False       # old news lingers briefly; then it is clutter
