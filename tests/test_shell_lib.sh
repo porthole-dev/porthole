@@ -118,12 +118,43 @@ has "a non-default port reaches ssh" "$opts" "-p 2222"
 # A master socket that outlives a reboot is a live handle to a dead sshd. If
 # any of these stops calling ph_ssh_mux_reset, the toolbox hangs instead of
 # failing fast, and the cause is invisible.
-for fn in tk_request_reboot tk_request_bootloader tk_rearm_and_boot; do
+for fn in ph_reboot_try tk_request_bootloader tk_rearm_and_boot; do
     body=$(phsh '' "declare -f $fn")
     has "$fn tears down the ssh master" "$body" "ph_ssh_mux_reset"
 done
+has "tk_request_reboot goes through the one request that does" \
+    "$(phsh '' 'declare -f tk_request_reboot')" "ph_reboot_try"
 has "tk_wait_ssh resets the master on a new boot_id" \
     "$(phsh '' 'declare -f tk_wait_ssh')" "ph_ssh_mux_reset"
+
+# ------------------------------------------------- the escalation ladder ----
+# #38: at the greeter phrog holds a shutdown inhibitor, so systemd REFUSES the
+# reboot and says so. The ladder read that refusal as a hang, forced, then
+# sysrq-reset a live rootfs -- and printed nothing about why the first attempt
+# failed. `timeout` is stubbed, so what each rung ASKS FOR is recorded and
+# nothing leaves this machine.
+TRACE=$(mktemp)
+esc=$(phsh "TRACE=$TRACE" '
+    timeout() { shift; printf "%s\n" "$*" >> "$TRACE"; return 0; }
+    tk_reboot_escalate 12; tk_reboot_escalate 12; tk_reboot_escalate 12')
+ladder=$(cat "$TRACE"); rm -f "$TRACE"
+
+has "the first rung lists the inhibitors it is about to override" \
+    "$ladder" "systemd-inhibit --list"
+has "the first rung is systemctl reboot -i, not force" "$ladder" "systemctl reboot -i"
+has "the second rung is reboot -f"                     "$ladder" "reboot -f"
+has "the last rung is sysrq"                           "$ladder" "sysrq-trigger"
+is  "sysrq is LAST, after force has had its own window" \
+    "$(printf '%s\n' "$ladder" | grep -n sysrq-trigger | cut -d: -f1)" \
+    "$(printf '%s\n' "$ladder" | grep -c .)"
+has "each escalation names the window that expired"    "$esc" "12s later"
+has "each escalation names what the last attempt returned" "$esc" "exited"
+
+# The request itself must be able to REPORT. Detaching it threw the exit status
+# and the message away, which is why #38 had no record of the first failure.
+body=$(phsh '' 'declare -f ph_reboot_try')
+has "the reboot request keeps the far side's stderr" "$body" "TK_REBOOT_ERR"
+hasnt "the reboot request is not detached into /dev/null" "$body" "&); exit 0"
 
 # --------------------------------------------- the forbidden-slot guard ----
 

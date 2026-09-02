@@ -3,7 +3,7 @@
 # scope: generic
 # needs: any (probes state; handles BOOTED and FASTBOOT)
 # env: FASTBOOT, TK_FORCE, TK_TIMEOUT
-# exits: 0 ok · 1 failed
+# exits: 0 ok · 1 failed · 64 bad argument
 # Reboot the phone and return the INSTANT ssh answers again.
 #
 # This used to sleep a flat 30s after asking for the reboot and then poll every
@@ -31,10 +31,16 @@
 #     prints in the real bootloader -- that is what we key off.
 #   - `sudo -n reboot` over ssh gets swallowed, and on this device it can be
 #     swallowed EVERY time: it exits 0, queues no job, and the phone stays up.
-#     So a stuck reboot ESCALATES rather than repeating -- systemd, then
-#     `reboot -f`, then sysrq -- at 12s per step. Repeating the request that
+#     So a stuck reboot ESCALATES rather than repeating -- `systemctl reboot -i`,
+#     then `reboot -f`, then sysrq -- at 12s per step. Repeating the request that
 #     just failed is how this used to burn a full 180s timeout and still not
 #     reboot.
+#   - not every "swallowed" reboot is a hang. At the greeter phrog/greetd hold a
+#     shutdown inhibitor and systemd REFUSES the request, out loud, and stays up
+#     -- so the first escalation lists the inhibitors and re-asks with -i, and
+#     only a device that ignores THAT is worth forcing. Going straight to
+#     `reboot -f` and sysrq took this rootfs down uncleanly for what should have
+#     been a normal reboot (#38).
 #
 # Measured on this device, host-side wall clock:
 #
@@ -56,6 +62,16 @@ cd "$(dirname "$0")" || exit 1
 . ./tk-lib.sh
 
 TIMEOUT=${1:-${TK_TIMEOUT:-180}}
+# Checked BEFORE anything is asked of the device. `tk-reboot.sh --help` took
+# "--help" as the timeout, issued a real reboot, and then waited against an
+# empty deadline -- so the phone went down and nothing was left waiting for it
+# to come back. An argument this script does not understand must cost nothing.
+case $TIMEOUT in
+    ''|*[!0-9]*)
+        echo ">> usage: tk-reboot.sh [timeout_seconds]  (default 180, or \$TK_TIMEOUT)" >&2
+        echo ">>   env: TK_FORCE=1  skip service shutdown (~15s faster, syncs first)" >&2
+        exit 64 ;;
+esac
 START=$(tk_now_ms)
 DEADLINE=$(tk_deadline_ms "$TIMEOUT")
 
