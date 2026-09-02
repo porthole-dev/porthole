@@ -199,6 +199,82 @@ def test_an_upstream_file_named_with_its_path_is_accepted():
         "a deliberately qualified upstream path was refused: " + complaint)
 
 
+
+# ------------------------------------------- a note is not part of your work --
+
+class _Out:
+    """Only what cmd_submit reaches for."""
+    def __init__(self): self.lines = []
+    def __call__(self, text): self.lines.append(text)
+    def paint(self, text, _colour): return text
+    def heading(self, text): self.lines.append(text)
+    def hint(self, text): self.lines.append(text)
+    def warn(self, text): self.lines.append(text)
+    def blank(self): pass
+
+
+class _Ctx:
+    def __init__(self): self.out = _Out()
+
+
+class _SubmitArgs:
+    branch = "brain/a-test-note"
+    message = "brain: a test note"
+    no_push = True
+    yes = True
+
+
+def test_a_note_branches_off_main_and_puts_the_checkout_back():
+    """#41: `git switch -c` with no start point branches from HEAD, and this is
+    a SHARED checkout. A submit run while another agent had it on a feature
+    branch cut the note from that branch -- so five brain files arrived as a PR
+    carrying three unrelated commits and its red CI -- and left the checkout
+    there, mid-task, for the other agent to undo by hand.
+
+    Real git, because the defect is entirely in what git was asked to do.
+    """
+    import porthole_cmd_brain as B
+
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="brain-submit-"))
+    origin, work = tmp / "origin.git", tmp / "work"
+
+    def g(*a, cwd=work):
+        return subprocess.run(["git", "-C", str(cwd), *a], capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)],
+                   check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    for k, v in (("user.name", "T"), ("user.email", "t@e"), ("commit.gpgsign", "false")):
+        g("config", k, v)
+    (work / "README").write_text("x\n")
+    g("add", "README"); g("commit", "-qm", "base")
+    g("remote", "add", "origin", str(origin))
+    g("push", "-q", "origin", "main")
+    main_tip = g("rev-parse", "main")
+
+    # Somebody else's work in progress, checked out right now.
+    g("switch", "-qc", "feature")
+    (work / "OTHER").write_text("y\n")
+    g("add", "OTHER"); g("commit", "-qm", "someone else's commit")
+
+    (work / "brain" / "traps").mkdir(parents=True)
+    (work / "brain" / "traps" / "a-test-note.md").write_text("body\n")
+
+    lint = B.cmd_lint
+    B.cmd_lint = lambda *a, **k: 0          # linting has its own tests above
+    try:
+        assert B.cmd_submit(_SubmitArgs(), _Ctx(), work) == 0
+    finally:
+        B.cmd_lint = lint
+
+    assert g("rev-parse", "brain/a-test-note^") == main_tip, \
+        "the note was cut from the feature branch, not from origin/main"
+    assert g("rev-parse", "--abbrev-ref", "HEAD") == "feature", \
+        "the submit left the shared checkout on the note's branch"
+    assert not (work / "brain").exists(), \
+        "the note is still in the other branch's working tree"
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
