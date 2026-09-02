@@ -344,6 +344,45 @@ near 41% on the same clip. The measurement harness is `tools/tk-mempressure.sh`
 (its `hwdec` field reads the decoder subdevice's `runtime_status`, which is
 valid only while `power/control` is `auto` — it reports `pinned` otherwise).
 
+## Resuming: the tree is the expensive thing, not the build
+
+`pmbootstrap build` always runs abuild's full `clean fetch unpack prepare build
+check rootpkg`, and `copy_to_buildpath` deletes `/home/pmos/build` before it
+starts. For a package measured in hours that makes every one-line fix a full
+rebuild: on 2026-09-02 the useful work was "recompile three files and
+repackage" against a 5.5-hour `webkit2gtk-6.0` tree, twice (once after the
+`/dev/urandom` failure in #33, once to test two patches), and both were done by
+hand inside the chroot.
+
+`porthole pkg resume <aport>` is that by-hand line, with the parts that were
+easy to forget:
+
+```sh
+porthole pkg resume webkit2gtk-6.0
+porthole pkg resume webkit2gtk-6.0 --apply-new-patches --pkgrel 53
+porthole pkg resume webkit2gtk-6.0 --actions 'rootpkg update_abuildrepo_index'
+```
+
+- The **buildroot lock** is taken, as for any other build here, and the tree's
+  own APKBUILD is read first: one buildroot means one tree, and resuming the
+  wrong package would run abuild over someone else's source.
+- The **abuild environment** is pmbootstrap's (`CARCH`, `SUDO_APK`), not a
+  guess; `pmbootstrap chroot -b <arch> --user` is what gets into the buildroot.
+- **`rm -rf pkg` first.** A `pkg/<sub>` left by an earlier `rootpkg` makes the
+  `-lang` split fail with "file already exists", after the compile.
+- **Patches are applied by hand because `prepare` is skipped.** `$builddir`
+  comes from the APKBUILD (webkit's is `src/webkitgtk-$pkgver`, not
+  `$pkgname-$pkgver`), and `patch -N` makes an already-applied patch a skip
+  rather than a failure, so a resume can be re-run.
+- **`pkgrel` moves in both copies.** abuild reads the build tree's APKBUILD;
+  the aport's is what the next full build reads. Bumping one is how a rebuilt
+  package quietly reverts.
+- Any abuild function name is a valid action, which is what `--actions` takes.
+
+The verdict is the artifact, as everywhere else here -- and a resume that
+rewrote nothing is a failure, not a pass: the apk on disk would be the one from
+before.
+
 ## Related notes
 
 - `brain/traps/a-444-test-clip-makes-working-hardware-decode-look-broken.md` —
