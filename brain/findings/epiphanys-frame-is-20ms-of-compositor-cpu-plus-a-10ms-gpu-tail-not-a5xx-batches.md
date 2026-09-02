@@ -85,3 +85,10 @@ an idle video frame cost only the player, and drop the "future" transform
 walk when no layer has an `AnimatedBackingStoreClient`. Pipelining alone
 (three buffers, paint N+1 while N renders) would give max(20, 24) ms --
 still not 16.
+
+**What this replaces** --
+[[webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound]], written
+the day before from a GALLIUM_HUD batch count. Its frame-loop half stands (one
+frame in flight, `FrameDone` from GTK's `snapshot()`); its "a5xx is
+batch-bound" half does not: the HUD's 100-170 "batches" are mesa's internal
+render passes, and the kernel sees **two** `GEM_SUBMIT`s per frame.
