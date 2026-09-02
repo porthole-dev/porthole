@@ -26,6 +26,7 @@ generic notes as well.
 | [envkernel-activation-is-cheap-once-the-chroot-is-warm](findings/envkernel-activation-is-cheap-once-the-chroot-is-warm.md) | `generic` | envkernel activation costs 0.8 s, not 14 s -- the 14 s is a one-off apk add |
 | [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
+| [epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers](findings/epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers.md) | `device:google-taimen` | Epiphany's window updates at 12-30 fps on YouTube because WebKit's compositor thread spends 35-50 ms per frame on a 237-layer page -- not the video, not GTK, not the GPU clock, not damage tracking |
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
@@ -138,6 +139,7 @@ generic notes as well.
 | [the-av1-demotion-deleted-the-v4l2-ranks](traps/the-av1-demotion-deleted-the-v4l2-ranks.md) | `generic` | A second environment.d file setting the same variable deletes the first one's value |
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
+| [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
@@ -180,8 +182,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 28
-- `generic` — 95
+- `device:google-taimen` — 29
+- `generic` — 96
 - `soc:gs201` — 1
 - `soc:msm8998` — 18
 - `soc:qcom` — 1
