@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import subprocess
 import time
 
 import porthole
@@ -55,6 +56,34 @@ def activity_summary(snap, holder: str = "", alive=None) -> str:
     return "idle — no package build running, buildroot free"
 
 
+def _hooks_state(root: pathlib.Path) -> dict:
+    """Is this clone's git pointed at .githooks, and does it matter?
+
+    Here for the same reason as _workspace_state: brief is the verb section 9
+    tells every agent to run first, and a hook nobody installed enforces
+    nothing. Git ignores in-repo hooks until `core.hooksPath` says otherwise,
+    so a fresh clone -- which is what an agent usually gets -- has the secret
+    scanner and the trailer strip both switched off and no way to notice.
+
+    Reported, not fixed: writing to someone's git config is a change to their
+    checkout, and the shared-checkout note in AGENTS.md section 7 is exactly
+    about not doing that behind their back.
+    """
+    try:
+        out = subprocess.run(["git", "-C", str(root), "config", "--get",
+                              "core.hooksPath"], capture_output=True,
+                             text=True).stdout.strip()
+    except OSError:
+        return {"installed": True, "message": ""}       # no git; nothing to say
+    if out == ".githooks":
+        return {"installed": True, "message": ""}
+    return {"installed": False, "message":
+            "this clone does not have the hooks installed, so nothing strips "
+            "attribution trailers or scans a commit message for a serial "
+            "before it is written. Run `git config core.hooksPath .githooks` "
+            "once. CI catches both afterwards, but only after they are pushed."}
+
+
 def _workspace_state(root: pathlib.Path) -> dict:
     """Is the build workspace usable, and if not, what should be said about it?
 
@@ -91,6 +120,7 @@ def cmd_brief(args, ctx) -> int:
     tools = tmod.collect(root, device)
 
     workspace = _workspace_state(root)
+    hooks = _hooks_state(root)
     import porthole as _porthole
     drifts = _porthole.drift(cfg)
 
@@ -180,6 +210,7 @@ def cmd_brief(args, ctx) -> int:
             "traps": _device_traps(cfg),
         },
         "workspace": workspace,
+        "hooks": hooks,
         "config_drift": drifts,
         "tools": {
             "count": len(tools),
@@ -308,6 +339,11 @@ def cmd_brief(args, ctx) -> int:
                     f"  {d['key']}: environment says {d['winning']}, "
                     f"{d['committed_layer']} says {d['committed']}  "
                     f"({verb})", "yellow"))
+            ctx.out.blank()
+
+        if not payload["hooks"]["installed"]:
+            ctx.out.heading("git hooks")
+            ctx.out(ctx.out.paint("  " + payload["hooks"]["message"], "yellow"))
             ctx.out.blank()
 
         if not payload["workspace"]["ready"]:

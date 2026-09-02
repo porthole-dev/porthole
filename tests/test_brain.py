@@ -275,6 +275,33 @@ def test_a_note_branches_off_main_and_puts_the_checkout_back():
     assert not (work / "brain").exists(), \
         "the note is still in the other branch's working tree"
 
+def test_the_index_is_current():
+    """A note that is not in the index is a note nobody finds.
+
+    Eight commits added a brain note without touching brain/INDEX.md -- the
+    reindex is a separate command and remembering it is not a mechanism. The
+    index is generated, so "is it current" is a comparison, not a judgement,
+    and there is no reason for a human to be the one making it.
+
+    Failing here means: run `make brain-index` and commit the result.
+    """
+    import porthole_cmd_brain as B
+    notes = B.load_notes(ROOT)
+    want = B.render_index(ROOT, notes)
+    have = (ROOT / "brain" / "INDEX.md").read_text(encoding="utf-8")
+    if want == have:
+        return
+    # Only sections the index actually renders. brain/memory/ is not one, so
+    # a hint computed over every note names a file that is absent on purpose
+    # -- a diagnostic that sends you to the wrong file is worse than none.
+    indexed = [n for n in notes if n.section in B.SECTIONS]
+    missing = [n.id for n in indexed if f"[{n.id}](" not in have]
+    detail = ("\n%d note(s) are not in it: %s"
+              % (len(missing), ", ".join(sorted(missing)[:8]))) if missing else ""
+    assert False, ("brain/INDEX.md is stale -- run `make brain-index` and "
+                   "commit the result." + detail)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

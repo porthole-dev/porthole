@@ -23,7 +23,7 @@ TEST_JOBS ?= 8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
-.PHONY: help test console smoke lint floor check ci distros fmt tools-doc brain-index clean install-completion docs docs-serve rules
+.PHONY: help test console smoke lint floor check ci trailers distros fmt tools-doc brain-index clean install-completion docs docs-serve rules
 
 help:            ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -120,9 +120,15 @@ distros:         ## does doctor's install advice actually work, per distro? (nee
 
 check: lint test ## lint then test, on YOUR interpreter -- the everyday one
 
-ci: check console smoke floor ## every job CI runs, plus the python floor
+ci: check console smoke floor trailers ## every job CI runs, plus the python floor
 	@echo
 	@echo "== green here means green on GitHub: the jobs run these same targets =="
+
+trailers:        ## CI job "trailers": no attribution trailer in any commit message or the PR body
+	@# The pull request body is only reachable when the workflow exports
+	@# PR_BODY; locally this is the commit-log half, which is the half a
+	@# laptop can check. AGENTS.md section 5.
+	@$(PY) lib/porthole_trailers.py --ci && echo "trailers                     ok"
 
 brain-index:     ## regenerate brain/INDEX.md
 	@./bin/porthole brain reindex

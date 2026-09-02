@@ -154,10 +154,38 @@ RULES = [
           ".githooks/commit-msg", ".githooks/pre-push"]),
 
     Rule("no-trailers", MUST,
-         "No attribution trailers of any kind on a commit",
-         "they are injected by a harness default rather than typed by anyone, "
-         "and the history has been rewritten twice to remove them",
-         [".githooks/commit-msg"]),
+         "No attribution trailers on a commit message OR a pull request body",
+         "they are injected by a harness default rather than typed by anyone; "
+         "the history has been rewritten twice, and #51 and #52 then published "
+         "the same lines in the body, a surface no check had ever read",
+         [".githooks/commit-msg", "tests/test_trailers.py",
+          ".github/workflows/ci.yml"],
+         session=True),
+
+    Rule("brain-index-current", MUST,
+         "A new brain note is reindexed in the same commit",
+         "eight commits added a note and never ran `make brain-index`; a note "
+         "missing from the index is a note nobody finds, and the index is what "
+         "an agent is pointed at first",
+         ["tests/test_brain.py::test_the_index_is_current"],
+         session=True),
+
+    Rule("pr-after-the-work", SHOULD,
+         "Open the pull request after the work is done, not partway through",
+         "a finding written mid-session is a draft: the a540 corruption note "
+         "was reversed by its own next measurement, and a body filed early "
+         "describes a conclusion that no longer holds",
+         [".github/PULL_REQUEST_TEMPLATE.md"],
+         session=True),
+
+    Rule("hooks-installed", SHOULD,
+         "Point this clone at the hooks once: "
+         "`git config core.hooksPath .githooks`",
+         "git ignores in-repo hooks until told, so a fresh clone has the "
+         "secret scanner and the trailer strip both switched off and no way "
+         "to notice; `porthole brief` says which clones do",
+         ["lib/porthole_cmd_brief.py"],
+         session=True),
 
     # ------------------------------------------------- contributing code ----
     Rule("make-ci-before-pushing", SHOULD,

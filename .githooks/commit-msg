@@ -1,26 +1,22 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Strip attribution trailers from the commit message. AGENTS.md section 5 bans
 # them; prose alone did not hold, because the lines are injected by a harness
-# default rather than typed by anyone, and the history has now been rewritten
-# twice to remove them. Strip rather than reject: the commit is not the place
-# to argue with a default, and a rejection just gets retried with the same body.
+# default rather than typed by anyone. Strip rather than reject: the commit is
+# not the place to argue with a default, and a rejection just gets retried with
+# the same body.
+#
+# The patterns used to live here as sed expressions. They now live in
+# lib/porthole_trailers.py, because a pull request body needs the same list and
+# a second copy is how #51 and #52 shipped a trailer the hook already knew
+# about -- the hook stripped it from the message and nothing read the body.
 set -e
-f=$1
-sed -E \
-	-e '/^Co-Authored-By:/Id' \
-	-e '/^Claude-Session:/Id' \
-	-e '/^Signed-off-by:/Id' \
-	-e '/^🤖 Generated with \[Claude Code\]/d' \
-	-e '/^https:\/\/claude\.ai\/code\/session_/d' \
-	"$f" \
-| awk 'BEGIN{n=0}
-	{if ($0 ~ /^[[:space:]]*$/) n++; else {while (n-->0) print ""; n=0; print}}' \
-> "$f.tmp"
-mv "$f.tmp" "$f"
+root=$(git rev-parse --show-toplevel)
+python3 "$root/lib/porthole_trailers.py" --strip "$1"
 
 # Then the message is scanned. The serial that produced
 # docs/HANDOFF-contribution-rules.md reached a commit message, and no check in
 # this repo had ever read one. Reject rather than strip, unlike the trailers
 # above: a trailer is a harness default and stripping it is uncontroversial,
 # but only a human can decide what a secret should be redacted TO.
-exec python3 "$(git rev-parse --show-toplevel)/lib/porthole_secrets.py" "$f"
+exec python3 "$root/lib/porthole_secrets.py" "$1"

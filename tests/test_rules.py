@@ -37,7 +37,14 @@ import porthole_rules as rules                              # noqa: E402
 # hook is not CI enforcement, and a MUST resting on one alone is a known hole.
 # This set is the honest record of which. Shrinking it is the work; GROWING it
 # without deciding to is what this test exists to stop.
-HOOK_ONLY = {"no-trailers"}
+#
+# It is empty, and that took a leak to earn. `no-trailers` sat here alone,
+# annotated as a known hole, and the hole opened exactly as described: the hook
+# stripped the trailer from the commit message of #52 and the same lines went
+# out in the pull request body, which no hook and no test had ever read.
+# tests/test_trailers.py and the `trailers` job in ci.yml close it on both
+# surfaces. Do not put a rule back in here without closing it the same way.
+HOOK_ONLY = set()
 
 ID = re.compile(r"^[a-z][a-z0-9-]*$")
 
@@ -99,9 +106,8 @@ def test_every_named_enforcer_exists():
 
 
 def test_every_must_is_enforced_in_ci_or_is_a_declared_hook_only_gap():
-    """A hook only runs for someone who opted in. The trailer ban is the last
-    rule standing on one, and naming it here is what keeps it from being
-    forgotten -- and stops a second one joining it unnoticed."""
+    """A hook only runs for someone who opted in. No MUST rests on one now;
+    naming the set is what stops one quietly joining it again."""
     hook_only = {r.id for r in rules.must()
                  if not any(_ci_reached(e) for e in r.enforced_by)}
     assert hook_only == HOOK_ONLY, (
