@@ -40,6 +40,7 @@ generic notes as well.
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
+| [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
@@ -63,6 +64,7 @@ generic notes as well.
 | [vht-capa-overrides-cannot-touch-channel-width](findings/vht-capa-overrides-cannot-touch-channel-width.md) | `generic` | wpa_supplicant's vht_capa cannot change Supported Channel Width Set or Extended NSS BW -- mac80211 drops it |
 | [waylandsink-5fps-was-two-upstream-policies-colliding](findings/waylandsink-5fps-was-two-upstream-policies-colliding.md) | `device:google-taimen` | The waylandsink 5 fps cap was two upstream policies colliding -- wlroots hides LINEAR from v3 clients, GStreamer refuses INVALID |
 | [waylandsink-delivers-5fps-where-other-sinks-do-60](findings/waylandsink-delivers-5fps-where-other-sinks-do-60.md) | `device:google-taimen` | waylandsink delivers 5 fps where glimagesink and gtk4paintablesink do 60 -- and WebKit's compositor is the browser's ceiling, not venus |
+| [webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound](findings/webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound.md) | `soc:msm8998` | WebKitGTK's frame loop allows one frame in flight, released from GTK's snapshot(); on a5xx every render pass is a separate kernel submit -- so the compositor's cost is passes, not pixels |
 | [what-a-rootless-workspace-cannot-do](findings/what-a-rootless-workspace-cannot-do.md) | `generic` | Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs |
 | [where-the-build-minutes-actually-go](findings/where-the-build-minutes-actually-go.md) | `generic` | Every rung pays ~14s to activate envkernel, and that dwarfs the compile |
 | [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
@@ -183,5 +185,5 @@ generic notes as well.
 - `device:google-taimen` — 28
 - `generic` — 95
 - `soc:gs201` — 1
-- `soc:msm8998` — 18
+- `soc:msm8998` — 20
 - `soc:qcom` — 1
