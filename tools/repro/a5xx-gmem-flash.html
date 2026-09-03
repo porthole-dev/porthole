@@ -1,0 +1,15 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>flash</title>
+<!-- Full-viewport colour change every frame: the client damages its WHOLE
+     surface each frame whether WebKit paints with the GPU or in software, so
+     the compositor's damage shape is the same in both arms and only the GPU
+     work of the client differs. Used to separate "another GPU process is
+     required" from "the damage geometry changed" (2026-09-03). -->
+<style>html,body{margin:0;height:100%;background:#000}#b{position:fixed;inset:0}</style>
+<div id="b"></div>
+<script>
+var h=0,b=document.getElementById('b');
+(function f(){h=(h+7)%360;b.style.background='hsl('+h+',60%,40%)';requestAnimationFrame(f);})();
+document.title='flash ready';
+</script>
