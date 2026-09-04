@@ -46,9 +46,14 @@ def versions(ko):
     with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as t:
         tmp = t.name
     for tool in ('llvm-objcopy', 'objcopy'):
-        if subprocess.run([tool, '-O', 'binary', '--only-section=__versions', ko, tmp],
-                          capture_output=True).returncode == 0:
-            break
+        try:
+            if subprocess.run([tool, '-O', 'binary', '--only-section=__versions', ko, tmp],
+                              capture_output=True).returncode == 0:
+                break
+        except FileNotFoundError:
+            # an absent objcopy is "cannot compare" (69), not a CRC mismatch (1):
+            # the caller refuses the push on 1, and a traceback exits 1
+            continue
     else:
         cannot(f'could not extract __versions from {ko}')
     data = open(tmp, 'rb').read()

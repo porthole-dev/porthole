@@ -1637,6 +1637,7 @@ _ph_mod_abi_check() {
 		return 0
 	fi
 	[ $rc -eq 1 ] || return 0
+	echo ">> $out" >&2
 	echo ">> REFUSING: $name does not share an ABI with the copy it would"
 	echo ">> replace. Symbols they both import carry different MODVERSIONS"
 	echo ">> CRCs, so the running kernel would answer \`disagrees about"
