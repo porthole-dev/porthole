@@ -98,8 +98,8 @@ rule cost to learn, and how to follow it.
   (`state-what-you-verified` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
 - **Never publish anything on the sensitive list** — docs/HANDOFF-contribution-rules.md section 4.5; publication is irreversible and redaction is free
   (`no-secrets` · **MUST** · enforced by `tests/test_secrets.py`, `.githooks/commit-msg`, `.githooks/pre-push`)
-- **No attribution trailers on a commit message OR a pull request body** — they are injected by a harness default rather than typed by anyone; the history has been rewritten twice, and #51 and #52 then published the same lines in the body, a surface no check had ever read
-  (`no-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`)
+- **No attribution trailers on a commit message, a pull request body OR an issue body** — they are injected by a harness default rather than typed by anyone; the history has been rewritten twice, #51 and #52 then published the same lines in the body, and #54 published them in an issue -- each time on the one surface no check had yet read
+  (`no-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`, `.github/workflows/issue-trailers.yml`)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST** · enforced by `tests/test_brain.py::test_the_index_is_current`)
 - **Open the pull request after the work is done, not partway through** — a finding written mid-session is a draft: the a540 corruption note was reversed by its own next measurement, and a body filed early describes a conclusion that no longer holds
@@ -540,15 +540,20 @@ by `tests/test_tools.py`, not by review diligence.
   history has been rewritten twice over this: 35 AI trailers, 35 session URLs
   and 59 sign-offs the first time, then 49, 49 and 32 the second. Do not start
   a third.
-- **The ban covers the pull request body, not just the commit.** That
-  distinction cost the third escape. `.githooks/commit-msg` stripped
-  `Claude-Session:` out of #52's message exactly as designed, and the harness
-  put the same two lines in the body, where no hook and no test had ever
-  looked. A rule holds on the surfaces its enforcer reads.
-- One pattern list, `lib/porthole_trailers.py`, now serves both: the hook
-  strips a commit message with it, and the `trailers` job in CI fails a pull
-  request whose body or whose log matches it. `make trailers` is the same
-  check on a laptop.
+- **The ban covers every surface you publish text on** — the commit message,
+  the pull request body, and the issue body. Each one cost an escape of its
+  own. `.githooks/commit-msg` stripped `Claude-Session:` out of #52's message
+  exactly as designed and the harness put the same two lines in the body; the
+  CI check then held the body, and #54 was filed as an issue carrying them.
+  A rule holds on the surfaces its enforcer reads, and nowhere else.
+- One pattern list, `lib/porthole_trailers.py`, serves all three: the hook
+  strips a commit message with it, the `trailers` job in CI fails a pull
+  request whose body or whose log matches it, and the `issue trailers`
+  workflow strips an issue body and edits the issue. `make trailers` is the
+  commit-log half on a laptop.
+- An issue body is stripped rather than rejected, for the reason a commit
+  message is: the lines are a harness default, not an argument anyone is
+  having. A red run on an issue event appears nowhere anybody is looking.
 - Git ignores in-repo hooks until you point it at them: a fresh clone needs
   `git config core.hooksPath .githooks` once. `porthole brief` tells you when
   a clone has not. CI catches a trailer either way now, but only after you

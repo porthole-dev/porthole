@@ -101,6 +101,40 @@ def test_the_pull_request_templates_survive_stating_the_ban():
                           + "\n  ".join(f"{h[1]}: {h[3]!r}" for h in hits))
 
 
+def test_the_issue_body_surface_has_an_enforcer():
+    """#54 was filed carrying two of the lines above while the hook and the
+    pull request check both held. A rule holds on the surfaces its enforcer
+    reads, so the third surface gets a reader too -- and it edits the issue
+    rather than going red on an event nobody is subscribed to."""
+    flow = (ROOT / ".github/workflows/issue-trailers.yml").read_text()
+    assert "types: [opened, edited]" in flow, (
+        "without `edited` a body is checked once at open and a trailer pasted "
+        "in afterwards stays")
+    assert "issues: write" in flow, "the workflow cannot fix what it finds"
+    assert "make issue-trailers" in flow, (
+        "the workflow has grown its own copy of the steps")
+    assert "${{ github.event.issue.body }}" not in flow.split("run:")[-1], (
+        "the body must reach the shell through the environment, never through "
+        "the command line: it is attacker-controlled text")
+
+
+def test_scan_exits_nonzero_only_on_a_body_that_carries_one():
+    """The exit code the workflow branches on, both directions. Comparing the
+    stripped file against the original instead would edit forever: strip()
+    normalises line endings and GitHub hands out CRLF."""
+    import contextlib
+    import io
+    import tempfile
+    noise = contextlib.redirect_stderr(io.StringIO())   # the finding it prints
+    with tempfile.TemporaryDirectory() as d, noise:
+        clean = pathlib.Path(d, "clean.md")
+        clean.write_text("## What happened\r\n\r\nIt broke.\r\n")
+        assert T.main(["--scan", str(clean)]) == 0
+        dirty = pathlib.Path(d, "dirty.md")
+        dirty.write_text("It broke.\n\n" + OBSERVED[2] + "\n")
+        assert T.main(["--scan", str(dirty)]) == 1
+
+
 def test_no_commit_message_in_this_history_carries_one():
     """The standing claim. The history has been rewritten twice to make it
     true; this is what keeps it true without a third.

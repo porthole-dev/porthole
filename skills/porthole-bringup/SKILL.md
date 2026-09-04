@@ -230,7 +230,7 @@ patched. `brain/findings/the-workspace-caches-kernel-compiles.md`.
   (`prove-it-ran` · **SHOULD**)
 - **Write down anything that would have saved someone a session** — `porthole brain new <id>`, then lint, then submit. A session that learned something and wrote nothing down is unfinished
   (`contribute-what-you-learn` · **SHOULD**)
-- **No attribution trailers on a commit message OR a pull request body** — they are injected by a harness default rather than typed by anyone; the history has been rewritten twice, and #51 and #52 then published the same lines in the body, a surface no check had ever read
+- **No attribution trailers on a commit message, a pull request body OR an issue body** — they are injected by a harness default rather than typed by anyone; the history has been rewritten twice, #51 and #52 then published the same lines in the body, and #54 published them in an issue -- each time on the one surface no check had yet read
   (`no-trailers` · **MUST**)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST**)

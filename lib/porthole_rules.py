@@ -154,12 +154,15 @@ RULES = [
           ".githooks/commit-msg", ".githooks/pre-push"]),
 
     Rule("no-trailers", MUST,
-         "No attribution trailers on a commit message OR a pull request body",
+         "No attribution trailers on a commit message, a pull request body "
+         "OR an issue body",
          "they are injected by a harness default rather than typed by anyone; "
-         "the history has been rewritten twice, and #51 and #52 then published "
-         "the same lines in the body, a surface no check had ever read",
+         "the history has been rewritten twice, #51 and #52 then published the "
+         "same lines in the body, and #54 published them in an issue -- each "
+         "time on the one surface no check had yet read",
          [".githooks/commit-msg", "tests/test_trailers.py",
-          ".github/workflows/ci.yml"],
+          ".github/workflows/ci.yml",
+          ".github/workflows/issue-trailers.yml"],
          session=True),
 
     Rule("brain-index-current", MUST,

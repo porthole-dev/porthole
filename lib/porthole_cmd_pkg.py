@@ -77,12 +77,6 @@ _VAR = re.compile(r'\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?')
 # a full ninety-second webkit configure before anyone suspected the APKBUILD.
 _DEP_VARS = ("makedepends", "depends", "checkdepends")
 
-# `makedepends="$makedepends libjxl-dev"` -- an APPEND, which is the only form
-# a case/esac can use and the only form pmbootstrap's line-by-line parser
-# drops on the floor.
-_APPEND = re.compile(
-    r"^\s*(makedepends|depends|checkdepends)=[\"']?\$\1\s+([^\"'\n]*)", re.M)
-
 
 # The buildroot mutex lives in porthole_buildroot: `pmbootstrap checksum`
 # destroyed a kernel build on the redfin port, so a lock only this verb takes
@@ -280,25 +274,53 @@ def apkbuild_fields(text: str) -> dict:
     return out
 
 
+def _bodies(text: str, var: str):
+    """Every `var=` assignment body in the file, quotes resolved.
+
+    A dependency list is usually several quoted lines, so the body has to be
+    taken to its closing quote rather than to the end of the line -- and
+    `$makedepends` is normally the FIRST of those lines rather than the first
+    token after the `=`. That is the shape Alpine's mesa uses, and reading
+    only the `=` line saw none of the five packages it hides there.
+    """
+    for match in re.finditer(rf'(?m)^[ \t]*{re.escape(var)}=(.*)$', text):
+        rest = match.group(1)
+        if rest[:1] in ('"', "'"):
+            end = text.find(rest[0], match.start(1) + 1)
+            yield text[match.start(1) + 1:end] if end != -1 else rest
+        else:
+            yield rest.strip('"\'')
+
+
+def bare_dep(dep: str) -> str:
+    """`libclc-dev~22` -> `libclc-dev`. An Alpine version constraint.
+
+    Compared bare on both sides: an append that pins a version is still
+    installed by the plain name in the static list, and warning about that is
+    warning about correct code.
+    """
+    return re.split(r"[~=<>]", dep.lstrip("!"), maxsplit=1)[0]
+
+
 def static_deps(text: str, var: str) -> set:
     """Packages assigned to `var` OUTRIGHT -- the ones pmbootstrap can see.
 
     An append (`var="$var ..."`) is deliberately excluded: that is the form
     this whole check is about.
     """
-    found = set()
-    for match in re.finditer(rf"(?m)^\s*{re.escape(var)}=(.*)$", text):
-        rest = match.group(1)
-        if rest.startswith('"'):
-            # A dependency list is usually several quoted lines. Take the whole
-            # thing, or a multi-line makedepends reads as one token.
-            end = text.find('"', match.start(1) + 1)
-            body = text[match.start(1) + 1:end] if end != -1 else rest
-        else:
-            body = rest.strip('"\'')
-        if body.lstrip().startswith("$" + var):
-            continue
-        found.update(tok for tok in body.split() if not tok.startswith("$"))
+    return {bare_dep(tok)
+            for body in _bodies(text, var)
+            if not body.lstrip().startswith("$" + var)
+            for tok in body.split() if not tok.startswith("$")}
+
+
+def appended_deps(text: str, var: str) -> list:
+    """Packages appended to `var`, in file order. The invisible ones."""
+    found = []
+    for body in _bodies(text, var):
+        head = body.lstrip()
+        if head.startswith("$" + var):
+            found += head[len(var) + 1:].split()
     return found
 
 
@@ -314,11 +336,17 @@ def conditional_dep_warning(text: str) -> str:
     firing on that would be a warning about correct code, which is how a check
     teaches people to ignore it.
     """
+    assignments = {k: v.strip() for k, v in _ASSIGN.findall(text)}
     missing = []
-    for var, rest in _APPEND.findall(text):
+    for var in _DEP_VARS:
         visible = static_deps(text, var)
-        missing += [tok for tok in rest.split()
-                    if not tok.startswith("$") and tok not in visible]
+        for tok in appended_deps(text, var):
+            if tok.startswith("$"):
+                continue
+            # `clang$_llvmver-dev` names no package anyone can act on.
+            dep = expand_vars(tok, assignments)
+            if bare_dep(dep) not in visible:
+                missing.append(dep)
     if not missing:
         return ""
     return (f"{', '.join(sorted(set(missing)))} "
