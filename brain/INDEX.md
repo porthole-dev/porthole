@@ -44,6 +44,7 @@ generic notes as well.
 | [nothing-polls-an-idle-link-on-ath10k](findings/nothing-polls-an-idle-link-on-ath10k.md) | `generic` | ath10k turns off mac80211's idle connection polling, then disables the firmware keepalive too |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 | [panel-corruption-was-gpu-reset-wreckage-not-tearing](findings/panel-corruption-was-gpu-reset-wreckage-not-tearing.md) | `device:google-taimen` | The panel corruption and degraded phosh were one GPU reset's wreckage -- not display tearing, and not the rd_ptr patch |
+| [phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it](findings/phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it.md) | `device:google-taimen` | A GPU reset aborts phosh, not phoc -- the session restarts and looks like a reboot |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
@@ -53,6 +54,7 @@ generic notes as well.
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-browser-stutter-is-a-blocked-webkit-main-thread](findings/the-browser-stutter-is-a-blocked-webkit-main-thread.md) | `generic` | The browser stutter is a blocked WebKit main thread, not the display stack |
+| [the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized](findings/the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized.md) | `device:google-taimen` | Epiphany's frame period is CPU paint PLUS the GPU tail, serialized -- frameDone to next frame start is 0.1 ms |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
 | [the-missing-eapol-is-ath10ks-rx-confused-latch](findings/the-missing-eapol-is-ath10ks-rx-confused-latch.md) | `device:google-taimen` | The missing 4-way handshake is ath10k's rx_confused latch: one split A-MSDU disables data RX for the life of the firmware |
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
@@ -203,7 +205,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 36
+- `device:google-taimen` — 38
 - `generic` — 100
 - `soc:gs201` — 1
 - `soc:msm8998` — 28
