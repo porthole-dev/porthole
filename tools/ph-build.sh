@@ -1480,8 +1480,12 @@ tkpush-modules() {
 	# tkflash-boot patches them into the export; see the comment there.
 	ssh "${TK_SSH_OPTS[@]}" "$phone" 'cat /proc/cmdline' 2>/dev/null | tr ' ' '\n' |
 		grep -E '^pmos_(boot|root)_uuid=' > "$_PH_REPO/.device-uuids"
-	[ -s "$_PH_REPO/.device-uuids" ] &&
+	# A cmdline without pmos_*_uuid= (taimen boots by partition, not UUID) leaves
+	# the file empty; that is the flash step's warning, not this step's failure.
+	if [ -s "$_PH_REPO/.device-uuids" ]; then
 		echo ">> recorded device UUIDs: $(tr '\n' ' ' < "$_PH_REPO/.device-uuids")"
+	fi
+	return 0
 }
 
 # FAST loop for driver-only changes: build the module, push it, reload it.
