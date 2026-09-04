@@ -1,0 +1,26 @@
+# a540 blob (libGLESv2_adreno.so) PKT4 register writes absent from mesa fd5 (26.1.6) and kernel a5xx_hw_init/power/preempt
+# Ranked by relevance to RB/UCHE/VSC stalls in mesa workloads. fn = nm function start (MiniDebugInfo), site = blob emit site.
+# Method: mov/movk immediate reconstruction of CP_TYPE4 headers (reg parity bit validated) over llvm-objdump text; see scan_blob.py.
+#
+# rank reg    name (mesa)                     fn       when            assessment
+  1   e006   GRAS_CL_GUARDBAND_CLIP_ADJ      2f82f8   per viewport    only non-feature-gated named reg mesa never writes on a5xx (fd6/tu do). value computed from viewport (loaded [x22]); HW reset default unknown. Rasterizer/clip robustness, not RB/UCHE.
+  2   e789   (unnamed; HLSQ_CONTROL_4+1)     23a230   per program     program-state emitter (44 callers, 30 headers). value from stack slot (computed). candidate name HLSQ_CONTROL_5_REG. Emitted alongside HLSQ_xS_CONFIG for all 6 stages -> may be GS/tess related.
+  3   e5f2   UNKNOWN_E5F2 (+SP_CS_OBJ_START) 31f4f0   per CS program  CS analog of UNKNOWN_E5AB/E5C2 (which mesa writes for VS/FS in fd5_program.c). fd5_compute.c does not write it. Compute-only.
+  4   e2a5/6 (unnamed; VPC_SO_PROG+1, 64-bit) 2f4500,321a10,3224f0 per XFB   GPU address (hi masked 17 bits) followed by rodata packet 70460001 00000009 (CP_EVENT_WRITE ev 9). a6xx VPC_SO_STREAM_COUNTS analog. Transform-feedback only.
+  5   e591,e5c1,e5f1,e601,e611,e641  (SP_xS_CTRL_REG0+1, 6 stages) 320730 per program  bitmask of 1<<cond_id built from a compare list -> a6xx SP_xS_BRANCH_COND analog (blob compiler feature). Not a workaround.
+  6   e002,e003 (GRAS_CL, DS/GS)     3185f8,3141d0  per program  GRAS_{DS,GS}_CL_CNTL analogs of GRAS_VS_CL_CNTL(e001). Tess/GS only - mesa a5xx has no GS/tess.
+  7   e29b,e29c,e29e,e29f (VPC, DS/GS) 3185f8,3141d0 per program  VPC_{GS,DS} pack/clip. Tess/GS only.
+  8   e386,e387,e38a,e38b (PC, DS/GS)  3185f8,3141d0 per program  PC_{GS,DS} params. Tess/GS only.
+  9   e602/e62b/e65b (+OBJ_START, HS/DS/GS) 318068,3185f8,3141d0 per program  HS/DS/GS shader object base. Tess/GS only.
+ 10   e605..e608,e62e..e631,e65e..e661 SP_{HS,DS,GS}_PVT_MEM_*  2f7690,2f77c8 per program/bind  blob sets private-mem for all 5 stages at once (cnt 4 each); mesa sets VS/FS/CS via fd5_emit_shader_obj. Tess/GS only.
+ 11   e762/e763 (TPL1, 64-bit)         30d5f0   per draw (tex)  pointer written instead of e706/e707 (TPL1_TP_BORDER_COLOR_BASE_ADDR) when a flag is set. Likely per-stage border-color table. Low.
+ 12   e722..e731,e75a..e761 TPL1_{VS,HS,DS,GS,FS,CS}_TEX_SAMP/TEX_CONST  30d5f0,30eb38 per draw  blob binds sampler/texture tables by pointer; mesa uses CP_LOAD_STATE4 direct. Different mechanism, not a workaround.
+ 13   0d08/0d09 PC_TESSFACTOR_ADDR      2f4160   per tess draw   Tess only.
+ 14   2140..2145 RB_2D_SRC/DST_FLAGS    238370,238580,23c2d0 per 2D blit  UBWC flag buffers for 2D blits; mesa a5xx has no UBWC.
+ 15   0004..0024,003f..0049 RBBM_CFG_DBGBUS_*  f92e8  debug tool   debug-bus/snapshot register dump path; not rendering.
+ 16   30d8..3112 VBIF_PERF_*            d42b8    perf counters   perf-counter code (with 6b01/45d0/30d4 FP headers in same fn).
+#
+# NOT candidates (verified): every RB_*, UCHE_*, VSC_*, GRAS_SC_*, RB_RESOLVE_*, HLSQ_CONTROL_0..4, SP_SP_CNTL, VPC_CNTL_0, PC_*, VFD_CONTROL_*
+# header the blob emits from userspace is also written by mesa fd5. No DBG_ECO / MODE_CNTL / TIMEOUT / CACHE / GMEM-named register appears
+# in the diff; the blob's userspace never programs RBBM/UCHE/CP/VBIF config from the command stream (only UCHE_CACHE_INVALIDATE_MIN..+5, which mesa also does).
+# Data-section (.rodata/.data) header hits are all ASCII/float false positives after name+parity filtering; none survive.
