@@ -34,6 +34,7 @@ generic notes as well.
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
+| [gstreamer-copies-every-venus-frame-when-the-sink-lacks-video-meta](findings/gstreamer-copies-every-venus-frame-when-the-sink-lacks-video-meta.md) | `device:google-taimen` | GStreamer's V4L2 pool copies every venus frame when the sink offers no video meta: 12 fps at 4K, 82 fps otherwise |
 | [hardware-decode-works-in-webkit-the-ceiling-is-webkits-process-count](findings/hardware-decode-works-in-webkit-the-ceiling-is-webkits-process-count.md) | `device:google-taimen` | Hardware decode does work in Epiphany -- the residual ceiling is WebKit's ~7 processes per tab, not the decoder and not GEM runaway |
 | [holding-vdd-mx-does-not-stop-the-wake-crash](findings/holding-vdd-mx-does-not-stop-the-wake-crash.md) | `soc:msm8998` | Holding VDD_MX does not stop the display-wake crash -- neither enabled nor at TURBO |
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
@@ -45,6 +46,7 @@ generic notes as well.
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
+| [the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not](findings/the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not.md) | `soc:msm8998` | The a540 userspace blob writes no a5xx register that mesa fd5 and the kernel do not already write |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
@@ -152,6 +154,7 @@ generic notes as well.
 | [the-bootloader-reboot-can-drop-the-phone-off-usb-entirely](traps/the-bootloader-reboot-can-drop-the-phone-off-usb-entirely.md) | `device:google-taimen` | The bootloader reboot can drop the phone off USB entirely |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
 | [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
+| [the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series](traps/the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series.md) | `device:google-taimen` | The taimen-v7.2 tree was ten venus patches behind its own aport series, and a venus_core built from it wedges the SoC |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
@@ -195,8 +198,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 31
+- `device:google-taimen` — 33
 - `generic` — 99
 - `soc:gs201` — 1
-- `soc:msm8998` — 26
+- `soc:msm8998` — 27
 - `soc:qcom` — 1
