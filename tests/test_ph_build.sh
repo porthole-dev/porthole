@@ -615,5 +615,46 @@ out=$(measure 0)
 is "a clean make still succeeds"        "${out%% *}" "0"
 is "and the stamp is recorded"          "$(saw "$out" STAMPED)" "yes"
 
+# ------------------------------------------- resuming an interrupted rung ----
+#
+# #59: tkflash-boot asked taimen for the bootloader and the phone left the USB
+# bus entirely -- nothing enumerated for ten minutes until a cable replug. The
+# rung had already pushed 271 modules; re-running it refused at tkpush-modules,
+# which needs BOOTED, for work that was already done. There was no flash-only
+# path, so the run was finished by hand.
+#
+# The escape is deliberately narrow, and these four cases are the whole of it:
+# FASTBOOT, plus a record that matches the chroot's set byte for byte.
+#
+# No device is touched. ssh and scp are stubbed to fail, so a return of 0 can
+# only have come from the resume branch -- if the push were attempted it would
+# return 1, which is the positive control the last two cases below rely on.
+push() { # push <STATE> <match|stale|none> -> tkpush-modules's return code
+    rm -rf "$TMP/push"; mkdir -p "$TMP/push/run"
+    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+        PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" \
+        PORTHOLE_KERNEL_TREE="$TMP/tree" PORTHOLE_PMB_DIR="$TMP/push/pmb" \
+        PORTHOLE_RUNDIR="$TMP/push/run" TK_DEVICE_STATE="$1" WANT="$2" \
+        bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+                 src="$PORTHOLE_PMB_DIR/chroot_rootfs_$PORTHOLE_CODENAME/lib/modules"
+                 mkdir -p "$src/9.9.9"; echo bytes > "$src/9.9.9/fake.ko"
+                 case $WANT in
+                   match) _ph_modules_id "$src" 9.9.9 > "$(_ph_modules_record)" ;;
+                   stale) echo "9.9.9 notthisone" > "$(_ph_modules_record)" ;;
+                 esac
+                 ssh() { return 1; }
+                 scp() { return 1; }
+                 tkpush-modules >/dev/null 2>&1; echo $?'
+}
+is "FASTBOOT with this exact set recorded resumes"  "$(push FASTBOOT match)" "0"
+is "a record of a DIFFERENT set still needs BOOTED" "$(push FASTBOOT stale)" "76"
+is "no record at all still needs BOOTED"            "$(push FASTBOOT none)"  "76"
+# The escape is FASTBOOT-only: from ABSENT there is nothing to flash either.
+is "ABSENT is not resumable however good the record" "$(push ABSENT match)" "76"
+# THE POSITIVE CONTROL. A tkpush-modules that returned 0 unconditionally would
+# satisfy the first assertion; a BOOTED device must still reach the push and
+# fail on the stubbed scp.
+is "BOOTED still pushes, and the stubs fail it"      "$(push BOOTED match)"  "1"
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
