@@ -612,6 +612,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `slots` | read A/B slot policy from the device, never guess it | yes | no |
 | `statusline` | render the build bar for an agent's status line, or install it | yes | no |
 | `matrix` | what works on this device, tested separately from what exists | yes | no |
+| `permissions` | grant an agent the commands a bring-up runs all day | yes | no |
 | `doctor` | check the host, the profile and the device; name every fix | yes | no |
 | `pkg` | find, fork and build a userspace aport, with a real progress bar | yes | needs --yes |
 | `sandbox` | run pmbootstrap without handing the host to an agent | yes | no |

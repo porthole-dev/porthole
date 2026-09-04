@@ -16,8 +16,14 @@ from __future__ import annotations
 # A SECOND opinion, not the first: `safe` is a human judgement recorded in the
 # milestone table, and a table can be edited in a hurry. If either the table or
 # this list says stop, we stop.
+# "ramp" and "recover" were added when `porthole permissions` started deriving
+# an agent's allowlist from this tuple and found tk-thermal-ramp.sh and
+# tk-recover.sh on the safe side of it. Both are named by hand in AGENTS.md
+# section 1 (`confirm-before-irreversible` lists thermal ramps outright), so
+# the omission was in this list rather than in that rule. "ramp" rather than
+# "thermal", so that READING a thermal zone stays a read.
 DANGEROUS = ("flash", "set_active", "erase", "format", "dd ", "mkfs",
-             "reboot", "fastboot", "install", "zap", "rm ")
+             "reboot", "fastboot", "install", "zap", "rm ", "ramp", "recover")
 
 # Form fields whose value names a slot or a partition. A generated form makes
 # an irreversible command easier to assemble than a bare verb ever was, so
