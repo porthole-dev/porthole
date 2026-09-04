@@ -460,6 +460,111 @@ def test_the_build_path_never_invokes_ssh_without_the_shared_options():
         "these invoke ssh/scp without TK_SSH_OPTS, so they offer no device "
         "key:\n  " + "\n  ".join(offenders))
 
+# A `&&` chain whose head is a TEST: `[ -s f ] && echo`. `grep -q x && warn` is
+# the same shape, and so is `command -v foo && use-it`.
+_GUARD_HEAD = re.compile(r"^(\[\[?\s|test\s|grep\s|command\s+-v\s|pgrep\s)")
+# A tail that is itself a test makes the function a PREDICATE, which is correct
+# code -- _ph_defconfig_current is four tests joined by `&&` and its status is
+# the answer. `return`/`exit` say the status out loud. Everything else is a
+# side effect standing where the return value should be.
+_DELIBERATE_TAIL = re.compile(r"^(return|exit|:)\b")
+
+
+def _last_statement(lines, close):
+    """The last statement of the function that ends at `lines[close]`.
+
+    Walks back over blanks and comments to the final line, then keeps going
+    while the line before it ends in a continuation -- `&&`, `||`, `|` or a
+    backslash. Without that, the guard and its body look like two statements
+    and the one that matters is invisible: the bug this test was written for
+    is written across two lines, with the `&&` at the end of the first."""
+    j = close - 1
+    while j >= 0 and (not lines[j].strip() or lines[j].lstrip().startswith("#")):
+        j -= 1
+    if j < 0:
+        return ""
+    start = j
+    while start > 0 and re.search(r"(&&|\|\||\||\\)\s*$", lines[start - 1]):
+        start -= 1
+    return " ".join(line.strip() for line in lines[start:j + 1])
+
+
+def test_no_shell_function_ends_in_a_test_that_guards_a_side_effect():
+    """Issue #58: a function's exit status is its last command's.
+
+    `tkpush-modules` ended with
+
+        [ -s "$_PH_REPO/.device-uuids" ] &&
+            echo ">> recorded device UUIDs: ..."
+
+    and on taimen -- which boots by partition, so its cmdline carries no
+    `pmos_*_uuid=` -- that file is empty. The test is false, the echo never
+    runs, and the FUNCTION returns 1. The `fast` rung then aborted after
+    pushing 271 modules and before flashing, twice on 2026-09-04, over a line
+    whose absence the flash step already handles with a warning.
+
+    Nothing about the push failed. The last line was a report.
+
+    Not shellcheck's job: SC2015 is about `a && b || c` precedence, and says
+    nothing about where in a function the construct sits. This is the position
+    that makes it a bug.
+
+    Write the intent instead -- an `if`, or an explicit `return 0`."""
+    bad = []
+    for path in tools() + [ROOT / "lib" / "porthole.sh"]:
+        if path.suffix != ".sh":
+            continue
+        lines = path.read_text(errors="replace").splitlines()
+        for i, line in enumerate(lines):
+            if line.rstrip() != "}":          # a function close, at column 0
+                continue
+            statement = _last_statement(lines, i)
+            if "&&" not in statement or "||" in statement:
+                continue
+            if not _GUARD_HEAD.match(statement):
+                continue
+            tail = statement.rsplit("&&", 1)[1].strip()
+            if _GUARD_HEAD.match(tail) or _DELIBERATE_TAIL.match(tail):
+                continue
+            bad.append(f"{path.name}:{i + 1}: {statement[:90]}")
+    assert not bad, (
+        "a function whose last statement is a guarded side effect returns the "
+        "GUARD, so a false test fails the function:\n  " + "\n  ".join(bad))
+
+
+def test_a_missing_objcopy_is_cannot_compare_not_a_crc_mismatch():
+    """Issue #57: exit codes are an API, and 1 is an ANSWER.
+
+    tk-modcrc.py gates `porthole build mod`: 1 means "these two modules
+    disagree" and the rung refuses the push on it. Inside the workspace there
+    is no llvm-objcopy on PATH, `subprocess.run` raised FileNotFoundError, and
+    a traceback exits 1 -- so every venus_core push for a week was refused
+    with a message about CONFIG skew, against a module whose CRCs matched.
+
+    69 is the code for "cannot compare", and the rung treats it as not-a-
+    refusal (tests/test_ph_build.sh covers that half). This is the half that
+    has to produce it. PATH is emptied rather than mocked because the tool
+    finding a stray objcopy is the whole failure mode.
+
+    stderr is the positive control: it proves the run reached the `for/else`
+    over the objcopy candidates, rather than exiting 69 somewhere earlier."""
+    with tempfile.TemporaryDirectory() as d:
+        ko = pathlib.Path(d, "empty.ko")
+        ko.write_bytes(b"")
+        nowhere = pathlib.Path(d, "bin")
+        nowhere.mkdir()
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "tk-modcrc.py"),
+             str(ko), str(ko)],
+            capture_output=True, text=True, timeout=60,
+            env=dict(os.environ, PATH=str(nowhere)))
+    assert proc.returncode == 69, (
+        f"no objcopy on PATH exited {proc.returncode}; 1 would tell the mod "
+        f"rung the CRCs disagree\n{proc.stderr.strip()}")
+    assert "could not extract __versions" in proc.stderr, (
+        "it exited 69 without reaching the objcopy candidates -- this test is "
+        f"no longer measuring what it says\n{proc.stderr.strip()}")
+
 
 if __name__ == "__main__":
     sys.exit(main())
