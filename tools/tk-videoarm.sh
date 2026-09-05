@@ -47,7 +47,7 @@ EOF
 for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do
 	systemctl --user stop "$u"
 done
-sleep 2
+sleep 2  # contract: sleep-ok systemctl stop already blocks on the cgroup, but phoc's own client teardown (releasing the surface/registration) has no state exposed over ssh to poll for
 rm -f ~/.local/share/epiphany/session_state.xml "/tmp/wlv-$L.log"
 
 setsid systemd-run --user --scope --quiet --slice=app.slice \
@@ -67,7 +67,7 @@ t1=""; for i in $(seq 1 30); do
 	t1=$(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v?v.currentTime:-1' 2>/dev/null | tail -1)
 	case "$t1" in ''|-1|*[!0-9.]*) ;; *) [ "${t1%%.*}" -ge 1 ] 2>/dev/null && break ;; esac
 done
-sleep 3
+sleep 3  # contract: sleep-ok this IS the measurement window, not a wait for an event -- the check below needs currentTime to have had a known ~3s to advance in, and polling away the wait would poll away the thing being measured
 t2=$(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v?v.currentTime:-1' 2>/dev/null | tail -1)
 echo "[$L] $(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); JSON.stringify({w:v.videoWidth,h:v.videoHeight,paused:v.paused})' 2>/dev/null | tail -1)  t $t1 -> $t2"
 python3 - "${t1:-0}" "${t2:-0}" <<'PY' || exit 1

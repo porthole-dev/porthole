@@ -39,7 +39,7 @@ EV=/tmp/tk-webeval.py
 for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do
 	systemctl --user stop "$u"
 done
-sleep 2
+sleep 2  # contract: sleep-ok systemctl stop already blocks on the cgroup, but phoc's own client teardown (releasing the surface/registration) has no state exposed over ssh to poll for
 rm -f ~/.local/share/epiphany/session_state.xml "/tmp/wl-$L.log"
 
 # WAYLAND_DEBUG gives the app's OWN commit intervals; the DPU counter is phoc's
@@ -74,8 +74,14 @@ echo "[$L] $(python3 $EV 'document.title' 2>/dev/null | cut -c1-46) scrollHeight
 [ -n "${TK_SCROLL_HOOK:-}" ] && { echo "[$L] hook: $TK_SCROLL_HOOK"; sh -c "$TK_SCROLL_HOOK"; }
 
 python3 $EV 'window.scrollTo(0,0); "top"' >/dev/null 2>&1
-sleep 1
-Y0=$(python3 $EV 'window.scrollY' 2>/dev/null)
+# Poll the readback instead of guessing how long the commit takes to reach
+# the inspector -- same idea as the scrollHeight poll above.
+Y0=
+for _ in $(seq 1 5); do
+	Y0=$(python3 $EV 'window.scrollY' 2>/dev/null)
+	[ "$Y0" = 0 ] && break
+	sleep 1
+done
 
 # Drag finger up = content scrolls down. From the top there is always room.
 (sleep 1; python3 /tmp/threadcpu.py 8 > "/tmp/tc-$L.txt" 2>&1) &

@@ -3,7 +3,7 @@
 # scope: generic
 # needs: BOOTED (edits greetd's config on the device, over ssh)
 # env: PORTHOLE_USER (the account to auto-login), TK_DEVICE_* as usual
-# exits: 0 ok · 64 usage · 65 no greetd config found
+# exits: 0 ok · 64 usage · 69 no greetd config found (the tool could not run)
 #
 # Enable or disable greetd auto-login, which is the ONLY reliable way to get an
 # UNLOCKED graphical session on phosh without a human.
@@ -34,12 +34,12 @@ source tools/tk-lib.sh
 
 CFG=/etc/phrog/greetd-config.toml
 BAK=$CFG.pre-autologin
-USER_NAME=${PORTHOLE_USER:-jert}
+USER_NAME=$PORTHOLE_USER  # tk-lib.sh already defaults this to "user"
 
 usage() { echo "usage: tools/tk-autologin.sh status|enable|disable" >&2; exit 64; }
 [ $# -eq 1 ] || usage
 
-tk_run "test -f $CFG" || { echo "no greetd config at $CFG" >&2; exit 65; }
+tk_run "test -f $CFG" || { echo "no greetd config at $CFG" >&2; exit 69; }
 
 case "$1" in
 status)
