@@ -995,6 +995,8 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
                doc="sudo visudo    # remove the Defaults line; the workspace "
                    "has no sudoers entry and needs none")
 
+    _check_gadget_steals_default_route(ch, ctx)
+
     binfmt = pathlib.Path("/proc/sys/fs/binfmt_misc/qemu-aarch64")
     if binfmt.exists():
         ch.add("host: binfmt aarch64", "ok", "registered")
@@ -1002,6 +1004,89 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
         ch.add("host: binfmt aarch64", "warn",
                "not registered -- cross-arch package builds need it",
                doc="install qemu-user-static (host-global, needs root once)")
+
+
+def _gadget_nm_profile(host: str):
+    """(profile-uuid, name, unsafe-settings) for the NM connection that carries
+    the USB gadget link, or None when NetworkManager is not in charge of it.
+
+    Matched by which connection owns the route to the device's own subnet, not
+    by interface name: udev names the gadget from the USB path, so it is
+    `enp5s0f3u2` on one machine and `enp0s20f0u4` on the next, and hardcoding
+    either would be a check that works on exactly one desk.
+    """
+    try:
+        route = subprocess.run(["ip", "-o", "route", "get", host],
+                               capture_output=True, text=True, timeout=5)
+        m = re.search(r"\bdev\s+(\S+)", route.stdout)
+        if not m:
+            return None
+        iface = m.group(1)
+        out = subprocess.run(
+            ["nmcli", "-t", "-f", "GENERAL.CONNECTION,GENERAL.CON-UUID",
+             "device", "show", iface], capture_output=True, text=True, timeout=5)
+        if out.returncode:
+            return None
+        fields = dict(line.split(":", 1) for line in out.stdout.splitlines()
+                      if ":" in line)
+        uuid = fields.get("GENERAL.CON-UUID", "").strip()
+        name = fields.get("GENERAL.CONNECTION", "").strip()
+        if not uuid or uuid == "--":
+            return None
+        show = subprocess.run(["nmcli", "-t", "connection", "show", uuid],
+                              capture_output=True, text=True, timeout=5)
+        settings = dict(line.split(":", 1) for line in show.stdout.splitlines()
+                        if ":" in line)
+        unsafe = [k for k in ("ipv4.never-default", "ipv6.never-default")
+                  if settings.get(k, "").strip() == "no"]
+        unsafe += [k for k in ("ipv4.ignore-auto-dns", "ipv6.ignore-auto-dns")
+                   if settings.get(k, "").strip() == "no"]
+        return uuid, name, unsafe
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def _check_gadget_steals_default_route(ch: Checks, ctx) -> None:
+    """The phone must not be allowed to become the host's default route or DNS.
+
+    The USB gadget is a DHCP server. NetworkManager's default for a fresh wired
+    profile is to accept everything it offers -- including a default route and
+    nameservers -- so plugging the phone in silently reroutes the HOST's
+    traffic into a device that has no upstream. The failure does not look like
+    networking: web pages stop loading, `git push` hangs, and the agent in the
+    terminal keeps working because its own traffic is on the link that still
+    works. Reported by a user mid-session as "you set up an ethernet to the
+    device that kept disconnecting my host".
+
+    A warning, not a failure: some setups genuinely do route through the phone,
+    and doctor must not fail a host over a deliberate choice. But the default
+    is wrong for a bring-up and nothing else says so.
+    """
+    host = (ctx.cfg.get("PORTHOLE_HOST") or "").strip()
+    if not host:
+        return
+    found = _gadget_nm_profile(host)
+    if found is None:
+        ch.add("host: device link", "ok",
+               "not a NetworkManager profile -- nothing here can hijack the "
+               "host's route")
+        return
+    uuid, name, unsafe = found
+    if not unsafe:
+        ch.add("host: device link", "ok",
+               f"{name} cannot take the host's default route or DNS")
+        return
+    ch.add("host: device link", "warn",
+           f"{name} may take the host's default route or DNS "
+           f"({', '.join(unsafe)}) -- the phone is a DHCP server with no "
+           f"upstream, so the host loses internet whenever it is plugged in",
+           fix="nmcli connection modify " + uuid +
+               " ipv4.never-default yes ipv6.never-default yes"
+               " ipv4.ignore-auto-dns yes ipv6.ignore-auto-dns yes"
+               " ipv4.route-metric 4000 ipv6.route-metric 4000"
+               "    # then `nmcli connection up " + uuid + "`."
+               " Keeps ssh to the device working; only the default route and"
+               " the nameservers stop being the phone's to give")
 
 
 def cmd_doctor(args, ctx) -> int:
