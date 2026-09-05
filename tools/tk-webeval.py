@@ -45,8 +45,15 @@ def open_target(sock):
         if r.get("method") == "Target.targetCreated": page = r["params"]["targetInfo"]["targetId"]
     return s, page
 
+# Anything gated on a user gesture -- requestFullscreen(), unmuted play() --
+# is refused from a plain inspector eval, and the refusal looks exactly like the
+# call not working. TK_GESTURE=1 marks the evaluation as user-initiated, which
+# is how the fullscreen video path can be measured without synthesising a tap on
+# a button whose position depends on the page.
+GESTURE = os.environ.get("TK_GESTURE", "") not in ("", "0")
+
 def run(s, page, expression, msg_id):
-    inner = json.dumps({"id": msg_id, "method": "Runtime.evaluate", "params": {"expression": expression, "returnByValue": True}})
+    inner = json.dumps({"id": msg_id, "method": "Runtime.evaluate", "params": {"expression": expression, "returnByValue": True, "emulateUserGesture": GESTURE}})
     vq.ws_send(s, json.dumps({"id": 1000 + msg_id, "method": "Target.sendMessageToTarget", "params": {"targetId": page, "message": inner}}))
     while True:
         r = json.loads(vq.ws_recv(s))
