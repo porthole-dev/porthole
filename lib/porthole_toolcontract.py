@@ -136,4 +136,46 @@ def check_fixed_timeout(name, text):
     return out
 
 
-CHECKS = (check_exit_codes, check_pkill_pattern, check_fixed_timeout)
+_SLEEP = re.compile(r"^\s*sleep\s+(\d+)")
+# A loop opener on any of the preceding lines of the same block means the
+# sleep is the poll interval, not a wait. Deliberately crude: the alternative
+# is parsing shell, and the cost of the crude version is a missed finding
+# rather than a false one.
+_LOOP = re.compile(r"^\s*(while|until|for)\b")
+_LOOP_WINDOW = 6
+
+
+def check_bare_sleep(name, text):
+    """brain/laws/poll-never-sleep.md: a fixed wait is wrong in both
+    directions -- it wastes the time the thing did not need and calls a
+    failure when it needed more.
+
+    A WARNING, NOT AN ERROR, and exemptible. The law is about waiting for an
+    event you could have polled for; a hardware settling delay is not that,
+    and thirty tools contain one. An error here would be a gate that gets
+    deleted rather than satisfied.
+    """
+    lines = text.splitlines()
+    out = []
+    for i, line in enumerate(lines):
+        m = _SLEEP.match(line)
+        if not m:
+            continue
+        if any(_LOOP.match(prev)
+               for prev in lines[max(0, i - _LOOP_WINDOW):i]):
+            continue
+        reason = _exempted(line, "sleep-ok")
+        if reason is None:
+            out.append(Finding(
+                "bare-sleep", "warn",
+                "a fixed wait is wrong in both directions; poll for the "
+                "condition (brain/laws/poll-never-sleep.md)"))
+        elif not reason:
+            out.append(Finding(
+                "bare-sleep", "warn",
+                "`# contract: sleep-ok` must carry a reason"))
+    return out
+
+
+CHECKS = (check_exit_codes, check_pkill_pattern, check_fixed_timeout,
+          check_bare_sleep)

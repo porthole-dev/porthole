@@ -121,5 +121,32 @@ def test_a_timeout_exemption_with_a_reason_suppresses_the_finding():
     assert tc.check_fixed_timeout("ph-thing.sh", text) == []
 
 
+def test_a_bare_sleep_is_a_warning():
+    text = "#!/bin/bash\nreboot_it\nsleep 60\ncheck_it\n"
+    found = tc.check_bare_sleep("ph-thing.sh", text)
+    assert len(found) == 1 and found[0].severity == "warn"
+
+
+def test_settling_hardware_is_a_legitimate_reason():
+    """poll-never-sleep.md is about waiting for an EVENT you could poll for.
+    A hardware settling delay is not that, and thirty tools contain one, so
+    this must be a warning with an exemption rather than an error."""
+    text = "#!/bin/bash\nsleep 2  # contract: sleep-ok i2c settling, nothing to poll\n"
+    assert tc.check_bare_sleep("ph-thing.sh", text) == []
+
+
+def test_a_short_sleep_inside_a_poll_loop_is_not_flagged():
+    """`while ...; do ...; sleep 1; done` IS polling. Flagging it would push
+    people toward busy loops, which is worse."""
+    text = "#!/bin/bash\nwhile ! ready; do\n    sleep 1\ndone\n"
+    assert tc.check_bare_sleep("ph-thing.sh", text) == []
+
+
+def test_the_sleep_exemption_must_carry_a_reason():
+    text = "#!/bin/bash\nsleep 30  # contract: sleep-ok\n"
+    found = tc.check_bare_sleep("ph-thing.sh", text)
+    assert len(found) == 1 and "reason" in found[0].detail
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
