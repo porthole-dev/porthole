@@ -18,6 +18,11 @@ systemd/phosh device, with the two hints that measured on taimen 2026-09-01
   LAUNCH       when an app-*.{scope,slice} cgroup appears in the session's
                app.slice (how systemd represents "an app was launched"): pin
                the clusters high for the launch window.
+  TOP_APP      per-task uclamp_min on the threads of the apps in app.slice, so
+               the scheduler places them on the big cluster. Android's top-app
+               cpuset/uclamp, the one hint that moves PLACEMENT rather than
+               frequency. OFF unless the unit passes a value: it measured null
+               on scroll, see clamp_app_threads() for the numbers.
 
 Hints are sysfs assignments given on the command line, so no device policy
 lives in the tool; the unit file carries the numbers:
@@ -25,6 +30,7 @@ lives in the tool; the unit file carries the numbers:
   powerhintd [--latency-us 44] \
       [--interaction-hold 3] --interaction PATH=VALUE [--interaction ...] \
       [--launch-hold 5]      --launch PATH=VALUE      [--launch ...] \
+      [--top-app-uclamp-min 512] \
       [--app-slice /sys/fs/cgroup/.../app.slice]
 
 While any hint is active the daemon owns the target files: it saves their
@@ -51,6 +57,91 @@ ABS_MT_POSITION_X = 0x35
 EVENT_SIZE = struct.calcsize("llHHi")
 IN_CREATE = 0x100
 IN_IGNORED = 0x8000
+
+
+# TOP_APP. sched_setattr(2) has no libc wrapper, so it goes through syscall(2);
+# 274 is the arm64 native number. SCHED_FLAG_KEEP_ALL leaves policy, nice and
+# priority untouched, and raising util_min alone needs no CAP_SYS_NICE -- only
+# check_same_owner(), which holds because this daemon runs as root.
+SYS_sched_setattr = 274
+SCHED_FLAG_KEEP_ALL = 0x08 | 0x10          # KEEP_POLICY | KEEP_PARAMS
+SCHED_FLAG_UTIL_CLAMP_MIN = 0x20
+
+
+class sched_attr(ctypes.Structure):
+    _fields_ = [("size", ctypes.c_uint32), ("sched_policy", ctypes.c_uint32),
+                ("sched_flags", ctypes.c_uint64), ("sched_nice", ctypes.c_int32),
+                ("sched_priority", ctypes.c_uint32), ("sched_runtime", ctypes.c_uint64),
+                ("sched_deadline", ctypes.c_uint64), ("sched_period", ctypes.c_uint64),
+                ("sched_util_min", ctypes.c_uint32), ("sched_util_max", ctypes.c_uint32)]
+
+
+def clamp_app_threads(libc, app_slice, util_min):
+    """uclamp_min every thread of every app cgroup. Returns the count set.
+
+    WHY THIS HINT EXISTS: it is the one Android lever this daemon was missing.
+    INTERACTION and LAUNCH both move frequency; top-app moves PLACEMENT.
+
+    WHAT IT IS WORTH: unknown, and measured null so far. On taimen 2026-09-05,
+    tk-scrollarm.sh, jank frames >33 ms in a 10 s drag of a 79000px document:
+
+        eleven control arms, five sweeps   32 36 37 38 38 39 41 42 43 43 44 46
+                                           -> mean 40.1, sd 4.1
+        TOP_APP 512, browser only (4 arms) 39 34 36 42   vs off 37 36 38 43
+        uclamp 512 phoc+phosh only (2)     40 38
+        uclamp 512 browser only (2)        40 39
+        both clusters pinned MAX freq (2)  40 46
+        uclamp 1024 on everything (2)      47 48
+
+    Nothing clears the noise. That sd puts a single arm's 95% interval at +/-8
+    jank and a two-arm mean at +/-5.7, so two arms a side resolve only a ~30%
+    change. An earlier two-arm reading of this same hint looked like a clean
+    -20% and did not survive four arms and an end-to-end test through this
+    daemon -- the same error the commit before this one warns about. So the
+    unit file ships NO --top-app-uclamp-min and the hint is inert by default.
+
+    What IS verified is that the mechanism works: a browser started after the
+    daemon, with no touch input at all, comes up with uclamp.min set on its main
+    thread and its ThreadedCompositor.
+
+    1024 is the one value with a hint of a real effect, and it is negative:
+    clamping all 24 threads of the process, JIT and raster workers included, to
+    full utilisation piles them onto the four big cores to contend.
+
+    Deliberately STATELESS -- it re-clamps threads it has already clamped rather
+    than remembering them. A browser spawns its web process seconds after its
+    scope appears, and a set of "already done" tids would either miss those or
+    go stale as tids get reused; sched_setattr on a thread that already holds
+    the value costs a few microseconds and cannot be wrong.
+
+    ponytail: clamps every app in app.slice, not just the focused one. Real
+    top-app tracking needs a focus signal this daemon does not have, and
+    uclamp_min only bites while a thread is actually runnable, so a backgrounded
+    app costs nothing. Narrow it if a background app ever starts spinning.
+    """
+    attr = sched_attr()
+    attr.size = ctypes.sizeof(sched_attr)
+    attr.sched_flags = SCHED_FLAG_KEEP_ALL | SCHED_FLAG_UTIL_CLAMP_MIN
+    attr.sched_util_min = util_min
+    done = 0
+    for root, _dirs, files in os.walk(app_slice):
+        if "cgroup.procs" not in files:
+            continue
+        try:
+            with open(os.path.join(root, "cgroup.procs")) as f:
+                pids = f.read().split()
+        except OSError:
+            continue
+        for pid in pids:
+            try:
+                tids = os.listdir(f"/proc/{pid}/task")
+            except OSError:
+                continue                      # exited between the two reads
+            for tid in tids:
+                if libc.syscall(SYS_sched_setattr, ctypes.c_int(int(tid)),
+                                ctypes.byref(attr), ctypes.c_uint(0)) == 0:
+                    done += 1
+    return done
 
 
 def find_touchscreen():
@@ -155,7 +246,17 @@ def main():
     ap.add_argument("--launch-hold", type=float, default=5.0)
     ap.add_argument("--app-slice", metavar="CGROUP_DIR",
                     help="session app.slice cgroup directory to watch for launches")
+    ap.add_argument("--top-app-uclamp-min", type=int, default=0, metavar="N",
+                    help="0-1024 uclamp_min for app.slice threads; 0 disables. "
+                         "Needs --app-slice. Peaks in the middle -- see "
+                         "clamp_app_threads()")
     args = ap.parse_args()
+
+    if args.top_app_uclamp_min:
+        if not args.app_slice:
+            sys.exit("--top-app-uclamp-min needs --app-slice")
+        if not 0 < args.top_app_uclamp_min <= 1024:
+            sys.exit("--top-app-uclamp-min must be 1-1024")
 
     by_hint = {}
     if args.interaction:
@@ -164,7 +265,7 @@ def main():
         if not args.app_slice:
             sys.exit("--launch needs --app-slice")
         by_hint["LAUNCH"] = parse_specs(args.launch)
-    if not by_hint:
+    if not by_hint and not args.top_app_uclamp_min:
         sys.exit("no hints configured")
     hints = Hints(by_hint, args.latency_us)
 
@@ -186,7 +287,23 @@ def main():
             print(f"watching {args.app_slice} for launches", flush=True)
 
     watch_app_slice()
-    print(f"watching {node}; hints: {', '.join(by_hint)}", flush=True)
+    names = list(by_hint) + (["TOP_APP"] if args.top_app_uclamp_min else [])
+    print(f"watching {node}; hints: {', '.join(names)}", flush=True)
+
+    # TOP_APP rescans on touch, but no faster than this: a drag delivers events
+    # continuously and walking every app cgroup per event would burn more CPU
+    # than the hint saves.
+    TOP_APP_RESCAN = 2.0
+    top_app_at = 0.0
+
+    def clamp_top_app():
+        nonlocal top_app_at
+        now = time.monotonic()
+        if (not args.top_app_uclamp_min or not args.app_slice
+                or now - top_app_at < TOP_APP_RESCAN):
+            return
+        top_app_at = now
+        clamp_app_threads(libc, args.app_slice, args.top_app_uclamp_min)
 
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
@@ -200,6 +317,7 @@ def main():
                 if "INTERACTION" in by_hint:
                     hints.fire("INTERACTION", args.interaction_hold)
                 watch_app_slice()   # lazy: a touch means the session exists
+                clamp_top_app()     # catches threads spawned since the launch
             if ino_fd in r:
                 buf = os.read(ino_fd, 4096)
                 off = 0
@@ -213,8 +331,17 @@ def main():
                         watched = False
                         continue
                     if name.startswith("app-"):
-                        hints.fire("LAUNCH", args.launch_hold)
+                        if "LAUNCH" in by_hint:
+                            hints.fire("LAUNCH", args.launch_hold)
+                        top_app_at = 0.0    # a new app: clamp it now, not in 2 s
+                        clamp_top_app()
             hints.reap()
+            # Every wakeup, throttled. A launch creates the scope seconds before
+            # the app's real worker processes exist -- a browser's web process
+            # is not there when its scope appears -- so clamping only on the
+            # inotify event misses exactly the threads that matter. Any later
+            # wakeup (a hint expiring, the next touch) sweeps them up.
+            clamp_top_app()
     finally:
         hints.disengage()
 

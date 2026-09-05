@@ -1,0 +1,41 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>repro4</title>
+<style>
+ html,body{margin:0;background:#000;color:#eee;font:16px system-ui}
+ .card{position:relative;margin:8px;padding:10px;background:#141414;border-radius:8px;
+       display:flex;align-items:center}
+ .layers .card{will-change:transform;contain:paint}
+ .icons{display:flex;gap:18px;align-items:center;flex:0 0 auto}
+ svg{width:48px;height:48px;fill:#fff;display:block}
+ .side{position:relative;flex:1;height:56px;margin-left:20px;background:#202020;overflow:hidden}
+ .mover{position:absolute;left:0;top:0;width:40px;height:56px;background:#2e2e2e;
+        animation:sweep 1.3s linear infinite alternate;will-change:transform}
+ @keyframes sweep{from{transform:translateX(0)}to{transform:translateX(120px)}}
+ .blur .side::after{content:"";position:absolute;inset:0;backdrop-filter:blur(4px)}
+</style>
+<div id="host"></div>
+<script>
+var q=new URLSearchParams(location.search);
+if(q.get('layers')!=='0') document.documentElement.classList.add('layers');
+if(q.get('blur')!=='0')   document.documentElement.classList.add('blur');
+var N=+(q.get('n')||80);
+var P=["M2 21h4V9H2v12zM23 10a2 2 0 0 0-2-2h-6.3l1-4.6.03-.3a1.5 1.5 0 0 0-.44-1.06L14.2 1 7.6 7.6A2 2 0 0 0 7 9v10a2 2 0 0 0 2 2h9a2 2 0 0 0 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z",
+ "M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z",
+ "M17 3H7a2 2 0 0 0-2 2v16l7-3 7 3V5a2 2 0 0 0-2-2z",
+ "M12 2L2 22h20L12 2zm1 15h-2v-2h2v2zm0-4h-2V8h2v5z"];
+var ns='http://www.w3.org/2000/svg', host=document.getElementById('host');
+for (var c=0;c<N;c++){
+  var card=document.createElement('div'); card.className='card';
+  var ic=document.createElement('div'); ic.className='icons';
+  P.forEach(function(d){
+    var s=document.createElementNS(ns,'svg'); s.setAttribute('viewBox','0 0 24 24');
+    var pa=document.createElementNS(ns,'path'); pa.setAttribute('d',d); s.appendChild(pa);
+    ic.appendChild(s);
+  });
+  var side=document.createElement('div'); side.className='side';
+  if(q.get('anim')!=='0'){ var m=document.createElement('div'); m.className='mover'; side.appendChild(m); }
+  card.appendChild(ic); card.appendChild(side); host.appendChild(card);
+}
+document.title='repro4 ready';
+</script>

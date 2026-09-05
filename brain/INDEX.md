@@ -17,10 +17,12 @@ generic notes as well.
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever](findings/a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever.md) | `soc:msm8998` | A venus firmware assert wedges the video GDSC, and the driver's recovery then retries every 10 ms forever |
+| [a5xx-gmem-never-resolves-multisample-buffers](findings/a5xx-gmem-never-resolves-multisample-buffers.md) | `soc:msm8998` | GPU rasterisation is visibly wrong on a540 because the a5xx GMEM store never resolves multisample buffers |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [android-interaction-boost-is-the-remaining-perf-delta](findings/android-interaction-boost-is-the-remaining-perf-delta.md) | `soc:msm8998` | Android's INTERACTION boost is the remaining perf delta -- the scaling infrastructure already has vendor parity |
 | [app-jank-is-app-shaped-once-the-stack-is-clean](findings/app-jank-is-app-shaped-once-the-stack-is-clean.md) | `device:google-taimen` | With the display/decode stack clean, the remaining jank is app-shaped -- GJS GC in Maps, main-thread layout in WebKit 2.48, init CPU in browser launches |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
+| [clipping-webkit-compositing-to-damage-is-worth-8-percent](findings/clipping-webkit-compositing-to-damage-is-worth-8-percent.md) | `device:google-taimen` | Clipping WebKit's compositing to the damaged rectangles is worth ~8% and 3 C on taimen, not a step change |
 | [ap-accepts-us-intermittently](findings/ap-accepts-us-intermittently.md) | `device:google-taimen` | TEST-SSID does accept this client -- intermittently, with the stock frame |
 | [ap-refuses-us-our-assocreq-is-clean](findings/ap-refuses-us-our-assocreq-is-clean.md) | `device:google-taimen` | TEST-SSID refuses this client, and our association request is not the reason |
 | [crossdirect-hands-the-linker-to-qemu-on-purpose](findings/crossdirect-hands-the-linker-to-qemu-on-purpose.md) | `generic` | Crossdirect hands every link step to qemu on purpose, not just compile |
@@ -33,21 +35,29 @@ generic notes as well.
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
+| [gstreamer-copies-every-venus-frame-when-the-sink-lacks-video-meta](findings/gstreamer-copies-every-venus-frame-when-the-sink-lacks-video-meta.md) | `device:google-taimen` | GStreamer's V4L2 pool copies every venus frame when the sink offers no video meta: 12 fps at 4K, 82 fps otherwise |
 | [hardware-decode-works-in-webkit-the-ceiling-is-webkits-process-count](findings/hardware-decode-works-in-webkit-the-ceiling-is-webkits-process-count.md) | `device:google-taimen` | Hardware decode does work in Epiphany -- the residual ceiling is WebKit's ~7 processes per tab, not the decoder and not GEM runaway |
 | [holding-vdd-mx-does-not-stop-the-wake-crash](findings/holding-vdd-mx-does-not-stop-the-wake-crash.md) | `soc:msm8998` | Holding VDD_MX does not stop the display-wake crash -- neither enabled nor at TURBO |
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
 | [lax-build-buys-nothing-measurable](findings/lax-build-buys-nothing-measurable.md) | `generic` | PORTHOLE_LAX_BUILD=1 saves no measurable time, and the zap it skips is not the wall clock |
+| [mainline-a540-init-matches-kgsl-except-allflatoptdis](findings/mainline-a540-init-matches-kgsl-except-allflatoptdis.md) | `soc:msm8998` | Mainline a5xx_hw_init programs the A540 at parity with kgsl's a5xx_start; the one extra mainline write is VPC ALLFLATOPTDIS |
 | [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
 | [nothing-polls-an-idle-link-on-ath10k](findings/nothing-polls-an-idle-link-on-ath10k.md) | `generic` | ath10k turns off mac80211's idle connection polling, then disables the firmware keepalive too |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 | [panel-corruption-was-gpu-reset-wreckage-not-tearing](findings/panel-corruption-was-gpu-reset-wreckage-not-tearing.md) | `device:google-taimen` | The panel corruption and degraded phosh were one GPU reset's wreckage -- not display tearing, and not the rd_ptr patch |
+| [phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it](findings/phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it.md) | `device:google-taimen` | A GPU reset aborts phosh, not phoc -- the session restarts and looks like a reboot |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
+| [the-a540-blob-brackets-gmem-passes-with-ccu-maintenance-and-re-arms-the-restore-blit](findings/the-a540-blob-brackets-gmem-passes-with-ccu-maintenance-and-re-arms-the-restore-blit.md) | `soc:msm8998` | The a540 blob brackets every GMEM pass with CCU invalidate/flush and re-arms the restore blit rectangle; fd5 does neither |
+| [the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not](findings/the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not.md) | `soc:msm8998` | The a540 userspace blob writes no a5xx register that mesa fd5 and the kernel do not already write |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
+| [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-browser-stutter-is-a-blocked-webkit-main-thread](findings/the-browser-stutter-is-a-blocked-webkit-main-thread.md) | `generic` | The browser stutter is a blocked WebKit main thread, not the display stack |
+| [the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized](findings/the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized.md) | `device:google-taimen` | Epiphany's frame period is CPU paint PLUS the GPU tail, serialized -- frameDone to next frame start is 0.1 ms |
+| [the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible](findings/the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible.md) | `device:google-taimen` | Epiphany's frame period is pinned at 2 refreshes because the CPU paint alone exceeds one -- every sub-quantum optimisation measures as neutral |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
 | [the-missing-eapol-is-ath10ks-rx-confused-latch](findings/the-missing-eapol-is-ath10ks-rx-confused-latch.md) | `device:google-taimen` | The missing 4-way handshake is ath10k's rx_confused latch: one split A-MSDU disables data RX for the life of the firmware |
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
@@ -70,10 +80,13 @@ generic notes as well.
 | [vht-capa-overrides-cannot-touch-channel-width](findings/vht-capa-overrides-cannot-touch-channel-width.md) | `generic` | wpa_supplicant's vht_capa cannot change Supported Channel Width Set or Extended NSS BW -- mac80211 drops it |
 | [waylandsink-5fps-was-two-upstream-policies-colliding](findings/waylandsink-5fps-was-two-upstream-policies-colliding.md) | `device:google-taimen` | The waylandsink 5 fps cap was two upstream policies colliding -- wlroots hides LINEAR from v3 clients, GStreamer refuses INVALID |
 | [waylandsink-delivers-5fps-where-other-sinks-do-60](findings/waylandsink-delivers-5fps-where-other-sinks-do-60.md) | `device:google-taimen` | waylandsink delivers 5 fps where glimagesink and gtk4paintablesink do 60 -- and WebKit's compositor is the browser's ceiling, not venus |
+| [webkit-recomposites-the-whole-viewport-because-damage-clipping-is-off-by-default](findings/webkit-recomposites-the-whole-viewport-because-damage-clipping-is-off-by-default.md) | `device:google-taimen` | Epiphany recomposites the whole viewport every frame: WebKit collects damage but UseDamagingInformationForCompositing defaults off, and UnifyDamagedRegions makes a playing video's damage the whole viewport |
 | [webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound](findings/webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound.md) | `soc:msm8998` | WebKitGTK's frame loop allows one frame in flight, released from GTK's snapshot(); on a5xx every render pass is a separate kernel submit -- so the compositor's cost is passes, not pixels |
 | [what-a-rootless-workspace-cannot-do](findings/what-a-rootless-workspace-cannot-do.md) | `generic` | Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs |
 | [where-the-build-minutes-actually-go](findings/where-the-build-minutes-actually-go.md) | `generic` | Every rung pays ~14s to activate envkernel, and that dwarfs the compile |
 | [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
+| [wlroots-drm-layers-need-libliftoff](findings/wlroots-drm-layers-need-libliftoff.md) | `generic` | wlroots does DRM output layers only through libliftoff |
+| [wlroots-never-re-imports-a-texture-after-a-renderer-swap](findings/wlroots-never-re-imports-a-texture-after-a-renderer-swap.md) | `generic` | wlroots drops every client texture on a renderer swap and never re-imports one, so static layer-surfaces stay blank after a GPU reset |
 | [youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput](findings/youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput.md) | `device:google-taimen` | YouTube's judder on taimen is 2160p60 being served, plus venus clocked for 30 fps because vdec had no VIDIOC_G_PARM -- not the compositor, not buffer counts |
 
 ## laws
@@ -118,6 +131,8 @@ generic notes as well.
 | [a-tree-built-module-carries-btf-the-running-kernel-rejects](traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md) | `generic` | A tree-built module carries BTF the running kernel rejects, and modprobe blames a symlink loop |
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
+| [an-arm-behind-the-phosh-lockscreen-measures-a-still-page](traps/an-arm-behind-the-phosh-lockscreen-measures-a-still-page.md) | `device:google-taimen` | An arm behind the phosh lockscreen measures a still page, and it looks exactly like the change under test breaking WebKit |
+| [androidboot-bootreason-always-says-watchdog-here](traps/androidboot-bootreason-always-says-watchdog-here.md) | `device:google-taimen` | androidboot.bootreason says watchdog on every boot of taimen, including clean ones -- it is not a reset-reason oracle |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
 | [apr-service-inherits-a-protection-domain-the-board-deletes](traps/apr-service-inherits-a-protection-domain-the-board-deletes.md) | `soc:qcom` | A new APR service inherits a protection domain the board deletes |
@@ -138,9 +153,11 @@ generic notes as well.
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
+| [one-arm-cannot-resolve-a-browser-change-here](traps/one-arm-cannot-resolve-a-browser-change-here.md) | `device:google-taimen` | One browser arm cannot resolve anything under ~10% here: the same build gave 29% and 73% frames-over-budget |
 | [pmbootstrap-never-runs-the-shell-in-an-apkbuild](traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md) | `generic` | pmbootstrap parses an APKBUILD line by line and never runs the shell |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
 | [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
+| [reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone](traps/reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone.md) | `soc:msm8998` | Reading the qfprom corrected region through nvmem hard resets the phone |
 | [running-a-device-script-on-the-host](traps/running-a-device-script-on-the-host.md) | `generic` | A device-side script run on the host produces plausible, entirely wrong output |
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
@@ -150,10 +167,13 @@ generic notes as well.
 | [the-bootloader-reboot-can-drop-the-phone-off-usb-entirely](traps/the-bootloader-reboot-can-drop-the-phone-off-usb-entirely.md) | `device:google-taimen` | The bootloader reboot can drop the phone off USB entirely |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
 | [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
+| [the-msm-reset-debugfs-does-not-make-a-client-lose-its-context](traps/the-msm-reset-debugfs-does-not-make-a-client-lose-its-context.md) | `soc:msm8998` | Writing msm's reset debugfs faults the GPU but no client loses its context, so it cannot test GPU-reset recovery |
+| [the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series](traps/the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series.md) | `device:google-taimen` | The taimen-v7.2 tree was ten venus patches behind its own aport series, and a venus_core built from it wedges the SoC |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
 | [unmasked-suspend-during-an-automated-wait-is-a-death-loop](traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md) | `generic` | Unmasking suspend before an automated wait can loop a device out of reach |
+| [uprobes-do-not-attach-to-an-already-mapped-library](traps/uprobes-do-not-attach-to-an-already-mapped-library.md) | `generic` | A uprobe set after the process started never fires |
 | [usb-gadget-rerandomises-the-host-mac](traps/usb-gadget-rerandomises-the-host-mac.md) | `generic` | The USB gadget hands the host a new MAC on every boot |
 | [usb-ids-cannot-tell-booted-from-bootloader](traps/usb-ids-cannot-tell-booted-from-bootloader.md) | `generic` | lsusb can label a running pmOS USB gadget as "fastboot |
 | [wait-long-enough-before-calling-a-boot-failed](traps/wait-long-enough-before-calling-a-boot-failed.md) | `generic` | Wait long enough before calling a boot failed |
@@ -193,8 +213,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 31
-- `generic` — 99
+- `device:google-taimen` — 41
+- `generic` — 102
 - `soc:gs201` — 1
-- `soc:msm8998` — 24
+- `soc:msm8998` — 31
 - `soc:qcom` — 1
