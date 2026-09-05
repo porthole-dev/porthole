@@ -7,7 +7,7 @@
 # lockscreen), load the strip detector, and measure the panel at the bin edge.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-cd "$HERE/../../.."
+cd "$HERE/../../.." || exit
 source tools/tk-lib.sh
 source "$HERE/session_state.sh"
 TAG=$1; VAL=${2:-}; OUT=$3
@@ -15,7 +15,7 @@ case $VAL in '') tk_run 'rm -f ~/.phoshdebug' >/dev/null ;; *=*) tk_run "printf 
 sid=$(tk_run "loginctl list-sessions --no-legend | awk '\$4==\"seat0\"{print \$1}' | head -1" | tr -d '\r ')
 tk_run "sudo -n loginctl terminate-session $sid" >/dev/null 2>&1 || true
 sleep 12
-for i in $(seq 1 30); do timeout 5 ssh "${TK_SSH_OPTS[@]}" "$PHONE" true 2>/dev/null && break; sleep 3; done
+for _ in $(seq 1 30); do timeout 5 ssh "${TK_SSH_OPTS[@]}" "$PHONE" true 2>/dev/null && break; sleep 3; done
 scp "${TK_SSH_OPTS[@]}" tools/tk-greetd-login.py tools/tk-touch.py tools/tk-key.py tools/tk-webeval.py tools/tk-webvq.py "$PHONE:/tmp/" >/dev/null 2>&1
 printf '%s' "$TK_LOGIN_PASSWORD" | ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
   'sudo -n env TK_LOGIN_PASSWORD="$(cat)" python3 /tmp/tk-greetd-login.py user' 2>&1 | tail -1

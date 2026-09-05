@@ -5,7 +5,7 @@
 # Needs PHONE/HOST, TK_LOGIN_PASSWORD, A5XX_WORK. Prints one line per arm:
 #   <tag>: right N/40 (mean m) | left N/40
 set -uo pipefail
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit
 . tools/tk-lib.sh
 for val in "$@"; do
   tag=$(printf '%s' "${val:-default}" | tr -c 'A-Za-z0-9' '_' | cut -c1-40)

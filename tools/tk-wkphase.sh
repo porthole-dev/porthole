@@ -52,6 +52,9 @@ arm)
 measure)
 	sudo -n sh -c "echo > $T/trace"
 	sleep "${2:-12}"
+	# Reading a root-only trace file, not writing one -- the redirect
+	# running as the caller (not root) is the point, not a bug.
+	# shellcheck disable=SC2024
 	sudo -n sh -c "cat $T/trace" > /tmp/wk.trace
 	python3 - /tmp/wk.trace <<'PY'
 import re, sys, collections, statistics as st

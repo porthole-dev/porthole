@@ -1,8 +1,7 @@
 #!/bin/bash
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-cd "$HERE/../../.."
-source tools/tk-lib.sh
+source "$HERE/../../tk-lib.sh"
 # Same default tk-wkoffsets.sh uses for the sandbox's apk output dir.
 P=${TK_MESA_APK_DIR:-$HOME/.local/var/porthole-sandbox/packages/edge/aarch64}
 V=${1:?mesa version, e.g. 26.1.6-r8}
