@@ -74,6 +74,14 @@ def test_pkill_without_dash_f_is_left_alone():
     assert tc.check_pkill_pattern("ph-thing.sh", "#!/bin/bash\npkill epiphany\n") == []
 
 
+def test_a_comment_mentioning_pkill_is_not_a_finding():
+    """A comment line warning never to use `pkill -f` documents the hazard;
+    it is not the hazard. Two real tools carry exactly this comment and were
+    both ranked as top-severity violators before the comment skip."""
+    text = "#!/bin/bash\n# never use pkill -f over ssh\n"
+    assert tc.check_pkill_pattern("ph-thing.sh", text) == []
+
+
 def test_an_explicit_exemption_is_honoured():
     """Some caller will have a real reason. The exemption is a marker in the
     source, so the reason is reviewable and greppable -- not an allowlist in
@@ -178,6 +186,30 @@ sleep 30
     assert len(found) == 1 and found[0].severity == "warn"
 
 
+def test_a_one_line_loop_does_not_leak_depth():
+    """`for x in $Y; do ...; done` on one line nets to +1 then -1 under the
+    do/done counter, so it must not silence a later top-level sleep. The old
+    while/until/for opener counted this as an unmatched open."""
+    text = "#!/bin/bash\nfor e in $EVENTS; do echo $e; done\nsleep 30\n"
+    found = tc.check_bare_sleep("ph-thing.sh", text)
+    assert len(found) == 1
+
+
+def test_a_python_heredoc_does_not_leak_depth():
+    """A Python `for i in range(200):` inside a heredoc in a shell tool has
+    no `do` at command position, so it must not increment loop depth and
+    silence the real shell `sleep` that follows it."""
+    text = """#!/bin/bash
+cat <<'PY' | python3 -
+for i in range(200):
+    print(i)
+PY
+sleep 10
+"""
+    found = tc.check_bare_sleep("ph-thing.sh", text)
+    assert len(found) == 1
+
+
 def test_audit_ranks_errors_before_warnings():
     class FakeTool(object):
         def __init__(self, name, text):
@@ -192,6 +224,22 @@ def test_audit_ranks_errors_before_warnings():
     err_too = FakeTool("ph-err.sh", "#!/bin/bash\npkill -f x\nsleep 9\n")
     ranked = tc.audit([warn_only, err_too])
     assert [r["name"] for r in ranked] == ["ph-err.sh", "ph-warn.sh"]
+
+
+def test_every_finding_has_a_severity_from_the_shared_set():
+    """SEVERITIES is declared and meant to be the whole vocabulary a checker
+    can use. Drive a fixture that trips all four checks at once and assert
+    nothing escapes the set."""
+    text = ("#!/bin/bash\n"
+            "# exits: 0 ok · 3 see source\n"
+            "pkill -f thing\n"
+            "timeout 12 ssh \"$PHONE\" true\n"
+            "sleep 30\n")
+    found = []
+    for check in tc.CHECKS:
+        found.extend(check("ph-thing.sh", text))
+    assert found, "fixture did not trip every checker"
+    assert all(f.severity in tc.SEVERITIES for f in found)
 
 
 def test_a_clean_tool_is_absent_from_the_audit():
