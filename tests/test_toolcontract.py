@@ -88,5 +88,27 @@ def test_the_pkill_exemption_must_carry_a_reason():
     assert len(found) == 1 and "reason" in found[0].detail
 
 
+def test_a_fixed_timeout_on_ssh_is_a_warning():
+    text = '#!/bin/bash\ntimeout 12 ssh "$PHONE" true\n'
+    found = tc.check_fixed_timeout("ph-thing.sh", text)
+    assert len(found) == 1 and found[0].severity == "warn"
+
+
+def test_a_fixed_timeout_on_scp_counts_too():
+    text = '#!/bin/bash\ntimeout 30 scp "$PHONE:/tmp/x" .\n'
+    assert len(tc.check_fixed_timeout("ph-thing.sh", text)) == 1
+
+
+def test_a_variable_ceiling_is_not_flagged():
+    """The point is not that timeouts are bad -- it is that a LITERAL is a
+    guess nobody can override. A variable already has the escape hatch."""
+    text = '#!/bin/bash\ntimeout "${PH_RUN_TIMEOUT:-30}" ssh "$PHONE" true\n'
+    assert tc.check_fixed_timeout("ph-thing.sh", text) == []
+
+
+def test_a_timeout_on_something_that_is_not_the_device_is_ignored():
+    assert tc.check_fixed_timeout("ph-thing.sh", "#!/bin/bash\ntimeout 5 make\n") == []
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

@@ -109,4 +109,27 @@ def check_pkill_pattern(name, text):
     return out
 
 
-CHECKS = (check_exit_codes, check_pkill_pattern)
+_FIXED_TIMEOUT = re.compile(r"\btimeout\s+\d+(\.\d+)?\s+(ssh|scp)\b")
+
+
+def check_fixed_timeout(name, text):
+    """A literal ceiling on a remote command cannot tell a slow tool from a
+    wedged one, and cannot be raised by the caller who knows better. Eleven
+    tools carry one. The design replaces them with PH_SILENCE (liveness) and
+    PH_DEADLINE (ceiling) -- the shape the shared ssh options already use with
+    ServerAliveInterval and ConnectTimeout. A variable ceiling is fine and is
+    deliberately not flagged: it already has the escape hatch."""
+    out = []
+    for line in text.splitlines():
+        if not _FIXED_TIMEOUT.search(line):
+            continue
+        if _exempted(line, "timeout-ok") is not None:
+            continue
+        out.append(Finding(
+            "fixed-timeout", "warn",
+            "a literal ssh/scp ceiling cannot tell slow from wedged; "
+            "use PH_SILENCE and PH_DEADLINE"))
+    return out
+
+
+CHECKS = (check_exit_codes, check_pkill_pattern, check_fixed_timeout)
