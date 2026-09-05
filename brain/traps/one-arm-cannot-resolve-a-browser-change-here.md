@@ -40,3 +40,28 @@ And the standing companion to this: a metric moving is not evidence the code
 moved it. Instrument the patch to prove it executed -- a skip counter, a log
 line -- because "the change had no effect" and "the change never ran" are
 indistinguishable from the outside and want opposite responses.
+
+## The scroll arm has the same problem, and here is its number
+
+Measured 2026-09-05 with `tools/tk-scrollarm.sh` (pure scroll, no video):
+**eleven control arms across five sweeps** gave jank frames >33 ms of
+32 36 37 38 38 39 41 42 43 43 44 46 -- **mean 40.1, sd 4.1**.
+
+That sd is the whole story:
+
+- a single arm carries a 95% interval of **+/-8 jank**
+- a two-arm mean, **+/-5.7**
+- so two arms a side resolve only a **~30%** change; 20% needs four a side and
+  10% needs sixteen
+
+It caught a real one. Android's top-app uclamp read as a clean **-20%** on two
+arms (35, 34 against a 43, 42 baseline). Four arms through the daemon gave
+39 34 36 42 against 37 36 38 43 -- nothing -- and a direct replication of the
+identical configuration came back **37, 38**. The hint ships disabled.
+
+Every scheduling lever tried that day landed inside this band: uclamp on the
+browser, on phoc+phosh, on both, and pinning both CPU clusters to their maximum
+frequency. Treat "inside the band" as the default expectation, not the
+surprise. Related: [[taimen-thermal-hygiene]] -- and never run a second load on
+the phone during a sweep, a `perf report` left going took the die to 74.5 C and
+voided an arm.
