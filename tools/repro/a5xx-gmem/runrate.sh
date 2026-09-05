@@ -3,8 +3,7 @@
 # Paths were de-hardcoded from the original session scratchpad.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-cd "$HERE/../../.."
-source tools/tk-lib.sh
+source "$HERE/../../tk-lib.sh"
 TAG=$1
 source "$HERE/session_state.sh"
 wait_ready "${WAIT_TITLE:-strip detector}" || { echo "run is invalid"; exit 9; }

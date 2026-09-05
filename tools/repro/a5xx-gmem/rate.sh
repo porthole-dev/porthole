@@ -9,8 +9,8 @@ TAG=$1; N=${2:-40}
 rm -rf $HOME/rate-$TAG; mkdir -p $HOME/rate-$TAG
 i=0
 while [ $i -lt $N ]; do
-  timeout 20 grim -g "341,3 102x25" $HOME/rate-$TAG/p$(printf %03d $i).png 2>/dev/null
-  timeout 20 grim -g "100,3 67x25" $HOME/rate-$TAG/q$(printf %03d $i).png 2>/dev/null   # left flat panel region x 300..500, tile column 0
+  timeout 20 grim -g "341,3 102x25" "$HOME/rate-$TAG/p$(printf %03d $i).png" 2>/dev/null
+  timeout 20 grim -g "100,3 67x25" "$HOME/rate-$TAG/q$(printf %03d $i).png" 2>/dev/null   # left flat panel region x 300..500, tile column 0
   i=$((i+1)); sleep 2
 done
 echo "[$TAG] $(ls $HOME/rate-$TAG/*.png 2>/dev/null | wc -l) samples"

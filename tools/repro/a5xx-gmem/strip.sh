@@ -21,7 +21,7 @@ setsid systemd-run --user --scope --quiet --slice=app.slice -u "app-eph-strip.sc
 sleep 20
 i=0
 while [ $i -lt $N ]; do
-  timeout 40 grim $HOME/strip-$TAG/s$(printf %03d $i).png 2>/dev/null
+  timeout 40 grim "$HOME/strip-$TAG/s$(printf %03d $i).png" 2>/dev/null
   i=$((i+1)); sleep 3
 done
 echo "[$TAG] captures=$(ls $HOME/strip-$TAG/*.png 2>/dev/null | wc -l) faults=+$(( $(sudo -n dmesg | grep -c 'gpu fault') - F0 ))"
