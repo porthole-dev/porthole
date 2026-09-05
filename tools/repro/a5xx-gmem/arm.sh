@@ -18,7 +18,7 @@ sleep 12
 for _ in $(seq 1 30); do timeout 5 ssh "${TK_SSH_OPTS[@]}" "$PHONE" true 2>/dev/null && break; sleep 3; done
 scp "${TK_SSH_OPTS[@]}" tools/tk-greetd-login.py tools/tk-touch.py tools/tk-key.py tools/tk-webeval.py tools/tk-webvq.py "$PHONE:/tmp/" >/dev/null 2>&1
 printf '%s' "$TK_LOGIN_PASSWORD" | ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
-  'sudo -n env TK_LOGIN_PASSWORD="$(cat)" python3 /tmp/tk-greetd-login.py user' 2>&1 | tail -1
+  'sudo -n env TK_LOGIN_PASSWORD="$(cat)" python3 /tmp/tk-greetd-login.py '"$PORTHOLE_USER" 2>&1 | tail -1
 sleep 15
 unlock_swipe || { echo '  ABORT: still locked'; exit 1; }
 echo -n "  phoc env: "; tk_run "p=\$(pgrep -x phoc); tr '\\0' '\\n' < /proc/\$p/environ | grep FD_MESA_DEBUG || echo UNSET"
