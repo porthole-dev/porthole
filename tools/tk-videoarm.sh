@@ -25,7 +25,7 @@ set -u
 L=${1:?usage: tk-videoarm.sh LABEL [ENV...]}; X=${2:-}
 CLIP=${TK_VIDEO_FILE:-$HOME/Videos/vtest/v1440.mp4}
 # An existing page next to the clip wins over the one generated below: this
-# device already has /home/user/Videos/vtest/*.html, made when these clips were,
+# device already has ~/Videos/vtest/*.html, made when these clips were,
 # and they are known to play. TK_VIDEO_URL overrides everything.
 URL=${TK_VIDEO_URL:-}
 [ -n "$URL" ] || { alt="${CLIP%.*}.html"; [ -f "$alt" ] && URL="file://$alt"; }

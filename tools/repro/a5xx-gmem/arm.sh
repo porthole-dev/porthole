@@ -6,9 +6,10 @@
 # unlock for real (swipe + PIN, logind's unlock-sessions does NOT dismiss phosh's
 # lockscreen), load the strip detector, and measure the panel at the bin edge.
 set -uo pipefail
-cd /home/user/src/taimen
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd "$HERE/../../.."
 source tools/tk-lib.sh
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd); source "$HERE/session_state.sh"
+source "$HERE/session_state.sh"
 TAG=$1; VAL=${2:-}; OUT=$3
 case $VAL in '') tk_run 'rm -f ~/.phoshdebug' >/dev/null ;; *=*) tk_run "printf 'export %s\n' '$VAL' > ~/.phoshdebug" >/dev/null ;; *) tk_run "printf 'export FD_MESA_DEBUG=%s\n' '$VAL' > ~/.phoshdebug" >/dev/null ;; esac
 sid=$(tk_run "loginctl list-sessions --no-legend | awk '\$4==\"seat0\"{print \$1}' | head -1" | tr -d '\r ')
@@ -22,9 +23,9 @@ sleep 15
 unlock_swipe || { echo '  ABORT: still locked'; exit 1; }
 echo -n "  phoc env: "; tk_run "p=\$(pgrep -x phoc); tr '\\0' '\\n' < /proc/\$p/environ | grep FD_MESA_DEBUG || echo UNSET"
 scp "${TK_SSH_OPTS[@]}" "$HERE/sess.sh" tools/tk-rangehttp.py "$PHONE:/tmp/" >/dev/null 2>&1
-scp "${TK_SSH_OPTS[@]}" tools/repro/a5xx-gmem-strip.html "$PHONE:/home/user/" >/dev/null 2>&1
+scp "${TK_SSH_OPTS[@]}" tools/repro/a5xx-gmem-strip.html "$PHONE:~/" >/dev/null 2>&1
 tk_run ". /tmp/sess.sh; pkill -x epiphany; sleep 2; rm -f ~/.local/share/epiphany/session_state.xml; \
-  (cd /home/user && setsid python3 /tmp/tk-rangehttp.py 8080 /home/user >/tmp/http.log 2>&1 &); sleep 2; \
+  (cd ~ && setsid python3 /tmp/tk-rangehttp.py 8080 ~ >/tmp/http.log 2>&1 &); sleep 2; \
   setsid systemd-run --user --scope --quiet --slice=app.slice -u app-eph-$TAG.scope \
   env ${EPH_ENV:-} WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 \
   ${CLIENT_CMD:-epiphany 'http://127.0.0.1:8080/a5xx-gmem-strip.html'} >/tmp/eph.log 2>&1 </dev/null & sleep 28; echo '  client launched'"

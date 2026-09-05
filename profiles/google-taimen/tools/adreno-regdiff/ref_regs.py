@@ -1,8 +1,10 @@
 # S_mesa (fd5 gallium driver) and S_kernel (a5xx_gpu/power/preempt writes) as offset sets
-import re, glob, xml.etree.ElementTree as ET
-from a5xx_regs import XML
-M='/home/user/src/taimen/ref/mesa-26.1.6/src/gallium/drivers/freedreno/a5xx/'
-K='/home/user/src/taimen/linux-ws/drivers/gpu/drm/msm/adreno/'
+import os, re, glob, xml.etree.ElementTree as ET
+from a5xx_regs import XML, WORKDIR
+M = os.environ.get('MESA_SRC', os.path.join(
+    WORKDIR, 'ref/mesa-26.1.6/src/gallium/drivers/freedreno/a5xx/'))
+K = os.environ.get('KERNEL_SRC', os.path.join(
+    WORKDIR, 'linux-ws/drivers/gpu/drm/msm/adreno/'))
 def names():
     root=ET.parse(XML).getroot(); strip=lambda t:t.split('}')[-1]; nm={}
     for dom in root.iter():

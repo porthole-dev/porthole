@@ -55,8 +55,8 @@ for line in open('gles.dis'):
         if op in('ldp','stp') and len(args)>1: state.pop(rn(args[1]),None)
     if op in('bl','blr'): state.clear()
 # also scan data sections for raw header words
-import subprocess
-OC='/home/user/.local/share/swiftly/bin/llvm-objcopy'
+import os, subprocess
+OC=os.environ.get('LLVM_OBJCOPY', 'llvm-objcopy')  # PATH by default; override for a non-standard install
 dhits=[]
 for sec,vma in(('.rodata',0xa850),('.data.rel.ro',0x32e000),('.data',0x336c08)):
     subprocess.run([OC,'--dump-section',f'{sec}=sec.bin','../libGLESv2_adreno.so','/dev/null'],check=True)
