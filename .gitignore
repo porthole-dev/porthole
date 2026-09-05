@@ -32,3 +32,10 @@ logs/
 
 # Agent scratch: SDD ledgers, briefs and review packages. Never a deliverable.
 .superpowers/
+
+# a5xx-gmem repro rig: lockscreen probe captures and the reference crop
+# is_locked() diffs against. No regex reads a screenshot, so these are never
+# tracked (porthole_secrets.py's device-capture rule) -- generate ref_lock.png
+# and ref_lock_small.png locally once (grim the same region documented in
+# session_state.sh against a known-unlocked screen) before using the rig.
+tools/repro/a5xx-gmem/*.png
