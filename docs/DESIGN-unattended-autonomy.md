@@ -296,7 +296,7 @@ be falsifying the record.
 
 ## The audit
 
-`porthole tools --audit [--json]` scores every tool against the tool contract
+`porthole tools audit [--json]` scores every tool against the tool contract
 and ranks by severity. Host-only, no device time. Because it is generated it
 cannot rot, and re-running it is how the cleanup is seen to land.
 
@@ -305,6 +305,27 @@ fail on hardware" -- that is what the run ledger accumulates, and the second
 audit, run against real data, is the one that answers it. Stating both
 separately is deliberate: they are different failures and conflating them
 would let a tool that scores perfectly and fails every time look healthy.
+
+### Baseline, measured 2026-09-05 before any fix
+
+The measured output of `./bin/porthole tools audit` on the day it was built:
+
+| finding | count |
+|---|---|
+| `exit-code-not-shared` | 18 |
+| `exit-code-undocumented` | 9 |
+| `pkill-pattern` | 7 |
+| `fixed-timeout` | 16 |
+| `bare-sleep` | 22 |
+
+Totals: 33 of 146 tools have findings — 34 error, 38 warning.
+
+Phase 1 works this list down. A class is gated by `tests/test_tools.py` in the
+commit that clears its last violation, never before.
+
+Note: the `bare-sleep` figure is lower than an earlier grep estimate of 30
+because sleeps inside poll loops are correctly excluded — that difference is
+the checker working, not a miscount.
 
 ## Interfaces
 
@@ -331,7 +352,7 @@ agent holds the phone.
 
 | phase | what | why in this position |
 |---|---|---|
-| 0 | contract tests + `porthole tools --audit` | produces the list before anything moves |
+| 0 | contract tests + `porthole tools audit` | produces the list before anything moves |
 | 1 | fix or delete what the audit condemns | do not rename tools that are about to be deleted |
 | 2 | the rename, both repos | mechanical, and now guarded by phase 0's tests |
 | 3 | run contract: silence timeouts, status, ledger | every later piece reports through it |
