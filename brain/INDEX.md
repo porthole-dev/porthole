@@ -63,6 +63,7 @@ generic notes as well.
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
 | [the-msm8998-thermal-trip-is-a-cliff](findings/the-msm8998-thermal-trip-is-a-cliff.md) | `soc:msm8998` | The mainline msm8998 thermal zone is a cliff -- one passive trip, no limit, 2.36 GHz to 500 MHz in about 7 s |
 | [the-reserved-vht-width-pair-is-why-the-ap-refused](findings/the-reserved-vht-width-pair-is-why-the-ap-refused.md) | `soc:msm8998` | The reserved VHT channel-width pair was the refusal -- clamping it associates 8/8 |
+| [the-scroll-stall-is-the-pages-own-javascript](findings/the-scroll-stall-is-the-pages-own-javascript.md) | `generic` | The browser scroll stall is the page's own JavaScript -- not the engine, not the tile-record path, and not page settling |
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
 | [the-sigkill-venus-wedge-was-vp9-bandwidth-starvation](findings/the-sigkill-venus-wedge-was-vp9-bandwidth-starvation.md) | `device:google-taimen` | The "SIGKILL wedges venus until reboot" was VP9 bandwidth starvation misread -- venus survives SIGKILL on both codecs |
 | [the-top-right-corruption-is-freedreno-gmem](findings/the-top-right-corruption-is-freedreno-gmem.md) | `soc:msm8998` | The top-right corruption is freedreno's GMEM tile path, not a GPU fault -- the boundary is the a5xx bin column at x=1024 |
@@ -132,6 +133,7 @@ generic notes as well.
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [an-arm-behind-the-phosh-lockscreen-measures-a-still-page](traps/an-arm-behind-the-phosh-lockscreen-measures-a-still-page.md) | `device:google-taimen` | An arm behind the phosh lockscreen measures a still page, and it looks exactly like the change under test breaking WebKit |
+| [an-injected-touch-does-not-wake-a-blanked-screen](traps/an-injected-touch-does-not-wake-a-blanked-screen.md) | `generic` | An injected touch does not wake a blanked screen, and every gesture arm then measures a still image |
 | [androidboot-bootreason-always-says-watchdog-here](traps/androidboot-bootreason-always-says-watchdog-here.md) | `device:google-taimen` | androidboot.bootreason says watchdog on every boot of taimen, including clean ones -- it is not a reset-reason oracle |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
@@ -169,6 +171,7 @@ generic notes as well.
 | [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
 | [the-msm-reset-debugfs-does-not-make-a-client-lose-its-context](traps/the-msm-reset-debugfs-does-not-make-a-client-lose-its-context.md) | `soc:msm8998` | Writing msm's reset debugfs faults the GPU but no client loses its context, so it cannot test GPU-reset recovery |
 | [the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series](traps/the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series.md) | `device:google-taimen` | The taimen-v7.2 tree was ten venus patches behind its own aport series, and a venus_core built from it wedges the SoC |
+| [the-usb-gadget-can-steal-the-hosts-default-route](traps/the-usb-gadget-can-steal-the-hosts-default-route.md) | `generic` | The USB gadget is a DHCP server, and NetworkManager lets it take the host's default route and DNS |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
@@ -214,7 +217,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 41
-- `generic` — 102
+- `generic` — 105
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
