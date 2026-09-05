@@ -15,10 +15,10 @@
 # returns success and changes nothing. So: press the power key to wake, swipe to
 # unlock, and *look at the screen* to decide whether it worked.
 #
-#   tools/tk-session.sh state     panel on/off, locked/unlocked
-#   tools/tk-session.sh wake      power key if the panel is off
-#   tools/tk-session.sh ensure    wake + swipe until unlocked (what arms call)
-#   tools/tk-session.sh blank     power key if the panel is on
+#   tk-session.sh state     panel on/off, locked/unlocked
+#   tk-session.sh wake      power key if the panel is off
+#   tk-session.sh ensure    wake + swipe until unlocked (what arms call)
+#   tk-session.sh blank     power key if the panel is on
 #
 # The PIN is disabled on this device, so the swipe IS the whole unlock and is
 # harmless when nothing was locked. If a PIN is ever set, pipe it to tk-key.py
@@ -56,7 +56,7 @@ is_locked() {
     awk -v m="$mean" -v t="$LOCK_LUMA" 'BEGIN{exit !(m > t)}'
 }
 
-usage() { echo "usage: tools/tk-session.sh state|wake|ensure|blank" >&2; exit 64; }
+usage() { echo "usage: tk-session.sh state|wake|ensure|blank" >&2; exit 64; }
 [ $# -eq 1 ] || usage
 
 case "$1" in
