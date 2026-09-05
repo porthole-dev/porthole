@@ -1420,19 +1420,44 @@ tkpush-modules() {
 	# have parked it in the bootloader -- tkflash-boot puts it there -- and the
 	# bare failure is `scp: Connection closed`, which reads as a network fault
 	# and says nothing about the state the device is actually in.
-	local st; st=$(tk_device_state)
-	[ "$st" = BOOTED ] || {
-		echo ">> the device is $st, and pushing modules needs it BOOTED." >&2
-		echo ">> tools/tk-reboot.sh will bring it back, then re-run." >&2
-		return 76; }
-
+	# The chroot half first: it needs no device, and a broken build should be
+	# named before the device state is, not after.
 	local src="$_PH_PMB/chroot_rootfs_${PORTHOLE_CODENAME}/lib/modules"
-	local kver; kver=$(basename "$(ls -d "$src"/* | head -1)")
-	[ -d "$src/$kver" ] || { echo ">> no modules at $src"; return 1; }
+	local kver; kver=$(basename "$(ls -d "$src"/* 2>/dev/null | head -1)")
+	[ -n "$kver" ] && [ -d "$src/$kver" ] || { echo ">> no modules at $src"; return 1; }
 
 	# Catch a broken build before it ever reaches the phone.
 	local empty; empty=$(find "$src/$kver" -name '*.ko*' -size 0 | wc -l)
 	[ "$empty" -eq 0 ] || { echo ">> $empty EMPTY .ko in $src -- bad build, refusing"; return 1; }
+
+	local st; st=$(tk_device_state)
+	if [ "$st" != BOOTED ]; then
+		# The rung is RESUMABLE when this exact set is already on the phone.
+		#
+		# Issue #59, 2026-09-04: tkflash-boot asked for the bootloader and the
+		# phone left the USB bus entirely -- nothing enumerated for ten
+		# minutes, no 18d1:4ee0 and no d001, until the cable was replugged. By
+		# then 271 modules had been pushed. Re-running `fast` refused HERE,
+		# needing BOOTED, for work that was already done; the only way to
+		# finish was tk-flash-boot.sh by hand. Three attempts, each four
+		# minutes of build plus a 181 s bootloader wait.
+		#
+		# Narrow on purpose. It skips only when the module set in the rootfs
+		# chroot is byte-identical to the one recorded as pushed, and only from
+		# FASTBOOT -- which is where the interrupted run left the device. No
+		# record, a different set, an unreadable chroot: push, which means
+		# asking for BOOTED exactly as before. A stale module set kept silently
+		# is the failure this whole function exists to prevent.
+		if [ "$st" = FASTBOOT ] && [ -f "$(_ph_modules_record)" ] &&
+		   [ "$(cat "$(_ph_modules_record)")" = "$(_ph_modules_id "$src" "$kver")" ]; then
+			echo ">> $kver is already pushed -- this set, byte for byte."
+			echo ">> the device is in FASTBOOT, so resuming at the flash."
+			return 0
+		fi
+		echo ">> the device is $st, and pushing modules needs it BOOTED." >&2
+		echo ">> tools/tk-reboot.sh will bring it back, then re-run." >&2
+		return 76
+	fi
 
 	local tar=/tmp/tk-modules-$kver.tar.gz base sum
 	tar -C "$src" -czf "$tar" "$kver" || return 1
@@ -1480,8 +1505,39 @@ tkpush-modules() {
 	# tkflash-boot patches them into the export; see the comment there.
 	ssh "${TK_SSH_OPTS[@]}" "$phone" 'cat /proc/cmdline' 2>/dev/null | tr ' ' '\n' |
 		grep -E '^pmos_(boot|root)_uuid=' > "$_PH_REPO/.device-uuids"
-	[ -s "$_PH_REPO/.device-uuids" ] &&
+	# A cmdline without pmos_*_uuid= (taimen boots by partition, not UUID) leaves
+	# the file empty; that is the flash step's warning, not this step's failure.
+	if [ -s "$_PH_REPO/.device-uuids" ]; then
 		echo ">> recorded device UUIDs: $(tr '\n' ' ' < "$_PH_REPO/.device-uuids")"
+	fi
+
+	# What is now on the phone, so an interrupted rung can resume. Written only
+	# here, after the device has confirmed the swap.
+	_ph_modules_id "$src" "$kver" > "$(_ph_modules_record)" 2>/dev/null || true
+	return 0
+}
+
+# Where the pushed-module record lives. Per DEVICE: .run is shared between the
+# devices a checkout works on, and "these modules are on the phone" is a claim
+# about one phone.
+_ph_modules_record() {
+	local rundir=${PORTHOLE_RUNDIR:-$_PH_REPO_ROOT/.run}
+	mkdir -p "$rundir" 2>/dev/null
+	printf '%s/pushed-modules-%s\n' "$rundir" "$PORTHOLE_CODENAME"
+}
+
+# The identity of a module set: its kernel release, then a digest over every
+# .ko it contains.
+#
+# CONTENT, not mtimes. A rebuild that produces the same bytes is the same set,
+# and the obvious `find -printf` is GNU-only -- this also has to run inside the
+# workspace, where find is busybox. `sort` because find's order is the
+# directory's, which is not stable across filesystems.
+_ph_modules_id() {
+	local src=$1 kver=$2
+	printf '%s ' "$kver"
+	find "$src/$kver" -name '*.ko*' -exec md5sum {} + 2>/dev/null |
+		sort | md5sum | cut -d' ' -f1
 }
 
 # FAST loop for driver-only changes: build the module, push it, reload it.
@@ -1637,6 +1693,7 @@ _ph_mod_abi_check() {
 		return 0
 	fi
 	[ $rc -eq 1 ] || return 0
+	echo ">> $out" >&2
 	echo ">> REFUSING: $name does not share an ABI with the copy it would"
 	echo ">> replace. Symbols they both import carry different MODVERSIONS"
 	echo ">> CRCs, so the running kernel would answer \`disagrees about"
