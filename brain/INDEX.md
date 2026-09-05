@@ -82,6 +82,7 @@ generic notes as well.
 | [what-a-rootless-workspace-cannot-do](findings/what-a-rootless-workspace-cannot-do.md) | `generic` | Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs |
 | [where-the-build-minutes-actually-go](findings/where-the-build-minutes-actually-go.md) | `generic` | Every rung pays ~14s to activate envkernel, and that dwarfs the compile |
 | [wifi-dies-while-still-reporting-connected](findings/wifi-dies-while-still-reporting-connected.md) | `device:google-taimen` | WiFi dies while every layer still reports connected -- and it is not the CPU, the GPU, or board-2.bin |
+| [wlroots-drm-layers-need-libliftoff](findings/wlroots-drm-layers-need-libliftoff.md) | `generic` | wlroots does DRM output layers only through libliftoff |
 | [wlroots-never-re-imports-a-texture-after-a-renderer-swap](findings/wlroots-never-re-imports-a-texture-after-a-renderer-swap.md) | `generic` | wlroots drops every client texture on a renderer swap and never re-imports one, so static layer-surfaces stay blank after a GPU reset |
 | [youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput](findings/youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput.md) | `device:google-taimen` | YouTube's judder on taimen is 2160p60 being served, plus venus clocked for 30 fps because vdec had no VIDIOC_G_PARM -- not the compositor, not buffer counts |
 
@@ -168,6 +169,7 @@ generic notes as well.
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
 | [unmasked-suspend-during-an-automated-wait-is-a-death-loop](traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md) | `generic` | Unmasking suspend before an automated wait can loop a device out of reach |
+| [uprobes-do-not-attach-to-an-already-mapped-library](traps/uprobes-do-not-attach-to-an-already-mapped-library.md) | `generic` | A uprobe set after the process started never fires |
 | [usb-gadget-rerandomises-the-host-mac](traps/usb-gadget-rerandomises-the-host-mac.md) | `generic` | The USB gadget hands the host a new MAC on every boot |
 | [usb-ids-cannot-tell-booted-from-bootloader](traps/usb-ids-cannot-tell-booted-from-bootloader.md) | `generic` | lsusb can label a running pmOS USB gadget as "fastboot |
 | [wait-long-enough-before-calling-a-boot-failed](traps/wait-long-enough-before-calling-a-boot-failed.md) | `generic` | Wait long enough before calling a boot failed |
@@ -208,7 +210,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 40
-- `generic` — 100
+- `generic` — 102
 - `soc:gs201` — 1
 - `soc:msm8998` — 28
 - `soc:qcom` — 1
