@@ -55,6 +55,7 @@ generic notes as well.
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-browser-stutter-is-a-blocked-webkit-main-thread](findings/the-browser-stutter-is-a-blocked-webkit-main-thread.md) | `generic` | The browser stutter is a blocked WebKit main thread, not the display stack |
 | [the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized](findings/the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized.md) | `device:google-taimen` | Epiphany's frame period is CPU paint PLUS the GPU tail, serialized -- frameDone to next frame start is 0.1 ms |
+| [the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible](findings/the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible.md) | `device:google-taimen` | Epiphany's frame period is pinned at 2 refreshes because the CPU paint alone exceeds one -- every sub-quantum optimisation measures as neutral |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
 | [the-missing-eapol-is-ath10ks-rx-confused-latch](findings/the-missing-eapol-is-ath10ks-rx-confused-latch.md) | `device:google-taimen` | The missing 4-way handshake is ath10k's rx_confused latch: one split A-MSDU disables data RX for the life of the firmware |
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
@@ -148,6 +149,7 @@ generic notes as well.
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
+| [one-arm-cannot-resolve-a-browser-change-here](traps/one-arm-cannot-resolve-a-browser-change-here.md) | `device:google-taimen` | One browser arm cannot resolve anything under ~10% here: the same build gave 29% and 73% frames-over-budget |
 | [pmbootstrap-never-runs-the-shell-in-an-apkbuild](traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md) | `generic` | pmbootstrap parses an APKBUILD line by line and never runs the shell |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
 | [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
@@ -205,7 +207,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 38
+- `device:google-taimen` — 40
 - `generic` — 100
 - `soc:gs201` — 1
 - `soc:msm8998` — 28
