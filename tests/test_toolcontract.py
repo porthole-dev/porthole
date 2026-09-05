@@ -178,5 +178,31 @@ sleep 30
     assert len(found) == 1 and found[0].severity == "warn"
 
 
+def test_audit_ranks_errors_before_warnings():
+    class FakeTool(object):
+        def __init__(self, name, text):
+            self.name = name
+            self.head = text
+            self._text = text
+
+        def read(self):
+            return self._text
+
+    warn_only = FakeTool("ph-warn.sh", "#!/bin/bash\nsleep 9\n")
+    err_too = FakeTool("ph-err.sh", "#!/bin/bash\npkill -f x\nsleep 9\n")
+    ranked = tc.audit([warn_only, err_too])
+    assert [r["name"] for r in ranked] == ["ph-err.sh", "ph-warn.sh"]
+
+
+def test_a_clean_tool_is_absent_from_the_audit():
+    class FakeTool(object):
+        name = "ph-clean.sh"
+
+        def read(self):
+            return "#!/bin/bash\n# exits: 0 ok \xb7 1 failed\necho hi\n"
+
+    assert tc.audit([FakeTool()]) == []
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

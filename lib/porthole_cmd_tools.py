@@ -132,6 +132,15 @@ class Tool:
                 "documented": not self.gaps,
                 "missing_fields": self.gaps}
 
+    def read(self) -> str:
+        """The whole file. `head` is the first 30 lines, which is the right
+        amount for a catalogue and the wrong amount for a contract check --
+        `pkill` and `sleep` live in the body."""
+        try:
+            return self.path.read_text(errors="replace")
+        except OSError:
+            return ""
+
 
 # Files that live in tools/ but are not tools: systemd units are installed on
 # the device, and listing them in the catalogue invites someone to run them.
@@ -161,11 +170,13 @@ def cmd_tools(args, ctx) -> int:
     tools = collect(ctx.root, device)
 
     # A leading ACTION word is a mode; anything else is a tool name. The
-    # collision set is two words and no tool is called "lint" or "list" --
-    # they are all tk-*.sh -- so this costs nothing and keeps
-    # `porthole tools tk-fps.py` exactly as short as it was.
+    # collision set is three words now, and one of them is no longer free of
+    # collateral: tk-daily-audit.sh contains "audit", so
+    # `porthole tools audit` no longer substring-matches it -- it stays
+    # reachable by its full name or via `--grep audit`. That trade is
+    # accepted.
     action = ""
-    if args.name in ("list", "lint"):
+    if args.name in ("list", "lint", "audit"):
         action, args.name = args.name, None
 
     if action == "lint":
@@ -186,6 +197,34 @@ def cmd_tools(args, ctx) -> int:
                     f"Header format: docs/CONTRIBUTING.md")
         ctx.emit(payload, render_lint)
         return EX_FAIL if bad else EX_OK
+
+    if action == "audit":
+        from porthole_toolcontract import audit as run_audit
+        rows = run_audit(tools)
+
+        def render_audit():
+            if not rows:
+                ctx.out(ctx.out.paint(
+                    f"all {len(tools)} tools hold to the contract", "green"))
+                return
+            width = max(len(r["name"]) for r in rows)
+            for row in rows:
+                for finding in row["findings"]:
+                    colour = "red" if finding["severity"] == "error" else "yellow"
+                    ctx.out(f"  {row['name']:<{width}}  "
+                            f"{ctx.out.paint(finding['check'], colour)}: "
+                            f"{finding['detail']}")
+            ctx.out.blank()
+            errors = sum(r["errors"] for r in rows)
+            warnings = sum(r["warnings"] for r in rows)
+            ctx.out(f"{len(rows)} of {len(tools)} tools have findings: "
+                    f"{errors} error, {warnings} warning. "
+                    f"Contract: docs/DESIGN-unattended-autonomy.md")
+        ctx.emit(rows, render_audit)
+        # A finding is not a broken toolbox, and phase 1 has not run yet.
+        # Exiting non-zero here would make `make check` red for everyone
+        # before there is anything they can do about it.
+        return EX_OK
 
     if args.name:
         # Exact match, then substring: `porthole tools suspend` should work.
@@ -269,7 +308,7 @@ SPEC = {
         "For agents: `porthole tools --json` is the catalogue to consult first."),
     "args": [
         (["name"], {"nargs": "?", "metavar": "ACTION|NAME",
-                    "help": "list | lint, or a tool name to read its contract"}),
+                    "help": "list | lint | audit, or a tool name to read its contract"}),
         (["--scope"], {"metavar": "SCOPE",
                        "help": "generic | soc:<soc> | device:<codename>"}),
         (["--needs"], {"metavar": "STATE",
@@ -286,5 +325,6 @@ SPEC = {
         "porthole tools --grep suspend",
         "porthole tools tk-suspend-cycle.sh",
         "porthole tools lint",
+        "porthole tools audit",
     ],
 }

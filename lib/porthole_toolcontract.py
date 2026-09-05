@@ -186,3 +186,27 @@ def check_bare_sleep(name, text):
 
 CHECKS = (check_exit_codes, check_pkill_pattern, check_fixed_timeout,
           check_bare_sleep)
+
+
+def audit(tools):
+    """Findings per tool, worst first.
+
+    Ranked by error count then warning count then name, so the list is stable
+    between runs -- an audit whose order changes for no reason is an audit
+    nobody can diff.
+    """
+    rows = []
+    for tool in tools:
+        text = tool.read()
+        found = []
+        for check in CHECKS:
+            found.extend(check(tool.name, text))
+        if not found:
+            continue
+        errors = sum(1 for f in found if f.severity == "error")
+        rows.append({"name": tool.name,
+                     "errors": errors,
+                     "warnings": len(found) - errors,
+                     "findings": [f._asdict() for f in found]})
+    rows.sort(key=lambda r: (-r["errors"], -r["warnings"], r["name"]))
+    return rows
