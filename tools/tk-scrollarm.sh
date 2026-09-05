@@ -61,7 +61,11 @@ H=0
 for _ in $(seq 1 40); do
 	sleep 2
 	H=$(python3 $EV 'document.documentElement.scrollHeight' 2>/dev/null)
-	case "${H:-0}" in ''|*[!0-9]*) H=0 ;; esac
+	# Test $H, not ${H:-0}: the default made the empty case unreachable, so a
+	# webeval that answered nothing left H empty and every later
+	# `[ "$H" -gt 6000 ]` printed `sh: out of range` forty times over instead
+	# of refusing the arm.
+	case "$H" in ''|*[!0-9]*) H=0 ;; esac
 	[ "$H" -gt 6000 ] && break
 done
 echo "[$L] $(python3 $EV 'document.title' 2>/dev/null | cut -c1-46) scrollHeight=$H"
@@ -86,7 +90,12 @@ done
 # Drag finger up = content scrolls down. From the top there is always room.
 (sleep 1; python3 /tmp/threadcpu.py 8 > "/tmp/tc-$L.txt" 2>&1) &
 TC=$!
-sudo -n python3 /tmp/tk-gesture-bench.py drag 720 2400 720 900 500 8 \
+# TK_SCROLL_DRAG overrides the gesture, because "is it smooth" and "is this
+# knob better" want different ones: the default leaves 700 ms between drags,
+# `--pause 0` scrolls continuously and is the one to use when a gap in the
+# frame record is supposed to mean a stall.
+# shellcheck disable=SC2086
+sudo -n python3 /tmp/tk-gesture-bench.py drag ${TK_SCROLL_DRAG:-720 2400 720 900 500 8} \
 	--client "/tmp/wl-$L.log" 2>&1 | tail -8
 # ONLY the sampler. A bare `wait` also waits on the browser started above, which
 # never exits, and the whole arm hangs with its output stuck in the pipeline.

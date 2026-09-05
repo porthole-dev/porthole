@@ -20,6 +20,7 @@ nothing.
   tk-ui.py list                       toplevels, one "app-id\ttitle" per line
   tk-ui.py hash                       md5 of the current frame
   tk-ui.py settle [TIMEOUT]           wait until the screen stops changing
+  tk-ui.py unblank                    undo the screensaver blank (a touch will not)
   tk-ui.py launch APP_ID CMD...       run CMD, wait for its window, focus it
   tk-ui.py focus APP_ID               raise an existing window, verify
   tk-ui.py require APP_ID             exit nonzero unless APP_ID has a window
@@ -31,10 +32,16 @@ import subprocess
 import sys
 import time
 
+# The session user's runtime dir. Root may open the wayland socket -- there is
+# no auth on it -- but NOT the session bus, so anything on DBus below has to be
+# run back as this user.
+SESSION_UID = 10000
+RUNTIME_DIR = "/run/user/%d" % SESSION_UID
+
 ENV = dict(os.environ,
-           XDG_RUNTIME_DIR="/run/user/10000",
+           XDG_RUNTIME_DIR=RUNTIME_DIR,
            WAYLAND_DISPLAY="wayland-0",
-           DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/10000/bus")
+           DBUS_SESSION_BUS_ADDRESS="unix:path=%s/bus" % RUNTIME_DIR)
 
 
 def run(*cmd, **kw):
@@ -71,6 +78,31 @@ def screen_hash():
     if out.returncode:
         return None
     return hashlib.md5(out.stdout).hexdigest()
+
+
+def unblank():
+    """Turn the screen back on, and say whether it worked.
+
+    phosh's screensaver powers the output down after a few minutes idle, and an
+    INJECTED touch does NOT wake it -- uinput events reach the client but never
+    the idle notifier. So an unattended arm drags against a dark screen: the
+    page does not scroll, the DPU counts zero frames, and the only thing that
+    says why is `run()`'s "screen off?" timeout, which reads like a hung device.
+
+    Writing bl_power=0 is not the lever. Measured 2026-09-05: the backlight
+    comes on, the compositor's output stays off, and the same drag still moves
+    the page zero pixels. Only the screensaver's own call restores scanout --
+    and only as the session user, because from root the session bus answers
+    "Call failed: Socket not connected".
+    """
+    cmd = ["busctl", "--user", "call", "org.gnome.ScreenSaver",
+           "/org/gnome/ScreenSaver", "org.gnome.ScreenSaver",
+           "SetActive", "b", "false"]
+    if os.getuid() == 0:
+        cmd = ["sudo", "-n", "-u", "#%d" % SESSION_UID, "env",
+               "XDG_RUNTIME_DIR=" + RUNTIME_DIR,
+               "DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus" % RUNTIME_DIR] + cmd
+    return run(*cmd).returncode == 0
 
 
 def settle(timeout=10.0, quiet_for=0.6):
@@ -158,6 +190,8 @@ def main():
         print(screen_hash())
     elif cmd == "settle":
         print(settle(float(argv[1]) if len(argv) > 1 else 10.0))
+    elif cmd == "unblank":
+        print("screen on" if unblank() else "the screensaver refused")
     elif cmd == "focus":
         focus(argv[1])
         print("focused %s" % argv[1])

@@ -19,7 +19,7 @@ exits with a FileNotFoundError traceback rather than saying what is
 missing: `apk add grim lswt`.
 
   tk-gesture-bench.py NAME [REPEATS]
-  tk-gesture-bench.py drag X1 Y1 X2 Y2 MS [REPEATS] [--fling]
+  tk-gesture-bench.py drag X1 Y1 X2 Y2 MS [REPEATS] [--fling] [--pause MS]
   tk-gesture-bench.py watch SECONDS          measure without touching anything
   ... [--client LOG]  add the APP's own frame rate beside the DPU's
 
@@ -72,6 +72,7 @@ _touch = _sibling("tk-touch")
 Touch, drag = _touch.Touch, _touch.drag
 _ui = _sibling("tk-ui")
 screen_hash, settle, toplevels = _ui.screen_hash, _ui.settle, _ui.toplevels
+unblank = _ui.unblank
 
 # 6.0 named it encoder31, 6.18 names it encoder-0. Glob, don't guess.
 ENCODER = next(iter(glob.glob("/sys/kernel/debug/dri/0/encoder*/status")),
@@ -296,6 +297,11 @@ def measure(name, desc, repeats, fn, wl_log=None):
     wl_log is a WAYLAND_DEBUG=1 log the app under test is still writing to; the
     run is bracketed by its size, so only this gesture's commits are read.
     """
+    # Wake the screen FIRST. The screensaver blanks it after a few minutes
+    # idle and an injected touch does not undo that, so an unattended arm
+    # otherwise drags against a dark output and lands in the "never changed"
+    # branch below -- a void arm that looks identical to a real end-stop.
+    woke = unblank()
     # Witness the screen before and after. A run whose screen never changed
     # measured nothing, however many frames it counted, and must say so rather
     # than report a frame rate for a still image.
@@ -327,10 +333,20 @@ def measure(name, desc, repeats, fn, wl_log=None):
               % (len(s.stamps), wall,
                  "never changed" if mid == before else "did change, so the "
                  "frame counter is wrong, not the gesture"))
+        if not woke:
+            print("  (and the screensaver would not turn the screen on -- "
+                  "is there a session on seat0 at all?)")
         return
     report(name, desc, s.stamps, wall, s.mhz, s.cpu, s.proc.labels)
     if wl_log:
-        report_client(*client_frames(_log_slice(wl_log, wl_at)))
+        lines = _log_slice(wl_log, wl_at)
+        # Keep the slice. The client column below is a summary, and a summary
+        # cannot say WHERE a stall was -- tk-wlgaps.py can, but only if it gets
+        # the same bytes this saw rather than the whole log with the page load
+        # and the settle still in it.
+        with open(wl_log + ".drag", "w") as f:
+            f.write("\n".join(lines))
+        report_client(*client_frames(lines))
 
 
 def latency(x, y, repeats, idle_s, dy=-200):
@@ -383,12 +399,23 @@ def main():
     elif argv and argv[0] == "drag":
         fling = "--fling" in argv
         argv = [a for a in argv if a != "--fling"]
+        # The pause between repeats is idle the client is RIGHT to spend not
+        # drawing, and it lands in the frame statistics as a 250-800 ms gap
+        # indistinguishable from a stall. `--pause 0` drags back to back, so
+        # any gap left over is one.
+        pause = 0.7
+        if "--pause" in argv:
+            i = argv.index("--pause")
+            pause = int(argv[i + 1]) / 1000.0
+            del argv[i:i + 2]
         x1, y1, x2, y2, ms = (int(v) for v in argv[1:6])
         repeats = int(argv[6]) if len(argv) > 6 else 3
-        measure("drag", "%d,%d -> %d,%d in %dms%s"
-                % (x1, y1, x2, y2, ms, " then fling" if fling else ""),
+        measure("drag", "%d,%d -> %d,%d in %dms%s, %.0f ms apart"
+                % (x1, y1, x2, y2, ms, " then fling" if fling else "",
+                   pause * 1000),
                 repeats,
-                lambda t: (drag(t, x1, y1, x2, y2, ms, fling), time.sleep(0.7)),
+                lambda t: (drag(t, x1, y1, x2, y2, ms, fling),
+                           time.sleep(pause)),
                 wl_log)
     elif argv and argv[0] == "watch":
         measure("watch", "no input, just watching", int(argv[1]), None, wl_log)
