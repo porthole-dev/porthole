@@ -207,13 +207,19 @@ def cmd_tools(args, ctx) -> int:
                 ctx.out(ctx.out.paint(
                     f"all {len(tools)} tools hold to the contract", "green"))
                 return
-            width = max(len(r["name"]) for r in rows)
-            for row in rows:
-                for finding in row["findings"]:
-                    colour = "red" if finding["severity"] == "error" else "yellow"
-                    ctx.out(f"  {row['name']:<{width}}  "
-                            f"{ctx.out.paint(finding['check'], colour)}: "
-                            f"{finding['detail']}")
+            locs = [(row, finding, f"{row['name']}:{finding['line']}")
+                    for row in rows
+                    # errors before warnings within a row, so the two
+                    # severities do not interleave in CHECKS order
+                    for finding in sorted(
+                        row["findings"],
+                        key=lambda f: f["severity"] != "error")]
+            width = max(len(loc) for _, _, loc in locs)
+            for row, finding, loc in locs:
+                colour = "red" if finding["severity"] == "error" else "yellow"
+                ctx.out(f"  {loc:<{width}}  "
+                        f"{ctx.out.paint(finding['check'], colour)}: "
+                        f"{finding['detail']}")
             ctx.out.blank()
             errors = sum(r["errors"] for r in rows)
             warnings = sum(r["warnings"] for r in rows)
