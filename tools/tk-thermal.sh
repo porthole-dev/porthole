@@ -26,9 +26,8 @@
 # `cool` is the one that matters for back-to-back arms, and `guard` is the one
 # that matters when nobody is watching.
 set -uo pipefail
-cd "$(dirname "$0")/.."
 # shellcheck source=tk-lib.sh
-. tools/tk-lib.sh
+. "$(dirname "$0")/tk-lib.sh"
 
 CEIL=${TK_THERMAL_CEILING:-82000}
 FLOOR=${TK_THERMAL_FLOOR:-55000}
@@ -45,8 +44,22 @@ dim() {
 # Anything an arm might have left running. Split strings so the pkill pattern
 # does not match the ssh command line carrying it -- that self-kill costs an
 # afternoon the first time it happens.
+#
+# `porthole tools audit` flags this anyway, correctly: the contract's real fix
+# is stopping each workload's systemd --user scope/slice, not string-splitting
+# a pkill pattern, and that fix also covers the gap this still has --
+# grandchildren pkill -f never sees. Every OTHER arm in this tree already
+# names its epiphany scope (app-gnome-org.gnome.Epiphany-$$.scope under
+# app.slice, stopped by unit glob) and tears down through that; killarms()
+# is the generic catch-all called by tools that do not know which of those
+# per-arm scope names, if any, is still standing, and I have not verified on
+# a device that MiniBrowser and glmark2 are ever placed in a stoppable scope
+# at all (nothing in this tree launches either one that way). Guessing here
+# risks a silent no-op teardown on an overheating phone, which is worse than
+# the known gap this already has -- so it stays pkill for now, exempted
+# rather than "fixed" on faith.
 killarms() {
-    tk_run 'pkill -f epipha""ny; pkill -f MiniBrow""ser; pkill -f glmark""2; true' >/dev/null 2>&1 || true
+    tk_run 'pkill -f epipha""ny; pkill -f MiniBrow""ser; pkill -f glmark""2; true' >/dev/null 2>&1 || true  # contract: pkill-ok scope names for MiniBrowser/glmark2 are unverified on-device; see comment above
 }
 
 usage() { echo "usage: tools/tk-thermal.sh prep|down|cool [mC]|guard SECONDS [mC]" >&2; exit 64; }
@@ -60,7 +73,14 @@ prep)
 down)
     killarms
     dim
-    sleep 2
+    # The temp/freq reading that follows is only meaningful once the killed
+    # workload has actually exited -- poll for that instead of guessing how
+    # long it takes, bounded so a process that ignores the kill still lets
+    # teardown finish and report.
+    for _ in $(seq 1 10); do
+        tk_run 'pgrep -x epiphany >/dev/null || pgrep -x MiniBrowser >/dev/null || pgrep -x glmark2 >/dev/null' >/dev/null 2>&1 || break
+        sleep 1
+    done
     echo "thermal: after teardown $(maxtemp) mC, gpu $(tk_run 'cat /sys/class/devfreq/*gpu/cur_freq' 2>/dev/null)"
     ;;
 cool)
