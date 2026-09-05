@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: device:google-taimen
 # needs: BOOTED; tk-key.py and tk-touch.py in /tmp on the device; magick on the host
-# env: HOST, PHONE, TK_SESSION_REF (lockscreen reference png)
+# env: HOST, PHONE
 # exits: 0 ok · 64 usage · 1 could not reach the requested state
 #
 # Wake, unlock and blank the phosh session, reliably enough to drive the phone
@@ -24,11 +24,9 @@
 # harmless when nothing was locked. If a PIN is ever set, pipe it to tk-key.py
 # type - rather than passing it as an argument (it would land in journald).
 set -uo pipefail
-cd "$(dirname "$0")/.."
-# shellcheck source=tk-lib.sh
-. tools/tk-lib.sh
+# shellcheck source=../../../lib/porthole.sh
+. "$(dirname "$0")/../../../tools/tk-lib.sh"
 
-REF=${TK_SESSION_REF:-tools/repro/a5xx-gmem/ref_lock_small.png}
 PROBE=/tmp/tk-session-lockprobe.png
 
 panel_on() { tk_run '. /tmp/sess.sh; timeout 8 grim -s 0.1 /tmp/panelprobe.png >/dev/null 2>&1'; }
