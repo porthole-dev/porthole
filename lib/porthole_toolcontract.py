@@ -137,12 +137,8 @@ def check_fixed_timeout(name, text):
 
 
 _SLEEP = re.compile(r"^\s*sleep\s+(\d+)")
-# A loop opener on any of the preceding lines of the same block means the
-# sleep is the poll interval, not a wait. Deliberately crude: the alternative
-# is parsing shell, and the cost of the crude version is a missed finding
-# rather than a false one.
-_LOOP = re.compile(r"^\s*(while|until|for)\b")
-_LOOP_WINDOW = 6
+_LOOP_OPEN = re.compile(r"^\s*(while|until|for)\b")
+_LOOP_CLOSE = re.compile(r"^\s*done\b")
 
 
 def check_bare_sleep(name, text):
@@ -154,15 +150,26 @@ def check_bare_sleep(name, text):
     event you could have polled for; a hardware settling delay is not that,
     and thirty tools contain one. An error here would be a gate that gets
     deleted rather than satisfied.
+
+    Shell loops are explicitly delimited by do/done, so depth tracking is exact.
+    A sleep inside a loop (depth > 0) is a poll interval and is left alone.
+    A remaining limitation: a Python tool's `for` would increment a depth that
+    no `done` ever decrements, which is harmless only because the `sleep`
+    pattern is anchored shell syntax that Python's `time.sleep(...)` never matches.
     """
     lines = text.splitlines()
     out = []
-    for i, line in enumerate(lines):
+    loop_depth = 0
+    for line in lines:
+        if _LOOP_OPEN.match(line):
+            loop_depth += 1
+        elif _LOOP_CLOSE.match(line):
+            loop_depth = max(0, loop_depth - 1)
+
         m = _SLEEP.match(line)
         if not m:
             continue
-        if any(_LOOP.match(prev)
-               for prev in lines[max(0, i - _LOOP_WINDOW):i]):
+        if loop_depth > 0:
             continue
         reason = _exempted(line, "sleep-ok")
         if reason is None:

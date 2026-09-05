@@ -148,5 +148,35 @@ def test_the_sleep_exemption_must_carry_a_reason():
     assert len(found) == 1 and "reason" in found[0].detail
 
 
+def test_a_sleep_in_a_long_poll_loop_is_not_flagged():
+    """A realistic poll loop body spans more than six lines, so the window-based
+    heuristic would incorrectly flag the sleep. do/done delimit the loop exactly."""
+    text = """#!/bin/bash
+while ! device_ready; do
+    echo waiting
+    check_usb
+    check_serial
+    check_uart
+    check_battery
+    check_temp
+    sleep 1
+done
+"""
+    assert tc.check_bare_sleep("ph-thing.sh", text) == []
+
+
+def test_a_sleep_after_a_closed_loop_is_still_flagged():
+    """When a loop closes with done, the depth counter must decrement. A sleep
+    that appears after the loop ends is a bare sleep and must be flagged."""
+    text = """#!/bin/bash
+while ! ready; do
+    sleep 1
+done
+sleep 30
+"""
+    found = tc.check_bare_sleep("ph-thing.sh", text)
+    assert len(found) == 1 and found[0].severity == "warn"
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
