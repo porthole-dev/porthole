@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: a `perf script -F sym` dump; run anywhere
+# needs: - (host only; feed it a perf-report dump, run anywhere)
 # env: -
 # exits: 0 ok
-"""wkbuckets.py PERF-REPORT-FILE -- what phase of WebKit owns the main thread.
+"""wkbuckets.py PERF-REPORT-FILE -- what phase of WebKit owns the main thread,
+from a `perf report` dump (not `perf script -F sym`, see below).
 
 A flat `perf report` of WebKit is useless: the work is spread over thousands of
 small functions and nothing clears 2%. Bucketing the SAME lines by what each

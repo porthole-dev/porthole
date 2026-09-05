@@ -1,11 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: HOST side. nm and readelf; the -dbg and the plain webkit apk for the
-#        build that is INSTALLED on the device.
+# needs: - (host only: nm and readelf)
 # env: TK_WK_APK_DIR (default the porthole sandbox package dir), TK_WK_VERSION
 # exits: 0 printed · 1 packages not found · 64 usage
-# tk-wkoffsets.sh [SYMBOL...] -- uprobe offsets for WebKit phase entry points.
+# tk-wkoffsets.sh [SYMBOL...] -- uprobe offsets for WebKit phase entry points,
+# from the -dbg and plain webkit apk for the build INSTALLED on the device.
 #
 # Prints a line to eval, giving tk-wkphase.sh the offsets for the build under
 # test. Run it again after every rebuild; that is the whole point.
