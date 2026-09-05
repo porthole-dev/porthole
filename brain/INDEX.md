@@ -40,6 +40,7 @@ generic notes as well.
 | [holding-vdd-mx-does-not-stop-the-wake-crash](findings/holding-vdd-mx-does-not-stop-the-wake-crash.md) | `soc:msm8998` | Holding VDD_MX does not stop the display-wake crash -- neither enabled nor at TURBO |
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
 | [lax-build-buys-nothing-measurable](findings/lax-build-buys-nothing-measurable.md) | `generic` | PORTHOLE_LAX_BUILD=1 saves no measurable time, and the zap it skips is not the wall clock |
+| [mainline-a540-init-matches-kgsl-except-allflatoptdis](findings/mainline-a540-init-matches-kgsl-except-allflatoptdis.md) | `soc:msm8998` | Mainline a5xx_hw_init programs the A540 at parity with kgsl's a5xx_start; the one extra mainline write is VPC ALLFLATOPTDIS |
 | [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
 | [nothing-polls-an-idle-link-on-ath10k](findings/nothing-polls-an-idle-link-on-ath10k.md) | `generic` | ath10k turns off mac80211's idle connection polling, then disables the firmware keepalive too |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
@@ -48,6 +49,7 @@ generic notes as well.
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
+| [the-a540-blob-brackets-gmem-passes-with-ccu-maintenance-and-re-arms-the-restore-blit](findings/the-a540-blob-brackets-gmem-passes-with-ccu-maintenance-and-re-arms-the-restore-blit.md) | `soc:msm8998` | The a540 blob brackets every GMEM pass with CCU invalidate/flush and re-arms the restore blit rectangle; fd5 does neither |
 | [the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not](findings/the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not.md) | `soc:msm8998` | The a540 userspace blob writes no a5xx register that mesa fd5 and the kernel do not already write |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
@@ -78,6 +80,7 @@ generic notes as well.
 | [vht-capa-overrides-cannot-touch-channel-width](findings/vht-capa-overrides-cannot-touch-channel-width.md) | `generic` | wpa_supplicant's vht_capa cannot change Supported Channel Width Set or Extended NSS BW -- mac80211 drops it |
 | [waylandsink-5fps-was-two-upstream-policies-colliding](findings/waylandsink-5fps-was-two-upstream-policies-colliding.md) | `device:google-taimen` | The waylandsink 5 fps cap was two upstream policies colliding -- wlroots hides LINEAR from v3 clients, GStreamer refuses INVALID |
 | [waylandsink-delivers-5fps-where-other-sinks-do-60](findings/waylandsink-delivers-5fps-where-other-sinks-do-60.md) | `device:google-taimen` | waylandsink delivers 5 fps where glimagesink and gtk4paintablesink do 60 -- and WebKit's compositor is the browser's ceiling, not venus |
+| [webkit-recomposites-the-whole-viewport-because-damage-clipping-is-off-by-default](findings/webkit-recomposites-the-whole-viewport-because-damage-clipping-is-off-by-default.md) | `device:google-taimen` | Epiphany recomposites the whole viewport every frame: WebKit collects damage but UseDamagingInformationForCompositing defaults off, and UnifyDamagedRegions makes a playing video's damage the whole viewport |
 | [webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound](findings/webkits-frame-loop-is-one-frame-in-flight-and-a5xx-is-batch-bound.md) | `soc:msm8998` | WebKitGTK's frame loop allows one frame in flight, released from GTK's snapshot(); on a5xx every render pass is a separate kernel submit -- so the compositor's cost is passes, not pixels |
 | [what-a-rootless-workspace-cannot-do](findings/what-a-rootless-workspace-cannot-do.md) | `generic` | Five things a rootless container cannot do that pmbootstrap assumes, and what each one costs |
 | [where-the-build-minutes-actually-go](findings/where-the-build-minutes-actually-go.md) | `generic` | Every rung pays ~14s to activate envkernel, and that dwarfs the compile |
@@ -154,6 +157,7 @@ generic notes as well.
 | [pmbootstrap-never-runs-the-shell-in-an-apkbuild](traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md) | `generic` | pmbootstrap parses an APKBUILD line by line and never runs the shell |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
 | [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
+| [reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone](traps/reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone.md) | `soc:msm8998` | Reading the qfprom corrected region through nvmem hard resets the phone |
 | [running-a-device-script-on-the-host](traps/running-a-device-script-on-the-host.md) | `generic` | A device-side script run on the host produces plausible, entirely wrong output |
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
@@ -209,8 +213,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 40
+- `device:google-taimen` — 41
 - `generic` — 102
 - `soc:gs201` — 1
-- `soc:msm8998` — 28
+- `soc:msm8998` — 31
 - `soc:qcom` — 1
