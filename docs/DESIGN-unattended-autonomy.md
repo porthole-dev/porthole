@@ -293,6 +293,18 @@ be falsifying the record.
 7. **Enforcement:** `tests/test_conventions.py` fails on any `\btk[-_]` or
    `\bTK_` outside the `brain/` evidence exemption. The rule stops depending
    on anyone remembering it.
+8. **Regenerate the generated docs.** `make rules` (`lib/porthole_rules.py
+   --write`) rewrites the rule blocks in both `AGENTS.md` and
+   `skills/porthole-bringup/SKILL.md`, and `tests/test_rules.py` fails the
+   moment either goes stale; `make tools-doc` rewrites `docs/TOOLS.md` from
+   the tool headers. Both must be re-run as part of the rename, not as an
+   afterthought once something fails. This does not cover everything:
+   `SKILL.md` carries hand-written `tk-` references *outside* its generated
+   block -- `TK_BOOT_DEADLINE` (line 159), `` TK_AGENT=<you> tools/tk-device.sh ``
+   (line 239), and `` . tools/tk-lib.sh `` (line 242, and `tools/tk-lib.sh` is
+   deleted outright by step 2) -- and the generator will not touch prose it
+   does not own. Those need the same explicit reviewed pass as the
+   identifiers in step 3.
 
 ## The audit
 
@@ -306,6 +318,27 @@ audit, run against real data, is the one that answers it. Stating both
 separately is deliberate: they are different failures and conflating them
 would let a tool that scores perfectly and fails every time look healthy.
 
+### Scope: what the audit looks at, and what it deliberately does not
+
+`collect()` is non-recursive over `tools/` plus the active profile's
+`tools/`. That is the right architecture -- it is exactly the set `porthole
+tools` already treats as "the tools" -- but it means the contract gate this
+design describes ("a class is gated in the commit that clears its last
+violation") is only true of that scope. These are known, counted, and
+currently outside it:
+
+| location | finding | count |
+|---|---|---|
+| `lib/porthole.sh` | `fixed-timeout` (`timeout <N> ssh`, lines 396, 405, 440, 527, 568, 586, 668, 677) | 8 |
+| `tools/repro/a5xx-gmem/arm.sh:17` | `fixed-timeout` | 1 |
+| `tools/repro/**` | `bare-sleep` (`strip.sh:12,21`, `session_state.sh:25,45,51`, `arm.sh:16,21`) | 7 |
+| `lib/porthole_cmd_pkg.py:1013` | `pkill-pattern` (`pkill -f 'pmbootstrap.*build'`) | 1 |
+
+`lib/porthole.sh` matters most: it is the shared library every tool sources,
+and exactly where phase 3's `PH_SILENCE`/`PH_DEADLINE` replacement has to
+land, so the audit certifying `fixed-timeout` clear must not be read as
+"lib/porthole.sh is clear" -- it never scored it.
+
 ### Baseline, measured 2026-09-05 before any fix
 
 The measured output of `./bin/porthole tools audit` on the day it was built:
@@ -314,18 +347,27 @@ The measured output of `./bin/porthole tools audit` on the day it was built:
 |---|---|
 | `exit-code-not-shared` | 18 |
 | `exit-code-undocumented` | 9 |
-| `pkill-pattern` | 7 |
+| `pkill-pattern` | 4 |
 | `fixed-timeout` | 16 |
-| `bare-sleep` | 22 |
+| `bare-sleep` | 27 |
 
-Totals: 33 of 146 tools have findings — 34 error, 38 warning.
+Totals: 35 of 146 tools have findings — 31 error, 43 warning.
 
 Phase 1 works this list down. A class is gated by `tests/test_tools.py` in the
 commit that clears its last violation, never before.
 
-Note: the `bare-sleep` figure is lower than an earlier grep estimate of 30
-because sleeps inside poll loops are correctly excluded — that difference is
-the checker working, not a miscount.
+Note: `pkill-pattern` and `bare-sleep` moved from an earlier same-day reading
+(7 and 22) once two checker defects were fixed, not because tools changed.
+`check_pkill_pattern` and `check_fixed_timeout` were reading comment lines as
+code, so two tools' comments *warning never to `pkill -f` over ssh*
+(`tk-capture.sh`, `tk-dmic-sweep.sh`) counted as three of the violations they
+document; a shared comment-line guard removed them. `check_bare_sleep`'s
+loop-depth counter leaked on one-line loops and on a Python `for` inside a
+shell heredoc, silencing every later top-level `sleep` in the file; keying
+depth on the actual `do`/`done` delimiters recovered six genuine settling
+waits and, as a side effect, also removed one pre-existing false positive
+(a sleep genuinely inside a loop that the old opener regex had never
+recognised as open). Net bare-sleep change: +6 found, -1 corrected, +5.
 
 ## Interfaces
 
@@ -358,6 +400,15 @@ agent holds the phone.
 | 3 | run contract: silence timeouts, status, ledger | every later piece reports through it |
 | 4 | the lease, the slice and the TTL teardown | the autonomy itself |
 | 5 | interfaces | last, because it is a view of phases 3 and 4 |
+| 6 | documentation: teach the workflow | an autonomy system no agent is told about is one nobody uses |
+
+Phase 6 updates the two places a session starts. The skill's opening
+currently tells an agent every session begins with `porthole doctor` and
+`porthole config`; once the lease exists it must also say `porthole session
+start` for unattended work. `AGENTS.md` in both repos needs the same
+addition -- the skill and `AGENTS.md` currently agree with each other, and a
+phase that lands the lease without updating either just grows a new gap
+between what the toolbox can do and what an agent is told it can do.
 
 ## Out of scope
 
