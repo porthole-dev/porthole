@@ -443,11 +443,16 @@ def test_a_build_does_not_inherit_pmb_sudo():
 
     A stale PMB_SUDO export kills a build with exit 78 deep inside
     pmbootstrap, with nothing anywhere saying the words PMB_SUDO.
-    """
-    import porthole_cmd_build as build
 
-    env = build.build_env({"PORTHOLE_ARCH": "aarch64"},
-                          {"PMB_SUDO": "sudo", "PATH": "/usr/bin"})
+    The scrub moved to porthole_cli.child_env (#63) so that `pkg` gets it too;
+    this assertion stays HERE because it is the doctor story's other half --
+    doctor is what tells you the variable is set, and this is what makes being
+    told survivable.
+    """
+    from porthole_cli import child_env
+
+    env = child_env({"PMB_SUDO": "sudo", "PATH": "/usr/bin"},
+                    {"PORTHOLE_ARCH": "aarch64"})
     assert "PMB_SUDO" not in env, env
     assert env.get("PATH") == "/usr/bin", "the rest of the environment stands"
 

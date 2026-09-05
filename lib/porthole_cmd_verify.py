@@ -28,7 +28,7 @@ import pathlib
 import shutil
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_OK, child_env
 
 OK, FAIL, SKIP = "ok", "fail", "skip"
 
@@ -264,7 +264,7 @@ def check_device_script(ctx, work) -> Check:
             continue
         if not os.access(script, os.X_OK):
             return Check(f"{name}", FAIL, "exists but is not executable")
-        env = dict(os.environ)
+        env = child_env(os.environ)
         env.setdefault("PORTHOLE", str(pathlib.Path(ctx.root) / "bin" / "porthole"))
         dtc = _dtc()
         if dtc:

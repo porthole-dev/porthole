@@ -13,7 +13,7 @@ import os
 import pathlib
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_USAGE
+from porthole_cli import Bail, EX_FAIL, EX_USAGE, child_env
 
 
 def cmd_tui(args, ctx) -> int:
@@ -32,7 +32,7 @@ def cmd_tui(args, ctx) -> int:
     device = getattr(args, "device", None) or ctx.cfg.get("PORTHOLE_DEVICE", "")
     if device:
         argv += ["-d", device]
-    env = dict(os.environ)
+    env = child_env(os.environ)
     env["PYTHONPATH"] = str(lib) + os.pathsep + env.get("PYTHONPATH", "")
     os.execve(sys.executable, argv, env)   # replace: two processes for one screen
     return EX_FAIL                         # unreachable

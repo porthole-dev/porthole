@@ -12,7 +12,7 @@ import os
 import shlex
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL
+from porthole_cli import Bail, EX_FAIL, child_env
 from porthole_cmd_tools import collect
 
 
@@ -35,7 +35,7 @@ def cmd_run(args, ctx) -> int:
                    f"did you mean: {', '.join(sorted(near)[:5])}?" if near
                    else "`porthole tools` lists them all")
 
-    env = dict(os.environ)
+    env = child_env(os.environ)
     env.update({k: str(v) for k, v in cfg.items()})
     env["PORTHOLE_ROOT"] = str(ctx.root)
 
