@@ -123,12 +123,16 @@ def check_fixed_timeout(name, text):
     for line in text.splitlines():
         if not _FIXED_TIMEOUT.search(line):
             continue
-        if _exempted(line, "timeout-ok") is not None:
-            continue
-        out.append(Finding(
-            "fixed-timeout", "warn",
-            "a literal ssh/scp ceiling cannot tell slow from wedged; "
-            "use PH_SILENCE and PH_DEADLINE"))
+        reason = _exempted(line, "timeout-ok")
+        if reason is None:
+            out.append(Finding(
+                "fixed-timeout", "warn",
+                "a literal ssh/scp ceiling cannot tell slow from wedged; "
+                "use PH_SILENCE and PH_DEADLINE"))
+        elif not reason:
+            out.append(Finding(
+                "fixed-timeout", "warn",
+                "`# contract: timeout-ok` must carry a reason"))
     return out
 
 

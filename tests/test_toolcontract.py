@@ -110,5 +110,16 @@ def test_a_timeout_on_something_that_is_not_the_device_is_ignored():
     assert tc.check_fixed_timeout("ph-thing.sh", "#!/bin/bash\ntimeout 5 make\n") == []
 
 
+def test_the_timeout_exemption_must_carry_a_reason():
+    text = "#!/bin/bash\ntimeout 12 ssh \"$PHONE\" true  # contract: timeout-ok\n"
+    found = tc.check_fixed_timeout("ph-thing.sh", text)
+    assert len(found) == 1 and "reason" in found[0].detail
+
+
+def test_a_timeout_exemption_with_a_reason_suppresses_the_finding():
+    text = "#!/bin/bash\ntimeout 12 ssh \"$PHONE\" true  # contract: timeout-ok justified here\n"
+    assert tc.check_fixed_timeout("ph-thing.sh", text) == []
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
