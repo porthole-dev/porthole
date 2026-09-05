@@ -29,3 +29,6 @@ docs/superpowers/
 # to publish. It was untracked but NOT ignored, which is one `git add -A` from
 # a leak. See docs/HANDOFF-contribution-rules.md section 4.5.
 logs/
+
+# Agent scratch: SDD ledgers, briefs and review packages. Never a deliverable.
+.superpowers/

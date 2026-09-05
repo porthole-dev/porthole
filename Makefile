@@ -23,7 +23,7 @@ TEST_JOBS ?= 8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
-.PHONY: help test console smoke lint floor check ci trailers issue-trailers distros fmt tools-doc brain-index clean install-completion docs docs-serve rules
+.PHONY: help test console smoke lint floor check ci trailers issue-trailers distros fmt tools-doc tools-audit brain-index clean install-completion docs docs-serve rules
 
 help:            ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -163,6 +163,9 @@ rules:           ## regenerate the rule blocks in AGENTS.md and the skill
 
 tools-doc:       ## regenerate docs/TOOLS.md from the tool headers
 	@$(PY) tools/gen-tools-doc.py > docs/TOOLS.md && echo "wrote docs/TOOLS.md"
+
+tools-audit:     ## score every tool against the contract, worst first
+	@./bin/porthole tools audit
 
 install-completion: ## install shell completion for the current shell
 	@shell=$$(basename "$$SHELL"); \

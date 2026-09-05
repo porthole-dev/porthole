@@ -222,10 +222,19 @@ def test_json_output_actually_parses():
     needs_pmaports()
     for argv in (["devices", "--json"], ["soc", "list", "--json"],
                  ["brain", "search", "--severity", "law", "--json"],
-                 ["tools", "--json"]):
+                 ["tools", "--json"], ["tools", "audit", "--json"]):
         rc, out, err = run(*argv)
         assert rc == 0, f"{argv} -> rc={rc} {err}"
         json.loads(out)
+
+
+def test_tools_audit_renders_plain():
+    """render_audit had zero coverage. This does not assert on the findings
+    (that is test_toolcontract.py's job against fixtures) -- only that the
+    live tree renders without crashing."""
+    rc, out, err = run("tools", "audit")
+    assert rc == 0, f"rc={rc} {err}"
+    assert out.strip(), "expected some report line"
 
 
 # ------------------------------------------------------------------ R4 --
