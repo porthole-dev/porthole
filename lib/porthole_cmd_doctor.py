@@ -755,11 +755,13 @@ def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
         ch.add("host: PMB_SUDO", "fail",
                f"set to {value} -- a leftover; the privilege broker it named "
                f"is gone",
-               fix="unset PMB_SUDO"
-                   "    # a build otherwise dies with exit 78 deep inside "
-                   "pmbootstrap, naming nothing."
-                   " If it is back in the next terminal it is exported from "
-                   "your session, not your shell rc -- remove it there")
+               fix="systemctl --user unset-environment PMB_SUDO"
+                   "    # then `unset PMB_SUDO` in this shell."
+                   " A build otherwise dies with exit 78 deep inside "
+                   "pmbootstrap, naming nothing. The user manager is where it"
+                   " was actually found: not in any rc file, not in"
+                   " environment.d, so grepping dotfiles finds nothing and"
+                   " every new terminal inherits it again")
     else:
         ch.add("host: PMB_SUDO", "ok", "unset -- nothing here uses it")
     _check_leftover_broker(ch, value)
