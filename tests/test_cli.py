@@ -355,6 +355,61 @@ def test_a_labelled_row_dims_its_label_not_its_value():
     assert "\033[90m2m41s" not in line, line
 
 
+# ---------------------------------- the environment a child process is given --
+
+def test_a_child_environment_drops_every_stale_export():
+    """#63: a dead export outlives the file it names.
+
+    PMB_SUDO named a privilege broker porthole deleted on 2026-08-29. On the
+    reference host it was still exported eleven days later -- from the systemd
+    USER MANAGER, so it was in no rc file, no environment.d, and every new
+    terminal and every agent inherited it. pmbootstrap invokes it directly, so
+    a build died with exit 78 naming nothing.
+
+    Generic over the table rather than hardcoding PMB_SUDO: the next entry gets
+    this coverage without anyone remembering to ask for it."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    from porthole_cli import STALE_EXPORTS, child_env
+
+    assert STALE_EXPORTS, "the table is empty; this test now asserts nothing"
+    base = dict({k: "leftover" for k in STALE_EXPORTS}, PATH="/usr/bin")
+    env = child_env(base)
+    for key in STALE_EXPORTS:
+        assert key not in env, f"{key} reached the child: {env}"
+    # THE POSITIVE CONTROL. A child_env that returned {} would pass every
+    # assertion above and break every build in the repo.
+    assert env.get("PATH") == "/usr/bin", "the rest of the environment must stand"
+
+
+def test_every_stale_export_says_why_it_is_one():
+    """A bare name in the table is a rule nobody can audit or retire. Each
+    entry carries the incident, the way the permissions deny table does."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    from porthole_cli import STALE_EXPORTS
+
+    thin = [k for k, why in STALE_EXPORTS.items() if len(why or "") < 40]
+    assert not thin, f"no reason given for: {thin}"
+
+
+def test_the_resolved_config_beats_the_shell_it_was_launched_from():
+    """`cfg` is what the verb resolved from the profile and the config files;
+    the shell's exports are what a stale terminal happens to be carrying. The
+    resolved value has to win, which is the same reason a build refuses on
+    config drift -- and only PORTHOLE_*/TK_ cross, so a cfg key is never a
+    route to setting arbitrary environment in a child."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    from porthole_cli import child_env
+
+    env = child_env({"PORTHOLE_ARCH": "stale", "PATH": "/usr/bin"},
+                    {"PORTHOLE_ARCH": "aarch64", "TK_X": "1",
+                     "HOME": "/should/not/cross", "PORTHOLE_N": 5})
+    assert env["PORTHOLE_ARCH"] == "aarch64", "the stale shell value won"
+    assert env["TK_X"] == "1"
+    assert env.get("PATH") == "/usr/bin"
+    assert env.get("HOME") != "/should/not/cross", "a non-PORTHOLE key crossed"
+    assert "PORTHOLE_N" not in env, "a non-string cfg value crossed"
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

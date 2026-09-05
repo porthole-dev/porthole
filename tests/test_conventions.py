@@ -200,5 +200,50 @@ def test_tracked_text_files_are_clean():
     assert not bad, "\n  ".join(bad)
 
 
+# A `dict(os.environ)` that is NOT a child process's environment, and why. All
+# three build the mapping `load_config` READS: nothing is spawned, and
+# scrubbing there would hide a stale export from the drift guard whose whole
+# job is to report it.
+#
+# The exemption is per FILE, which is the ceiling: a future child spawned from
+# one of these three would not be caught. They were chosen because none of them
+# spawns anything today -- narrow the exemption to a line number on the day one
+# does.
+ENV_COPIES_THAT_SPAWN_NOTHING = {
+    "lib/porthole.py": "load_config's own env argument",
+    "lib/porthole_cli.py": "Ctx.cfg builds that argument -- and child_env "
+                           "itself lives here",
+    "lib/porthole_tui/state.py": "the console reloads config, same reason",
+}
+
+
+def test_a_child_process_environment_comes_from_child_env():
+    """#63: one scrub, or one caller that forgets.
+
+    `build_env` in porthole_cmd_build popped PMB_SUDO and was right to. It was
+    also alone: `pkg`, `run`, `verify` and `tui` each built their own
+    `dict(os.environ)`, so `env -u PMB_SUDO porthole build` was redundant while
+    `env -u PMB_SUDO porthole pkg build` was load-bearing. Nobody could tell
+    which, so agents applied the prefix to everything for eleven days and the
+    variable was never removed at its source.
+
+    A shared helper only helps while it is the only door. This is the door
+    being the only door."""
+    bad = []
+    for path in sorted((ROOT / "lib").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in ENV_COPIES_THAT_SPAWN_NOTHING:
+            continue
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if "dict(os.environ" in line or "os.environ.copy()" in line:
+                bad.append(f"{rel}:{i}: {line.strip()}")
+    assert not bad, (
+        "these build a child's environment by hand, so a stale export the "
+        "rest of the CLI scrubs reaches the child anyway -- use "
+        "porthole_cli.child_env(), or add the file to "
+        "ENV_COPIES_THAT_SPAWN_NOTHING with the reason it spawns nothing:\n  "
+        + "\n  ".join(bad))
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

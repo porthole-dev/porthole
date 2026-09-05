@@ -41,7 +41,8 @@ import subprocess
 import sys
 import time
 
-from porthole_cli import Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE, EX_USAGE
+from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE,
+                          EX_USAGE, child_env)
 
 # Four hours. webkit is the reason: it is measured in hours on this hardware,
 # and a timeout that kills it at the default half hour would be a tool that
@@ -714,10 +715,7 @@ def _build(ctx, args) -> int:
                    "it holds no lock (started outside `porthole pkg`), but it "
                    "owns the buildroot all the same -- starting now deletes "
                    "its source tree")
-    env = dict(os.environ)
-    for key, value in ctx.cfg.items():
-        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
-            env[key] = value
+    env = child_env(os.environ, ctx.cfg)
     env.update(UNBUFFERED)
 
     force = getattr(args, "force", False)
@@ -940,10 +938,7 @@ def _resume(ctx, args) -> int:
                            EX_FAIL, "is the workspace up? `porthole doctor`")
             ctx.out.kv("patch", patch.name, 10)
 
-    env = dict(os.environ)
-    for key, value in ctx.cfg.items():
-        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
-            env[key] = value
+    env = child_env(os.environ, ctx.cfg)
     env.update(UNBUFFERED)
 
     packages = _packages_dir(ctx, usable)

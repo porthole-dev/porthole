@@ -222,6 +222,52 @@ class Ctx:
         return EX_OK
 
 
+# ------------------------------------------------------- child processes --
+
+# Variables a child process must never inherit, and the incident that put each
+# one here. A dict rather than a tuple because "not in the list" is an accident
+# and reads exactly like a decision -- the same reason the permissions table
+# has a deny half.
+STALE_EXPORTS = {
+    "PMB_SUDO":
+        "the privilege broker it names was deleted from porthole on "
+        "2026-08-29, but an export outlives the file. pmbootstrap invokes "
+        "PMB_SUDO directly, prefixing nothing, so a stale one kills a build "
+        "with exit 78 deep inside pmbootstrap while naming nothing",
+}
+
+
+def child_env(base=None, cfg=None) -> dict:
+    """The environment a child process gets: `base`, minus the stale exports.
+
+    Pure -- a mapping in, a mapping out -- so what crosses into a child is
+    testable with no device and no subprocess.
+
+    WHY IT IS SHARED RATHER THAN PER-VERB
+        This was `build_env` in porthole_cmd_build, and it worked: `porthole
+        build` has not carried PMB_SUDO since. `porthole pkg` never got the
+        same treatment, so the workaround people actually typed --
+        `env -u PMB_SUDO porthole ...` -- was redundant on the verb that had
+        the fix and load-bearing on the verb that did not (#63). Nobody could
+        tell which, so it was applied uniformly and forever.
+
+        One scrub, in the place every verb already imports, is a smaller thing
+        to keep right than a scrub per caller. `tests/test_conventions.py`
+        fails on a `dict(os.environ)` that does not come through here.
+
+    `cfg`, when given, overlays the resolved PORTHOLE_*/TK_ values on top --
+    the config a verb resolved must beat whatever the shell was carrying, which
+    is the same reason a build refuses on config drift.
+    """
+    env = dict(os.environ if base is None else base)
+    for key in STALE_EXPORTS:
+        env.pop(key, None)
+    for key, value in (cfg or {}).items():
+        if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
+            env[key] = value
+    return env
+
+
 # --------------------------------------------------------------- registry --
 
 def _cache_path(root) -> pathlib.Path:
