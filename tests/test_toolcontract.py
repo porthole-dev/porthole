@@ -62,5 +62,31 @@ def test_shared_exits_match_the_cli_constants():
     assert set(tc.SHARED_EXITS) == expected
 
 
+def test_pkill_dash_f_is_an_error():
+    text = "#!/bin/bash\npkill -f epiphany\n"
+    found = tc.check_pkill_pattern("ph-thing.sh", text)
+    assert len(found) == 1 and found[0].severity == "error"
+
+
+def test_pkill_without_dash_f_is_left_alone():
+    """`pkill epiphany` matches a process NAME, not a command line, so it
+    cannot match the ssh invocation carrying it. Only -f has that defect."""
+    assert tc.check_pkill_pattern("ph-thing.sh", "#!/bin/bash\npkill epiphany\n") == []
+
+
+def test_an_explicit_exemption_is_honoured():
+    """Some caller will have a real reason. The exemption is a marker in the
+    source, so the reason is reviewable and greppable -- not an allowlist in
+    another file that nobody reads next to the code."""
+    text = "#!/bin/bash\npkill -f thing  # contract: pkill-ok pid is unknowable here\n"
+    assert tc.check_pkill_pattern("ph-thing.sh", text) == []
+
+
+def test_the_pkill_exemption_must_carry_a_reason():
+    text = "#!/bin/bash\npkill -f thing  # contract: pkill-ok\n"
+    found = tc.check_pkill_pattern("ph-thing.sh", text)
+    assert len(found) == 1 and "reason" in found[0].detail
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

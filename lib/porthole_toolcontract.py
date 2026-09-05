@@ -69,4 +69,44 @@ def check_exit_codes(name, text):
     return out
 
 
-CHECKS = (check_exit_codes,)
+_PKILL_F = re.compile(r"\bpkill\s+(-\w+\s+)*-\w*f")
+_EXEMPT = re.compile(r"#\s*contract:\s*([a-z-]+)(.*)$")
+
+
+def _exempted(line, tag):
+    """An exemption is a marker in the source carrying a reason.
+
+    In the source rather than an allowlist file because the reason has to be
+    readable next to the code it excuses; an allowlist in another directory is
+    a list nobody reads and everybody appends to.
+    """
+    m = _EXEMPT.search(line)
+    if not m or m.group(1) != tag:
+        return None
+    return m.group(2).strip()
+
+
+def check_pkill_pattern(name, text):
+    """`pkill -f <pattern>` over ssh matches the command line CARRYING the
+    pattern and kills its own session. tk-thermal.sh already carries a comment
+    saying this costs an afternoon; it cost two probe runs while the design
+    that replaces it was being written. It also misses grandchildren, and is
+    unportable. Stopping the cgroup slice replaces every use."""
+    out = []
+    for line in text.splitlines():
+        if not _PKILL_F.search(line):
+            continue
+        reason = _exempted(line, "pkill-ok")
+        if reason is None:
+            out.append(Finding(
+                "pkill-pattern", "error",
+                "`pkill -f` self-kills over ssh and misses grandchildren; "
+                "stop the slice instead"))
+        elif not reason:
+            out.append(Finding(
+                "pkill-pattern", "error",
+                "`# contract: pkill-ok` must carry a reason"))
+    return out
+
+
+CHECKS = (check_exit_codes, check_pkill_pattern)
