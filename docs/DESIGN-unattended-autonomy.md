@@ -341,22 +341,28 @@ land, so the audit certifying `fixed-timeout` clear must not be read as
 
 ### Baseline, measured 2026-09-05 before any fix
 
-The measured output of `./bin/porthole tools audit` on the day it was built:
+The measured output of `./bin/porthole tools audit` on the day it was built,
+against `main` at 45c974e:
 
 | finding | count |
 |---|---|
-| `exit-code-not-shared` | 18 |
+| `exit-code-not-shared` | 17 |
 | `exit-code-undocumented` | 9 |
-| `pkill-pattern` | 4 |
+| `pkill-pattern` | 3 |
 | `fixed-timeout` | 16 |
-| `bare-sleep` | 27 |
+| `bare-sleep` | 22 |
 
-Totals: 35 of 146 tools have findings — 31 error, 43 warning.
+Totals: 31 of 136 tools have findings — 29 error, 38 warning.
+
+**The tree a count is taken on is part of the measurement.** An earlier
+reading of 35 of 146 came from a working branch carrying ten tools that have
+not reached `main`. Same checkers, same day, different tree — which is why
+the branch and commit are named above rather than left implied.
 
 Phase 1 works this list down. A class is gated by `tests/test_tools.py` in the
 commit that clears its last violation, never before.
 
-Note: `pkill-pattern` and `bare-sleep` moved from an earlier same-day reading
+Note: on that working branch `pkill-pattern` and `bare-sleep` moved
 (7 and 22) once two checker defects were fixed, not because tools changed.
 `check_pkill_pattern` and `check_fixed_timeout` were reading comment lines as
 code, so two tools' comments *warning never to `pkill -f` over ssh*
