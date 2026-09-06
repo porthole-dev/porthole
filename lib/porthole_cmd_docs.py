@@ -349,7 +349,8 @@ def cmd_build(args, ctx) -> int:
     # -- hand-written pages, copied verbatim --
     (src / "index.md").write_text(
         _readme_as_index((root / "README.md").read_text()))
-    for name, title in [("SANDBOX.md", "Running pmbootstrap safely"),
+    for name, title in [("NEW-HOST.md", "Setting up a new host"),
+                        ("SANDBOX.md", "Running pmbootstrap safely"),
                         ("CONFIG.md", "Configuration"),
                         ("ARCHITECTURE.md", "Architecture"),
                         ("PERFORMANCE.md", "Performance"),
@@ -372,6 +373,9 @@ def cmd_build(args, ctx) -> int:
     nav = [
         ("Home", "index.md"),
         ("Guides", [
+            # First, and deliberately: it is the page a new host needs, and it
+            # was the one that did not exist.
+            ("Setting up a new host", "new-host.md"),
             ("Running pmbootstrap safely", "sandbox.md"),
             ("Configuration", "config.md"),
             ("Performance", "performance.md"),
@@ -426,6 +430,7 @@ def cmd_build(args, ctx) -> int:
 # The README links by repository path; the site is flat. Rewriting these is
 # what lets one README serve both audiences instead of maintaining two.
 README_LINK_MAP = {
+    "docs/NEW-HOST.md": "new-host.md",
     "docs/SANDBOX.md": "sandbox.md",
     "docs/CONFIG.md": "config.md",
     "docs/PERFORMANCE.md": "performance.md",

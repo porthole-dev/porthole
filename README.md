@@ -183,7 +183,7 @@ porthole 0.1.0
   · identity  not configured
     profiles  1 (google-taimen)
 
-  → porthole init <codename>   set up, once
+  → porthole init <codename>   set this host up
 
 `porthole --help` for all verbs.
 ```
@@ -196,8 +196,21 @@ porthole init google-taimen --user myname --host 172.16.42.1
 porthole doctor
 ```
 
-`init` writes `~/.config/porthole/config.env`. That file is **yours** — your
+`init` sets this host up and is **safe to re-run**: it reads what is already
+there, offers it back as the default for every question, and rewrites only the
+lines you change. Comments and keys it does not know about are left alone, so
+running it on a half-configured machine converges rather than clobbers.
+
+It writes `~/.config/porthole/config.env`. That file is **yours** — your
 username, your device's address, your tool paths — and is never committed.
+
+It also asks the one question that decides what this machine needs at all:
+**where builds run.** In the workspace (the default) the container image
+carries pmbootstrap and its helpers pinned to each other, so *you do not
+install pmbootstrap here*. On the host tier, `init` finds or clones the
+checkout itself.
+
+Full walkthrough: **[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.
 
 ---
 

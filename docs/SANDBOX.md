@@ -1,5 +1,8 @@
 # Running pmbootstrap without handing over the host
 
+> Setting a machine up? Start at [Setting up a new host](NEW-HOST.md) -- one command, and it decides
+> most of what is below for you. This page is *why* the workspace exists, not how to get one.
+
 ## The problem
 
 pmbootstrap needs root. It bind-mounts, unmounts, chroots, creates device

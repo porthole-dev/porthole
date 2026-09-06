@@ -5,6 +5,43 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- `porthole init` sets the whole host up and is safe to re-run on a
+  half-configured one. It reads what is already there, offers it back as the
+  default for every question, and rewrites only the lines you change --
+  through the same `set_key` `porthole use` has always used, so comments,
+  hand-added keys and deliberately overridden tool paths survive. Every key is
+  reported `kept`/`changed`/`added`, and a run that changed nothing says so:
+  on a half-set-up machine "it did not complain" and "it agreed with what was
+  there" otherwise look identical.
+- `porthole init` asks the one question that decides what a machine needs at
+  all -- **where builds run**. On the workspace tier it writes no pmbootstrap
+  keys and says the image carries pmbootstrap, because it does; the reference
+  host had a hand-installed pmbootstrap that no build was using. On the host
+  tier it finds an existing checkout or clones one at the tag matching the
+  installed CLI, the same rule the Containerfile follows.
+- `porthole init` resolves pmaports: adopt what is already there, point at a
+  checkout, or clone one. `--tier` and `--pmaports` drive both steps headless.
+- `docs/NEW-HOST.md` -- what a new machine actually needs, in one page.
+- `porthole doctor` reports `host: pmaports` and `host: work dir` with **the
+  key each path came from**. "Which variable is effective" was unanswerable
+  without reading the source, and the two pmbootstrap work dirs are different
+  directories that a reader who has seen one of them assumes is the one their
+  build used.
+
+### Changed
+- `porthole init` output follows the same status-row shape as `doctor` and
+  `sandbox status`. It held 11 of the 16 hand-indented output calls in the
+  repository: the first command a newcomer runs was the one that looked
+  unlike the rest of the tool.
+
+### Removed
+- `PORTHOLE_ENVKERNEL`. It and `PORTHOLE_PMBOOTSTRAP_SRC` answered one
+  question -- where `helpers/envkernel.sh` is -- and two knobs for one
+  question is the reliable way to be unsure which one a build used. Nothing
+  set it. `find_pmaports` now reports which candidate answered, so the
+  explanation and the resolution order are the same code.
+
+### Added
 - `porthole doctor` and `porthole sandbox status` report whether the DEVICE
   accepts the workspace ssh key, not merely whether the key file exists. The
   old check was green on a phone whose `authorized_keys` had been lost in a
