@@ -40,8 +40,8 @@ def _pmaports(ctx) -> pathlib.Path:
     path = pmap.find_pmaports(ctx.cfg)
     if not path:
         raise Bail("no pmaports checkout found", EX_FAIL,
-                   "run `pmbootstrap init` once so it clones one, or set "
-                   "PORTHOLE_PMAPORTS")
+                   "porthole init    adopts a checkout or clones one, and "
+                   "writes the key that names it")
     if not (path / ".git").exists():
         raise Bail(f"{path} is not a git checkout", EX_FAIL)
     return path

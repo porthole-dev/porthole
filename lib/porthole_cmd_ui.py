@@ -53,7 +53,7 @@ def cmd_ui(args, ctx) -> int:
     pmaports = pmap.find_pmaports(ctx.cfg)
     if not pmaports:
         raise Bail("no pmaports checkout found", EX_FAIL,
-                   "run `pmbootstrap init` once so it clones one")
+                   "porthole init    adopts a checkout or clones one")
     uis = pmap.user_interfaces(pmaports)
     if not uis:
         raise Bail(f"no postmarketos-ui-* packages under {pmaports}/main",
