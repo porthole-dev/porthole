@@ -150,6 +150,7 @@ generic notes as well.
 | [dtbo-must-match-the-kernel](traps/dtbo-must-match-the-kernel.md) | `generic` | The dtbo must match the kernel, and the bootloader reads it from the active slot |
 | [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
 | [frozen-is-not-hung](traps/frozen-is-not-hung.md) | `generic` | FROZEN (kernel alive, userspace gone) is a distinct state and the watchdog will not save you |
+| [git-apply-silently-skips-diff-git-patches](traps/git-apply-silently-skips-diff-git-patches.md) | `generic` | git apply silently skips 'diff --git' patches and exits 0, so a source tree ends up half-patched |
 | [initramfs-is-not-frozen](traps/initramfs-is-not-frozen.md) | `generic` | A device stopped in the initramfs looks exactly like a frozen one, and is nothing like it |
 | [installing-firmware-can-flash-the-boot-partition](traps/installing-firmware-can-flash-the-boot-partition.md) | `generic` | apk add <firmware-pkg> (and apk fix) can FLASH the boot partition |
 | [memory-high-arms-systemd-oomd-against-the-browser](traps/memory-high-arms-systemd-oomd-against-the-browser.md) | `generic` | MemoryHigh= on an app scope arms systemd-oomd against that app |
@@ -222,7 +223,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 108
+- `generic` — 109
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
