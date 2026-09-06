@@ -52,7 +52,7 @@ def cmd_channel(args, ctx) -> int:
     pmaports = pmap.find_pmaports(ctx.cfg)
     if not pmaports:
         raise Bail("no pmaports checkout found", EX_FAIL,
-                   "run `pmbootstrap init` once so it clones one")
+                   "porthole init    adopts a checkout or clones one")
     chans = pmap.channels(pmaports)
     meta = chans.pop("_meta", {})
     now = current(ctx.cfg)

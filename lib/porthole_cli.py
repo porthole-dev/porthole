@@ -201,6 +201,19 @@ class Ctx:
             self._derive(self._cfg)
         return self._cfg
 
+    def reload(self) -> None:
+        """Drop the cached config so the next read sees the files as they are.
+
+        For a command that WRITES config.env and then asks a question about
+        the host it has just changed. `porthole init` is the whole reason: it
+        loads the config before writing (there may be nothing to load), so the
+        `porthole next` step it prints at the end was answered against the
+        host as it was BEFORE setup -- on a genuinely fresh machine, "no
+        device selected", and the one next step it promises was silently
+        absent from the first run it exists for.
+        """
+        self._cfg = None
+
     @staticmethod
     def _derive(cfg: porthole.Config) -> None:
         """Expose the composed values, so `config` shows what tools will use."""
