@@ -579,8 +579,9 @@ def _docs_root(ctx):
     """
     workdir = ctx.cfg.get("PORTHOLE_WORKDIR", "")
     if not workdir:
-        raise Bail("PORTHOLE_WORKDIR is not set", EX_FAIL,
-                   "porthole use <codename> --workdir <path>")
+        raise Bail("no working repo for this device", EX_FAIL,
+                   "porthole init    finds or creates one, or "
+                   "`porthole use <codename> --workdir <path>`")
     root = pathlib.Path(workdir).expanduser()
     if not root.is_dir():
         raise Bail(f"{root} does not exist", EX_FAIL,

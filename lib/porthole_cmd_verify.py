@@ -49,8 +49,9 @@ class Check:
 def _workdir(ctx) -> pathlib.Path:
     path = ctx.cfg.get("PORTHOLE_WORKDIR", "")
     if not path:
-        raise Bail("PORTHOLE_WORKDIR is not set", EX_FAIL,
-                   "porthole use <codename> --workdir <path>")
+        raise Bail("no working repo for this device", EX_FAIL,
+                   "porthole init    finds or creates one, or "
+                   "`porthole use <codename> --workdir <path>`")
     work = pathlib.Path(path).expanduser()
     if not work.is_dir():
         raise Bail(f"{work} does not exist", EX_FAIL)

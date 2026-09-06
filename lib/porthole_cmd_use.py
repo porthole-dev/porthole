@@ -183,19 +183,21 @@ def cmd_cd(args, ctx) -> int:
         found = pmap.find_pmaports(cfg)
         if not found:
             raise Bail("no pmaports checkout found", EX_FAIL,
-                       "run `pmbootstrap init` once, or set PORTHOLE_PMAPORTS")
+                       "porthole init    adopts a checkout or clones one")
         path = found
     elif what == "kernel":
         workdir = cfg.get("PORTHOLE_WORKDIR", "")
         if not workdir:
-            raise Bail("PORTHOLE_WORKDIR is not set", EX_FAIL,
-                       "porthole use <codename> --workdir <path>")
+            raise Bail("no working repo for this device", EX_FAIL,
+                       "porthole init    finds or creates one, or "
+                       "`porthole use <codename> --workdir <path>`")
         path = pathlib.Path(workdir) / "linux"
     else:
         workdir = cfg.get("PORTHOLE_WORKDIR", "")
         if not workdir:
-            raise Bail("PORTHOLE_WORKDIR is not set", EX_FAIL,
-                       "porthole use <codename> --workdir <path>")
+            raise Bail("no working repo for this device", EX_FAIL,
+                       "porthole init    finds or creates one, or "
+                       "`porthole use <codename> --workdir <path>`")
         path = pathlib.Path(workdir)
 
     if not path.exists():

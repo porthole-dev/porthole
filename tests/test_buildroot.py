@@ -216,6 +216,41 @@ def test_the_newest_buildroot_wins():
     assert started == 2000, started
 
 
+def test_every_chroot_owning_subcommand_counts_as_busy():
+    """`build` alone was the whole list, and that is how a running
+    `pmbootstrap install` read as an idle buildroot: `porthole build clean`
+    unstacked /mnt/linux underneath a live install and nothing objected.
+    `install` runs mkfs and populates the rootfs chroot, `zap` deletes chroots
+    outright, `checksum` is the command that destroyed the redfin kernel
+    build."""
+    for sub in ("install", "export", "zap", "checksum", "flasher", "chroot"):
+        ps = (f"  9 /usr/bin/python3 /usr/bin/pmbootstrap --as-root --config "
+              f"/pmb/pmbootstrap_v3.cfg {sub} --password hunter2\n")
+        assert buildroot.foreign_build(ps) == f"pmbootstrap {sub}", sub
+
+
+def test_a_read_only_pmbootstrap_is_not_busy():
+    """`status`, `log`, `config` and `pull` are cheap and read-only, and
+    `redirect_for` leaves them available on purpose. A guard that fires on
+    `pmbootstrap log` is a guard people route around."""
+    for sub in ("status", "log", "config", "pull"):
+        ps = f"  9 /usr/bin/python3 /usr/bin/pmbootstrap {sub}\n"
+        assert buildroot.foreign_build(ps) == "", sub
+
+
+def test_the_subcommand_is_found_past_the_global_options():
+    """`--config <path>` takes a separate value, and reading a fixed position
+    after `pmbootstrap` would take that path for the subcommand."""
+    ps = ("  9 /usr/bin/python3 /usr/bin/pmbootstrap --as-root --config "
+          "/pmb/pmbootstrap_v3.cfg --details-to-stdout build --lax mypkg\n")
+    assert buildroot.foreign_build(ps) == "mypkg", buildroot.foreign_build(ps)
+
+
+def test_a_pmbootstrap_with_no_subcommand_is_not_busy():
+    assert buildroot.foreign_build("  9 /usr/bin/pmbootstrap --help\n") == ""
+    assert buildroot.foreign_build("  9 /usr/bin/pmbootstrap\n") == ""
+
+
 if __name__ == "__main__":
     sys.exit(main())
 

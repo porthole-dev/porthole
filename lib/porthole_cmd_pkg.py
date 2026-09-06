@@ -1280,8 +1280,21 @@ def _status(ctx) -> int:
     log_path = _log_path(ctx)
     live = progress.reattach_from_log(log_path, snap)
     tracked = live is not None
-    if live is None:
-        # ...and the build nobody ever tracked. `reattach` only answers for a
+    # ONLY when this checkout's own snapshot is not a live tracked build.
+    #
+    # `reattach_from_log` returns None for two opposite reasons -- "the
+    # tracker is alive, its own file is better" and "there is nothing to
+    # reattach to" -- and this branch treated them the same. So a running
+    # `porthole pkg build linux-...` was reported as `pkg:device-google-taimen`
+    # at `39m30s`, reconstructed from a buildroot staging directory an
+    # unrelated build had left there an hour earlier, with a note saying it
+    # had been "started outside `porthole pkg`". Every field wrong, about a
+    # build whose own status file was correct and one second old.
+    #
+    # `build_snapshot` in the status line already had this guard, which is
+    # why the two disagreed.
+    if live is None and progress.liveness(snap) != "running":
+        # The build nobody ever tracked. `reattach` only answers for a
         # snapshot frozen at `running`; a build started outside this verb, or
         # started after the last one wrote `done`, has no snapshot to freeze.
         # Same two file reads the status line makes, so the two cannot

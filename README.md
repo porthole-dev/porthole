@@ -63,11 +63,36 @@ comments and keys it does not know about are left alone, so a half-configured
 machine converges rather than gets clobbered. It writes
 `~/.config/porthole/config.env`, which is **yours** and is never committed.
 
-It also asks the one question that decides what this machine needs at all:
-**where builds run.** In the workspace — the default — the container image
-carries pmbootstrap and its helpers pinned to each other, so *you do not install
-pmbootstrap on this host*. On the host tier, `init` finds or clones the checkout
-itself.
+It asks five things, and each one is a decision you would otherwise make by
+losing an afternoon to it:
+
+- **who you are on the device** — the ssh login every tool uses.
+- **how to reach it** — over the USB gadget (`172.16.42.1`, the same on every
+  postmarketOS device and up before wifi is configured) or over wifi. `init`
+  explains both, checks whether the gadget is enumerated on this host right
+  now, and pings whatever you answer.
+- **where builds run** — the workspace, or this host. In the workspace, the
+  default, the container image carries pmbootstrap and its helpers pinned to
+  each other, so *you do not install pmbootstrap on this host*. On the host
+  tier `init` finds or clones the checkout itself.
+- **pmaports** — adopt what is already here, point at a checkout, or clone one.
+- **the working repo for this device** — your notes, your logs, and the kernel
+  tree if you build one. `porthole build`, `verify`, `dts` and half of
+  `porthole next` cannot answer anything without it, and it is the key nothing
+  used to ask for.
+
+Then you can build. **You do not need a kernel tree to build a system image**:
+
+```sh
+porthole sandbox up               # start the workspace, once
+porthole build                    # the rung ladder — what each one costs
+porthole build image --yes        # the whole OS from pmaports, no tree needed
+porthole flash --yes              # rootfs and boot
+```
+
+Every rung except `image` compiles a kernel tree. `porthole build` says which
+rungs it can run here, where the build will go (workspace or host) and what is
+missing, before it starts.
 
 Full walkthrough, including moving to a second machine:
 **[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.

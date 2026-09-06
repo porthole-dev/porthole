@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import platform
 import re
 import shlex
 import shutil
@@ -30,8 +31,8 @@ import threading
 import time
 import sys
 
-from porthole_cli import (Bail, EX_FAIL, EX_OK, EX_STATE, EX_UNAVAILABLE,
-                          EX_USAGE, child_env)
+from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_STATE,
+                          EX_UNAVAILABLE, EX_USAGE, child_env)
 
 # Each verb maps to a shell function ph-build.sh defines. The names are kept
 # from the taimen toolbox because they are what every runbook prints and what
@@ -125,6 +126,13 @@ ACTIONS = {
                "build the kernel, package it, install and verify, but NOT flash (~10m)"),
     "upgrade": ("tkupgrade-kernel",
                 "swap to a DIFFERENT kernel flavor: push modules, flash boot (~7m)"),
+    # The only rung that compiles no kernel tree. See tksysimage in
+    # ph-build.sh: it is the whole postmarketOS image built from pmaports as
+    # it stands, which is what a host that has just been set up can actually
+    # do, and what `porthole build` had no way to say.
+    "image": ("tksysimage",
+              "build the whole system image from pmaports -- no kernel tree "
+              "(~20m cold; seconds once the packages are built)"),
     "clean": ("tkclean", "unstack /mnt/linux binds"),
     "purge": ("tkpurge-devpkgs", "remove envkernel apks that outrank a release"),
 }
@@ -132,7 +140,14 @@ ACTIONS = {
 # The rungs that compile and move the device. `clean` and `purge` are neither.
 # `auto` is here so its FALLBACK -- no tree yet, or an unfilled profile --
 # renders the ladder preview instead of running an empty function name.
-BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade")
+BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade", "image")
+
+# The rungs that compile a kernel tree, and therefore need one. `image` is the
+# whole point of this table: every OTHER rung goes through `_ph_make`, so on a
+# host with pmaports and no tree the preview listed six rungs and every one of
+# them was unrunnable -- with nothing on the screen saying which of the two
+# things was missing, or that one rung did not need it.
+TREE_RUNGS = ("auto", "mod", "boot", "fast", "kernel", "upgrade")
 
 # What each rung covers, so the preview can say why you would pick another.
 # This is the table an agent needs and had no way to get.
@@ -143,22 +158,30 @@ BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade")
 # On a device whose initramfs needs a module to mount root (taimen loop-mounts
 # its subpartition, so it needs loop.ko) the RAM boot cannot reach userspace at
 # all: it lands in the initramfs debug shell looking like a bad kernel.
+#
+# The fourth field is whether the rung compiles a kernel tree. It is here and
+# not merely in TREE_RUNGS because the preview PRINTS it: a reader with no tree
+# needs to see which of these they can run today, and the one they can is the
+# last row.
 LADDER = [
     ("mod", "a driver that is a module -- try this FIRST, even when the device "
      "ships from an aport: MODVERSIONS makes an ABI mismatch a loud refusal",
-     "no reboot at all"),
-    ("boot", "a DTS change", "one fastboot boot"),
+     "no reboot at all", True),
+    ("boot", "a DTS change", "one fastboot boot", True),
     ("boot --kernel", "built-in code, IF this device RAM-boots without modules",
-     "one fastboot boot"),
+     "one fastboot boot", True),
     ("fast", "a CONFIG change, or anything that moves module CRCs -- builds and "
      "flashes the APORT release, so the change must be in the series",
-     "flashes boot only"),
+     "flashes boot only", True),
     ("kernel", "rootfs contents changed, or boot/rootfs desynced",
-     "then `porthole flash --yes`"),
+     "then `porthole flash --yes`", True),
     ("upgrade", "the device moves to a DIFFERENT kernel flavor (a major version "
      "bump): PORTHOLE_KERNEL_PKG now names another aport, so kernel.release "
      "changes and the modules on the phone are absent rather than stale",
-     "pushes modules, then flashes boot"),
+     "pushes modules, then flashes boot", True),
+    ("image", "you have no kernel tree, or want the whole OS rebuilt from "
+     "pmaports as it stands -- the kernel comes from the aport",
+     "then `porthole flash --yes`", False),
 ]
 
 
@@ -181,6 +204,11 @@ def _script(ctx) -> pathlib.Path:
 # with "run `porthole build kernel --yes` once against this work dir" --
 # its own advice, unrunnable, a circular refusal a real session hit.
 EXPORT_RUNGS = ("fast", "upgrade")
+
+# The rungs that run `pmbootstrap install`, which mints a rootfs and therefore
+# needs the rootfs user's password. `fast` and `upgrade` deliberately do NOT:
+# avoiding the mkfs is the entire reason they are fast.
+INSTALL_RUNGS = ("kernel", "image")
 
 
 def export_problems(workdir, device: str) -> list:
@@ -217,15 +245,63 @@ def _preflight(ctx, action: str = "") -> list[str]:
     """
     problems = []
     cfg = ctx.cfg
-    for key in ("PORTHOLE_WORKDIR", "PORTHOLE_KERNEL_PKG", "PORTHOLE_DEFCONFIG",
-                "PORTHOLE_ARCH", "PORTHOLE_DTB"):
+    # PORTHOLE_WORKDIR is deliberately NOT in this loop. It is the only one of
+    # these that is not a profile key, so "PORTHOLE_WORKDIR is not set in the
+    # profile" was true of the variable and false about where to set it -- and
+    # it sent people to read a committed file that correctly says nothing
+    # about their working repo.
+    keys = ["PORTHOLE_KERNEL_PKG", "PORTHOLE_ARCH", "PORTHOLE_DTB"]
+    # PORTHOLE_DEFCONFIG configures a kernel COMPILE and nothing else, so the
+    # one rung that compiles no kernel must not be refused for lacking it.
+    # Reported as a missing thing it does not need, `image` would be
+    # unreachable on exactly the host it exists for.
+    if action != "image":
+        keys.append("PORTHOLE_DEFCONFIG")
+    for key in keys:
         if not cfg.get(key):
             problems.append(f"{key} is not set in the profile")
     workdir = cfg.get("PORTHOLE_WORKDIR", "")
-    if workdir and not pathlib.Path(workdir).is_dir():
+    if not workdir:
+        problems.append(
+            "no working repo for this device -- `porthole init` sets it, or "
+            "`porthole use <codename> --workdir <path>`")
+    elif not pathlib.Path(workdir).is_dir():
         problems.append(f"PORTHOLE_WORKDIR does not exist: {workdir}")
-    if not shutil.which("pmbootstrap"):
-        problems.append("pmbootstrap is not on PATH")
+    if action in TREE_RUNGS:
+        tree = _tree(cfg)
+        if workdir and not (tree / "Makefile").is_file():
+            # Named as its own problem rather than left to fail inside make.
+            # This is the state a freshly set-up host is in, and `image` is
+            # the answer -- which is only useful if the reader is told the two
+            # facts together.
+            problems.append(
+                f"no kernel tree at {tree} -- `{action}` compiles one. "
+                f"`porthole build image --yes` needs no tree; it builds the "
+                f"whole system from pmaports")
+    # A rootfs password reaches `pmbootstrap install` and nothing else. The
+    # shell parameter expansion in ph-build.sh that enforces it dies with a
+    # bare `${VAR:?...}` message naming no verb and no rung -- and on `image`
+    # that lands after the chroot work rather than before it.
+    # cfg first, then the environment -- the same order `child_env` composes
+    # for the build itself, so this checks the value that will actually reach
+    # `pmbootstrap install` rather than one of the two places it can live.
+    # `rootfs_pw`, not the obvious name: tests/test_secrets.py reads a
+    # `<word>password = <value>` assignment as a literal credential and cannot
+    # tell one from a lookup. The rule is right to be that blunt.
+    rootfs_pw = (cfg.get("TK_PMOS_PASSWORD")
+                 or os.environ.get("TK_PMOS_PASSWORD") or "").strip()
+    if action in INSTALL_RUNGS and not rootfs_pw:
+        problems.append(
+            "TK_PMOS_PASSWORD is unset -- `pmbootstrap install` sets the "
+            "rootfs user's password and this rung runs it. Export it (a "
+            "variable on purpose: a flag would show it in `ps`)")
+    if not shutil.which("pmbootstrap") and not _workspace_usable(ctx)[0]:
+        # Only when there is no workspace either. The workspace image carries
+        # pmbootstrap, which is the whole point of the tier, and refusing a
+        # build for a missing HOST copy is the advice `porthole init` spends a
+        # paragraph telling people not to follow.
+        problems.append("no workspace is running and pmbootstrap is not on "
+                        "PATH -- `porthole sandbox up`")
     problems += _space_problems(cfg)
     if action in EXPORT_RUNGS:
         problems += export_problems(
@@ -548,6 +624,14 @@ def _workspace_usable(ctx):
             return False, ("the running workspace predates the device label, "
                            "so it cannot be matched to this device -- "
                            "`porthole sandbox down` then `up`")
+        # A container is created ONCE, with the mounts its config named then.
+        # Setting a working repo afterwards -- which is the ordinary order on a
+        # new host, and what `porthole init` now does -- leaves the running
+        # workspace with no /work, and ph-build.sh then dies on its own
+        # `${PORTHOLE_WORKDIR:?}` naming neither the container nor the fix.
+        stale = sandbox.workdir_drift(ctx.cfg, sandbox._container_mounts())
+        if stale:
+            return False, stale
     except Exception:  # noqa: BLE001
         return False, "could not query the workspace"
     return True, ""
@@ -749,6 +833,46 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
     # otherwise arrive as two arguments.
     call = " ".join([func, *(shlex.quote(a) for a in extra or [])])
     usable, why_not = (False, "--host") if host else _workspace_usable(ctx)
+    # BEFORE anything is printed. The flock binds only callers who take it, so
+    # it cannot see a build started through `sandbox shell --command`, by a
+    # hand-rolled podman exec, or by a porthole from before builds took one --
+    # and `hold` asks its probe only when a sidecar says the buildroot should
+    # be busy, which a foreign build does not leave either. So ask outright,
+    # exactly as `porthole pkg build` has always done, and ask it here rather
+    # than after "building IN THE WORKSPACE" has already been claimed.
+    from porthole_buildroot import hold, lock_holder, running_build
+
+    wait = float(getattr(ctx.args, "wait", 0.0) or 0.0)
+    lock_dir = pmb_workdir(ctx, usable)
+    deadline = time.time() + wait
+    while True:
+        foreign = running_build(ctx, usable)
+        if not foreign:
+            break
+        if time.time() >= deadline:
+            # WHO holds it, from the sidecar, before guessing. The first
+            # version of this said "started outside porthole" about a build
+            # `porthole pkg build` had started thirty seconds earlier -- true
+            # of the flock (this probe runs before it) and false about the
+            # world, which is the worst kind of message to hand someone
+            # deciding whether to kill something.
+            holder = lock_holder(lock_dir)
+            why = (f"{holder.strip()} holds the buildroot" if holder else
+                   "it holds no lock -- started outside porthole, or by a "
+                   "porthole from before builds took one -- but it owns the "
+                   "buildroot all the same")
+            raise Bail(
+                f"a pmbootstrap build is already running: {foreign}", EX_LOCK,
+                f"{why}. Starting now deletes its source tree "
+                f"(brain/traps/two-pmbootstrap-builds-destroy-each-other). "
+                f"Follow it with `porthole build watch`, or queue behind it "
+                f"with --wait.")
+        time.sleep(2.0)
+
+    # `clean` and `purge` neither compile nor move the device. Calling them a
+    # build made `porthole build clean` announce "building IN THE WORKSPACE"
+    # and then draw a progress bar for a umount.
+    doing = "building" if rung in BUILD_ACTIONS or not rung else "running"
     if usable:
         secrets = {k: v for k, v in env.items()
                    if k.startswith("TK_") and isinstance(v, str)}
@@ -758,7 +882,8 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
         # Not grey. WHERE a build ran is the first thing you need when it fails
         # in a way that makes no sense, and burying it cost someone three
         # attempts before they noticed the tail.
-        ctx.out(ctx.out.paint("  building IN THE WORKSPACE (container)", "cyan"))
+        ctx.out(ctx.out.paint(
+            f"  {doing} IN THE WORKSPACE (container)", "cyan"))
     else:
         # A Pixel 5 porter had no workspace and no host pmbootstrap either,
         # and hit an error that named neither cause nor fix.
@@ -771,7 +896,7 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                 "host — the redfin port hit this with neither and got an "
                 "error that named neither")
         cmd = _host_cmd(script, func, extra)
-        ctx.out(ctx.out.paint(f"  building ON THE HOST ({why_not})", "cyan"))
+        ctx.out(ctx.out.paint(f"  {doing} ON THE HOST ({why_not})", "cyan"))
         # --host reads as the escape hatch when the workspace is down, and it
         # is a weaker one than it looks. EVERY rung compiles through envkernel
         # -- `boot` included, whatever its description used to say -- so this
@@ -836,8 +961,25 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
 
         key = progress.history_key(effective_rung, rebuilding)
 
-    return _stream(ctx, cmd, env, timeout, effective_rung, key=key,
-                   follow=pmb_workdir(ctx, usable) / "log.txt")
+    # THE BUILDROOT LOCK, which these rungs never took.
+    #
+    # `porthole pkg build` has held it since a `checksum` run destroyed an
+    # active kernel build on the redfin port: two pmbootstrap builds share one
+    # buildroot and abuild wipes $srcdir, so the second silently deletes the
+    # first one's source tree. porthole_buildroot.hold's own docstring says "a
+    # mutex that only the build verb takes is not a mutex" -- and the KERNEL
+    # rungs were the verb not taking it. `pkg` even has a branch for this,
+    # which describes a running kernel build as "a pmbootstrap build ... it
+    # holds no lock (started outside `porthole pkg`), but it owns the
+    # buildroot all the same". That was porthole's own build verb.
+    #
+    # In `_run` and not in `cmd_build`, because `porthole flash` comes through
+    # here too: `pmbootstrap flasher` uses the same chroots, and a rule that
+    # lives in one caller is a rule the second caller will not have.
+    with hold(lock_dir, f"porthole build {effective_rung}", wait,
+              probe=lambda: running_build(ctx, usable)):
+        return _stream(ctx, cmd, env, timeout, effective_rung, key=key,
+                       follow=lock_dir / "log.txt")
 
 
 # How often the bar repaints and the status file is written while the child
@@ -1151,10 +1293,24 @@ _DIAGNOSES = (
      "a dependency this build needs was probably appended inside a case/esac. "
      "pmbootstrap parses APKBUILDs line by line and never runs the shell, so "
      "it never installed it. List the package statically as well."),
+    # ABOVE the umount entry on purpose. `diagnose` returns hits in table
+    # order, and an install that recovered from one zap failure and then died
+    # on a dependency leaves BOTH signatures in the window -- so the umount
+    # one, which is no longer the reason, was the advice being handed out.
+    (re.compile(r"unable to select packages", re.I),
+     "apk could not resolve the world: a package something depends on has "
+     "not been built. The line under the error names it and who wants it -- "
+     "if that name is an aport in your pmaports, build it first with "
+     "`porthole pkg build <name>`. A device's own kernel subpackage depends "
+     "on the kernel aport this way, which is why `image` and `kernel` build "
+     "that one before they install."),
     (re.compile(r"Failed to umount|umount:.*not mounted", re.I),
      "a non-lax pmbootstrap build cannot run in the rootless workspace: "
      "zap_buildroots() cannot umount the recursive /dev bind. `porthole pkg "
-     "build` passes --lax for you; a hand-rolled pmbootstrap call does not."),
+     "build` passes --lax for you; a hand-rolled pmbootstrap call does not. "
+     "The `install` rungs already retry this by themselves -- reaching it "
+     "here means the retries ran out, so something is being rebuilt on every "
+     "attempt (`porthole pkg outdated` says what)."),
     # Either order: clang says "no such file or directory: 'x.idl'" and cc1
     # says "../fs/configfs/file.c: No such file or directory". Matching only
     # one of them misses half the real reports.
@@ -1499,6 +1655,189 @@ def _maybe_autoselect_tree(ctx, action: str = "") -> None:
         f"        {tree_banner(action, chosen, release)}", "yellow"))
 
 
+
+
+# ------------------------------------------------------------------ ccache --
+
+# `ccache -s` in the two shapes it prints. GiB on one build, GB on another --
+# ccache switched units between releases and both are in the field, so a
+# parser that knows one of them reports 0 for the other.
+_CC_SIZE = re.compile(
+    r"Cache size \((?P<unit>[KMGT]i?B)\):\s*(?P<used>[\d.]+)\s*/\s*(?P<max>[\d.]+)")
+_CC_HITS = re.compile(r"^\s*Hits:\s*(\d+)\s*/\s*(\d+)", re.M)
+_CC_MISS = re.compile(r"^\s*Misses:\s*(\d+)\s*/\s*(\d+)", re.M)
+
+_CC_UNITS = {"KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
+             "KiB": 2**10, "MiB": 2**20, "GiB": 2**30, "TiB": 2**40}
+
+
+def parse_ccache_stats(text: str) -> dict:
+    """`ccache -s` output -> bytes used, bytes max, hits, misses. PURE.
+
+    Bytes, not the printed number: `0.4 / 5.0 (GB)` and `0.0 / 5.0 (GiB)` are
+    different quantities wearing the same digits, and comparing a ceiling in
+    one against a size in the other is how a cache reports 8% full when it is
+    about to start evicting.
+    """
+    out = {"used": None, "max": None, "hits": None, "misses": None}
+    size = _CC_SIZE.search(text or "")
+    if size:
+        scale = _CC_UNITS.get(size.group("unit"), 1)
+        out["used"] = float(size.group("used")) * scale
+        out["max"] = float(size.group("max")) * scale
+    hits = _CC_HITS.search(text or "")
+    miss = _CC_MISS.search(text or "")
+    if hits:
+        out["hits"] = int(hits.group(1))
+    if miss:
+        out["misses"] = int(miss.group(1))
+    return out
+
+
+def ccache_hit_rate(stats: dict):
+    """Hits as a fraction of cacheable calls, or None when nothing was asked.
+
+    None, never 0.0: a cache nobody has compiled against has no hit rate, and
+    printing `0%` for it reads as "it is not working" about the one state that
+    proves nothing either way.
+    """
+    hits, misses = stats.get("hits"), stats.get("misses")
+    if hits is None or misses is None or (hits + misses) == 0:
+        return None
+    return hits / float(hits + misses)
+
+
+def _fmt_bytes(value) -> str:
+    if value is None:
+        return "?"
+    for unit, scale in (("T", 2**40), ("G", 2**30), ("M", 2**20)):
+        if value >= scale:
+            return f"{value / scale:.1f}{unit}"
+    return f"{value / 1024:.0f}K"
+
+
+def ccache_chroot_args(arch: str, host_arch: str) -> list:
+    """`pmbootstrap chroot` arguments for the chroot that owns this arch's
+    cache. PURE.
+
+    pmbootstrap mounts `cache_ccache_$ARCH` at `/mnt/pmbootstrap/ccache` and
+    symlinks it to the build user's `~/.ccache` -- so the cache is reachable
+    only from INSIDE the chroot for its own arch, which is why reading it
+    needs to know which chroot that is. The host's own arch lives in the
+    native chroot and has no `-b`.
+    """
+    return [] if arch == host_arch else ["-b", arch]
+
+
+def _ccache_dirs(workdir) -> list:
+    """The `cache_ccache_<arch>` directories that exist, arch-name only."""
+    try:
+        return sorted(p.name.split("cache_ccache_", 1)[1]
+                      for p in pathlib.Path(workdir).glob("cache_ccache_*")
+                      if p.is_dir())
+    except OSError:
+        return []
+
+
+def _ccache_run(ctx, usable: bool, arch: str, host_arch: str,
+                argv: list) -> str:
+    """One `ccache` invocation in the chroot that owns `arch`'s cache.
+
+    As the BUILD USER (`--user`): the cache belongs to it, and root in the
+    chroot has its own empty `~/.ccache` -- which is why `pmbootstrap chroot --
+    ccache -s` reports 0.0 GiB next to a 414 MB directory on disk.
+    """
+    import porthole_cmd_sandbox as sandbox
+
+    call = ["pmbootstrap", "-q", "chroot",
+            *ccache_chroot_args(arch, host_arch), "--user", "--",
+            "ccache", *argv]
+    line = " ".join(shlex.quote(a) for a in call)
+    cmd = (["podman", "exec", sandbox.CONTAINER, "/bin/bash", "-lc",
+            f"cd /porthole && {line}"] if usable else ["bash", "-lc", line])
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+                              env=child_env(os.environ, ctx.cfg))
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout if done.returncode == 0 else ""
+
+
+def _ccache(ctx, args) -> int:
+    """Report the compiler cache, and raise its ceiling.
+
+    Nothing could say whether ccache was working. Finding out meant knowing
+    that the cache lives in `cache_ccache_<arch>` under the work dir, that it
+    is mounted into the chroot for THAT arch and no other, and that it belongs
+    to the build user -- so `pmbootstrap chroot -- ccache -s`, the obvious
+    command, reports an empty cache next to 414 MB on disk. Three facts from
+    pmbootstrap's source to answer "is my rebuild going to be fast".
+
+    And the ceiling is ccache's own default of 5G, which nothing mentioned. A
+    single kernel build puts ~0.4G in it and a webkit build far more; past the
+    ceiling ccache evicts, and an evicted cache turns a rebuild back into a
+    full build without ever saying so.
+    """
+    usable, why_not = _workspace_usable(ctx)
+    workdir = pmb_workdir(ctx, usable)
+    host_arch = platform.machine()
+    arches = _ccache_dirs(workdir)
+
+    if args.max:
+        for arch in arches:
+            _ccache_run(ctx, usable, arch, host_arch, ["-M", args.max])
+
+    rows = []
+    for arch in arches:
+        stats = parse_ccache_stats(
+            _ccache_run(ctx, usable, arch, host_arch, ["-s"]))
+        stats["arch"] = arch
+        stats["rate"] = ccache_hit_rate(stats)
+        rows.append(stats)
+
+    payload = {"where": str(workdir),
+               "tier": "workspace" if usable else "host",
+               "caches": rows}
+
+    def render():
+        o = ctx.out
+        o.heading("compiler cache")
+        o.kv("where", str(workdir), 9,
+             note="workspace" if usable else why_not)
+        if not rows:
+            o.blank()
+            o(o.paint("  nothing cached yet -- it appears with the first "
+                      "build", "grey"))
+            return
+        o.blank()
+        for row in rows:
+            full = (row["used"] is not None and row["max"]
+                    and row["used"] / row["max"] >= 0.9)
+            rate = row["rate"]
+            o("  {}  {}  {:>6} / {:<6} {}".format(
+                o.status("warn" if full else "ok",
+                         "full" if full else "ok", 4),
+                o.paint("{:<8}".format(row["arch"]), "grey"),
+                _fmt_bytes(row["used"]), _fmt_bytes(row["max"]),
+                o.paint("no compiles yet" if rate is None
+                        else "{:.0%} hit  ({} hits, {} misses)".format(
+                            rate, row["hits"], row["misses"]), "grey")))
+        o.blank()
+        # The number that matters is not the hit rate on a FIRST build -- it
+        # is 0% by definition, and reporting that as a problem is what makes
+        # people turn the cache off. What matters is whether the ceiling is
+        # big enough that the second build still finds it.
+        o(o.paint("  A first build of anything is all misses; that is the "
+                  "cache being filled,", "grey"))
+        o(o.paint("  not failing. What costs you is the CEILING: past it "
+                  "ccache evicts, and", "grey"))
+        o(o.paint("  an evicted entry turns the next rebuild back into a "
+                  "full one, silently.", "grey"))
+        o.hint("porthole build ccache --max 25G    raise it")
+
+    return ctx.emit(payload, render)
+
+
 def cmd_build(args, ctx) -> int:
     action = args.action or "auto"
     # `status` and `auto` are actions, not flags. A store_true `--status` would
@@ -1508,9 +1847,12 @@ def cmd_build(args, ctx) -> int:
         return _status(ctx)
     if action == "watch":
         return _watch(ctx, args)
+    if action == "ccache":
+        return _ccache(ctx, args)
     if action != "auto" and action not in ACTIONS:
         raise Bail(f"unknown action {action!r}", EX_USAGE,
-                   f"actions: auto, status, watch, {', '.join(ACTIONS)}")
+                   f"actions: auto, status, watch, ccache, "
+                   f"{', '.join(ACTIONS)}")
 
     _assert_no_drift(ctx, args)
     _maybe_autoselect_tree(ctx, action)
@@ -1539,12 +1881,36 @@ def cmd_build(args, ctx) -> int:
     # most need to know why -- and a profile that cannot build yet is the
     # normal state of a new port.
     if not args.yes and action in BUILD_ACTIONS:
+        usable, why_not = _workspace_usable(ctx)
+        tree = _tree(ctx.cfg)
+        # `_tree` returns a bare `Path()` -- which renders as "." -- when there
+        # is no working repo to resolve against. "." is a real directory and,
+        # in a checkout that has a Makefile of its own, one that passes
+        # `is_file()`: run from porthole's own tree the preview claimed a
+        # kernel tree at `.` and offered every rung. Two different bugs, one
+        # missing guard.
+        named_tree = str(tree) not in ("", ".")
+        have_tree = named_tree and (tree / "Makefile").is_file()
+
         def render():
             o = ctx.out
             o.heading(f"would {what}")
             o.kv("device", ctx.cfg.get("PORTHOLE_DEVICE", ""), 12)
-            o.kv("tree", ctx.cfg.get("PORTHOLE_WORKDIR", "")
-                 or o.paint("not set", "yellow"), 12)
+            # WHERE, in the PREVIEW and not only once the build is running.
+            # `_run` has always printed it, which is too late for the question
+            # people actually have before committing ten minutes: "is this
+            # going to the workspace, or to my machine?" On a host where the
+            # sandbox is the default, that question had no answer at all until
+            # the build had already started.
+            if usable:
+                o.kv("where", "the workspace (rootless container)", 12)
+            else:
+                o.kv("where", o.paint("this host", "yellow"), 12, note=why_not)
+            o.kv("work dir", str(pmb_workdir(ctx, usable)), 12)
+            o.kv("tree", (str(tree) if have_tree else o.paint(
+                f"{tree} -- no kernel tree here" if named_tree
+                else "not set -- no working repo for this device", "yellow")),
+                 12)
             o.kv("package", ctx.cfg.get("PORTHOLE_KERNEL_PKG", "")
                  or o.paint("not set", "yellow"), 12)
             o.kv("defconfig", ctx.cfg.get("PORTHOLE_DEFCONFIG", "")
@@ -1553,23 +1919,42 @@ def cmd_build(args, ctx) -> int:
             if problems:
                 o.heading(f"{len(problems)} thing(s) missing first")
                 for problem in problems:
-                    o(f"  {o.paint(o.sym('·', '-'), 'yellow')} {problem}")
+                    # The glyph outside the f-string: a backslash escape
+                    # inside an expression part is a SyntaxError below 3.12,
+                    # and bin/porthole declares 3.8 as the floor.
+                    dot = o.paint(o.sym("\u00b7", "-"), "yellow")
+                    o(f"  {dot} {problem}")
                 o.blank()
             # The ladder, every time. The expensive mistake here is not a bad
             # build, it is iterating on the ~10 minute rung when the ~40 second
             # one covers the change -- and nothing used to say the cheap rungs
             # existed.
             o.heading("pick the cheapest rung that covers your change")
-            for name, covers, cost in LADDER:
+            for name, covers, cost, needs_tree in LADDER:
                 mark = o.sym(">", "*") if name == action else " "
-                o(f"  {mark} {o.paint(name.ljust(7), 'cyan')} {covers}"
+                # A rung that cannot run here is DIMMED, never hidden. Hiding
+                # it turns "why is there no way to do this at all" into a
+                # second question, and the reason it is unavailable is the
+                # answer to the first one.
+                blocked = needs_tree and not have_tree
+                label = o.paint(name.ljust(7), "grey" if blocked else "cyan")
+                body = o.paint(covers, "grey") if blocked else covers
+                o(f"  {mark} {label} {body}"
                   f"  {o.paint('(' + cost + ')', 'grey')}")
+            if not have_tree:
+                o.blank()
+                o(o.paint("  the dimmed rungs compile a kernel tree and there "
+                          "is none at", "grey"))
+                o(o.paint(f"  {tree if named_tree else '(no working repo set)'}"
+                          f" -- `image` is the rung that needs no tree.",
+                          "grey"))
             o.blank()
             if not problems:
                 o.hint(f"porthole build {' '.join([action, *extra])} --yes")
         return ctx.emit({"action": action, "function": func, "args": extra,
                          "would_run": not problems, "problems": problems,
-                         "ladder": [dict(zip(("rung", "covers", "cost"), r))
+                         "ladder": [dict(zip(("rung", "covers", "cost",
+                                              "needs_tree"), r))
                                     for r in LADDER]},
                         render)
 
@@ -1616,13 +2001,18 @@ SPEC = {
         "Two traps are encoded in the script it drives, both paid for in real\n"
         "sessions: `pmbootstrap build --envkernel` can write an apk and then\n"
         "fail before refreshing the index, and a stale _p snapshot outranks a\n"
-        "release build. Artifacts are verified rather than exit codes trusted."),
+        "release build. Artifacts are verified rather than exit codes trusted.\n\n"
+        "Every rung compiles a kernel tree except `image`, which builds the\n"
+        "whole system from pmaports as it stands and is what a host with a\n"
+        "pmaports checkout and no tree can run today. Builds go to the\n"
+        "workspace container when one is up; the preview says which."),
     "escapes_scope": True,
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["auto", "status", "watch"] + list(ACTIONS),
-                      "help": "auto | status | watch | " + " | ".join(ACTIONS)
-                              + "  (default: auto)"}),
+                      "choices": ["auto", "status", "watch",
+                                  "ccache"] + list(ACTIONS),
+                      "help": "auto | status | watch | ccache | "
+                              + " | ".join(ACTIONS) + "  (default: auto)"}),
         (["rest"], {"nargs": "*", "metavar": "ARG",
                     "help": "mod: MODULE.ko NAME"}),
         (["--kernel"], {"action": "store_true",
@@ -1636,13 +2026,20 @@ SPEC = {
                          "help": "stream the raw build output instead of a "
                                  "progress line"}),
         (["--host"], {"action": "store_true",
-                      "help": "build on the host, not in the workspace"}),
+                      "help": "run the build on THIS MACHINE instead of in "
+                              "the workspace container -- needs pmbootstrap "
+                              "installed here, with its chroots"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),
         (["--detach"], {"action": "store_true",
                         "help": "start the build in its own session and "
                                 "return; follow it with `build watch`"}),
         (["--interval"], {"type": float, "default": 1.0, "metavar": "SEC",
                           "help": "watch: seconds between reads (default 1)"}),
+        (["--max"], {"metavar": "SIZE",
+                     "help": "ccache: raise the cache ceiling, e.g. 25G"}),
+        (["--wait"], {"type": float, "default": 0.0, "metavar": "SEC",
+                      "help": "queue for this long if the buildroot is busy "
+                              "(default: fail immediately)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_build,
@@ -1656,6 +2053,10 @@ SPEC = {
         "porthole build watch",
         "porthole build watch --json",
         "porthole build kernel --yes",
+        "porthole build image",
+        "porthole build image --yes",
+        "porthole build ccache",
+        "porthole build ccache --max 25G",
         "porthole build clean",
     ],
 }

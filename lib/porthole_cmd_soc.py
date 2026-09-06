@@ -41,8 +41,7 @@ def _load(ctx):
     pmaports = pmap.find_pmaports(ctx.cfg)
     if not pmaports:
         raise Bail("no pmaports checkout found", EX_FAIL,
-                   "set PORTHOLE_PMAPORTS, or run `pmbootstrap init` once so "
-                   "it clones one")
+                   "porthole init    adopts a checkout or clones one")
     devices = pmap.load_devices(pmaports)
     if not devices:
         raise Bail(f"{pmaports}/device contains no device packages", EX_FAIL)

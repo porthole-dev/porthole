@@ -350,7 +350,13 @@ def row_segments(snap, reattached: bool, width: int, now: float):
     name = str(snap.get("rung") or "build").split(":", 1)[-1]
     if state != "running":
         age = pp.fmt_dur(now - (snap.get("last_at") or now))
-        return [(pp.spinner(snap, row_style()) + " ", "state"),
+        # The RESOLVED state, not the snapshot's. `stale` is exactly the case
+        # where the file still says `running` -- nothing wrote a final state
+        # because the process was killed -- so handing `spinner` the raw
+        # snapshot got back a spinner frame, and the row read
+        # `⠼ image  stale`: a moving glyph next to the word for "not moving".
+        return [(pp.spinner(dict(snap, state=state), row_style()) + " ",
+                 "state"),
                 (name, "name"), ("  ", "pad"), (state, "state"),
                 ("  ", "pad"), (age + " ago", "dim")]
     out = [(name, "name"), ("  ", "pad"),
@@ -359,8 +365,40 @@ def row_segments(snap, reattached: bool, width: int, now: float):
     frac = snap.get("progress")
     out.append(("--" if frac is None else "{:>3d}%".format(int(frac * 100)),
                 "figure"))
-    if snap.get("steps"):
-        out += [("  ", "pad"), (str(snap["steps"]), "dim")]
+
+    # WHETHER THIS IS STILL MOVING, which the row could not say at all.
+    #
+    # A kernel rung has no percentage -- there is no total to be a fraction of
+    # -- so the bar renders `[     unknown      ]` and the figure renders
+    # `--`, and the whole row was `image  [ unknown ]  --`. That is byte for
+    # byte what it shows for a build in its first second, its tenth minute,
+    # and one that quietly stopped saying anything eight minutes ago. Meanwhile
+    # `porthole build status`, reading the SAME snapshot, had the phase, the
+    # elapsed and the last line it printed.
+    #
+    # The three fields below are the difference, in the order they answer the
+    # question: how long since it said anything, how long it has been going,
+    # and what it is doing. `steps`/`compile_lines` follows because a number
+    # that ticks up is the only progress signal a kernel compile has.
+    silence = pp.last_age_of(snap, now)
+    if silence is not None and silence >= pp.STALL_AFTER_S:
+        # Ahead of everything optional, because clipping eats the tail and
+        # this is the field a reader most needs to keep.
+        out += [("  ", "pad"), ("quiet ", "warn"),
+                (pp.fmt_dur(silence), "warn")]
+    if isinstance(snap.get("elapsed"), (int, float)):
+        out += [("  ", "pad"), (pp.fmt_dur(snap["elapsed"]), "figure")]
+    phase = str(snap.get("phase") or "")
+    if phase and phase != "starting":
+        out += [("  ", "pad"), (phase, "dim")]
+    # `steps` is the ninja fraction and only a package build has one; a kernel
+    # rung carries `compile_lines`, and reading only `steps` is why the count
+    # never appeared on the rungs that have no other progress signal.
+    steps = snap.get("steps") or (
+        "{} lines".format(snap["compile_lines"])
+        if snap.get("compile_lines") else "")
+    if steps:
+        out += [("  ", "pad"), (str(steps), "dim")]
     if snap.get("eta"):
         out += [("  ", "pad"), ("eta ", "dim"),
                 (pp.fmt_dur(snap["eta"]), "figure")]
@@ -387,7 +425,8 @@ def build_line(repo: pathlib.Path, width: int, now=None):
     if state == "running" and snap.get("pid") is not None:
         state = pp.liveness(snap)
     colour = pp._STATE_COLOUR.get(state, "cyan")
-    tones = {"name": "bold", "figure": "bold", "dim": "grey", "state": colour}
+    tones = {"name": "bold", "figure": "bold", "dim": "grey",
+             "state": colour, "warn": "yellow"}
     segments = row_segments(snap, reattached, width, now)
     plain = "".join(text for text, _ in segments)
     if len(plain) > width:

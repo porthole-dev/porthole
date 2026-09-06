@@ -245,8 +245,32 @@ def staged_build_name(workdir):
     return None, None
 
 
+# The pmbootstrap subcommands that OWN the chroots, so a second one starting
+# alongside is the hazard this whole module exists for.
+#
+# `build` alone was the original list, and that is how a running
+# `pmbootstrap install` was reported as an idle buildroot: `porthole build
+# clean` unstacked /mnt/linux underneath a live install and nothing objected.
+# `install` runs mkfs and populates the rootfs chroot, `export` reads it,
+# `zap` deletes chroots outright, `flasher` and `chroot` enter them, and
+# `checksum` was the command that destroyed the redfin kernel build.
+#
+# The read-only ones are deliberately absent and must stay absent: `status`,
+# `log`, `config` and `pull` are cheap, and `porthole_cmd_sandbox.redirect_for`
+# leaves them available on purpose. A guard that fires on `pmbootstrap log` is
+# a guard people route around.
+CHROOT_OWNING = frozenset((
+    "build", "install", "export", "checksum", "chroot", "zap", "flasher",
+    "aportgen", "pkgrel_bump", "index", "repo_bootstrap", "kconfig",
+))
+
+# Options that take a SEPARATE value, so the value is not the package.
+# `--arch aarch64 webkit2gtk-6.0` used to be reported as "aarch64".
+_TAKES_VALUE = frozenset(("--arch", "-a", "--src", "--pkgrel"))
+
+
 def foreign_build(ps_output: str) -> str:
-    """A pmbootstrap build running that did NOT come through this verb, or "".
+    """A pmbootstrap that owns the chroots running right now, or "".
 
     The flock only binds callers who take it. `porthole sandbox shell
     --command 'pmbootstrap build ...'` is a bare command runner and takes
@@ -261,29 +285,36 @@ def foreign_build(ps_output: str) -> str:
     A ps line cannot contain the filter, because the filter never reaches it.
     """
     for line in ps_output.splitlines():
-        if "pmbootstrap" in line and " build" in line and "pgrep" not in line:
-            # Name the package if it is on the command line; a pid alone sends
-            # the reader back to ps to find out what they are waiting for.
-            words = line.split()
-            for i, word in enumerate(words):
-                if word == "build" and i + 1 < len(words):
-                    # Options that take a SEPARATE value: their value is not
-                    # the package. `--arch aarch64 webkit2gtk-6.0` used to be
-                    # reported as "aarch64" (2026-09-06).
-                    takes_value = {"--arch", "-a", "--src", "--pkgrel"}
-                    tail, skip = [], False
-                    for w in words[i + 1:]:
-                        if skip:
-                            skip = False
-                            continue
-                        if w in takes_value:
-                            skip = True
-                            continue
-                        if not w.startswith("-"):
-                            tail.append(w)
-                    if tail:
-                        return tail[0]
-            return "another pmbootstrap build"
+        if "pmbootstrap" not in line or "pgrep" in line:
+            continue
+        words = line.split()
+        # The subcommand is the first bare word after the pmbootstrap token --
+        # not a fixed position, because the global options before it vary
+        # (`--as-root`, `--config <path>`, `--details-to-stdout`).
+        rest, skip = [], False
+        for word in words:
+            if not rest and not word.endswith("pmbootstrap"):
+                continue
+            if not rest:
+                rest = ["-"]                     # found it; collect from here
+                continue
+            if skip:
+                skip = False
+                continue
+            if word in _TAKES_VALUE or word == "--config":
+                skip = True
+                continue
+            if word.startswith("-"):
+                continue
+            rest.append(word)
+        tail = rest[1:]
+        if not tail or tail[0] not in CHROOT_OWNING:
+            continue
+        # Name what it is doing; a pid alone sends the reader back to ps to
+        # find out what they are waiting for.
+        if tail[0] == "build" and len(tail) > 1:
+            return tail[1]
+        return f"pmbootstrap {tail[0]}"
     return ""
 
 

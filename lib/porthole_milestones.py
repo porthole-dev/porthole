@@ -265,7 +265,7 @@ def probe_dts_exists(ctx):
     """A device tree source in the working repo, named by the profile."""
     work = _workdir(ctx)
     if not work:
-        return blocked("PORTHOLE_WORKDIR is not set")
+        return blocked("no working repo -- `porthole init` sets it")
     dtb = _cfg(ctx, "PORTHOLE_DTB")
     stem = pathlib.Path(dtb).name if dtb else ""
     if not stem:
@@ -293,7 +293,7 @@ def probe_dts_compiles(ctx):
     """
     work = _workdir(ctx)
     if not work:
-        return blocked("PORTHOLE_WORKDIR is not set")
+        return blocked("no working repo -- `porthole init` sets it")
     dtb = _cfg(ctx, "PORTHOLE_DTB")
     stem = pathlib.Path(dtb).name if dtb else ""
     if not stem:
@@ -332,7 +332,7 @@ def probe_verify_script(ctx):
     """
     work = _workdir(ctx)
     if not work:
-        return blocked("PORTHOLE_WORKDIR is not set")
+        return blocked("no working repo -- `porthole init` sets it")
     for name in ("verify.sh", "verify"):
         path = work / name
         if path.is_file():
