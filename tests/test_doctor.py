@@ -510,5 +510,43 @@ def test_a_check_that_could_not_run_is_not_a_finding_about_fastboot():
     assert "could not ask" in row["detail"], row
 
 
+# ---------------------------------------------- which key is actually used --
+
+def test_doctor_names_the_key_a_pmaports_checkout_came_from():
+    """"Which variable is effective" is a question the tool should answer.
+
+    Four things can decide where pmaports is -- a per-device key, the global
+    key, pmbootstrap's cache_git, and the default cache path -- and reading the
+    documentation cannot tell you which one won on THIS machine. A path with no
+    layer beside it leaves the reader to work it out by elimination.
+    """
+    import tempfile
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="doctor-pmaports-"))
+    (tmp / "device").mkdir()
+    ch = doctor.Checks()
+    doctor._check_pmaports(ch, {"PORTHOLE_DEVICE": "google-taimen",
+                                "PORTHOLE_PMAPORTS_GOOGLE_TAIMEN": str(tmp)})
+    row = _row(ch, "host: pmaports")
+    assert row["status"] == "ok", row
+    assert str(tmp) in row["detail"], row
+    assert "PORTHOLE_PMAPORTS_GOOGLE_TAIMEN" in row["detail"], (
+        "the row names the path but not the key that put it there")
+
+
+def test_a_missing_host_work_dir_is_not_a_warning():
+    """On the workspace tier this directory is never created and never needed.
+
+    A yellow row for a tier you are not on is how a working setup starts
+    looking broken to somebody who is fine, which is the failure mode this
+    whole change exists to remove.
+    """
+    ch = doctor.Checks()
+    doctor._check_host_workdir(ch, {"PORTHOLE_PMB_DIR": "/nonexistent-xyz"})
+    row = _row(ch, "host: work dir")
+    assert row["status"] == "ok", row
+    assert "host builds only" in row["detail"], row
+
+
+
 if __name__ == "__main__":
     sys.exit(main())

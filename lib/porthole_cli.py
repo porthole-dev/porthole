@@ -438,7 +438,7 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
         "examples:",
         "  porthole next                   where am I, and what is next?",
         "  porthole doctor                 is my host ready?",
-        "  porthole init NAME              set up your identity, once",
+        "  porthole init NAME              set this host up (safe to re-run)",
         "  porthole tools --needs BOOTED   which tools need a booted device",
         "  porthole brain search --severity law   the ten notes worth reading",
         "",
@@ -529,7 +529,7 @@ def overview(root: pathlib.Path, out: Out) -> int:
     out.blank()
 
     if not device or not configured:
-        out.hint("porthole init <codename>   set up, once")
+        out.hint("porthole init <codename>   set this host up")
         if not profiles:
             out.hint("porthole new-device <codename>      port something new")
     else:

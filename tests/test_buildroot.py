@@ -170,6 +170,52 @@ def main():
     return 1 if failed else 0
 
 
+# ------------------------------------------------- naming an untracked build --
+#
+# Reported 2026-09-06: the status line showed no build while a webkit2gtk-6.0
+# build had been running for two hours, and `pkg watch` showed it. The tracked
+# snapshot said `done` -- a PREVIOUS build had finished and written it -- and
+# every consumer asks the snapshot, so a build nobody tracked is invisible.
+# `pkg watch` saw it only because it separately shells out to a podman `ps`,
+# which the status line may not do at a two-second refresh.
+#
+# The buildroot names the build for free: pmbootstrap stages the APKBUILD it is
+# building into the chroot, so one small file read says which package, and its
+# mtime says when the build began -- a field the log alone reports as None.
+
+def test_the_staged_apkbuild_names_the_running_build():
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-staged-"))
+    build = work / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+    build.mkdir(parents=True)
+    (build / "APKBUILD").write_text(
+        "# Contributor: someone\npkgname=webkit2gtk-6.0\npkgver=2.52.6\n")
+    name, started = buildroot.staged_build_name(work)
+    assert name == "webkit2gtk-6.0", name
+    assert started is not None and started > 0, started
+
+
+def test_no_buildroot_names_nothing():
+    """Absence must be None, never a guess. A wrong package name in the chrome
+    is worse than no row: it attributes somebody else's four-hour build to the
+    thing you are working on."""
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-staged-"))
+    assert buildroot.staged_build_name(work) == (None, None)
+
+
+def test_the_newest_buildroot_wins():
+    """One workspace can hold a buildroot per architecture. The one written
+    most recently is the one a fresh log belongs to."""
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-staged-"))
+    for arch, name, when in (("armv7", "older-pkg", 1000), ("aarch64", "newer-pkg", 2000)):
+        d = work / f"chroot_buildroot_{arch}" / "home" / "pmos" / "build"
+        d.mkdir(parents=True)
+        (d / "APKBUILD").write_text(f"pkgname={name}\n")
+        os.utime(d / "APKBUILD", (when, when))
+    name, started = buildroot.staged_build_name(work)
+    assert name == "newer-pkg", name
+    assert started == 2000, started
+
+
 if __name__ == "__main__":
     sys.exit(main())
 

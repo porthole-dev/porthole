@@ -43,8 +43,22 @@ parses it in ten lines, and the toolbox is half of each.
 | `PORTHOLE_SSH_KEY` | identity file | *(none)* |
 | `PORTHOLE_AGENT` | default `TK_AGENT` for the mutex | *(none)* |
 | `FASTBOOT`, `ADB` | tool paths | found on `$PATH` |
-| `PORTHOLE_PMB_DIR` | pmbootstrap state dir | `~/.local/var/pmbootstrap` |
+| `PORTHOLE_PMB_DIR` | pmbootstrap work dir, **host builds** | `~/.local/var/pmbootstrap` |
+| `PORTHOLE_SANDBOX_PMB_DIR` | pmbootstrap work dir, **workspace builds** | `~/.local/var/porthole-sandbox` |
+| `PORTHOLE_PMBOOTSTRAP_SRC` | pmbootstrap checkout, for `helpers/envkernel.sh` (host builds only) | *(none)* |
+| `PORTHOLE_PMAPORTS` | pmaports checkout | pmbootstrap's `cache_git/pmaports` |
+| `PORTHOLE_PMAPORTS_<DEVICE>` | pmaports checkout for one device; beats the global | *(none)* |
 | `PORTHOLE_WORKDIR` | the device working repo (kernel, pmaports, blobs) | *(none)* |
+
+The two work dirs are **different directories and not interchangeable**. A
+rootless container maps your uid and nothing else, so a work dir made by host
+root reads as `nobody` inside it and can be neither written nor chowned. Which
+one a build used is printed by that build, and by `porthole doctor`.
+
+You should not need to set any of these by hand. `porthole init` resolves them,
+and `porthole doctor` prints the resolved path for each one *and the key it
+came from* -- which is the question these rows otherwise leave you to answer by
+elimination. See [Setting up a new host](NEW-HOST.md).
 
 ## Behaviour keys
 
