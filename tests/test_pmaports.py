@@ -518,5 +518,119 @@ def main():
     return 1 if failed else 0
 
 
+# ------------------------------------------------- the fork problem --
+
+def _remotes(*lines):
+    return lambda _path: list(lines)
+
+
+def test_a_postmarketos_remote_is_recognised_under_any_name():
+    """pmbootstrap matches by URL, not by the name `origin` -- and so must
+    this, or a clone whose upstream is called `upstream` would be treated as a
+    fork and quietly given an override it does not need."""
+    assert pmap.upstream_remote("/x", _remotes(
+        "origin\thttps://gitlab.postmarketos.org/postmarketOS/pmaports.git (fetch)"
+    )) == "origin"
+    assert pmap.upstream_remote("/x", _remotes(
+        "mine\tgit@github.com:someone/pmaports.git (fetch)",
+        "upstream\tgit@gitlab.postmarketos.org:postmarketOS/pmaports.git (push)",
+    )) == "upstream"
+
+
+def test_a_gitlab_ci_authentication_segment_does_not_hide_the_upstream():
+    """The same strip `remote_to_name_and_clean_url` does. Without it a CI
+    checkout looks like a fork."""
+    assert pmap.upstream_remote("/x", _remotes(
+        "origin\thttps://gitlab-ci-token:xyz@gitlab.postmarketos.org/"
+        "postmarketOS/pmaports.git (fetch)"
+    )) == "origin"
+
+
+def test_a_fork_has_no_upstream_remote():
+    assert pmap.upstream_remote("/x", _remotes(
+        "origin\tgit@github.com:porthole-dev/pmaports.git (fetch)",
+        "origin\tgit@github.com:porthole-dev/pmaports.git (push)",
+    )) == ""
+    assert pmap.upstream_remote("/x", _remotes()) == ""
+
+
+def test_a_fork_gets_its_own_channels_cfg_and_a_stock_clone_does_not():
+    """pmbootstrap reads channels.cfg from `<upstream>/main` and finds the
+    upstream by URL, so a bring-up fork -- the normal state for this tool --
+    dies inside `pmbootstrap install` with a message about a remote, never
+    mentioning channels.cfg. PMB_CHANNELS_CFG is pmbootstrap's own documented
+    override, so no patch and no write to anybody's repository.
+
+    Returned ONLY for a checkout that cannot satisfy pmbootstrap's own path:
+    upstream prefers main's copy over an old release branch's for a reason,
+    and a stock clone must keep that behaviour."""
+    tree = TMP / "forked"
+    tree.mkdir(parents=True, exist_ok=True)
+    (tree / "channels.cfg").write_text("[channels.cfg]\nrecommended=edge\n")
+
+    fork = _remotes("origin\tgit@github.com:porthole-dev/pmaports.git (fetch)")
+    assert pmap.channels_cfg_override(tree, fork) == str(tree / "channels.cfg")
+
+    stock = _remotes(
+        "origin\thttps://gitlab.postmarketos.org/postmarketOS/pmaports.git (fetch)")
+    assert pmap.channels_cfg_override(tree, stock) == ""
+
+
+def test_no_channels_cfg_means_no_override_to_offer():
+    """A fork with no channels.cfg cannot be helped this way, and pointing at
+    a file that is not there would turn one clear error into two."""
+    bare = TMP / "bare"
+    bare.mkdir(parents=True, exist_ok=True)
+    fork = _remotes("origin\tgit@github.com:x/pmaports.git (fetch)")
+    assert pmap.channels_cfg_override(bare, fork) == ""
+
+
+# ------------------------------------------------ the kernel flavour --
+
+def _device_apkbuild(codename, subpackages, extra=""):
+    d = TMP / "device" / "testing" / f"device-{codename}"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "APKBUILD").write_text(
+        f'pkgname=device-{codename}\n'
+        f'subpackages="\n{subpackages}\n"\n{extra}')
+    return d
+
+
+def test_the_kernel_flavours_come_from_the_device_packages_subpackages():
+    """pmbootstrap defaults `kernel` to `stable` and only `pmbootstrap init`
+    ever changes it -- an interactive command the workspace exists to avoid.
+    A device offering only `mainline`, which is most bring-ups, therefore dies
+    inside `pmbootstrap install` after the rootfs chroot is built, telling you
+    to run the command you cannot run."""
+    _device_apkbuild("acme-one", "\t$pkgname-kernel-mainline:kernel_mainline",
+                     extra='kernel_mainline() {\n\tpkgdesc="Close to mainline"\n}\n')
+    got = pmap.device_kernels(TMP, "acme-one")
+    assert got == {"mainline": "Close to mainline"}, got
+
+
+def test_several_flavours_are_all_reported():
+    """A device with two is a question for a human, and the description is
+    what makes it answerable -- so both are returned, not just the names."""
+    _device_apkbuild(
+        "acme-two",
+        "\t$pkgname-kernel-mainline:kernel_mainline\n"
+        "\t$pkgname-kernel-downstream:kernel_downstream",
+        extra=('kernel_mainline() {\n\tpkgdesc="Mainline"\n}\n'
+               'kernel_downstream() {\n\tpkgdesc="Vendor 4.9"\n}\n'))
+    got = pmap.device_kernels(TMP, "acme-two")
+    assert set(got) == {"mainline", "downstream"}, got
+    assert got["downstream"] == "Vendor 4.9", got
+
+
+def test_a_device_with_a_hardcoded_kernel_offers_no_flavours():
+    """pmbootstrap's `kernels()` returns None here and never consults the
+    setting, so reporting a flavour would invent a choice that does not
+    exist."""
+    _device_apkbuild("acme-none", "\t$pkgname-nonfree-firmware:nonfree_firmware")
+    assert pmap.device_kernels(TMP, "acme-none") == {}
+    assert pmap.device_kernels(TMP, "acme-missing") == {}
+    assert pmap.device_kernels(TMP, "") == {}
+
+
 if __name__ == "__main__":
     sys.exit(main())
