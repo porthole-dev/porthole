@@ -995,6 +995,9 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
                doc="sudo visudo    # remove the Defaults line; the workspace "
                    "has no sudoers entry and needs none")
 
+    _check_gadget_steals_default_route(ch, ctx)
+    _check_legacy_host_override(ch, ctx)
+
     binfmt = pathlib.Path("/proc/sys/fs/binfmt_misc/qemu-aarch64")
     if binfmt.exists():
         ch.add("host: binfmt aarch64", "ok", "registered")
@@ -1002,6 +1005,143 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
         ch.add("host: binfmt aarch64", "warn",
                "not registered -- cross-arch package builds need it",
                doc="install qemu-user-static (host-global, needs root once)")
+
+
+def _usb_net_ifaces():
+    """Interface names whose device sits on the USB bus -- the gadget links.
+
+    From sysfs, not from the routing table and not from the name. Checking
+    "what routes to the device" only finds the gadget while the device is
+    reachable over it, so it goes blind exactly when someone has switched to
+    wifi to escape this bug -- and the dead profile is still there waiting to
+    autoconnect. Names are no better: udev builds them from the USB path, so
+    it is enp5s0f3u2 on one machine and enp0s20f0u4 on the next.
+    """
+    out = []
+    net = pathlib.Path("/sys/class/net")
+    if not net.is_dir():
+        return out
+    for iface in net.iterdir():
+        try:
+            if "usb" in os.path.realpath(iface / "device" / "subsystem"):
+                out.append(iface.name)
+                continue
+            # The gadget hangs off a USB device several levels up, so the
+            # interface's own subsystem is "net" and only the full path says
+            # USB. Cheap and works for both shapes.
+            if "/usb" in os.path.realpath(iface / "device"):
+                out.append(iface.name)
+        except OSError:
+            continue
+    return out
+
+
+def _unsafe_gadget_profiles():
+    """[(uuid, name, iface, [unsafe keys])] for every USB-link NM profile that
+    could hand the host a default route or nameservers.
+
+    Reports a profile whether or not it is currently up: an autoconnect
+    profile that is down right now is simply waiting for the next enumeration.
+    """
+    found = []
+    try:
+        listing = subprocess.run(
+            ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show"],
+            capture_output=True, text=True, timeout=5)
+        if listing.returncode:
+            return found
+    except (OSError, subprocess.SubprocessError):
+        return found
+    usb = set(_usb_net_ifaces())
+    for line in listing.stdout.splitlines():
+        parts = line.split(":")
+        if len(parts) < 4 or parts[2] != "802-3-ethernet":
+            continue
+        name, uuid = parts[0], parts[1]
+        try:
+            show = subprocess.run(["nmcli", "-t", "connection", "show", uuid],
+                                  capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        settings = dict(l.split(":", 1) for l in show.stdout.splitlines()
+                        if ":" in l)
+        iface = settings.get("connection.interface-name", "").strip()
+        if iface not in usb:
+            continue
+        # autoconnect=no is a complete answer: the profile can never apply
+        # itself, so its route and DNS settings cannot matter.
+        if settings.get("connection.autoconnect", "").strip() == "no":
+            continue
+        unsafe = [k for k in ("ipv4.never-default", "ipv6.never-default",
+                              "ipv4.ignore-auto-dns", "ipv6.ignore-auto-dns")
+                  if settings.get(k, "").strip() == "no"]
+        if unsafe:
+            found.append((uuid, name, iface, unsafe))
+    return found
+
+
+def _check_gadget_steals_default_route(ch: Checks, ctx) -> None:
+    """The phone must not be allowed to become the host's default route or DNS.
+
+    The USB gadget is a DHCP server. NetworkManager's default for a fresh wired
+    profile is to accept everything it offers -- including a default route and
+    nameservers -- so plugging the phone in silently reroutes the HOST's
+    traffic into a device that has no upstream. The failure does not look like
+    networking: web pages stop loading, `git push` hangs, and the agent in the
+    terminal keeps working because its own traffic is on the link that still
+    works. Reported by a user mid-session as "you set up an ethernet to the
+    device that kept disconnecting my host".
+
+    A warning, not a failure: some setups genuinely do route through the phone,
+    and doctor must not fail a host over a deliberate choice. But the default
+    is wrong for a bring-up and nothing else says so.
+    """
+    bad = _unsafe_gadget_profiles()
+    if not bad:
+        ch.add("host: device link", "ok",
+               "no USB-link profile can take the host's default route or DNS")
+        return
+    uuid, name, iface, unsafe = bad[0]
+    ch.add("host: device link", "warn",
+           f"{name} ({iface}) may take the host's default route or DNS "
+           f"({', '.join(unsafe)}) -- the phone is a DHCP server with no "
+           f"upstream, so the host loses internet whenever it enumerates"
+           + (f", and {len(bad) - 1} more like it" if len(bad) > 1 else ""),
+           fix="nmcli connection modify " + uuid +
+               " ipv4.never-default yes ipv6.never-default yes"
+               " ipv4.ignore-auto-dns yes ipv6.ignore-auto-dns yes"
+               " ipv4.route-metric 4000 ipv6.route-metric 4000"
+               "    # or `connection.autoconnect no` if you reach the device"
+               " over wifi and never want this link configured at all")
+
+
+def _check_legacy_host_override(ch: Checks, ctx) -> None:
+    """HOST and PHONE outrank PORTHOLE_HOST, and nothing says so.
+
+    tk-lib.sh's compatibility surface takes TK_HOST, then PHONE, then
+    PORTHOLE_HOST -- deliberately, so an old setup keeps working. The cost is
+    that setting the DOCUMENTED variable does nothing when a legacy one is
+    exported, and the tools keep talking to the old address with no message at
+    all. Hit while moving a device from the USB gadget to wifi:
+    `PORTHOLE_HOST=<wifi ip> porthole ...` kept timing out against the USB
+    address, three times, before anyone thought to look at $HOST.
+    """
+    want = (ctx.cfg.get("PORTHOLE_HOST") or "").strip()
+    for name in ("TK_HOST", "HOST", "PHONE"):
+        got = (os.environ.get(name) or "").strip()
+        if not got:
+            continue
+        addr = got.split("@")[-1]
+        if want and addr != want:
+            ch.add("host: address override", "warn",
+                   f"${name}={got} outranks PORTHOLE_HOST={want}, so the tools "
+                   f"talk to {addr}",
+                   fix=f"unset {name}    # or set it to the same address."
+                       " tk-lib.sh takes TK_HOST, then PHONE, then"
+                       " PORTHOLE_HOST, and says nothing when they disagree")
+            return
+    ch.add("host: address override", "ok",
+           "no legacy HOST/PHONE shadowing PORTHOLE_HOST")
 
 
 def cmd_doctor(args, ctx) -> int:

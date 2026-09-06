@@ -222,7 +222,20 @@ def foreign_build(ps_output: str) -> str:
             words = line.split()
             for i, word in enumerate(words):
                 if word == "build" and i + 1 < len(words):
-                    tail = [w for w in words[i + 1:] if not w.startswith("-")]
+                    # Options that take a SEPARATE value: their value is not
+                    # the package. `--arch aarch64 webkit2gtk-6.0` used to be
+                    # reported as "aarch64" (2026-09-06).
+                    takes_value = {"--arch", "-a", "--src", "--pkgrel"}
+                    tail, skip = [], False
+                    for w in words[i + 1:]:
+                        if skip:
+                            skip = False
+                            continue
+                        if w in takes_value:
+                            skip = True
+                            continue
+                        if not w.startswith("-"):
+                            tail.append(w)
                     if tail:
                         return tail[0]
             return "another pmbootstrap build"
