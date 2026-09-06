@@ -37,8 +37,20 @@ DEV = "google-taimen"
 KEY = "PORTHOLE_WORKDIR_GOOGLE_TAIMEN"
 
 
+# A HOME of its own, not the tester's and not the harness's.
+#
+# `tests/ci-local.sh` runs the suite from a `git archive` extraction with
+# HOME set INSIDE that tree, and with no .git the secrets scanner and the
+# file-cleanliness check fall back to walking it -- so porthole's own
+# `$HOME/.cache/porthole/registry.json`, written by any CLI call here, was
+# picked up as a tracked file and failed two unrelated suites. A test that
+# writes into the tree it is scanned from is a test that breaks its
+# neighbours.
+_HOME = tempfile.mkdtemp(prefix="porthole-init-home-")
+
+
 def cli(*args, env=None, xdg=None):
-    base = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
+    base = {"PATH": os.environ["PATH"], "HOME": _HOME,
             "PORTHOLE_ROOT": str(ROOT), "NO_COLOR": "1",
             "XDG_CONFIG_HOME": xdg or tempfile.mkdtemp(prefix="porthole-init-")}
     base.update(env or {})
