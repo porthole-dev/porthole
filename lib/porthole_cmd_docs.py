@@ -338,6 +338,26 @@ def _refresh_agents(ctx) -> bool:
     return False
 
 
+def _docs_links(text: str, pages) -> str:
+    """Rewrite links BETWEEN copied pages, because the copy renames them.
+
+    `docs/NEW-HOST.md` is published as `new-host.md`, so a sibling page linking
+    to `NEW-HOST.md` -- which is the correct link in the repository, and what
+    GitHub renders -- points at nothing on the site. mkdocs runs in strict
+    mode, so this is a BUILD failure rather than a dead link somebody finds
+    later, which is how it was caught.
+
+    Done here rather than by lowercasing the filenames on disk: the repository
+    is the primary artefact and `docs/NEW-HOST.md` is the name people link to
+    from commit messages and issues. The site is the copy, so the site adapts.
+    """
+    for page in pages:
+        text = text.replace(f"]({page})", f"]({page.lower()})")
+        # ...and the repo-relative form, which a page one directory up uses.
+        text = text.replace(f"](docs/{page})", f"]({page.lower()})")
+    return text
+
+
 def cmd_build(args, ctx) -> int:
     agents_changed = _refresh_agents(ctx)
     root = ctx.root
@@ -349,6 +369,8 @@ def cmd_build(args, ctx) -> int:
     # -- hand-written pages, copied verbatim --
     (src / "index.md").write_text(
         _readme_as_index((root / "README.md").read_text()))
+    pages = ["NEW-HOST.md", "SANDBOX.md", "CONFIG.md", "ARCHITECTURE.md",
+             "PERFORMANCE.md", "CONTRIBUTING.md"]
     for name, title in [("NEW-HOST.md", "Setting up a new host"),
                         ("SANDBOX.md", "Running pmbootstrap safely"),
                         ("CONFIG.md", "Configuration"),
@@ -357,7 +379,7 @@ def cmd_build(args, ctx) -> int:
                         ("CONTRIBUTING.md", "Contributing")]:
         source = root / "docs" / name
         if source.is_file():
-            (src / name.lower()).write_text(source.read_text())
+            (src / name.lower()).write_text(_docs_links(source.read_text(), pages))
     agents = root / "AGENTS.md"
     if agents.is_file():
         (src / "agents.md").write_text(agents.read_text())
