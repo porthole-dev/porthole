@@ -603,7 +603,7 @@ nothing else — it will burn a long time and return BLOCKED.
 <!-- BEGIN GENERATED: verbs -->
 | verb | does | json | writes outside its profile |
 |---|---|---|---|
-| `init` | set your identity and pick a device; writes config.env | yes | no |
+| `init` | set this host up: identity, build tier, pmaports | yes | no |
 | `tui` | open the console: progress, devices, tools, notes, in one screen | no | no |
 | `use` | switch the active device profile, and its working repo | yes | no |
 | `cd` | print a path to cd into: workdir, kernel, pmaports, profile | no | no |

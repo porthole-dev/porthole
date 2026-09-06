@@ -111,7 +111,6 @@ _ph_depth() { awk -v p="$_ph_mnt" '$2==p' /proc/mounts | wc -l; }
 _ph_find_envkernel() {
 	local c pmb_root
 	for c in \
-		"${PORTHOLE_ENVKERNEL:-}" \
 		"${PORTHOLE_PMBOOTSTRAP_SRC:-}/helpers/envkernel.sh" \
 		"$HOME/.local/share/pmbootstrap/helpers/envkernel.sh" \
 		"/usr/share/pmbootstrap/helpers/envkernel.sh"
@@ -126,8 +125,9 @@ _ph_find_envkernel() {
 		done
 	fi
 	echo ">> cannot find envkernel.sh." >&2
-	echo ">> set PORTHOLE_ENVKERNEL to its path, or PORTHOLE_PMBOOTSTRAP_SRC" >&2
-	echo ">> to a pmbootstrap checkout, and try again." >&2
+	echo ">> run \`porthole init\`, which clones pmbootstrap and sets" >&2
+	echo ">> PORTHOLE_PMBOOTSTRAP_SRC -- or build in the workspace, whose" >&2
+	echo ">> image carries the helper and the CLI pinned together." >&2
 	return 1
 }
 

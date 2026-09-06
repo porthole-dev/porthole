@@ -260,6 +260,124 @@ def test_init_does_not_clobber_an_existing_config_without_force():
     assert "alice" in text
 
 
+def test_init_converges_instead_of_rewriting_the_file():
+    """Re-running init on a half-configured host must not cost you your edits.
+
+    This is the bug behind "setting up a second machine is overwhelming": init
+    wrote the whole file from a template, so a second run either refused or
+    silently dropped every key and comment it did not know about. It now
+    rewrites one line per key it actually changes, through the same set_key
+    `porthole use` has always used.
+    """
+    xdg = tempfile.mkdtemp(prefix="porthole-init-")
+    run("init", "google-taimen", "--user", "alice",
+        env={"XDG_CONFIG_HOME": xdg})
+    cfg = pathlib.Path(xdg) / "porthole" / "config.env"
+    # A hand-added key, a comment, and a deliberate override of something init
+    # autodetects -- the three things a template rewrite destroys.
+    #
+    # FASTBOOT is WRITTEN here rather than edited in place: a CI runner has a
+    # bare PATH with no android-tools, so init never autodetected one and the
+    # edit was a no-op that made this pass for the wrong reason. The point is
+    # that a value already on disk survives, which does not need init to have
+    # put it there.
+    cfg.write_text(cfg.read_text()
+                   + "\n# a note I wrote myself\nTK_MY_OWN_KEY=keepme\n"
+                     "FASTBOOT=/opt/mine/fastboot\n")
+
+    rc, out, err = run("init", "google-taimen", "--user", "bob", "--force",
+                       env={"XDG_CONFIG_HOME": xdg})
+    assert rc == 0, f"rc={rc} err={err}"
+    after = cfg.read_text()
+    assert "TK_MY_OWN_KEY=keepme" in after, "init dropped a hand-added key"
+    assert "# a note I wrote myself" in after, "init dropped a comment"
+    assert "/opt/mine/" in after, (
+        "init overwrote a tool path the developer set deliberately")
+    assert "PORTHOLE_USER=bob" in after, "the key that WAS asked for did not change"
+
+
+def test_init_says_what_it_kept_and_what_it_changed():
+    """A run that changed nothing must say so.
+
+    On a half-configured host "it did not complain" and "it agreed with what
+    was already there" look identical, and only one of them means you are set
+    up. The verdict per key is the difference.
+    """
+    xdg = tempfile.mkdtemp(prefix="porthole-init-")
+    run("init", "google-taimen", "--user", "alice",
+        env={"XDG_CONFIG_HOME": xdg})
+    rc, out, _ = run("init", "google-taimen", "--user", "alice", "--force",
+                     env={"XDG_CONFIG_HOME": xdg})
+    assert rc == 0
+    assert "kept" in out, "a converging run must report what it kept"
+    assert "nothing to change" in out, (
+        "a run that changed nothing must say that in words")
+
+
+def test_init_on_the_workspace_tier_writes_no_pmbootstrap_keys():
+    """The sentence that costs an afternoon, enforced.
+
+    The image carries the pmbootstrap CLI and its source pinned together, so a
+    workspace host needs neither installed and neither key set. Writing one
+    anyway would point a reader at a host install that no build uses -- which
+    is exactly what happened on the reference host.
+    """
+    xdg = tempfile.mkdtemp(prefix="porthole-init-")
+    rc, out, err = run("init", "google-taimen", "--user", "alice",
+                       "--tier", "workspace", env={"XDG_CONFIG_HOME": xdg})
+    assert rc == 0, f"rc={rc} err={err}"
+    text = (pathlib.Path(xdg) / "porthole" / "config.env").read_text()
+    assert "PORTHOLE_PMBOOTSTRAP_SRC" not in text, (
+        "the workspace tier must not write a host pmbootstrap checkout")
+    assert "do not install it here" in out, (
+        "init must say the image carries pmbootstrap")
+
+
+def test_init_refuses_a_pmaports_path_that_is_not_pmaports():
+    """A path with no device/ is not pmaports, and accepting it turns every
+    later "device not found" into a puzzle about the wrong thing."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-")
+    empty = tempfile.mkdtemp(prefix="not-pmaports-")
+    rc, _, err = run("init", "google-taimen", "--user", "alice",
+                     "--pmaports", empty, env={"XDG_CONFIG_HOME": xdg})
+    assert rc != 0, "init accepted a directory that is not pmaports"
+    assert "device/" in err, err
+
+
+
+def test_init_never_clones_unattended():
+    """A network fetch nobody asked for is not a setup step.
+
+    init can clone pmbootstrap and pmaports, and both are the right thing to
+    offer a human at a terminal. Neither is the right thing for an agent or a
+    CI run to discover it has done: the first version of this shipped a silent
+    clone of two repositories on any headless `init --tier host`, and the way
+    it surfaced was a test suite that appeared to hang.
+
+    A fake `git` on PATH records what would have been fetched, so this asserts
+    the absence of a side effect rather than trusting the code to be read.
+    """
+    fake = pathlib.Path(tempfile.mkdtemp(prefix="porthole-nogit-"))
+    log = fake / "clone.log"
+    (fake / "git").write_text(
+        f'#!/bin/sh\necho "$*" >> {log}\nexit 1\n')
+    (fake / "git").chmod(0o755)
+    home = tempfile.mkdtemp(prefix="porthole-home-")
+    xdg = tempfile.mkdtemp(prefix="porthole-init-")
+
+    proc = subprocess.run(
+        [sys.executable, str(CLI), "init", "google-taimen", "--user", "alice",
+         "--tier", "host"],
+        capture_output=True, text=True, input="",
+        env={"PATH": f"{fake}:/usr/bin:/bin", "HOME": home,
+             "XDG_CONFIG_HOME": xdg, "PORTHOLE_ROOT": str(ROOT),
+             "NO_COLOR": "1"})
+    assert proc.returncode == 0, proc.stderr
+    assert not log.exists(), (
+        f"init cloned without being asked: {log.read_text()}")
+
+
+
 # ---------------------------------------------------------------------- run --
 
 def test_run_refuses_to_execute_an_on_device_tool_locally():
