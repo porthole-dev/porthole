@@ -428,5 +428,79 @@ def main():
     return 1 if failed else 0
 
 
+# ------------------------------------------ a build nobody published a file for --
+
+def test_a_build_nobody_tracked_still_reaches_the_status_line():
+    """Reported 2026-09-06: two hours of webkit building, an empty status line.
+
+    The tracked snapshot said `done` -- a PREVIOUS build had finished and
+    written it -- and the reattach path refuses anything whose snapshot is not
+    `running`, so a build started outside `porthole pkg` had no way to be
+    seen. `pkg watch` showed it only because it can afford a podman `ps`, and
+    at a two-second refresh this cannot.
+
+    Both file reads are faked here: the point is that a `done` snapshot plus a
+    fresh log plus a named buildroot is enough, without asking a container
+    anything.
+    """
+    import time
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-"))
+    build = work / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+    build.mkdir(parents=True)
+    (build / "APKBUILD").write_text("pkgname=webkit2gtk-6.0\n")
+    (work / "log.txt").write_text(
+        "[7947/9429] Building CXX object Source/WebCore/x.o\n")
+
+    repo = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-repo-"))
+    (repo / ".run").mkdir()
+    (repo / ".run" / "pkg-status.json").write_text(json.dumps(
+        {"state": "done", "rung": "pkg:something-else",
+         "last_at": time.time() - 9000, "pid": 1}))
+
+    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
+    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
+    try:
+        snap, reattached = sl.build_snapshot(repo, time.time())
+    finally:
+        if saved is None:
+            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
+        else:
+            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
+
+    assert snap is not None, "a live build was invisible to the status line"
+    assert snap["rung"] == "pkg:webkit2gtk-6.0", snap["rung"]
+    assert snap["state"] == "running", snap["state"]
+    assert reattached is True
+
+
+def test_a_quiet_log_is_not_a_running_build():
+    """The buildroot's APKBUILD outlives the build that staged it, so naming
+    alone must never put a row on screen. Liveness is the log's mtime."""
+    import time
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-"))
+    build = work / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+    build.mkdir(parents=True)
+    (build / "APKBUILD").write_text("pkgname=webkit2gtk-6.0\n")
+    (work / "log.txt").write_text("[7947/9429] Building CXX object x.o\n")
+    old = time.time() - 4000
+    os.utime(work / "log.txt", (old, old))
+
+    repo = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-repo-"))
+    (repo / ".run").mkdir()
+    (repo / ".run" / "pkg-status.json").write_text(json.dumps(
+        {"state": "done", "rung": "pkg:x", "last_at": old, "pid": 1}))
+
+    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
+    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
+    try:
+        snap, _ = sl.build_snapshot(repo, time.time())
+    finally:
+        if saved is None:
+            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
+        else:
+            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
+    assert snap is None, f"a log quiet for an hour was read as a live build: {snap}"
+
+
 if __name__ == "__main__":
     sys.exit(main())
