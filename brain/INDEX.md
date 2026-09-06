@@ -72,8 +72,10 @@ generic notes as well.
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
+| [the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail](findings/the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail.md) | `generic` | The WebKitWebProcess SIGSEGV is Epiphany asking for a FULL_DOCUMENT snapshot of a 237522 px page: Skia refuses a raster surface over 2 GB and WebKit dereferences the null |
 | [the-workspace-caches-kernel-compiles](findings/the-workspace-caches-kernel-compiles.md) | `generic` | The workspace caches kernel compiles now: 18% dearer the first time, 2.5x faster every repeat |
 | [the-workspace-loop-is-seconds-and-still-uncached](findings/the-workspace-loop-is-seconds-and-still-uncached.md) | `generic` | The workspace edit-build loop is 6-8 s, and ccache is still hit zero times |
+| [touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm](findings/touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm.md) | `device:google-taimen` | Finger drags on GTK4 WebKit ride the scrolling thread, and r61's two patches cut the Wikipedia drag from 289 layouts per 10 s to 10 |
 | [two-thirds-of-associations-never-get-keys](findings/two-thirds-of-associations-never-get-keys.md) | `device:google-taimen` | Two thirds of successful associations never complete the 4-way handshake, and ath10k says nothing |
 | [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
@@ -89,6 +91,7 @@ generic notes as well.
 | [wlroots-drm-layers-need-libliftoff](findings/wlroots-drm-layers-need-libliftoff.md) | `generic` | wlroots does DRM output layers only through libliftoff |
 | [wlroots-never-re-imports-a-texture-after-a-renderer-swap](findings/wlroots-never-re-imports-a-texture-after-a-renderer-swap.md) | `generic` | wlroots drops every client texture on a renderer swap and never re-imports one, so static layer-surfaces stay blank after a GPU reset |
 | [youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput](findings/youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput.md) | `device:google-taimen` | YouTube's judder on taimen is 2160p60 being served, plus venus clocked for 30 fps because vdec had no VIDIOC_G_PARM -- not the compositor, not buffer counts |
+| [youtube-video-freezes-are-a-software-css-blur-on-the-main-thread](findings/youtube-video-freezes-are-a-software-css-blur-on-the-main-thread.md) | `device:google-taimen` | The multi-second YouTube freezes are a CSS blur() painted in software on the web process main thread, because the GTK port never composites a layer for its filter |
 
 ## laws
 
@@ -128,6 +131,7 @@ generic notes as well.
 | [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
 | [a-sideloaded-device-apk-can-eat-the-radio-stack](traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md) | `generic` | A sideloaded device apk can eat the radio stack |
 | [a-stale-inherited-env-outbuilds-the-profile](traps/a-stale-inherited-env-outbuilds-the-profile.md) | `generic` | A stale inherited env outbuilds the profile |
+| [a-stall-catcher-must-pick-the-busiest-webkitwebprocess](traps/a-stall-catcher-must-pick-the-busiest-webkitwebprocess.md) | `generic` | A stall catcher on the browser must pick the WebKitWebProcess with the most threads, and thread names are truncated from the front |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
 | [a-tree-built-module-carries-btf-the-running-kernel-rejects](traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md) | `generic` | A tree-built module carries BTF the running kernel rejects, and modprobe blames a symlink loop |
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
@@ -217,8 +221,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 41
-- `generic` — 106
+- `device:google-taimen` — 43
+- `generic` — 108
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1

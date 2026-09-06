@@ -84,7 +84,7 @@ def main():
     def evaluate(expr):
         nonlocal msgid
         msgid += 1
-        inner = json.dumps({"id": msgid, "method": "Runtime.evaluate", "params": {"expression": expr, "returnByValue": True}})
+        inner = json.dumps({"id": msgid, "method": "Runtime.evaluate", "params": {"expression": expr, "returnByValue": True, "includeCommandLineAPI": True}})
         ws_send(s, json.dumps({"id": 1000 + msgid, "method": "Target.sendMessageToTarget", "params": {"targetId": page, "message": inner}}))
         while True:
             r = json.loads(ws_recv(s))
