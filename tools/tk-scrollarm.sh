@@ -28,6 +28,11 @@
 #
 #   tk-scrollarm.sh base
 #   tk-scrollarm.sh uclamp "WEBKIT_SKIA_CPU_PAINTING_THREADS=6"
+#
+# TK_EPHY_ARGS passes flags to epiphany itself. `--kiosk-mode` is the one that
+# matters: it removes the chrome that otherwise auto-hides mid-drag, and a
+# chrome hide RESIZES the web view, which re-evaluates the page's dynamic media
+# queries and can reconstruct the whole style resolver.
 set -u
 L=${1:?usage: tk-scrollarm.sh LABEL [ENV...]}; X=${2:-}
 # useformat=desktop matters: mobile Wikipedia collapses every section, so the
@@ -51,7 +56,7 @@ setsid systemd-run --user --scope --quiet --slice=app.slice \
 	env WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2 \
 	WEBKIT_LAYERS_TILE_SIZE=1440x1024 \
 	WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 WAYLAND_DEBUG=1 \
-	$X epiphany "$URL" >"/tmp/eph-$L.log" 2>"/tmp/wl-$L.log" </dev/null &
+	$X epiphany ${TK_EPHY_ARGS:-} "$URL" >"/tmp/eph-$L.log" 2>"/tmp/wl-$L.log" </dev/null &
 
 # Poll the condition that actually matters -- a document tall enough to scroll.
 # readyState alone is not it: it reads "complete" on Epiphany's initial
