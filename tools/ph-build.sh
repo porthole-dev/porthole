@@ -746,16 +746,31 @@ _ph_assert_no_devpkgs() {
 #
 # which names neither the missing version nor what to do about it. Build it if
 # it is not there, and say so plainly if it still is not.
-_ph_install_kernel_release() {
-	local ver
+# Split out of _ph_install_kernel_release, because the two halves are needed at
+# DIFFERENT times and one of them has a precondition the other does not.
+#
+# Making the release apk exist needs no rootfs chroot. Installing it into one
+# obviously does -- so a rung that creates the chroot with `pmbootstrap install`
+# has to do the first half BEFORE that and the second half after. tksysimage
+# did only the second, and `install` then failed resolving the world:
+#
+#   ERROR: unable to select packages:
+#     linux-postmarketos-qcom-msm8998-7.2 (no such package):
+#       required by: device-google-taimen-kernel-mainline-1-r40[...]
+#
+# -- the device's kernel subpackage asking for a kernel nothing had built.
+# Sets _PH_KREL (the version) and _PH_INSTALLED_APK (the artifact), which is
+# also what gives the export verification a reference that is not a tree build.
+_ph_build_kernel_release() {
 	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
-	ver=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
-	      echo "$pkgver-r$pkgrel")
-	[ -n "$ver" ] && [ "$ver" != "-r" ] || { echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
+	_PH_KREL=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	           echo "$pkgver-r$pkgrel")
+	[ -n "$_PH_KREL" ] && [ "$_PH_KREL" != "-r" ] || {
+		echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
 
 	local repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
-	if [ ! -f "$repo/$_PH_KPKG-$ver.apk" ]; then
-		echo ">> $_PH_KPKG-$ver.apk is not in the local repo -- building the aport"
+	if [ ! -f "$repo/$_PH_KPKG-$_PH_KREL.apk" ]; then
+		echo ">> $_PH_KPKG-$_PH_KREL.apk is not in the local repo -- building the aport"
 		echo ">>   (the newest there is: $(ls -t "$repo/$_PH_KPKG"-*.apk 2>/dev/null | head -1 | xargs -r basename))"
 		# _ph_make has just run `pmbootstrap build --envkernel`, so the repo now
 		# holds a 6.18_p<timestamp>-r0 apk -- and apk sorts _p<timestamp> ABOVE
@@ -766,14 +781,18 @@ _ph_install_kernel_release() {
 		tkpurge-devpkgs || return 1
 		_ph_pmb_build "$_PH_KPKG" || return 1
 	fi
-	[ -f "$repo/$_PH_KPKG-$ver.apk" ] || {
-		echo ">> still no $_PH_KPKG-$ver.apk after building." >&2
-		echo ">> The APKBUILD says pkgrel=${ver##*-r}; check the series applies" >&2
+	[ -f "$repo/$_PH_KPKG-$_PH_KREL.apk" ] || {
+		echo ">> still no $_PH_KPKG-$_PH_KREL.apk after building." >&2
+		echo ">> The APKBUILD says pkgrel=${_PH_KREL##*-r}; check the series applies" >&2
 		echo ">> (tools/tk-reconcile.sh) and that the build actually succeeded." >&2
 		return 1; }
+	_PH_INSTALLED_APK="$repo/$_PH_KPKG-$_PH_KREL.apk"
+}
 
-	echo ">> installing $_PH_KPKG=$ver into the rootfs chroot"
-	_PH_INSTALLED_APK="$repo/$_PH_KPKG-$ver.apk"
+_ph_install_kernel_release() {
+	_ph_build_kernel_release || return 1
+	local ver=$_PH_KREL
+
 	pmbootstrap chroot -r -- apk add -U --allow-untrusted "$_PH_KPKG=$ver" || return 1
 	pmbootstrap chroot -r -- apk info -W /boot/vmlinuz 2>/dev/null | sed -n 's/.*owned by //p' |
 		grep -q -- "-r${ver##*-r}$" || {
@@ -822,6 +841,111 @@ _ph_assert_must_ship() {
 	return 1
 }
 
+
+# `pmbootstrap install`, past the one thing that stops it in the workspace.
+#
+# install builds any package that is missing, and it builds them STRICT --
+# `pmb.chroot.apk` calls `pmb.build.packages()` with the default `strict=True`
+# and no install flag changes it. A strict build ends in `zap_buildroots()`,
+# which umounts by path, and the recursive /dev bind the rootless workspace
+# needs leaves propagated sub-mounts a userns cannot umount:
+#
+#   ERROR: Failed to umount: /pmb/chroot_buildroot_aarch64/dev/shm
+#
+# brain/findings/what-a-rootless-workspace-cannot-do.md, item 5. `--lax` is the
+# documented way out and `install` has no such flag, so the workspace can only
+# install when nothing is left to build.
+#
+# The zap runs in `finish()`, AFTER the apk has been written and verified -- so
+# the package that killed the run is built and the next attempt skips it. That
+# is what makes retrying correct rather than hopeful: every attempt completes
+# one more package and the loop is monotonic. Setup between attempts is
+# seconds once the chroots are cached; it was the first one that cost a minute.
+#
+# Only the umount failure is retried. Everything else fails on the first
+# attempt, as it should -- a loop that retries real errors is a loop that turns
+# a two-second failure into a twenty-minute one.
+# Can `pmbootstrap install` create the rootfs IMAGE here?
+#
+# It truncates a file and attaches it to a loop device (pmb/install/losetup.py),
+# and a rootless container cannot have one: /dev/loop-control is root:disk on
+# the host, the container has no /dev/loop* at all, and the loop ioctls want
+# CAP_SYS_ADMIN in the namespace that OWNS the device -- which a user namespace
+# never does. Adding yourself to `disk` would fix it and is a far worse standing
+# privilege than the sudoers entry this whole tier exists to avoid: `disk` is
+# raw read-write on every block device on the machine.
+#
+# So this is a fact about where the build is running, not a misconfiguration.
+# The node's mere existence is the test: inside the container we are uid 0 by
+# mapping, so a permission check there would answer about a uid that owns
+# nothing.
+_ph_can_make_image() { [ -e /dev/loop-control ]; }
+
+_ph_install_rootfs() {
+	local attempt=0 max=${TK_INSTALL_ATTEMPTS:-25} log="$_PH_PMB/log.txt" pkg
+	local extra=()
+	if ! _ph_can_make_image; then
+		# --no-image, not a refusal. Everything else install does -- and above
+		# all populating the rootfs chroot, which is what `pmbootstrap export`
+		# packs boot.img from -- works perfectly here, and is most of the
+		# value. Failing at the very last step after twelve minutes, with
+		# pmbootstrap's "modprobe: can't change directory to '/lib/modules'",
+		# threw all of that away and named a kernel module.
+		extra+=(--no-image)
+		_PH_NO_IMAGE=1
+		# AND MOVE ANY EXISTING ONE ASIDE. A previous attempt that died at
+		# `modprobe loop` had already run `truncate -s 1482M`, so a 1.5 GB
+		# sparse file with NOTHING in it was sitting exactly where
+		# `pmbootstrap flasher flash_rootfs` looks -- indistinguishable from a
+		# good image, and `porthole flash --yes` would have written it to the
+		# phone. A full install would have overwritten it; this run skips that
+		# step, so the file on disk is a lie about the build that just ran.
+		#
+		# Moved, not deleted, and the same `.stale-` shape tkpurge-devpkgs
+		# uses: it is the user's disk, and 1.5 GB they can delete themselves.
+		local imgdir="$_PH_PMB/chroot_native/home/pmos/rootfs"
+		if [ -d "$imgdir" ] && ls "$imgdir"/*.img >/dev/null 2>&1; then
+			echo ">> moving a rootfs image from an earlier run out of the way --"
+			echo ">>   this run cannot replace it, and flash_rootfs cannot tell"
+			echo ">>   a stale one from a fresh one."
+			_ph_sudo mkdir -p "$imgdir/.stale-images" &&
+				_ph_sudo sh -c "mv '$imgdir'/*.img '$imgdir/.stale-images'/" ||
+				echo ">> WARNING: could not move it; do NOT flash the rootfs" >&2
+		fi
+		echo ">> no loop device here, so the rootfs IMAGE cannot be created."
+		echo ">>   Everything else still runs: the rootfs chroot is populated"
+		echo ">>   and \`pmbootstrap export\` packs boot.img from it."
+		echo ">>   \`--host\` runs the build on this machine instead of in the"
+		echo ">>   workspace, and there a rootfs image can be made."
+	fi
+	while :; do
+		attempt=$((attempt + 1))
+		pmbootstrap install --password "$TK_PMOS_PASSWORD" "${extra[@]}" && return 0
+		# pmbootstrap's own log, not our stdout: capturing stdout would stop
+		# the build streaming, and this file is what porthole already follows
+		# for the progress bar.
+		if ! tail -n 80 "$log" 2>/dev/null | grep -q "Failed to umount.*/dev/"; then
+			return 1
+		fi
+		if [ "$attempt" -ge "$max" ]; then
+			echo ">> giving up after $attempt attempts." >&2
+			echo ">>   Each one built a package that \`install\` needed and could" >&2
+			echo ">>   not build in strict mode. If this is still going, something" >&2
+			echo ">>   is rebuilding every time -- check \`porthole pkg outdated\`." >&2
+			return 1
+		fi
+		pkg=$(grep -o "=> [^ ]*/[^:]*: Building package" "$log" 2>/dev/null |
+			tail -1 | sed 's/^=> //; s/: Building package$//')
+		echo ""
+		echo ">> \`install\` had to build ${pkg:-a package}, and a strict build"
+		echo ">>   cannot finish in the rootless workspace (it is built now, and"
+		echo ">>   the zap it died in runs after the apk is written)."
+		echo ">>   Attempt $((attempt + 1)) of $max -- continuing where it stopped."
+		echo ""
+	done
+}
+
+
 # FULL cycle. `install` runs mkfs and REMINTS the filesystem UUIDs, so it must be
 # paired with tkflash (rootfs + boot). Use when the rootfs itself changed, or when
 # the device's rootfs and boot have desynced.
@@ -848,7 +972,7 @@ tkbuild() {
 	: "${TK_PMOS_PASSWORD:?set TK_PMOS_PASSWORD (the rootfs user password) before tkbuild}"
 	echo ">> installing the kernel into the rootfs chroot (pmbootstrap install) --"
 	echo ">>   mkfs + package installs, normally minutes, no progress signal"
-	pmbootstrap install --password "$TK_PMOS_PASSWORD" || return 1
+	_ph_install_rootfs || return 1
 	# install just reminted the filesystem UUIDs, so any recorded set is now a
 	# lie -- and tkflash-boot would patch the fresh export back to the old ones.
 	rm -f "$_PH_REPO/.device-uuids"
@@ -863,6 +987,89 @@ tkbuild() {
 		--config "$_PH_PKGCONFIG" \
 		--ref-config "$_PH_OUT/.config"
 }
+
+# THE WHOLE SYSTEM IMAGE, from pmaports as it stands -- and the only rung that
+# needs no kernel tree.
+#
+# Every other rung compiles one. That is right for kernel work and wrong for
+# the first thing a new host actually wants to do: a porter who has cloned
+# pmaports and pointed porthole at it has everything needed to build an
+# installable postmarketOS for this device, and `porthole build` answered
+# "tree: not set" and offered six rungs, all of which need a tree. There was no
+# way in at all, and the workflow it was hiding is two pmbootstrap calls.
+#
+# The kernel comes from the APORT, exactly as tkbuild-kernel takes it: that is
+# what makes this rung tree-free, and it is also what gives the export
+# verification below a reference that exists. _ph_ref_dtb's last fallback is
+# the envkernel TREE build, which on this path was never built -- so without
+# the pin, `porthole flash` would refuse the image this rung had just made,
+# naming a .dtb nobody asked for.
+#
+# Pairs with `porthole flash --yes`, which writes rootfs AND boot: `install`
+# runs mkfs and remints the filesystem UUIDs, so flashing boot alone leaves an
+# initramfs hunting for a root that no longer exists under that UUID.
+tksysimage() {
+	# Read before anything runs, not at the end of a twenty-minute install.
+	: "${TK_PMOS_PASSWORD:?set TK_PMOS_PASSWORD (the rootfs user password) before an image build}"
+	# Same hazard tkbuild documents at ~line 838: apk sorts a leftover
+	# envkernel `_p<timestamp>-r0` ABOVE every release `-rNN`, so one stale
+	# apk in the local repo silently wins `install`'s dependency resolution
+	# and the image carries a kernel from days ago. Purge rather than refuse:
+	# nothing in THIS rung produced them, so there is nothing to lose.
+	tkpurge-devpkgs || return 1
+	# BEFORE the install, not after. `pmbootstrap install` resolves the whole
+	# world in one apk transaction, and the device's own kernel subpackage
+	# depends on this aport -- so if nothing has built it, install fails at
+	# resolution with "no such package" naming a package that is right there
+	# in pmaports. The install half of this pair still runs afterwards, once
+	# there is a rootfs chroot to install into.
+	_ph_build_kernel_release || return 1
+	echo ">> installing the system into the rootfs chroot (pmbootstrap install) --"
+	echo ">>   mkfs + package installs, normally minutes, no progress signal"
+	_ph_install_rootfs || return 1
+	# install just reminted the filesystem UUIDs, so any recorded set is now a
+	# lie -- and tkflash-boot would patch the fresh export back to the old ones.
+	rm -f "$_PH_REPO/.device-uuids"
+	# Pin the kernel to the aport release and remember WHICH apk, for the dtb
+	# reference below. Cheap and idempotent when `install` already resolved to
+	# the same package; it also BUILDS the aport when the local repo does not
+	# carry the pkgrel the world file asks for, which on a fresh host is the
+	# normal state and reaches apk as an unreadable "breaks: world[...]".
+	_ph_install_kernel_release || return 1
+	echo ">> exporting the built image (pmbootstrap export)"
+	pmbootstrap export || return 1
+
+	echo
+	echo ">> verifying the exported image against the kernel apk it installed"
+	local dtb; dtb=$(_ph_dtb_from_apk "$_PH_INSTALLED_APK") || return 1
+	"$_PH_REPO/tools/bootimg-verify.py" \
+		"$(readlink -f /tmp/postmarketOS-export/boot.img)" --dtb "$dtb" || {
+		echo ">> refusing to hand over a stale image" >&2; return 1; }
+
+	echo
+	echo ">> the image is in /tmp/postmarketOS-export"
+	ls -l /tmp/postmarketOS-export/ 2>/dev/null
+	if [ "${_PH_NO_IMAGE:-0}" = 1 ]; then
+		# Say what you got and what you did not, rather than printing advice
+		# whose first half cannot be followed here.
+		echo ">> NOTE: no rootfs image was made. A rootless workspace has no"
+		echo ">>   loop device, and pmbootstrap needs one to build the image"
+		echo ">>   file. Everything else is here and verified."
+		echo ">>"
+		echo ">>   To flash the boot image, which is what most kernel and DTS"
+		echo ">>   work needs:"
+		echo ">>     porthole run tools/tk-flash-boot.sh"
+		echo ">>"
+		echo ">>   To get the rootfs image as well, run the build on THIS"
+		echo ">>   MACHINE instead of in the workspace container (needs"
+		echo ">>   pmbootstrap installed here, with its chroots):"
+		echo ">>     porthole build image --yes --host"
+	else
+		echo ">> flash it with \`porthole flash --yes\` -- rootfs AND boot, because"
+		echo ">>   install reminted the filesystem UUIDs boot.img names."
+	fi
+}
+
 
 # Wait for the phone to come back, and say which kernel answered.
 #
@@ -1030,10 +1237,48 @@ _ph_ref_dtb() {
 }
 
 # Verify the export before ANYTHING is written to the device.
+# Refuse a rootfs image that did not come from the same install as boot.img.
+#
+# `install` writes boot.img into the rootfs chroot and THEN builds the disk
+# image, so in a good pair the image is never meaningfully older. A rootfs left
+# behind by an earlier run is: on 2026-09-06 a 1.5 GB file `truncate` had
+# created seven minutes before -- and then never populated, because that run
+# died at `modprobe loop` -- sat where flash_rootfs looks, with a perfectly
+# good boot.img beside it. Nothing could tell them apart, and flash_rootfs
+# writes ~640 MB that is not undoable.
+#
+# Generous threshold: this must never fire on one real install, only on a pair
+# that came from two different ones.
+_PH_ROOTFS_SKEW_S=300
+_ph_verify_rootfs_pair() {
+	local boot=$1 root
+	root=$(readlink -f "/tmp/postmarketOS-export/${PORTHOLE_CODENAME}.img" 2>/dev/null)
+	[ -n "$root" ] && [ -s "$root" ] || {
+		echo ">> no rootfs image at /tmp/postmarketOS-export/${PORTHOLE_CODENAME}.img" >&2
+		echo ">>   A workspace build cannot make one (no loop device). Flash boot" >&2
+		echo ">>   only with tools/tk-flash-boot.sh, or build the rung --host." >&2
+		return 1; }
+	local bt rt
+	bt=$(stat -Lc %Y "$boot" 2>/dev/null) || return 0
+	rt=$(stat -Lc %Y "$root" 2>/dev/null) || return 0
+	if [ "$((bt - rt))" -gt "$_PH_ROOTFS_SKEW_S" ]; then
+		echo "REFUSING: the rootfs image is $(( (bt - rt) / 60 )) minutes older than boot.img." >&2
+		echo "  $root" >&2
+		echo "  They are from different installs, so the UUIDs boot.img names" >&2
+		echo "  are not the ones in that rootfs -- the phone would come up in" >&2
+		echo "  the initramfs hunting for a root that is not there." >&2
+		echo "  Re-run the install rung, or flash boot only." >&2
+		return 1
+	fi
+}
+
 _ph_verify_export() {
 	local img dtb
 	img=$(readlink -f /tmp/postmarketOS-export/boot.img 2>/dev/null)
 	[ -s "$img" ] || { echo ">> no exported boot.img -- run a build first" >&2; return 1; }
+	# Before the dtb check, because this one is about what would be WRITTEN and
+	# the other is about what was built.
+	_ph_verify_rootfs_pair "$img" || return 1
 	dtb=$(_ph_ref_dtb) || return 1
 	echo ">> pre-flight: verifying the export before writing anything"
 	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
