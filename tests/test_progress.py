@@ -1535,5 +1535,60 @@ def test_one_rule_decides_whether_a_build_outlived_its_tracker():
             pathlib.Path(tmp) / "nope.txt", frozen, now=now) is None
 
 
+def test_a_finished_invocation_is_recognised_whatever_trails_it():
+    """pmbootstrap writes DONE! at the end of every invocation that finishes,
+    and a chroot trailer after it. A running build has not printed it -- which
+    is why this is the test and "are there compile lines in the tail" is not:
+    a real build is silent for minutes during packaging."""
+    ended = ("(1) [18:45] (native) % su pmos -c 'ccache -s'\n"
+             "(1) [18:45] NOTE: chroot is still active (use 'pmbootstrap "
+             "shutdown' as necessary)\n"
+             "(1) [18:45] DONE!\n\n")
+    assert progress.log_invocation_ended(ended)
+    assert progress.log_invocation_ended("(1) [18:45] DONE!")
+    building = ("(1) [18:45] DONE!\n"
+                "(1) [18:46]   CC      drivers/gpu/msm.o\n")
+    assert not progress.log_invocation_ended(building), (
+        "an earlier DONE! must not outrank the compile lines after it")
+    assert not progress.log_invocation_ended("")
+    assert not progress.log_invocation_ended("  AR built-in.a\n")
+
+
+def test_prose_about_a_step_does_not_become_the_step():
+    """`porthole build status` reported `phase flash` about a finished `image`
+    run, which never flashes anything. Every `>>` line was read as an
+    announcement, so detail lines and quoted commands set the phase:
+
+        >>   this rung flashes the aport apk, so the tree cannot affect it.
+        >>   and `pmbootstrap export` packs boot.img from it.
+        NOTE: To export the rootfs image, run 'pmbootstrap install' first
+
+    ph-build.sh's own convention answers it: `>> ` announces a step, `>>   `
+    explains one, and 63 of its detail lines already follow that.
+    """
+    keeps = [
+        ">>   this rung flashes the aport apk, so the tree cannot affect it.",
+        ">>   device. boot.img above is complete and flashable:",
+        ">>     porthole run tools/tk-flash-boot.sh",
+        ">> NOTE: no rootfs image was made -- this workspace has no loop",
+        ">> WARNING: no .device-uuids -- flashing the export UUIDs unchecked",
+        ">>   and `pmbootstrap export` packs boot.img from it.",
+        "[18:55] NOTE: To export the rootfs image, run 'pmbootstrap install' first",
+        ">>   pmbootstrap installed here, with its chroots):",
+    ]
+    for line in keeps:
+        assert progress.phase_of(line, "package") == "package", line
+
+    # THE POSITIVE CONTROL: the real announcements must still be read, or this
+    # is indistinguishable from turning phase detection off.
+    for line, want in (
+            (">> installing the system into the rootfs chroot", "install"),
+            (">> exporting the built image (pmbootstrap export)", "export"),
+            (">> verifying the exported image", "verify"),
+            (">> flashing boot", "flash"),
+            (">> pushing the module", "push")):
+        assert progress.phase_of(line, "") == want, (line, want)
+
+
 if __name__ == "__main__":
     sys.exit(main())
