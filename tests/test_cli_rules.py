@@ -34,10 +34,27 @@ class Skip(Exception):
     """
 
 
-def needs_pmaports():
+# Resolved ONCE, and handed to every subprocess below as PORTHOLE_PMAPORTS.
+#
+# The guard and the thing it guards have to look at the same environment. They
+# did not: `run()` deliberately isolates XDG_CONFIG_HOME so the tester's own
+# device selection cannot leak into an assertion, while `needs_pmaports()`
+# asked the tester's real config -- so on a host whose pmaports is named by
+# config.env rather than sitting in pmbootstrap's cache_git, the guard said
+# "present", every subprocess said "no pmaports checkout found", and six tests
+# failed for a reason that was nothing to do with what they test.
+def _pmaports_path():
     import porthole
     import porthole_pmaports as pmap
-    if not pmap.find_pmaports(porthole.load_config(root=ROOT)):
+    found = pmap.find_pmaports(porthole.load_config(root=ROOT))
+    return str(found) if found else ""
+
+
+PMAPORTS = _pmaports_path()
+
+
+def needs_pmaports():
+    if not PMAPORTS:
         raise Skip("no pmaports checkout on this host")
 
 
@@ -49,6 +66,11 @@ def run(*args, env=None):
     base = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
             "PORTHOLE_ROOT": str(ROOT), "XDG_CONFIG_HOME": TMPXDG,
             "NO_COLOR": "1"}
+    # The one thing the isolated config cannot supply and several tests need.
+    # Named explicitly rather than by letting config.env through: the point of
+    # TMPXDG is that the tester's device selection stays out of these runs.
+    if PMAPORTS:
+        base["PORTHOLE_PMAPORTS"] = PMAPORTS
     base.update(env or {})
     proc = subprocess.run([sys.executable, str(CLI), *args],
                           capture_output=True, text=True, env=base)
