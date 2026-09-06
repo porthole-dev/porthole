@@ -1919,7 +1919,11 @@ def cmd_build(args, ctx) -> int:
             if problems:
                 o.heading(f"{len(problems)} thing(s) missing first")
                 for problem in problems:
-                    o(f"  {o.paint(o.sym('\u00b7', '-'), 'yellow')} {problem}")
+                    # The glyph outside the f-string: a backslash escape
+                    # inside an expression part is a SyntaxError below 3.12,
+                    # and bin/porthole declares 3.8 as the floor.
+                    dot = o.paint(o.sym("\u00b7", "-"), "yellow")
+                    o(f"  {dot} {problem}")
                 o.blank()
             # The ladder, every time. The expensive mistake here is not a bad
             # build, it is iterating on the ~10 minute rung when the ~40 second

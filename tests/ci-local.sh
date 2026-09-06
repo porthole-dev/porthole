@@ -15,7 +15,18 @@ set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# HOME lives OUTSIDE the extracted tree, and that is load-bearing.
+#
+# It used to be "$WORK/.home", inside the very directory the suite walks. With
+# no .git in an archive extraction the secrets scanner and the
+# file-cleanliness check fall back to walking the tree, so porthole's own
+# `$HOME/.cache/porthole/registry.json` -- written by any test that runs the
+# CLI, and seven of them do -- was picked up as a tracked file and failed two
+# suites that have nothing to do with it. Which test wrote it first decided
+# whether the run was red, so the failure moved whenever anything else
+# changed. Outside the tree, the whole class is gone.
+SANDBOX_HOME="$(mktemp -d)"
+trap 'rm -rf "$WORK" "$SANDBOX_HOME"' EXIT
 
 # `git archive`, not a copy loop: it preserves file MODES and SYMLINKS, and
 # tools/tk-lib.sh is a symlink whose identity a test checks. A cp-based copy
@@ -47,11 +58,39 @@ done
 
 cd "$WORK"
 # A runner has no pmbootstrap, no pmaports, and an empty HOME.
-export HOME="$WORK/.home"
-export XDG_CONFIG_HOME="$WORK/.config"
-export XDG_CACHE_HOME="$WORK/.cache"
-export PATH=/usr/bin:/bin
+export HOME="$SANDBOX_HOME"
+export XDG_CONFIG_HOME="$SANDBOX_HOME/.config"
+export XDG_CACHE_HOME="$SANDBOX_HOME/.cache"
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+
+# A PATH that is bare in the way a RUNNER's is, not in the way /usr/bin is.
+#
+# `PATH=/usr/bin:/bin` was the simulation, and on a porting host it is not one:
+# `android-tools` puts fastboot in /usr/bin, so the "doctor is honest on a host
+# with nothing installed" assertion -- which requires doctor to NOTICE that
+# fastboot is missing -- was green on the runner and red on every machine that
+# had done a flash. That is precisely the drift this file's header says it
+# exists to catch, wearing the file's own clothes.
+#
+# So: link everything through, minus the tools a GitHub runner genuinely does
+# not have. Excluded by NAME, and the list is short and reviewable, because
+# "which tools does the runner have" is a question a diff should be able to
+# answer.
+NOT_ON_A_RUNNER="fastboot adb pmbootstrap podman heimdall mkbootimg abootimg
+                 android-tools-fastboot android-tools-adb"
+# OUTSIDE $WORK, for the same reason HOME is: it is full of symlinks to
+# /usr/bin, and the tree-walking fallback would scan every one of them.
+RUNNER_BIN="$SANDBOX_HOME/.bin"
+mkdir -p "$RUNNER_BIN"
+for _d in /usr/bin /bin; do
+	[ -d "$_d" ] || continue
+	for _f in "$_d"/*; do
+		_n=${_f##*/}
+		case " $NOT_ON_A_RUNNER " in *" $_n "*) continue ;; esac
+		[ -e "$RUNNER_BIN/$_n" ] || ln -s "$_f" "$RUNNER_BIN/$_n" 2>/dev/null || :
+	done
+done
+export PATH="$RUNNER_BIN"
 
 # ...and nothing porthole reads in its environment. A developer who has run
 # `porthole use` has the whole set exported, and the config layer puts the
@@ -137,7 +176,14 @@ for c in d["checks"]:
 fastboot = next(c for c in d["checks"] if c["name"] == "host: fastboot")
 assert fastboot["status"] == "fail", (
     "doctor did not notice fastboot is missing on a bare PATH")
-assert "install" in fastboot["fix"], (
+# "an install command", not the literal word `install`. Only apt, dnf and
+# zypper spell it that way; `pacman -S` and `apk add` do not, and doctor prints
+# whichever the host uses -- so this assertion was green on the Debian runner
+# and red on every Arch and Alpine machine, about a fix that was perfectly
+# correct. Checked against the set doctor can actually emit.
+MANAGERS = ("apt install", "pacman -S", "dnf install", "apk add",
+            "zypper install", "brew install")
+assert any(m in fastboot["fix"] for m in MANAGERS), (
     f"the fix should be an install command, got {fastboot['fix']!r}")
 PYEOF
 then say ok "doctor"; else say FAIL "doctor"; fail=1; fi

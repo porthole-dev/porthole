@@ -164,10 +164,13 @@ def _choose_tier(ctx, args, prompt, cfg) -> str:
     state = sandbox._container_state(pathlib.Path(ctx.root), cfg)
     if not state["podman"]:
         # Do not offer a tier that cannot run. `doctor` names the install.
-        ctx.out(ctx.out.paint(
-            "  podman is not installed, so builds would run on this host.",
-            "yellow"))
-        ctx.out.hint("porthole doctor   has the install command for podman")
+        #
+        # On stderr, because every step here runs BEFORE `ctx.emit` and stdout
+        # may be `--json`. `porthole init --json` on a host without podman
+        # emitted this line and then the payload, so the output did not parse
+        # -- and headless bootstrap is the whole reason the flag exists.
+        ctx.out.warn("podman is not installed, so builds would run on this "
+                     "host. `porthole doctor` has the install command.")
         return "host"
     if not prompt.interactive:
         return "workspace"
@@ -205,9 +208,11 @@ def _ensure_pmbootstrap_src(ctx, cfg, prompt) -> str:
         try:
             for hit in sorted(home.glob(pattern))[:1]:
                 found = str(hit.parent.parent)
+                if not prompt.interactive:
+                    return found            # silent: stdout may be --json
                 ctx.out(ctx.out.paint(f"  found a pmbootstrap checkout at "
                                       f"{found}", "grey"))
-                if not prompt.interactive or prompt.yes("use it?"):
+                if prompt.yes("use it?"):
                     return found
         except OSError:
             pass
