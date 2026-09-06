@@ -150,6 +150,52 @@ def pkg_phase_of(line: str, current: str) -> str:
     return current
 
 
+# ph-build.sh's own convention, and it has been consistent since the file was
+# written: `>> ` announces a STEP, `>>   ` (indented) is detail or advice about
+# it. 63 lines follow it. Phase detection ignored the distinction and read
+# every `>>` line as an announcement, so prose flipped the phase:
+#
+#   >>   this rung flashes the aport apk, so the tree cannot affect it.
+#   >>   device. boot.img above is complete and flashable:
+#
+# both set `phase: flash` on rungs that had not reached, and in the second case
+# would never reach, anything of the sort. Reported as `porthole build status`
+# saying `phase flash` about a finished `image` run.
+_STEP_LINE = re.compile(r"^\s*>>\s(?=\S)")
+_ADVISORY = re.compile(r"\b(?:NOTE|WARNING|FATAL|REFUSING)\b")
+# A command inside quotes or backticks is being TALKED ABOUT, not run. Both
+# porthole and pmbootstrap quote commands in their advice, and the phase
+# detector read every one of them as the step itself:
+#
+#   >>   and `pmbootstrap export` packs boot.img from it.
+#   NOTE: To export the rootfs image, run 'pmbootstrap install' first
+#   >>   pmbootstrap installed here, with its chroots):
+#
+# The last is not even quoted -- it is the word "installed" in a sentence --
+# which is why the `>>` half of this rule keys on the indent convention rather
+# than on punctuation.
+_QUOTED = re.compile(r"""['"`]\s*pmbootstrap""")
+
+
+def is_step_line(line: str) -> bool:
+    """Does this line ANNOUNCE a step, as opposed to commenting on one? PURE.
+
+    ph-build.sh's own convention, consistent across its 63 detail lines:
+    `>> ` announces, `>>   ` (indented) explains.
+    """
+    line = line or ""
+    return bool(_STEP_LINE.match(line)) and not _ADVISORY.search(line)
+
+
+def names_a_running_command(line: str) -> bool:
+    """Is `pmbootstrap <sub>` on this line the command being run? PURE.
+
+    False for prose about it -- quoted, or in a sentence that is advice.
+    """
+    line = line or ""
+    return not _QUOTED.search(line) and not _ADVISORY.search(line)
+
+
 def phase_of(line: str, current: str) -> str:
     """Which phase a line says we are in, or `current` if it says nothing.
 
@@ -157,8 +203,23 @@ def phase_of(line: str, current: str) -> str:
     verify, and the later phase is the true one.
     """
     for name, pattern in _MARKERS:
-        if pattern.search(line):
+        # A `>>` pattern only counts on a line that announces a step. The two
+        # patterns that also match pmbootstrap's own output (`pmbootstrap
+        # export`, `pmbootstrap install`) are left alone -- they are the
+        # command, not prose about it.
+        if not pattern.search(line):
+            continue
+        # A `>>` marker counts only on a line that announces a step; the bare
+        # `pmbootstrap export|install` alternative counts only when the
+        # command is being run rather than quoted in advice. Without both,
+        # every sentence that mentions a step set the phase to it -- which is
+        # how a finished `image` run reported `phase flash`.
+        if is_step_line(line):
             return name
+        if ">>" not in line and names_a_running_command(line) and re.search(
+                r"pmbootstrap (?:export|install)", line):
+            return name
+        continue
     if _COMPILE.match(line) and current == "":
         return "make"
     return current or ("make" if _COMPILE.match(line) else current)
@@ -1464,6 +1525,39 @@ def reattach_from_log(log_path, snap, now=None, samples=None):
     return snapshot_from_log(text, name, mtime, now=now, samples=samples)
 
 
+# pmbootstrap writes this as the last line of EVERY invocation that finishes,
+# and the chroot trailer after it. Both are noise to a reader and decisive to
+# this file: if the last thing in the log is the end of an invocation, no
+# pmbootstrap is running, whatever the mtime says.
+_LOG_ENDED = re.compile(r"(?:^|\])\s*DONE!\s*$")
+_LOG_TRAILER = re.compile(r"NOTE: chroot is still active|^\s*$")
+
+
+def log_invocation_ended(text: str) -> bool:
+    """Did the last pmbootstrap invocation in this log finish? PURE.
+
+    The status line and `pkg status` decide "something is building" from a log
+    the WHOLE WORKSPACE shares, so its mtime says only that some pmbootstrap
+    ran -- `pmbootstrap status`, `index`, a `chroot -- ccache -s`, anything.
+    Reported 2026-09-06: the row read
+
+        device-google-taimen  [ unknown ]  --  42m50s  build  · reattached
+
+    where `device-google-taimen` came from a staged APKBUILD an unrelated
+    build left behind 42 minutes earlier, and the freshness came from a
+    `ccache -s` five seconds before. Every number in it was invented.
+
+    A running build has not printed DONE!. That is the whole test, and it
+    cannot produce a false negative the way "are there compile lines in the
+    tail" would -- a real build is silent for minutes during packaging.
+    """
+    for line in reversed((text or "").splitlines()):
+        if _LOG_TRAILER.search(line):
+            continue
+        return bool(_LOG_ENDED.search(line))
+    return False
+
+
 def live_build_from_log(log_path, name, started=None, now=None, samples=None):
     """A snapshot for a build NOTHING ever published a status file for, or None.
 
@@ -1497,6 +1591,13 @@ def live_build_from_log(log_path, name, started=None, now=None, samples=None):
     # The log says how this build ENDED. A fresh mtime after that is somebody
     # else touching a log the whole workspace shares.
     if log_outcome(text, name, now)[0]:
+        return None
+    # ...and the same is true when the log says nothing about THIS name but
+    # the invocation that was writing it has finished. `log_outcome` can only
+    # answer for the package it is given, and `name` here comes from a staged
+    # APKBUILD that outlives its build -- so on a mismatch it finds no ending
+    # and the row invents one.
+    if log_invocation_ended(text):
         return None
     snap = snapshot_from_log(text, name, mtime, now=now, samples=samples)
     if started:
