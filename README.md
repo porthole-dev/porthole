@@ -11,7 +11,7 @@ Pixel 2 XL, made generic — so the next device starts from month three instead 
 day one.
 
 ```
-117 tools · 96 knowledge notes · 30 commands · zero third-party dependencies in the CLI
+150 tools · 184 knowledge notes · 35 commands · zero third-party dependencies in the CLI
 ```
 
 > **Work in progress.** This is under active development against real hardware,
@@ -22,132 +22,15 @@ day one.
 > wrong. Expect breaking changes before 1.0, read what a command says it will
 > do before passing `--yes`, and please report anything that bites you.
 
-Every push to `main` publishes the documentation to GitHub Pages; `make
-docs-serve` renders the same site locally.
-
 ---
 
-## Table of contents
+## Start here
 
-- [Requirements](#requirements) — and what happens if you're missing things
-- [Install](#install)
-- [First run](#first-run)
-- [The one-time device setup everyone hits](#the-one-time-device-setup-everyone-hits)
-- [Daily use](#daily-use)
-- [Porting a new device](#porting-a-new-device)
-- [Configuration](#configuration)
-- [For agents and LLMs](#for-agents-and-llms)
-- [Speed](#speed)
-- [Repository layout](#repository-layout)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
+Three steps, and only the third is specific to you: install porthole, tell it
+who you are, then give your device passwordless sudo. `porthole doctor` checks
+all of it and names the fix for anything missing.
 
----
-
-## Requirements
-
-**porthole's CLI has no third-party dependencies.** No pip install, no npm, no
-virtualenv — every verb starts on a bare Python 3.8. What some of them then need to
-finish the job (fastboot to reach a bootloader, pmbootstrap to build) is in the table
-below, and `porthole doctor` names the install command for your distribution.
-
-The **console** (`porthole tui`) is the one optional extra: it needs Python
-3.10+ and `textual`. Nothing else does, and nothing else ever will — a host
-that is already broken is exactly where `porthole next` has to keep working
-with nothing installed.
-
-| | needed for | if missing |
-|---|---|---|
-| **python3 ≥ 3.8** | the CLI and half the tools | nothing works — install it first |
-| **openssh client** | every command that talks to a booted device | device tools fail; host-only tools still work |
-| **fastboot** | reaching and leaving the bootloader | flashing and recovery unavailable |
-| **flock** *(util-linux)* | serialising parallel workers on one device | the mutex cannot serialise; fine if you work alone |
-| **textual** *(optional)* | `porthole tui`, the full-screen console | the console says so and names the install command for your distro; every verb still works |
-| adb | talking to a stock or recovery system | optional, rarely needed |
-| pmbootstrap | building and flashing images | you can still probe and debug a running device |
-| shellcheck | `make lint` when contributing | optional |
-
-**You do not need all of it to start.** Run `porthole doctor` and it will tell
-you exactly what is missing, what each thing is for, and the install command
-**for your distribution** — it reads `/etc/os-release` and adjusts.
-
-```console
-$ porthole doctor
-    ok  host: python          3.11.9 at /usr/bin/python3
-    ok  host: ssh             /usr/bin/ssh
-  FAIL  host: fastboot        not found -- the only reliable way to reach the bootloader
-        fix: sudo apt install android-sdk-platform-tools
-  warn  host: pmbootstrap     not found -- needed to build and flash, not to probe
-        see: pipx install pmbootstrap
-```
-
-Only `FAIL` lines are fatal. Warnings are things you can work without.
-
-### Getting the essentials
-
-<details>
-<summary><strong>Debian / Ubuntu / Mint / Pop!_OS</strong></summary>
-
-```sh
-sudo apt install python3 openssh-client android-sdk-platform-tools util-linux
-pipx install pmbootstrap        # optional: only to build images
-```
-</details>
-
-<details>
-<summary><strong>Arch / Manjaro</strong></summary>
-
-```sh
-sudo pacman -S python openssh android-tools util-linux
-pipx install pmbootstrap
-```
-</details>
-
-<details>
-<summary><strong>Fedora / RHEL</strong></summary>
-
-```sh
-sudo dnf install python3 openssh-clients android-tools util-linux
-pipx install pmbootstrap
-```
-</details>
-
-<details>
-<summary><strong>Alpine / postmarketOS</strong></summary>
-
-```sh
-sudo apk add python3 openssh-client android-tools util-linux
-```
-</details>
-
-<details>
-<summary><strong>macOS</strong></summary>
-
-```sh
-brew install python android-platform-tools flock
-```
-ssh is preinstalled. pmbootstrap needs Linux, so builds happen elsewhere;
-probing and debugging a running device work fine.
-</details>
-
-### USB access without root
-
-On Linux, fastboot needs a udev rule or it only works under `sudo`:
-
-```sh
-sudo tee /etc/udev/rules.d/51-android.rules >/dev/null <<'EOF'
-SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", GROUP="plugdev"
-EOF
-sudo udevadm control --reload-rules && sudo udevadm trigger
-sudo usermod -aG plugdev "$USER"     # log out and back in
-```
-
-`18d1` is Google. Substitute your vendor's ID — `lsusb` while the device is in
-the bootloader will show it.
-
----
-
-## Install
+### Install
 
 There is nothing to build. Clone it and put `bin/` on your `PATH`:
 
@@ -155,9 +38,10 @@ There is nothing to build. Clone it and put `bin/` on your `PATH`:
 git clone https://github.com/porthole-dev/porthole.git
 cd porthole
 export PATH="$PWD/bin:$PATH"          # add to ~/.bashrc or ~/.zshrc to persist
+porthole version
 ```
 
-Optional, but pleasant:
+Shell completion is optional but pleasant:
 
 ```sh
 porthole completion bash > ~/.local/share/bash-completion/completions/porthole
@@ -165,30 +49,7 @@ porthole completion zsh  > "${fpath[1]}/_porthole"
 porthole completion fish > ~/.config/fish/completions/porthole.fish
 ```
 
-Verify:
-
-```sh
-porthole version
-```
-
----
-
-## First run
-
-```console
-$ porthole
-porthole 0.1.0
-
-  · device    none selected
-  · identity  not configured
-    profiles  1 (google-taimen)
-
-  → porthole init <codename>   set this host up
-
-`porthole --help` for all verbs.
-```
-
-Then:
+### Set this host up
 
 ```sh
 porthole init                     # interactive, or:
@@ -196,28 +57,24 @@ porthole init google-taimen --user myname --host 172.16.42.1
 porthole doctor
 ```
 
-`init` sets this host up and is **safe to re-run**: it reads what is already
-there, offers it back as the default for every question, and rewrites only the
-lines you change. Comments and keys it does not know about are left alone, so
-running it on a half-configured machine converges rather than clobbers.
-
-It writes `~/.config/porthole/config.env`. That file is **yours** — your
-username, your device's address, your tool paths — and is never committed.
+`init` is **safe to re-run**. It reads what is already there, offers it back as
+the default for every question, and rewrites only the lines you change —
+comments and keys it does not know about are left alone, so a half-configured
+machine converges rather than gets clobbered. It writes
+`~/.config/porthole/config.env`, which is **yours** and is never committed.
 
 It also asks the one question that decides what this machine needs at all:
-**where builds run.** In the workspace (the default) the container image
-carries pmbootstrap and its helpers pinned to each other, so *you do not
-install pmbootstrap here*. On the host tier, `init` finds or clones the
-checkout itself.
+**where builds run.** In the workspace — the default — the container image
+carries pmbootstrap and its helpers pinned to each other, so *you do not install
+pmbootstrap on this host*. On the host tier, `init` finds or clones the checkout
+itself.
 
-Full walkthrough: **[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.
+Full walkthrough, including moving to a second machine:
+**[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.
 
----
+### The one device step everyone hits
 
-## The one-time device setup everyone hits
-
-This is the single most common "all the tools are broken" report, so it gets its
-own section.
+This is the single most common "all the tools are broken" report.
 
 Nearly every tool calls `sudo -n` on the device. The `-n` means *never prompt* —
 so without passwordless sudo it does not ask for a password, it just **fails
@@ -237,9 +94,46 @@ detects when it is missing.
 > your development device only. That is precisely why porthole prints it instead
 > of applying it — and why an agent should hand it to you rather than retrying.
 
----
+### What you need
 
+**porthole's CLI has no third-party dependencies.** No pip install, no npm, no
+virtualenv — every verb starts on a bare Python 3.8. What some of them then need
+to finish the job is below, and **you do not need all of it to start**.
+
+| | needed for | if missing |
+|---|---|---|
+| **python3 ≥ 3.8** | the CLI and half the tools | nothing works — install it first |
+| **openssh client** | every command that talks to a booted device | device tools fail; host-only tools still work |
+| **fastboot** | reaching and leaving the bootloader | flashing and recovery unavailable |
+| **podman** | building images in the rootless workspace | builds unavailable; probing and debugging still work |
+| **flock** *(util-linux)* | serialising parallel workers on one device | the mutex cannot serialise; fine if you work alone |
+| **textual** *(optional)* | `porthole tui`, the full-screen console | the console says so; every verb still works |
+| adb | talking to a stock or recovery system | optional, rarely needed |
+
+`porthole doctor` reads `/etc/os-release` and prints the install command **for
+your distribution**, so you never have to match this table to a package name
+yourself. Only `FAIL` lines are fatal; warnings are things you can work without.
+
+```console
+$ porthole doctor
+    ok  host: python          3.11.9 at /usr/bin/python3
+  FAIL  host: fastboot        not found -- the only reliable way to reach the bootloader
+        fix: sudo apt install android-sdk-platform-tools
+    ok  host: pmaports        ~/.local/var/pmbootstrap/cache_git/pmaports  (via PORTHOLE_PMB_DIR/cache_git)
+```
+
+The console (`porthole tui`) is the one optional extra: it needs Python 3.10+
+and `textual`. Nothing else does, and nothing else ever will — a host that is
+already broken is exactly where `porthole next` has to keep working with nothing
+installed.
+
+Package names per distribution, and the udev rule that lets fastboot work
+without `sudo`, are in **[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.
+
+---
 ## Daily use
+
+Four commands answer almost everything:
 
 ```sh
 porthole brief          # where am I, what state is the device in, what now
@@ -250,17 +144,19 @@ porthole brain <query>  # what do we already know about this
 
 ### Finding a tool
 
+Tools are searchable by what they need and what they do, so you never have to
+remember a filename:
+
 ```console
 $ porthole tools --needs BOOTED
   tk-fps.py            Measure real frame delivery on the device [BOOTED]
   tk-suspend-cycle.sh  One real s2idle cycle, with evidence [BOOTED]
-  ...
 
 $ porthole tools --grep suspend
 $ porthole tools tk-suspend-cycle.sh          # read its contract
 ```
 
-Every tool documents itself in its first lines, so `head -20 <tool>` also works:
+Every tool documents itself in its first lines, so `head -20 <tool>` works too:
 
 ```
 # scope: generic
@@ -271,13 +167,15 @@ Every tool documents itself in its first lines, so `head -20 <tool>` also works:
 
 ### Talking to the device safely
 
-There is one physical device and possibly several of you (or several agents).
+There is one physical device and possibly several of you, or several agents.
 Everything that touches it goes through the mutex, **declaring the state it
 needs**:
 
 ```sh
 TK_AGENT=$USER tools/tk-device.sh --need-booted ssh "$PHONE" 'uname -a'
 ```
+
+Two exit codes carry the whole protocol:
 
 - exit **75** — could not get the lock. Someone else has it. **Retry.**
 - exit **76** — device is in the wrong state. **Do not retry**; something has to
@@ -287,43 +185,44 @@ That distinction exists because an agent once queued ten minutes for a phone
 another agent had left in the bootloader, then died at its own timeout having
 done nothing.
 
+### A serial console
+
+```sh
+porthole serial hardware   what to buy, how to wire it, how to enable earlycon
+porthole serial list       what is attached
+porthole serial console    attach (terminal built in — no picocom needed)
+```
+
+ssh needs userspace and the USB gadget needs driver probe. A UART needs neither:
+it is the only channel that talks during early boot, and the only one that says
+anything when a kernel dies before console handover.
+
 ---
 
-## Porting a new device
+## Porting a device
 
 ```sh
 porthole new-device oneplus-enchilada
-```
-
-This scaffolds `profiles/oneplus-enchilada/` with:
-
-- **`device.env`** — every key documented, seeded with whatever can honestly be
-  determined from `fastboot getvar all` and any existing pmaports `deviceinfo`.
-  Everything else is left blank, because *a blank you can see is a question you
-  know to ask.*
-- **`checklist.md`** — the bring-up order, each item linked to the playbook that
-  explains it.
-- **`tools/`** — where probes specific to your device go.
-
-It deliberately does **not** invent a `deviceinfo`, defconfig or DTS. A
-confidently wrong one costs more than a blank: you end up debugging the device
-instead of the file.
-
-Then:
-
-```sh
 porthole init oneplus-enchilada
 porthole brain search --severity law     # ten notes. Read them before you start.
 cat profiles/oneplus-enchilada/checklist.md
 ```
 
-**If the framework gets something wrong for your device — a key that does not
-fit, an assumption that does not hold — that is the most valuable bug report
-this project can receive.** It has only ever been proven against one device.
+`new-device` scaffolds `profiles/oneplus-enchilada/` with **`device.env`** (every
+key documented, seeded with whatever can honestly be determined from `fastboot
+getvar all` and any existing pmaports `deviceinfo`), **`checklist.md`** (the
+bring-up order, each item linked to the playbook explaining it), and **`tools/`**
+for probes specific to your device.
 
----
+It deliberately does **not** invent a `deviceinfo`, defconfig or DTS. A
+confidently wrong one costs more than a blank: you end up debugging the device
+instead of the file. *A blank you can see is a question you know to ask.*
 
-## Device trees
+> **If the framework gets something wrong for your device — a key that does not
+> fit, an assumption that does not hold — that is the most valuable bug report
+> this project can receive.** It has only ever been proven against one device.
+
+### Device trees
 
 ```sh
 porthole dts sources              where the real values come from
@@ -336,34 +235,29 @@ porthole dts check                does it compile
 A device tree is layered: the SoC dtsi is written, a board-family dtsi often
 covers most of the rest, and your `.dts` is a few hundred lines describing the
 board. `compare` follows `#include` chains, so it does not report inherited
-nodes as gaps.
+nodes as gaps. Background: `porthole brain 25-device-tree`.
 
-Background: `porthole brain 25-device-tree`.
-
-## Working on pmaports
+### Working on pmaports
 
 ```sh
 porthole aports status            branch, what changed, which of it is yours
 porthole aports start <topic>     a feature branch off the right base
 porthole aports diff --mine       just your device's packages
 porthole aports patch             a series, with a pre-submission lint
+porthole aports worktree          give this device its own checkout
 porthole channel                  see and switch release channel
 porthole ui                       see and switch compositor
 ```
 
-## A serial console
+---
 
-```sh
-porthole serial hardware   what to buy, how to wire it, how to enable earlycon
-porthole serial list       what is attached
-porthole serial console    attach (terminal built in — no picocom needed)
-```
+## How it works
 
-ssh needs userspace and the USB gadget needs driver probe. A UART needs
-neither: it is the only channel that talks during early boot, and the only one
-that says anything when a kernel dies before console handover.
+Four ideas carry most of the design: configuration is layered data, device facts
+are committed rather than remembered, builds hold no privilege, and latency is a
+correctness concern.
 
-## Configuration
+### Configuration
 
 Two files, two questions.
 
@@ -372,32 +266,18 @@ Two files, two questions.
 | who am I, where is my tooling | `~/.config/porthole/config.env` | **no** |
 | which device is this | `profiles/<codename>/device.env` | yes |
 
-Resolution runs lowest to highest:
+Resolution runs lowest to highest, and the process environment always wins — so
+a one-off override just works:
 
 ```
 built-in defaults → profiles/<device>/device.env → ~/.config/porthole/config.env
                   → ./.env → the process environment
 ```
 
-The process environment always wins, so a one-off override just works:
-
-```sh
-PHONE=other@host tools/tk-fps.py
-```
-
-To see what resolved and why:
-
-```console
-$ porthole config PHONE
-user@172.16.42.1
-
-$ porthole config --source profile
-PORTHOLE_ACTIVE_SLOT  b     # profile
-PORTHOLE_SOC          msm8998   # profile
-...
-```
-
-Full key reference: **[`docs/CONFIG.md`](docs/CONFIG.md)**.
+`porthole config` prints every resolved value **and the layer it came from**, so
+"which variable is actually effective" is a question you answer by running
+something rather than by reading. Full key reference:
+**[`docs/CONFIG.md`](docs/CONFIG.md)**.
 
 ### Device facts are data, not folklore
 
@@ -413,14 +293,19 @@ PORTHOLE_USB_LIES_AS_FASTBOOT=1  # lsusb mislabels the running gadget
 Each of those cost someone a session. Now they are one `porthole config` away,
 and `porthole brief` reads them back to you as sentences.
 
----
-
-## Running pmbootstrap safely
+### Builds run in a rootless container
 
 pmbootstrap needs root. The usual workaround —
 `Defaults:you timestamp_timeout=9999` — is a **167-hour root credential cache**:
 for a week, every process running as you gets silent, unlimited root. That is
 not something to hand an agent.
+
+So don't have root at all. Builds run in a persistent **rootless** container
+where you are root inside — pmbootstrap therefore uses no sudo whatsoever — and
+your own unprivileged uid outside. The default install grants no sudoers entry
+and no standing privilege, so there is nothing for a mistake, a dependency or an
+injection to spend. Only what it mounts is reachable: your `~/.ssh`, `/etc` and
+home directory are not there.
 
 ```sh
 porthole sandbox up                          # build the image, start the workspace
@@ -429,34 +314,60 @@ porthole sandbox shell                       # a shell, for a human
 porthole sandbox status                      # what is up, what is missing
 ```
 
-So don't have root at all. Builds run in a **persistent rootless container**
-where you are root inside — pmbootstrap therefore uses no sudo whatsoever — and
-your own unprivileged uid outside. **The default install grants no sudoers
-entry and no standing privilege**, so there is nothing for a mistake, a
-dependency or an injection to spend. Only what it mounts is reachable; your
-`~/.ssh`, `/etc` and home directory are not there.
+There is no second, weaker path — a privilege broker used to exist for hosts
+without podman and was removed, because a weaker path that still exists is the
+one a stuck agent reaches for.
 
-The workspace keeps its **own pmbootstrap work directory**
-(`~/.local/var/porthole-sandbox`), which it creates and owns — a rootless
-container maps your uid and nothing else, so it cannot use one that host root
-built, and cannot be given one either. `porthole sandbox up` configures it and
-the chroots bootstrap on first build. Your host work dir is left alone;
-`porthole build --host` still uses it.
+The mounts, the work-directory rules, and what this honestly does *not* stop are
+in **[`docs/SANDBOX.md`](docs/SANDBOX.md)**. Read it before trusting it.
 
-There is no second, weaker path. A validating privilege broker (`ph-sudo`)
-used to exist for a host without podman; it is gone. It granted a real sudoers
-entry, its own documentation admitted it could not contain a determined chroot
-payload, and keeping it meant every reader had to work out which tier they were
-on. Podman is the one host prerequisite, and `porthole doctor` says how to
-install it.
+### Speed
 
-The threat model — including what this honestly does *not* stop — is in
-**[`docs/SANDBOX.md`](docs/SANDBOX.md)**. Read it before trusting it.
+These tools run in tight loops — a 20-cycle suspend test, a soak run, an agent
+polling device state — so latency is a correctness concern, not a nicety. Config
+resolution costs under a millisecond; everything else is a network round trip,
+which is why the shared ssh options carry connection multiplexing. **Measured on
+a Pixel 2 XL over USB:**
 
+| | per ssh round trip |
+|---|---|
+| without multiplexing | **302 ms** |
+| with multiplexing | **14 ms** |
+
+Every tool inherits that from one place. It is only safe because every reboot
+path tears the control master down first — host keys change on essentially every
+boot here, so a socket that outlives a reboot is a live handle to a dead sshd.
+When a tool hangs strangely, `PORTHOLE_NO_MUX=1` is the first thing to try.
+
+Measure it yourself with `porthole doctor --bench`. Details:
+**[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)**.
+
+### Repository layout
+
+```
+bin/porthole            the CLI — a thin launcher
+lib/
+  porthole.py           config resolution + device transport (python tools)
+  porthole.sh           the same semantics for shell tools
+  porthole_cli.py       command registry and output helpers
+  porthole_cmd_*.py     one module per verb — drop one in to add a verb
+  porthole_tui/         the console (`porthole tui`) — needs python 3.10+
+                        and textual; gate.py itself runs on 3.8 to say so
+tools/                  150 tk-* tools: boot, flash, probe, benchmark, soak
+profiles/
+  _template/            every device key, documented
+  google-taimen/        the reference device: facts as data + its own tools
+brain/                  184 scoped knowledge notes
+docs/                   new-host, sandbox, config, performance, contributing
+tests/                  everything runs with no device attached
+```
+
+---
 ## For agents and LLMs
 
 **[`AGENTS.md`](AGENTS.md)** is the front door, written for any LLM rather than
-one vendor's format.
+one vendor's format. There is also a Claude skill at
+[`skills/porthole-bringup/`](skills/porthole-bringup/).
 
 The single command to run first:
 
@@ -466,7 +377,7 @@ porthole brief --json
 
 It returns the device and its state, this device's encoded traps as prose, the
 rules that cost sessions when broken, the tool catalogue pointer, the laws, and
-suggested next steps. That replaces four or five exploratory commands, each of
+suggested next steps — replacing four or five exploratory commands, each of
 which can be got wrong.
 
 Everything else an agent needs is machine-readable:
@@ -478,7 +389,7 @@ porthole doctor --all --json   # health, with a fix for every failure
 porthole brain --json --severity law
 ```
 
-Design rules that make this work:
+Four design rules make that work:
 
 - **Exit codes are an API.** `0` ok · `1` the thing under test failed · `64`
   usage · `75` lock unavailable (retry) · `76` wrong device state (do not retry)
@@ -488,68 +399,13 @@ Design rules that make this work:
 - **No colour when piped**, and `NO_COLOR` is honoured.
 - **Every tool is self-describing** in its first 20 lines.
 
-There is also a Claude skill at [`skills/porthole-bringup/`](skills/porthole-bringup/).
-
----
-
-## Speed
-
-These tools run in tight loops — a 20-cycle suspend test, a soak run, an agent
-polling device state. Latency is a correctness concern, not a nicety.
-
-Config resolution costs under a millisecond. Everything else is a network round
-trip, which is why the shared ssh options carry connection multiplexing.
-**Measured on a Pixel 2 XL over USB:**
-
-| | per ssh round trip |
-|---|---|
-| without multiplexing | **302 ms** |
-| with multiplexing | **14 ms** |
-
-All 115 tools inherit that from one place. It is only safe because every reboot
-path tears the control master down first — host keys change on essentially every
-boot here, so a socket that outlives a reboot is a live handle to a dead sshd.
-
-Measure it yourself rather than trusting this table:
-
-```sh
-porthole doctor --bench
-PORTHOLE_TIMING=1 tools/tk-fps.py      # per-probe timings to stderr
-PORTHOLE_NO_MUX=1 ...                  # disable multiplexing (first thing to try
-                                       # when diagnosing a strange hang)
-```
-
-Details: **[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md)**.
-
----
-
-## Repository layout
-
-```
-bin/porthole            the CLI — a thin launcher
-lib/
-  porthole.py           config resolution + device transport (python tools)
-  porthole.sh           the same semantics for shell tools
-  porthole_cli.py       command registry and output helpers
-  porthole_cmd_*.py     one module per verb — drop one in to add a verb
-  porthole_tui/         the console (`porthole tui`) — needs python 3.10+
-                        and textual; gate.py itself runs on 3.8 to say so
-tools/                  ~95 tk-* tools: boot, flash, probe, benchmark, soak
-profiles/
-  _template/            every device key, documented
-  google-taimen/        the reference device: facts as data + its own tools
-brain/                  55 scoped knowledge notes
-docs/                   architecture, config, performance, contributing
-tests/                  everything runs with no device attached
-```
-
 ---
 
 ## Troubleshooting
 
 **"Every tool does nothing."**
-Passwordless sudo on the device. See
-[the one-time setup](#the-one-time-device-setup-everyone-hits), or run
+Passwordless sudo on the device — see
+[the one device step everyone hits](#the-one-device-step-everyone-hits), or run
 `porthole doctor`.
 
 **A tool hangs where it used to work.**
@@ -563,18 +419,26 @@ is deliberately fatal rather than silently resolving to no device facts — that
 is how you flash the wrong DTB.
 
 **The device is unreachable but powered.**
-It has four states, not two. `porthole brief` tells you which:
-`BOOTED` · `INITRAMFS` (stopped in the pmOS debug shell -- `tools/tsh.py` will say why) · `FROZEN` (kernel alive, userspace gone) · `FASTBOOT` · `ABSENT`.
-See `porthole brain frozen-is-not-hung`.
+It has four states, not two, and `porthole brief` tells you which: `BOOTED` ·
+`INITRAMFS` (stopped in the pmOS debug shell — `tools/tsh.py` will say why) ·
+`FROZEN` (kernel alive, userspace gone) · `FASTBOOT` · `ABSENT`. See
+`porthole brain frozen-is-not-hung`.
 
 **Boot verdicts seem wrong.**
 Never judge a boot by the screen — mainline often never lights the panel, so a
-booted device and a hung one look identical. `porthole brain
-never-judge-a-boot-by-the-screen`.
+booted device and a hung one look identical. See
+`porthole brain never-judge-a-boot-by-the-screen`.
+
+**A build is running but nothing shows it.**
+`porthole pkg status` reads the workspace log and the buildroot, so it reports
+builds started outside `porthole pkg` too. If it says a build finished while one
+is clearly running, that is a bug worth reporting.
 
 ---
 
-## Contributing
+## Project
+
+### Contributing
 
 See **[`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)**.
 
@@ -588,7 +452,10 @@ make ci          # every job GitHub runs -- green here is green there
 Adding a tool, a device, a CLI verb or a brain note each takes one file. The
 tests enforce the contracts so that stays true.
 
-## Status
+Every push to `main` publishes the documentation to GitHub Pages; `make
+docs-serve` renders the same site locally.
+
+### Status
 
 Proven against one device (`google-taimen`, MSM8998), with a second
 (`google-cheetah`, GS201) in progress. That is stated as a coverage limit rather
@@ -598,11 +465,10 @@ protocol lives in that device's profile rather than pretending to be portable.
 **The most useful thing you can do is bring a second device.** Not because the
 tools need testing — because the line between "this is how phones work" and
 "this is how *this* phone works" is only visible from two devices, and every
-note in `brain/` that is wrongly marked `scope: generic` is a trap waiting for
-the next person. `porthole new-device <codename>` scaffolds a profile in one
-command.
+note in `brain/` wrongly marked `scope: generic` is a trap waiting for the next
+person. `porthole new-device <codename>` scaffolds a profile in one command.
 
-## Acknowledgements
+### Acknowledgements
 
 The original Pixel 2 XL mainline work this port builds on is by **Caleb
 Connolly**, **Yassine Oudjana**, **Joel Selvaraj**, **Jami Kettunen**,
@@ -616,6 +482,6 @@ free of assistant trailers deliberately: the work is the author's, the mistakes
 are the author's, and a log full of tool attribution helps nobody reading it in
 two years.
 
-## Licence
+### Licence
 
 MIT — see [`LICENSE`](LICENSE).
