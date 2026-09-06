@@ -172,3 +172,11 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_a_foreign_build_is_named_after_the_package_not_the_arch_value():
+    ps = ("  9 /usr/bin/python3 /usr/bin/pmbootstrap --as-root build --lax "
+          "--src=/work/webkit-src/webkitgtk-2.52.6 --arch aarch64 webkit2gtk-6.0\n")
+    assert buildroot.foreign_build(ps) == "webkit2gtk-6.0"
+    ps = "  9 pmbootstrap build --arch aarch64 --src /work/x webkit2gtk-6.0\n"
+    assert buildroot.foreign_build(ps) == "webkit2gtk-6.0"

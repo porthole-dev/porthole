@@ -63,6 +63,7 @@ generic notes as well.
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
 | [the-msm8998-thermal-trip-is-a-cliff](findings/the-msm8998-thermal-trip-is-a-cliff.md) | `soc:msm8998` | The mainline msm8998 thermal zone is a cliff -- one passive trip, no limit, 2.36 GHz to 500 MHz in about 7 s |
 | [the-reserved-vht-width-pair-is-why-the-ap-refused](findings/the-reserved-vht-width-pair-is-why-the-ap-refused.md) | `soc:msm8998` | The reserved VHT channel-width pair was the refusal -- clamping it associates 8/8 |
+| [the-scroll-stall-is-the-pages-own-javascript](findings/the-scroll-stall-is-the-pages-own-javascript.md) | `generic` | The browser scroll stall is the page's own JavaScript -- not the engine, not the tile-record path, and not page settling |
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
 | [the-sigkill-venus-wedge-was-vp9-bandwidth-starvation](findings/the-sigkill-venus-wedge-was-vp9-bandwidth-starvation.md) | `device:google-taimen` | The "SIGKILL wedges venus until reboot" was VP9 bandwidth starvation misread -- venus survives SIGKILL on both codecs |
 | [the-top-right-corruption-is-freedreno-gmem](findings/the-top-right-corruption-is-freedreno-gmem.md) | `soc:msm8998` | The top-right corruption is freedreno's GMEM tile path, not a GPU fault -- the boundary is the a5xx bin column at x=1024 |
@@ -71,8 +72,10 @@ generic notes as well.
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
+| [the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail](findings/the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail.md) | `generic` | The WebKitWebProcess SIGSEGV is Epiphany asking for a FULL_DOCUMENT snapshot of a 237522 px page: Skia refuses a raster surface over 2 GB and WebKit dereferences the null |
 | [the-workspace-caches-kernel-compiles](findings/the-workspace-caches-kernel-compiles.md) | `generic` | The workspace caches kernel compiles now: 18% dearer the first time, 2.5x faster every repeat |
 | [the-workspace-loop-is-seconds-and-still-uncached](findings/the-workspace-loop-is-seconds-and-still-uncached.md) | `generic` | The workspace edit-build loop is 6-8 s, and ccache is still hit zero times |
+| [touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm](findings/touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm.md) | `device:google-taimen` | Finger drags on GTK4 WebKit ride the scrolling thread, and r61's two patches cut the Wikipedia drag from 289 layouts per 10 s to 10 |
 | [two-thirds-of-associations-never-get-keys](findings/two-thirds-of-associations-never-get-keys.md) | `device:google-taimen` | Two thirds of successful associations never complete the 4-way handshake, and ath10k says nothing |
 | [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
@@ -88,6 +91,7 @@ generic notes as well.
 | [wlroots-drm-layers-need-libliftoff](findings/wlroots-drm-layers-need-libliftoff.md) | `generic` | wlroots does DRM output layers only through libliftoff |
 | [wlroots-never-re-imports-a-texture-after-a-renderer-swap](findings/wlroots-never-re-imports-a-texture-after-a-renderer-swap.md) | `generic` | wlroots drops every client texture on a renderer swap and never re-imports one, so static layer-surfaces stay blank after a GPU reset |
 | [youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput](findings/youtube-judder-is-2160p60-plus-a-lockstep-decoder-not-venus-throughput.md) | `device:google-taimen` | YouTube's judder on taimen is 2160p60 being served, plus venus clocked for 30 fps because vdec had no VIDIOC_G_PARM -- not the compositor, not buffer counts |
+| [youtube-video-freezes-are-a-software-css-blur-on-the-main-thread](findings/youtube-video-freezes-are-a-software-css-blur-on-the-main-thread.md) | `device:google-taimen` | The multi-second YouTube freezes are a CSS blur() painted in software on the web process main thread, because the GTK port never composites a layer for its filter |
 
 ## laws
 
@@ -127,11 +131,13 @@ generic notes as well.
 | [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
 | [a-sideloaded-device-apk-can-eat-the-radio-stack](traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md) | `generic` | A sideloaded device apk can eat the radio stack |
 | [a-stale-inherited-env-outbuilds-the-profile](traps/a-stale-inherited-env-outbuilds-the-profile.md) | `generic` | A stale inherited env outbuilds the profile |
+| [a-stall-catcher-must-pick-the-busiest-webkitwebprocess](traps/a-stall-catcher-must-pick-the-busiest-webkitwebprocess.md) | `generic` | A stall catcher on the browser must pick the WebKitWebProcess with the most threads, and thread names are truncated from the front |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
 | [a-tree-built-module-carries-btf-the-running-kernel-rejects](traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md) | `generic` | A tree-built module carries BTF the running kernel rejects, and modprobe blames a symlink loop |
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [an-arm-behind-the-phosh-lockscreen-measures-a-still-page](traps/an-arm-behind-the-phosh-lockscreen-measures-a-still-page.md) | `device:google-taimen` | An arm behind the phosh lockscreen measures a still page, and it looks exactly like the change under test breaking WebKit |
+| [an-injected-touch-does-not-wake-a-blanked-screen](traps/an-injected-touch-does-not-wake-a-blanked-screen.md) | `generic` | An injected touch does not wake a blanked screen, and every gesture arm then measures a still image |
 | [androidboot-bootreason-always-says-watchdog-here](traps/androidboot-bootreason-always-says-watchdog-here.md) | `device:google-taimen` | androidboot.bootreason says watchdog on every boot of taimen, including clean ones -- it is not a reset-reason oracle |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
@@ -166,9 +172,11 @@ generic notes as well.
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [the-bootloader-reboot-can-drop-the-phone-off-usb-entirely](traps/the-bootloader-reboot-can-drop-the-phone-off-usb-entirely.md) | `device:google-taimen` | The bootloader reboot can drop the phone off USB entirely |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
+| [the-device-keeps-a-default-route-through-a-link-that-is-gone](traps/the-device-keeps-a-default-route-through-a-link-that-is-gone.md) | `generic` | The device keeps its USB default route after the host drops the link, and then has no internet at all |
 | [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
 | [the-msm-reset-debugfs-does-not-make-a-client-lose-its-context](traps/the-msm-reset-debugfs-does-not-make-a-client-lose-its-context.md) | `soc:msm8998` | Writing msm's reset debugfs faults the GPU but no client loses its context, so it cannot test GPU-reset recovery |
 | [the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series](traps/the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series.md) | `device:google-taimen` | The taimen-v7.2 tree was ten venus patches behind its own aport series, and a venus_core built from it wedges the SoC |
+| [the-usb-gadget-can-steal-the-hosts-default-route](traps/the-usb-gadget-can-steal-the-hosts-default-route.md) | `generic` | The USB gadget is a DHCP server, and NetworkManager lets it take the host's default route and DNS |
 | [timestamps-cannot-prove-a-build-is-fresh](traps/timestamps-cannot-prove-a-build-is-fresh.md) | `generic` | A fresh boot.img mtime says nothing about which kernel is inside it |
 | [two-config-copies-at-one-commit-break-every-module](traps/two-config-copies-at-one-commit-break-every-module.md) | `generic` | The tree defconfig and the aport config can differ at the same commit, and modprobe pays for it |
 | [two-pmbootstrap-builds-destroy-each-other](traps/two-pmbootstrap-builds-destroy-each-other.md) | `generic` | Two concurrent pmbootstrap builds share one buildroot and silently destroy each other |
@@ -213,8 +221,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 41
-- `generic` — 102
+- `device:google-taimen` — 43
+- `generic` — 108
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
