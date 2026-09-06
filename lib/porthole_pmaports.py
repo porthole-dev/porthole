@@ -39,24 +39,52 @@ DEVICEINFO_RE = re.compile(r'^\s*deviceinfo_([a-z0-9_]+)\s*=\s*"?([^"#\n]*)"?',
 CATEGORIES = ("main", "community", "testing", "downstream", "archived")
 
 
-def find_pmaports(cfg=None) -> pathlib.Path | None:
-    """Locate a pmaports checkout, preferring what pmbootstrap is configured to use."""
+def find_pmaports_with_source(cfg=None):
+    """Locate a pmaports checkout AND say which candidate answered.
+
+    The label is not decoration. Four things can decide where pmaports is, and
+    which one won is precisely the question a developer cannot answer by
+    reading the documentation -- so the resolution order and the explanation of
+    it have to be the same code. `porthole doctor` printing a path next to a
+    key derived separately was wrong within an hour of being written.
+    """
     candidates = []
     if cfg:
+        # A per-device override is collapsed into PORTHOLE_PMAPORTS by the
+        # config layer before anything here sees it, so name it when it is what
+        # produced the value -- "via PORTHOLE_PMAPORTS" is true but unhelpful
+        # to someone looking for the line to edit.
+        device = cfg.get("PORTHOLE_DEVICE", "")
+        per_device = (f"PORTHOLE_PMAPORTS_{device.upper().replace('-', '_')}"
+                      if device else "")
         if cfg.get("PORTHOLE_PMAPORTS"):
-            candidates.append(pathlib.Path(cfg["PORTHOLE_PMAPORTS"]))
+            label = ("PORTHOLE_PMAPORTS"
+                     if not (per_device and cfg.get(per_device)
+                             == cfg["PORTHOLE_PMAPORTS"]) else per_device)
+            candidates.append((label, pathlib.Path(cfg["PORTHOLE_PMAPORTS"])))
+        if per_device and cfg.get(per_device):
+            candidates.append((per_device, pathlib.Path(cfg[per_device])))
         pmb = cfg.get("PORTHOLE_PMB_DIR")
         if pmb:
-            candidates.append(pathlib.Path(pmb) / "cache_git" / "pmaports")
+            candidates.append(("PORTHOLE_PMB_DIR/cache_git",
+                               pathlib.Path(pmb) / "cache_git" / "pmaports"))
     candidates += [
-        pathlib.Path(os.environ.get("PORTHOLE_PMAPORTS", "/nonexistent")),
-        pathlib.Path.home() / ".local/var/pmbootstrap/cache_git/pmaports",
-        pathlib.Path.home() / ".cache/pmbootstrap/pmaports",
+        ("PORTHOLE_PMAPORTS in the environment",
+         pathlib.Path(os.environ.get("PORTHOLE_PMAPORTS", "/nonexistent"))),
+        ("the default pmbootstrap work dir",
+         pathlib.Path.home() / ".local/var/pmbootstrap/cache_git/pmaports"),
+        ("the legacy cache path",
+         pathlib.Path.home() / ".cache/pmbootstrap/pmaports"),
     ]
-    for path in candidates:
+    for label, path in candidates:
         if (path / "device").is_dir():
-            return path
-    return None
+            return path, label
+    return None, ""
+
+
+def find_pmaports(cfg=None) -> pathlib.Path | None:
+    """Locate a pmaports checkout, preferring what pmbootstrap is configured to use."""
+    return find_pmaports_with_source(cfg)[0]
 
 
 def find_aports_upstream(pmaports) -> pathlib.Path | None:

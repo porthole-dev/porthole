@@ -324,6 +324,8 @@ def check_host(ch: Checks, cfg, family: str) -> None:
                    doc=install_hint(tool, family))
 
     _check_envkernel(ch, cfg)
+    _check_pmaports(ch, cfg)
+    _check_host_workdir(ch, cfg)
 
     # flock backs the device mutex. Without it parallel workers corrupt each
     # other's sessions, which is a subtle failure rather than a loud one.
@@ -335,6 +337,51 @@ def check_host(ch: Checks, cfg, family: str) -> None:
                doc="part of util-linux; on macOS: brew install flock")
 
 
+def _check_pmaports(ch: Checks, cfg) -> None:
+    """WHICH pmaports checkout, and which key put it there.
+
+    There are four ways to answer "where is pmaports" -- a per-device key, a
+    global key, pmbootstrap's own cache_git, and the legacy cache path -- and
+    until now nothing printed the answer. The complaint that produced this row
+    was not "it is broken", it was "I cannot tell which variable is effective",
+    which is a question a tool should answer rather than a manual.
+    """
+    import porthole_pmaports as pmap
+
+    found, via = pmap.find_pmaports_with_source(cfg)
+    if not found:
+        ch.add("host: pmaports", "warn",
+               "no checkout found -- device facts, SoC siblings and package "
+               "builds all read it",
+               "porthole init    adopts an existing one, or clones one")
+        return
+    # The layer comes from the resolver, never re-derived here: a label
+    # computed in parallel with the search is a label that can disagree with
+    # the path beside it, which is worse than printing no label at all.
+    ch.add("host: pmaports", "ok", f"{found}  (via {via})")
+
+
+def _check_host_workdir(ch: Checks, cfg) -> None:
+    """The HOST pmbootstrap work dir -- the other one.
+
+    Reported beside `workspace: work dir` on purpose. They are different
+    directories, they are not interchangeable, and a reader who has seen only
+    one of them reasonably assumes it is the one their build used.
+    """
+    workdir = cfg.get("PORTHOLE_PMB_DIR")
+    via = "PORTHOLE_PMB_DIR" if workdir else "default"
+    path = pathlib.Path(workdir or (pathlib.Path.home() / ".local/var/pmbootstrap"))
+    if path.is_dir():
+        ch.add("host: work dir", "ok", f"{path}  (via {via})")
+    else:
+        # Not a warning: on the workspace tier this directory is never created
+        # and never needed, and a yellow row for a tier you are not on is how
+        # a setup starts looking broken to somebody who is fine.
+        ch.add("host: work dir", "ok",
+               f"{path} does not exist  (host builds only; the workspace has "
+               f"its own)")
+
+
 def _envkernel_candidates(cfg):
     """The same search order tools/ph-build.sh uses, in the same order.
 
@@ -344,7 +391,6 @@ def _envkernel_candidates(cfg):
     home = pathlib.Path.home()
     src = cfg.get("PORTHOLE_PMBOOTSTRAP_SRC", "")
     for label, cand in (
-        ("PORTHOLE_ENVKERNEL", cfg.get("PORTHOLE_ENVKERNEL", "")),
         ("PORTHOLE_PMBOOTSTRAP_SRC", f"{src}/helpers/envkernel.sh" if src else ""),
         ("the pmbootstrap data dir", home / ".local/share/pmbootstrap/helpers/envkernel.sh"),
         ("the system install", "/usr/share/pmbootstrap/helpers/envkernel.sh"),
@@ -400,8 +446,8 @@ def _check_envkernel(ch: Checks, cfg) -> None:
         return
     ch.add("host: envkernel", "warn",
            "not found -- `porthole build` cannot compile without it",
-           "clone pmbootstrap and set PORTHOLE_PMBOOTSTRAP_SRC to it, "
-           "or set PORTHOLE_ENVKERNEL to helpers/envkernel.sh directly")
+           "porthole init    clones it and writes the key, or use the "
+           "workspace, whose image carries both")
 
 
 def check_drift(ch: Checks, cfg) -> None:

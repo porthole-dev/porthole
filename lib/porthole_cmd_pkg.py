@@ -1188,6 +1188,19 @@ def _log_path(ctx):
     return build.pmb_workdir(ctx, usable) / "log.txt"
 
 
+def buildroot_staged_name(workdir):
+    """`(pkgname, started)` for whatever that buildroot is building.
+
+    Takes the workdir rather than ctx so the caller can pass the one it has
+    already resolved: `_workspace_usable` costs a `podman ps` plus an
+    `inspect`, and asking it twice in one `pkg status` doubled the wait on a
+    loaded machine for an answer that cannot have changed in between.
+    """
+    import porthole_buildroot as buildroot
+
+    return buildroot.staged_build_name(workdir)
+
+
 def _verdict(ctx, aport: str, out) -> int:
     """Did the build we reattached to actually produce its apk?
 
@@ -1264,7 +1277,17 @@ def _status(ctx) -> int:
     # The same question `watch` and the status line ask: the tracker can die
     # without the build dying, and reporting the frozen file as `stale` is
     # how this said nothing for two hours about a build sitting at 88%.
-    live = progress.reattach_from_log(_log_path(ctx), snap)
+    log_path = _log_path(ctx)
+    live = progress.reattach_from_log(log_path, snap)
+    tracked = live is not None
+    if live is None:
+        # ...and the build nobody ever tracked. `reattach` only answers for a
+        # snapshot frozen at `running`; a build started outside this verb, or
+        # started after the last one wrote `done`, has no snapshot to freeze.
+        # Same two file reads the status line makes, so the two cannot
+        # disagree about whether something is building.
+        name, started = buildroot_staged_name(log_path.parent)
+        live = progress.live_build_from_log(log_path, name, started)
     if live is not None:
         snap = dict(live, reattached=True)
 
@@ -1275,9 +1298,19 @@ def _status(ctx) -> int:
         for label, value in rows:
             ctx.out.kv(label, value, 10)
         if live is not None:
-            ctx.out.kv("note", "reattached: this build outlived the run that "
-                               "was tracking it, so these numbers come from "
-                               "the workspace log", 10)
+            # Two different facts wear one symptom, and `orphaned` exists
+            # because the wording is not interchangeable: a tracker that died
+            # leaves real-but-frozen numbers, while a `sandbox shell` build
+            # was never published at all and never will be. Telling somebody
+            # their build "outlived its tracker" when nothing ever tracked it
+            # sends them looking for a run that did not exist.
+            ctx.out.kv("note",
+                       ("reattached: this build outlived the run that was "
+                        "tracking it, so these numbers come from the "
+                        "workspace log") if tracked else
+                       ("nothing published a status file for this build -- it "
+                        "was started outside `porthole pkg`, so these numbers "
+                        "come from the workspace log and the buildroot"), 10)
 
     return ctx.emit(snap, render)
 

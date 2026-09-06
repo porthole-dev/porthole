@@ -208,9 +208,18 @@ def test_the_build_script_reads_the_slot_policy():
 
 
 def test_envkernel_is_discovered_rather_than_assumed():
+    """One key points at a checkout, not two.
+
+    PORTHOLE_ENVKERNEL named the helper directly and PORTHOLE_PMBOOTSTRAP_SRC
+    names the checkout it lives in -- two knobs for one question, and the
+    reliable way to be unsure which of them the build was actually using.
+    Nothing set the direct one; it is gone, and the checkout key stays.
+    """
     text = (ROOT / "tools" / "ph-build.sh").read_text()
     assert "_ph_find_envkernel" in text
-    assert "PORTHOLE_ENVKERNEL" in text, "no way to point it at a checkout"
+    assert "PORTHOLE_PMBOOTSTRAP_SRC" in text, "no way to point it at a checkout"
+    assert "PORTHOLE_ENVKERNEL" not in text, (
+        "the second envkernel knob is back; one question, one key")
 
 
 def test_the_build_script_is_still_valid_bash():
