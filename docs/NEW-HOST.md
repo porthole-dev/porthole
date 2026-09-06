@@ -84,6 +84,48 @@ devices share it: building for one sees whatever the other left checked out. A
 git worktree gives each device its own working tree on its own branch, off the
 same object store — no second fetch, no duplicated objects.
 
+## Packages, per distribution
+
+`porthole doctor` prints the right line for the host it is running on. These are
+the same commands, collected:
+
+```sh
+# Debian / Ubuntu / Mint / Pop!_OS
+sudo apt install python3 openssh-client android-sdk-platform-tools util-linux podman
+
+# Arch / Manjaro
+sudo pacman -S python openssh android-tools util-linux podman
+
+# Fedora / RHEL
+sudo dnf install python3 openssh-clients android-tools util-linux podman
+
+# Alpine / postmarketOS
+sudo apk add python3 openssh-client android-tools util-linux podman
+
+# macOS -- ssh is preinstalled. pmbootstrap needs Linux, so builds happen
+# elsewhere; probing and debugging a running device work fine.
+brew install python android-platform-tools flock
+```
+
+On an rpm-ostree host (Silverblue, Kinoite) there is no `dnf`. `doctor` detects
+that and suggests unpacking Google's platform-tools into `~/.local/bin` rather
+than a layered package that needs a reboot.
+
+## USB access without root
+
+On Linux, fastboot needs a udev rule or it only works under `sudo`:
+
+```sh
+sudo tee /etc/udev/rules.d/51-android.rules >/dev/null <<'RULE'
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", GROUP="plugdev"
+RULE
+sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo usermod -aG plugdev "$USER"     # log out and back in
+```
+
+`18d1` is Google. Substitute your vendor's ID — `lsusb` while the device is in
+the bootloader will show it.
+
 ## The one step that still needs root, once
 
 Installing podman, and registering binfmt for cross-architecture builds. Both
