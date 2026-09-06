@@ -1464,6 +1464,50 @@ def reattach_from_log(log_path, snap, now=None, samples=None):
     return snapshot_from_log(text, name, mtime, now=now, samples=samples)
 
 
+def live_build_from_log(log_path, name, started=None, now=None, samples=None):
+    """A snapshot for a build NOTHING ever published a status file for, or None.
+
+    `reattach_from_log` answers a narrower question -- "the tracker died MID
+    BUILD, did the build?" -- and refuses anything whose snapshot is not
+    `running`. That leaves a real case with no answer at all: a build started
+    through `sandbox shell --command`, or simply one that began after the last
+    tracked build wrote `done`. Nothing was published for it and nothing ever
+    will be, so every consumer that asks the snapshot is blind to it. Reported
+    2026-09-06 as "the status line shows nothing while `pkg watch` shows a
+    two-hour webkit build" -- watch saw it only via a podman `ps`, which the
+    status line cannot afford at a two-second refresh.
+
+    The division of evidence is the whole point. `name` comes from the
+    buildroot (`porthole_buildroot.staged_build_name`), because the log's
+    naming banner is written once at the start and is long outside the tail.
+    LIVENESS comes from the log's mtime, because the staged APKBUILD outlives
+    the build that wrote it. Neither fact alone is enough and neither is a
+    guess.
+    """
+    if not name:
+        return None                # never guess a name into somebody's chrome
+    now = time.time() if now is None else now
+    text, mtime = log_tail(log_path)
+    if text is None:
+        return None
+    # Bounded at both ends, like every other freshness test here: a quiet log
+    # is not a running build, and a log dated in the future is a broken clock.
+    if not -CLOCK_SKEW_S <= now - mtime <= LOG_FRESH_S:
+        return None
+    # The log says how this build ENDED. A fresh mtime after that is somebody
+    # else touching a log the whole workspace shares.
+    if log_outcome(text, name, now)[0]:
+        return None
+    snap = snapshot_from_log(text, name, mtime, now=now, samples=samples)
+    if started:
+        # The one thing a log tail genuinely cannot know. The staged APKBUILD's
+        # mtime is when pmbootstrap put it there, which is when this build
+        # began.
+        snap["started"] = started
+        snap["elapsed"] = max(0.0, now - started)
+    return snap
+
+
 def orphaned(snap, foreign: str) -> bool:
     """Is `foreign` the very build this status file was following?
 

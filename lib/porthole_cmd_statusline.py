@@ -301,6 +301,24 @@ def build_snapshot(repo: pathlib.Path, now: float):
                     (snap.get("state") or "running") == "running"
                     or now - (snap.get("last_at") or 0) <= LINGER_S):
                 return snap, True
+    # Nothing this checkout published is running -- but something may still be
+    # building. A `sandbox shell --command` build publishes no status file, and
+    # neither does one that started after the last tracked build wrote `done`.
+    # Both were invisible here while `pkg watch` showed them, because watch can
+    # afford a podman `ps` and this cannot. The buildroot names the build and
+    # the log's mtime says it is alive: two file reads, no container.
+    live = _live_log(now)
+    if live:
+        import porthole_buildroot as buildroot
+        name, started = buildroot.staged_build_name(live[0].parent)
+        if name:
+            text, _ = pp.log_tail(live[0])
+            samples = _samples(repo / ".run", live[1],
+                               pp.log_steps(text or "")[0], now)
+            snap = pp.live_build_from_log(live[0], name, started, now=now,
+                                          samples=samples)
+            if snap is not None:
+                return snap, True
     if best and now - (best.get("last_at") or 0) <= LINGER_S:
         return best, False       # old news lingers briefly; then it is clutter
     return None, False

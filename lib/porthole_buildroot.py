@@ -200,6 +200,51 @@ def hold(workdir, what: str, wait: float = 0.0, probe=None):
             handle.close()
 
 
+def staged_build_name(workdir):
+    """`(pkgname, started)` for the build staged in a buildroot, or `(None, None)`.
+
+    pmbootstrap copies the APKBUILD it is about to build into
+    `<workdir>/chroot_buildroot_<arch>/home/pmos/build/APKBUILD`, so one small
+    file read names the package and its mtime says when the build began.
+
+    This exists because the log cannot answer it. The naming banner
+    (`=> edge/<pkg>: Building package`) is written once at the start, and two
+    hours into a 37 MB log it is far outside the tail anything reads; the lines
+    that ARE in the tail are ninja's, which name object files and not packages.
+
+    It names, and never decides liveness. The staged file survives the build
+    that wrote it, so on its own it is the LAST build, not a running one --
+    the log's mtime is what says something is building now. Keeping those two
+    facts in separate places is deliberate: conflating them is how a finished
+    build sat at "99% reattached" all night.
+    """
+    newest = None
+    try:
+        roots = sorted(pathlib.Path(workdir).glob(
+            "chroot_buildroot_*/home/pmos/build/APKBUILD"))
+    except OSError:
+        return None, None
+    for path in roots:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if newest is None or mtime > newest[1]:
+            newest = (path, mtime)
+    if newest is None:
+        return None, None
+    try:
+        text = newest[0].read_text(errors="replace")
+    except OSError:
+        return None, None
+    for line in text.splitlines():
+        if line.startswith("pkgname="):
+            name = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if name:
+                return name, newest[1]
+    return None, None
+
+
 def foreign_build(ps_output: str) -> str:
     """A pmbootstrap build running that did NOT come through this verb, or "".
 
