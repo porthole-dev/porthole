@@ -820,5 +820,218 @@ def main():
     return 1 if failed else 0
 
 
+# ------------------------------------------------- mounts go stale --
+
+def test_a_workspace_started_before_the_working_repo_cannot_build():
+    """Mounts are fixed when the container is created. Set a working repo
+    afterwards -- the ordinary order on a new host, and what `porthole init`
+    now does -- and the running workspace still has no /work, so ph-build.sh
+    dies on its own `${PORTHOLE_WORKDIR:?}` naming neither the container nor
+    the fix. `sandbox status` said "sandbox is configured" throughout."""
+    import porthole_cmd_sandbox as sandbox
+
+    drift = sandbox.workdir_drift({"PORTHOLE_WORKDIR": "/home/x/taimen"},
+                                  {"/pmb", "/porthole"})
+    assert drift, "a configured repo with no /work mount was reported as fine"
+    assert "sandbox down" in drift, drift
+
+
+def test_a_mounted_working_repo_is_not_drift():
+    import porthole_cmd_sandbox as sandbox
+
+    assert sandbox.workdir_drift({"PORTHOLE_WORKDIR": "/home/x/taimen"},
+                                 {"/pmb", "/porthole", "/work"}) == ""
+
+
+def test_no_working_repo_configured_is_the_hosts_problem_not_the_workspaces():
+    """`porthole pkg build` needs no working repo, so a workspace without one
+    is not broken -- and `porthole build` already names the missing key. A
+    second refusal here would block the one tier that still works."""
+    import porthole_cmd_sandbox as sandbox
+
+    assert sandbox.workdir_drift({}, {"/pmb"}) == ""
+    assert sandbox.workdir_drift({"PORTHOLE_WORKDIR": "  "}, {"/pmb"}) == ""
+
+
+# ------------------------------------------- pmaports reaches the workspace --
+
+def test_up_finds_pmaports_wherever_the_config_says_it_is():
+    """`sandbox up` looked ONLY in `$PORTHOLE_PMB_DIR/cache_git/pmaports`, so
+    a host whose pmaports is named by PORTHOLE_PMAPORTS or the per-device key
+    was told "the workspace has nothing to build from, run `pmbootstrap init`
+    on the host" -- false, and the opposite of what the workspace tier exists
+    to avoid. `porthole init` had already asked for that checkout and written
+    the key; `up` did not read it, then brought a workspace up with no
+    pmaports mounted at all."""
+    import porthole_pmaports as pmap
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = pathlib.Path(tmp) / "mine" / "pmaports"
+        (fake / "device").mkdir(parents=True)
+        cfg = {"PORTHOLE_DEVICE": "google-taimen",
+               "PORTHOLE_PMAPORTS_GOOGLE_TAIMEN": str(fake),
+               "PORTHOLE_PMAPORTS": str(fake),
+               "PORTHOLE_PMB_DIR": str(pathlib.Path(tmp) / "nowhere")}
+        found, via = pmap.find_pmaports_with_source(cfg)
+        assert found == fake, (found, via)
+        assert "PMAPORTS" in via, via
+
+
+def test_pmaports_is_mounted_where_pmbootstrap_derives_it():
+    """The container's own pmbootstrap config points `aports` here, so the
+    mount and the config have to name the same path -- and ph-build.sh's
+    `_PH_APORTS` fallback finds it there too, with no configuration on either
+    side."""
+    import porthole_cmd_sandbox as sandbox
+
+    mounts = sandbox._mounts("/repo", "/pmb-host", "/work-host", "/key",
+                             "google-taimen", None, aports="/host/pmaports")
+    dests = {dst: src for src, dst, _o in mounts}
+    assert dests.get(sandbox.APORTS_IN) == "/host/pmaports", mounts
+    assert sandbox.APORTS_IN in sandbox.pmb_config_text("google-taimen")
+
+
+def test_a_checkout_already_inside_the_work_dir_is_not_bound_over_itself():
+    """/pmb already exposes it, so a second bind is redundant at best and a
+    nested mount podman has to unpick at worst."""
+    import porthole_cmd_sandbox as sandbox
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = pathlib.Path(tmp) / "porthole-sandbox"
+        inside = work / "cache_git" / "pmaports"
+        inside.mkdir(parents=True)
+        assert sandbox._inside(inside, work)
+        assert not sandbox._inside(pathlib.Path(tmp) / "elsewhere", work)
+
+
+def test_a_workspace_that_cannot_see_pmaports_says_so():
+    """It was up and useless, and every row said it was fine."""
+    import porthole_cmd_sandbox as sandbox
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = {"PORTHOLE_SANDBOX_PMB_DIR": tmp}
+        gap = sandbox.aports_gap(cfg, {"/pmb", "/porthole"})
+        assert gap, "a workspace with no pmaports at all was reported as fine"
+        assert "porthole init" in gap, gap
+
+        # Configured on the host but not mounted: a DIFFERENT problem with a
+        # different fix, and telling someone to go and find a checkout they
+        # have already configured is how "one command sets this host up" stops
+        # being believed.
+        checkout = pathlib.Path(tmp) / "elsewhere" / "pmaports"
+        (checkout / "device").mkdir(parents=True)
+        cfg["PORTHOLE_PMAPORTS"] = str(checkout)
+        gap = sandbox.aports_gap(cfg, {"/pmb", "/porthole"})
+        assert "sandbox down" in gap, gap
+        assert str(checkout) in gap, gap
+
+
+def test_a_mounted_or_locally_cloned_pmaports_is_not_a_gap():
+    """Two ways it can be there and only one of them is a mount: a clone made
+    inside the work dir arrives through /pmb. Checking the mount list alone
+    would call a working workspace broken."""
+    import porthole_cmd_sandbox as sandbox
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = {"PORTHOLE_SANDBOX_PMB_DIR": tmp}
+        assert sandbox.aports_gap(cfg, {sandbox.APORTS_IN}) == ""
+
+        own = pathlib.Path(tmp) / "cache_git" / "pmaports" / "device"
+        own.mkdir(parents=True)
+        assert sandbox.aports_gap(cfg, {"/pmb"}) == ""
+
+
+# ------------------------------------------- the kernel flavour --
+
+def test_the_workspace_config_names_a_kernel_the_device_actually_offers():
+    """pmbootstrap defaults `kernel` to `stable` and only `pmbootstrap init`
+    -- interactive, and the thing this tier exists to avoid -- ever changes
+    it. So `pmbootstrap install` died after building the rootfs chroot with
+    "Selected kernel (stable) is not valid for device google-taimen. Please
+    run 'pmbootstrap init'", advice that cannot be followed in a workspace
+    about a value pmaports already answers."""
+    import porthole_cmd_sandbox as sandbox
+
+    text = sandbox.pmb_config_text("google-taimen", {}, "mainline")
+    assert "kernel = mainline" in text, text
+    # Empty leaves pmbootstrap its own default rather than writing a blank.
+    assert "kernel" not in sandbox.pmb_config_text("google-taimen", {}, "")
+
+
+def test_an_explicit_kernel_beats_the_host_config_which_beats_the_derived_one():
+    """Each step earns its place: PORTHOLE_PMB_KERNEL is the developer's word,
+    the host's own pmbootstrap config is what they chose for host builds and
+    the workspace must not silently differ from it, and the derived answer is
+    a fact about the device package."""
+    import porthole_cmd_sandbox as sandbox
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = pathlib.Path(tmp) / "device" / "testing" / "device-acme-x"
+        d.mkdir(parents=True)
+        (d / "APKBUILD").write_text(
+            'pkgname=device-acme-x\nsubpackages="\n\t$pkgname-kernel-mainline:k\n"\n')
+
+        got, why = sandbox.resolve_pmb_kernel(
+            {"PORTHOLE_PMB_KERNEL": "downstream"}, tmp, "acme-x")
+        assert got == "downstream" and "PORTHOLE_PMB_KERNEL" in why, (got, why)
+
+        got, why = sandbox.resolve_pmb_kernel({}, tmp, "acme-x")
+        assert got == "mainline", (got, why)
+        assert "only one" in why, why
+
+
+def test_two_flavours_are_not_guessed_between():
+    """Choosing changes which kernel lands on the phone. That is not a guess
+    to make for someone -- the same bar the tree autoselection holds."""
+    import porthole_cmd_sandbox as sandbox
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = pathlib.Path(tmp) / "device" / "testing" / "device-acme-y"
+        d.mkdir(parents=True)
+        (d / "APKBUILD").write_text(
+            'pkgname=device-acme-y\nsubpackages="\n'
+            '\t$pkgname-kernel-mainline:a\n\t$pkgname-kernel-downstream:b\n"\n')
+        got, _why = sandbox.resolve_pmb_kernel({}, tmp, "acme-y")
+        assert got == "", got
+        # ...and the preview says so before a build spends twenty minutes
+        # reaching pmbootstrap's own refusal.
+        problem = sandbox.pmb_kernel_problem("", tmp, "acme-y")
+        assert "stable" in problem and "PORTHOLE_PMB_KERNEL" in problem, problem
+
+
+def test_a_kernel_the_device_does_not_offer_is_caught_before_the_build():
+    import porthole_cmd_sandbox as sandbox
+
+    with tempfile.TemporaryDirectory() as tmp:
+        d = pathlib.Path(tmp) / "device" / "testing" / "device-acme-z"
+        d.mkdir(parents=True)
+        (d / "APKBUILD").write_text(
+            'pkgname=device-acme-z\nsubpackages="\n\t$pkgname-kernel-mainline:k\n"\n')
+        problem = sandbox.pmb_kernel_problem("stable", tmp, "acme-z")
+        assert "mainline" in problem, problem
+        assert sandbox.pmb_kernel_problem("mainline", tmp, "acme-z") == ""
+        # A device whose kernel is hardcoded in depends never consults the
+        # setting, so it cannot be wrong.
+        assert sandbox.pmb_kernel_problem("stable", tmp, "acme-absent") == ""
+        assert sandbox.pmb_kernel_problem("none", tmp, "acme-z") == ""
+
+
+def test_the_channels_override_reaches_the_container_as_a_container_path():
+    """Decided on the host, where git is reliable and the checkout really is;
+    sent as the path INSIDE, because the host's is not resolvable in there.
+    The same translation PORTHOLE_KERNEL_TREE gets."""
+    import porthole_cmd_sandbox as sandbox
+
+    argv = sandbox._up_argv("/repo", "img", [], "google-taimen",
+                            "/home/x/pmaports/channels.cfg")
+    joined = " ".join(argv)
+    assert f"PMB_CHANNELS_CFG={sandbox.APORTS_IN}/channels.cfg" in joined, joined
+    assert "/home/x/pmaports/channels.cfg" not in joined, (
+        "a host path crossed the boundary")
+    # A stock clone gets nothing, so pmbootstrap keeps its own behaviour.
+    assert "PMB_CHANNELS_CFG" not in " ".join(
+        sandbox._up_argv("/repo", "img", [], "google-taimen", ""))
+
+
 if __name__ == "__main__":
     sys.exit(main())
