@@ -5,6 +5,193 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- **`porthole build image`** -- the whole postmarketOS system, built from
+  pmaports as it stands, and the only rung that compiles no kernel tree. Every
+  other rung goes through `_ph_make`, so on a host that had just been set up
+  `porthole build` printed "tree: not set", offered six rungs, and not one of
+  them could run -- with nothing on the screen saying which of the two missing
+  things was the problem or that a build was possible at all. The kernel comes
+  from the aport, which is also what gives the export a verification reference
+  that exists: without the pin, `porthole flash` refused the image the rung had
+  just produced, naming a `.dtb` that was never built.
+- `porthole init` asks for **the working repo**, which is the key every build
+  verb needed and nothing ever asked for. It looks for a directory named after
+  the device beside the porthole checkout and under the usual roots in `$HOME`,
+  offers what it finds, and offers to create one. It never picks between two
+  candidates on its own -- the same bar `_autoselect_tree` holds.
+- `porthole init` writes `PORTHOLE_WORKDIR_<CODENAME>`, never the bare key.
+  `--workdir` wrote the bare one, which `porthole.load_config` ignores outright
+  the moment a second device declares its own -- so on any two-device host the
+  value it wrote was present, looked right, and was not used.
+- `porthole init` explains **how to reach the device** instead of printing
+  `172.16.42.1` as a bare default. Both routes are named -- the USB gadget, the
+  same address on every postmarketOS device and up before wifi is configured,
+  and wifi, which is faster and changes -- and it checks whether the gadget is
+  enumerated on this host right now, then pings whatever you answer. The number
+  was always correct and unrecognisable as anything but a hardcoded guess.
+- `porthole build`'s preview says **where the build will run** -- workspace or
+  host, with the reason when it is the host -- which work dir it will use, and
+  whether there is a kernel tree. It was printed only once the build had
+  started, which is after the point at which anybody could act on it.
+- `porthole sandbox status`, `porthole sandbox up` and `porthole build` all
+  report a workspace **started before the working repo was set**. Container
+  mounts are fixed at creation, so such a workspace has no `/work` and every
+  build in it dies on ph-build.sh's own `${PORTHOLE_WORKDIR:?}` -- naming
+  neither the container nor the fix, while `sandbox status` said "sandbox is
+  configured" throughout.
+- `porthole build` refuses `kernel` and `image` up front when
+  `TK_PMOS_PASSWORD` is unset, rather than letting a shell parameter expansion
+  kill the run after the chroot work.
+
+### Added
+- **`porthole build ccache`** -- what the compiler cache is doing, and
+  `--max` to raise its ceiling. Nothing could answer "is my rebuild going to
+  be fast": the cache lives in `cache_ccache_<arch>` under the work dir, is
+  mounted into the chroot for *that* arch and no other, and belongs to the
+  build user -- so `pmbootstrap chroot -- ccache -s`, the obvious command,
+  reports an empty cache next to 400 MB on disk. Three facts from
+  pmbootstrap's source to read one number. The ceiling was ccache's own
+  default of 5G with nothing mentioning it; a single kernel build puts ~0.4G
+  in, and past the ceiling ccache evicts and a rebuild silently becomes a full
+  build. Measured on this host: a forced kernel rebuild went from ~12 minutes
+  to **2m33s**, hits 4 -> 3280.
+
+### Fixed
+- **`pmbootstrap install` now actually runs in the workspace.** The whole
+  zero-privilege design rests on `--no-image` -- `docs/SANDBOX-PROVISIONING.md`
+  says so, and `sandbox/Containerfile` fails the image build if pmbootstrap
+  ever drops the flag -- and nothing ever passed it. Nobody had noticed
+  because no rung in the workspace had run `install` to completion: `mod`,
+  `boot`, `fast` and `upgrade` never call it. It died after twelve minutes on
+  `modprobe: can't change directory to '/lib/modules'`, having built
+  everything correctly first.
+- The install rungs pre-build the kernel aport. `pmbootstrap install` resolves
+  the whole world in one apk transaction and the device's own kernel
+  subpackage depends on that aport, so with nothing having built it the run
+  failed at resolution with "no such package" -- naming a package that is
+  right there in pmaports.
+- The install rungs survive pmbootstrap building a package for itself. It
+  builds in strict mode, with no flag to change that, and a strict build ends
+  in `zap_buildroots()`, which a rootless namespace cannot complete. The zap
+  runs *after* the apk is written, so each attempt completes one more package;
+  the rungs now retry that one failure and only that one.
+- **A stale rootfs image can no longer be flashed.** A run that died at
+  `modprobe loop` had already run `truncate -s 1482M`, leaving a 1.5 GB file
+  with nothing in it exactly where `flash_rootfs` looks, beside a perfectly
+  good `boot.img`. `porthole flash` now refuses a rootfs image meaningfully
+  older than the boot image, and an install that cannot make one moves the old
+  one aside rather than leaving it to be found.
+- The kernel rungs take the buildroot lock. `porthole pkg build` has held it
+  since a `checksum` run destroyed an active kernel build; `porthole build`
+  never took it, and `pkg`'s own code described a running kernel build as a
+  foreign process that "holds no lock ... but owns the buildroot all the
+  same". The new `--wait` flag on `porthole build` queues instead of failing.
+- `porthole build` recognises every pmbootstrap subcommand that owns the
+  chroots, not only `build`. A running `pmbootstrap install` read as an idle
+  buildroot, so `porthole build clean` unstacked `/mnt/linux` underneath a
+  live install and nothing objected.
+- `porthole sandbox up` sets pmbootstrap's `kernel` from the device package.
+  It defaults to `stable` and only `pmbootstrap init` -- interactive, and the
+  thing this tier exists to avoid -- ever changed it, so a device offering
+  only `mainline` failed inside `install`, after the rootfs chroot was built,
+  telling you to run the command you cannot run.
+- `porthole sandbox up` works with a forked pmaports. pmbootstrap reads
+  channels.cfg from `<upstream>/main` and identifies the upstream by matching
+  a remote URL against two hardcoded postmarketOS ones, so a bring-up fork --
+  the normal state for this tool -- died with a message about a remote that
+  never mentioned channels.cfg. `PMB_CHANNELS_CFG` is pmbootstrap's own
+  documented override, so no patch and no write to anybody's repository.
+- `porthole build`'s failure diagnosis no longer blames `--lax` for a
+  dependency-resolution failure. An install that recovered from one zap and
+  then died on apk left both signatures in the window, and the stale one was
+  the advice being handed out.
+- **A rootless workspace cannot make the rootfs disk image, and now says so
+  instead of failing.** `pmbootstrap install` attaches the image file to a
+  loop device, and `/dev/loop-control` is `root:disk` -- the loop ioctls want
+  `CAP_SYS_ADMIN` in the namespace that owns the device, which a user
+  namespace never does. The install rungs pass `--no-image` where no loop
+  device exists, so the rootfs chroot is populated and `boot.img` is exported
+  and verified; the message says what you got, what you did not, and spells
+  out that `--host` means running the build on this machine rather than in
+  the workspace.
+- **A stale rootfs image can no longer reach the phone.** A run that died at
+  `modprobe loop` had already run `truncate -s 1482M`, leaving 1.5 GB of
+  nothing exactly where `flash_rootfs` looks, beside a good `boot.img`.
+  `porthole flash` now refuses a rootfs image meaningfully older than the boot
+  image, and an install that cannot replace one moves it aside.
+- **Prose about a step no longer becomes the step.** `porthole build status`
+  reported `phase flash` about a finished `image` run, which flashes nothing:
+  every `>>` line was read as an announcement, so detail lines and quoted
+  commands set the phase. ph-build.sh's own convention answers it -- `>> `
+  announces, `>>   ` explains, and 63 of its detail lines already follow that.
+- **A finished pmbootstrap invocation is no longer reported as a running
+  build.** The status line read `device-google-taimen  [ unknown ]  --
+  42m50s  build  · reattached`, where the name came from a staged APKBUILD an
+  unrelated build left 42 minutes earlier and the freshness came from a
+  `ccache -s` five seconds before. The log is shared by the whole workspace,
+  so its mtime says only that some pmbootstrap ran. A running build has not
+  printed `DONE!`.
+- **`porthole pkg status` no longer replaces a live snapshot with a guess.**
+  `reattach_from_log` returns `None` for two opposite reasons -- "the tracker
+  is alive, its own file is better" and "there is nothing to reattach to" --
+  and this treated them the same, so a running `pkg build linux-...` was
+  reported as `pkg:device-google-taimen` at `39m30s` with a note saying it had
+  been started outside porthole. Every field wrong, about a build whose own
+  status file was correct and one second old.
+- `porthole build` names who holds the buildroot, from the lock sidecar,
+  instead of asserting the build "was started outside porthole" about one
+  `porthole pkg build` had started a minute earlier. `--wait` now queues for a
+  foreign build too, not only for the flock.
+- **The status line can tell you whether a build is alive.** A kernel rung has
+  no percentage, so the row was `image  [ unknown ]  --` -- byte for byte the
+  same in a build's first second, its tenth minute, and one that had quietly
+  stopped saying anything, while `porthole build status` had the phase, the
+  elapsed and the last line from the same snapshot. It now carries elapsed,
+  phase, a line count that ticks up, and `quiet <duration>` when nothing has
+  been said for a while. A `stale` run no longer gets a spinner frame beside
+  the word for "not moving".
+- `porthole sandbox up` finds pmaports wherever the config says it is. It
+  looked only in `$PORTHOLE_PMB_DIR/cache_git/pmaports` -- pmbootstrap's own
+  clone -- so a host whose checkout is named by `PORTHOLE_PMAPORTS` or the
+  per-device key was told "the workspace has nothing to build from, run
+  `pmbootstrap init` on the host": false, and the exact thing the workspace
+  tier exists to spare you. `porthole init` had already asked for that
+  checkout and written the key. The workspace then came up with no pmaports
+  mounted at all, and nothing said so.
+- `porthole sandbox status` reports whether the workspace can see pmaports,
+  and distinguishes "there is no checkout on this host" from "one is
+  configured and this container started before it was" -- different problems
+  with different fixes.
+- Every "no pmaports checkout found" now names `porthole init`, which adopts
+  or clones one, rather than `pmbootstrap init`, which is the host-tier
+  answer offered on the tier that exists to avoid it.
+
+### Changed
+- `porthole init`'s prompts and menus use the toolkit's own output vocabulary.
+  It held the only hand-rolled interaction in the repository -- a bare
+  `input()` and numbered menus with the indentation typed in by hand -- and it
+  is the first command a newcomer runs. Menus now return the option's key
+  rather than its number, which is what stopped the two existing ones
+  disagreeing about what `3` meant.
+- `porthole build`'s "PORTHOLE_WORKDIR is not set in the profile" now names the
+  thing that is missing and the command that sets it. It is not a profile key
+  and never was, so the old wording sent people to read a committed file that
+  correctly says nothing about it.
+- `porthole build`'s preview no longer claims a kernel tree at `.`. With no
+  working repo `_tree` returns a bare `Path()`, and run from a checkout with a
+  `Makefile` of its own that passed the existence test.
+
+### Fixed
+- `porthole init` answers its own "next step" against the host as it now is.
+  It loads the config before writing -- there may be nothing to load -- so on a
+  genuinely fresh machine the one next step it promises was computed against
+  "no device selected" and silently omitted, on the first run it exists for.
+- Two test suites guarded themselves with the tester's config and then ran
+  subprocesses with `XDG_CONFIG_HOME` isolated, so on a host whose pmaports is
+  named by `config.env` rather than sitting in pmbootstrap's `cache_git`, seven
+  tests failed for a reason unrelated to what they test.
+
+### Added
 - `porthole init` sets the whole host up and is safe to re-run on a
   half-configured one. It reads what is already there, offers it back as the
   default for every question, and rewrites only the lines you change --

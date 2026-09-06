@@ -123,11 +123,24 @@ and not something it can do. `porthole doctor` names both.
 
 **Loop devices are unavailable to a rootless container.** That is a kernel
 boundary, not a configuration knob: `LOOP_SET_FD` and block-device `mount`
-require `CAP_SYS_ADMIN` in the *initial* user namespace. It matters less than
-it sounds, because `pmbootstrap install --no-image` never touches a loop device
-(`_install.py` returns before `install_system_image`), and `fuse2fs` mounts
-ext4 from a plain file inside a user namespace, where ext4-on-loop is illegal.
-See `docs/SANDBOX-PROVISIONING.md`.
+require `CAP_SYS_ADMIN` in the *initial* user namespace, and `/dev/loop-control`
+is `root:disk` besides. Adding yourself to `disk` would work and is a worse
+standing privilege than the sudoers entry this tier exists to avoid — `disk` is
+raw read-write on every block device on the machine.
+
+It matters less than it sounds. `pmbootstrap install --no-image` never touches
+a loop device (`_install.py` returns before `install_system_image`), so the
+install rungs pass it whenever no loop device is present and everything else
+still runs: the rootfs chroot is populated and `pmbootstrap export` packs
+`boot.img` from it.
+
+**What the workspace does not produce is the rootfs disk IMAGE.** `pmbootstrap
+flasher flash_rootfs` needs that file, so a full rootfs+boot flash is a
+`--host` job; `porthole run tools/tk-flash-boot.sh` flashes the boot image the
+workspace did build. `fuse2fs` is *not* a way around this — it mounts a
+filesystem, and what pmbootstrap wants a loop device for is a **partitioned
+disk**; see `brain/findings/fuse2fs-cannot-replace-the-loop-device.md` and
+`docs/SANDBOX-PROVISIONING.md`.
 
 ## There is no second, weaker path
 

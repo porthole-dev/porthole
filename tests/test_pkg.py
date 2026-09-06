@@ -9,6 +9,7 @@ device, or four hours.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 import tempfile
@@ -774,6 +775,34 @@ def test_only_the_file_copy_attaches_stdin_to_the_container():
     """A build reading from an attached stdin is a build that can block on it."""
     assert "-i" in pkg.in_container("true", stdin=True)[:3]
     assert "-i" not in pkg.in_container("true")
+
+
+def test_a_live_tracked_build_is_not_replaced_by_the_buildroot_guess():
+    """`reattach_from_log` returns None for two OPPOSITE reasons -- "the
+    tracker is alive, its own file is better" and "there is nothing to
+    reattach to" -- and `pkg status` treated them the same.
+
+    So a running `porthole pkg build linux-...` was reported as
+    `pkg:device-google-taimen` at `39m30s`, reconstructed from a buildroot
+    staging directory an unrelated build had left there an hour earlier, with
+    a note saying it had been "started outside `porthole pkg`". Every field
+    wrong, about a build whose own status file was correct and one second old.
+    """
+    now = time.time()
+    snap = {"rung": "pkg:linux-postmarketos-qcom-msm8998-7.2",
+            "phase": "build", "state": "running", "pid": os.getpid(),
+            "elapsed": 99.1, "progress": None, "last": "  AR x.a",
+            "last_at": now - 0.1}
+    # A live tracker: reattach declines, and the untracked fallback must not
+    # run at all.
+    assert progress.reattach_from_log(pathlib.Path("/nonexistent"), snap) is None
+    assert progress.liveness(snap) == "running"
+
+    # The positive control: the same snapshot with a dead pid IS eligible for
+    # the fallback, or the guard above would be indistinguishable from
+    # removing the feature.
+    dead = dict(snap, pid=999999)
+    assert progress.liveness(dead) != "running"
 
 
 if __name__ == "__main__":

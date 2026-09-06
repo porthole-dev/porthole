@@ -87,6 +87,162 @@ def find_pmaports(cfg=None) -> pathlib.Path | None:
     return find_pmaports_with_source(cfg)[0]
 
 
+# The URLs pmbootstrap's `get_upstream_remote()` will accept, copied from
+# pmb/config/__init__.py's `git_repos["pmaports"]`. It matches with
+# `url in clean_url`, so a substring is the right shape here too.
+#
+# WHY THIS IS DUPLICATED. pmbootstrap raises rather than warns when no remote
+# matches, and it raises from inside `parse_channels_cfg` -- which every
+# `pmbootstrap install`, `build` and `status` reaches. Knowing the answer
+# BEFORE a twenty-minute build starts is the whole value, and importing pmb
+# from here is not available: the CLI is stdlib-only by rule, and on the
+# workspace tier pmbootstrap is not installed on this host at all.
+PMAPORTS_UPSTREAM_URLS = (
+    "https://gitlab.postmarketos.org/postmarketOS/pmaports.git",
+    "git@gitlab.postmarketos.org:postmarketOS/pmaports.git",
+)
+
+
+def _remote_lines(path, runner=None) -> list:
+    if runner is not None:
+        return runner(path)
+    import subprocess
+    try:
+        proc = subprocess.run(["git", "remote", "-v"], cwd=str(path),
+                              capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return proc.stdout.splitlines() if proc.returncode == 0 else []
+
+
+def upstream_remote(path, runner=None) -> str:
+    """The remote name pmbootstrap will accept for this checkout, or "".
+
+    Mirrors `remote_to_name_and_clean_url` + `get_upstream_remote`, including
+    the https authentication-segment strip GitLab CI needs. `runner` is a seam
+    so the matching can be tested without a git repository.
+    """
+    for line in _remote_lines(path, runner):
+        name, _, url = line.partition("\t")
+        url = url.split(" ", 1)[0].strip()          # drop the " (fetch)" tail
+        if url.startswith("https://"):
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            url = f"{parsed.scheme}://{parsed.hostname}{parsed.path}"
+        if any(u.lower() in url.lower() for u in PMAPORTS_UPSTREAM_URLS):
+            return name.strip()
+    return ""
+
+
+def channels_cfg_override(path, runner=None) -> str:
+    """The `channels.cfg` to hand pmbootstrap, or "" when it can find its own.
+
+    THE FORK PROBLEM, and it is the normal state for this tool rather than an
+    edge case. pmbootstrap reads channels.cfg from `<upstream>/main` -- not
+    from the working tree -- and finds `<upstream>` by matching a remote URL
+    against two hardcoded postmarketOS ones. A bring-up fork on GitHub matches
+    neither, so `pmbootstrap install` dies with
+
+        pmaports: could not find remote name for any URL '[...]' in git
+        repository: /pmb/cache_git/pmaports
+
+    which names no fix, no verb, and not the actual subject -- channels.cfg
+    was never mentioned. The data was all present: `origin/main:channels.cfg`
+    existed and was readable. pmbootstrap simply refused to name the remote.
+
+    `PMB_CHANNELS_CFG` is pmbootstrap's own documented override for this, so
+    the fix is neither a patch nor a write to the developer's repository: point
+    it at the checkout's own file. That is also the more honest source -- the
+    tree being built is the tree whose channel definitions apply.
+
+    Returned only when the checkout CANNOT satisfy pmbootstrap's own path, so a
+    stock clone keeps upstream's behaviour exactly, including its reason for
+    preferring main's copy over an old release branch's.
+    """
+    path = pathlib.Path(path)
+    if upstream_remote(path, runner):
+        return ""
+    cfg = path / "channels.cfg"
+    return str(cfg) if cfg.is_file() else ""
+
+
+def _quoted_body(text: str, var: str) -> str:
+    """The body of a `var=...` assignment, taken to its closing quote.
+
+    `subpackages` is normally several lines, so reading only the `=` line sees
+    the first entry and nothing else.
+    """
+    match = re.search(rf'(?m)^[ \t]*{re.escape(var)}=(.*)$', text)
+    if not match:
+        return ""
+    rest = match.group(1)
+    if rest[:1] in ('"', "'"):
+        end = text.find(rest[0], match.start(1) + 1)
+        return text[match.start(1) + 1:end] if end != -1 else rest
+    return rest.strip("\"'")
+
+
+def device_kernels(pmaports, codename: str) -> dict:
+    """The kernel flavours `device-<codename>` offers: {name: description}.
+
+    Mirrors pmbootstrap's `pmb.parse._apkbuild.kernels()` exactly -- the
+    subpackages named `device-<codename>-kernel-<flavour>`, with any `:func`
+    suffix stripped and `$pkgname` expanded, which is how every device package
+    in pmaports actually writes them.
+
+    WHY PORTHOLE HAS TO KNOW THIS. pmbootstrap's `kernel` setting defaults to
+    `stable`, and `pmbootstrap init` is the only thing that ever sets it -- an
+    interactive command the workspace tier exists to avoid needing. A device
+    that offers only `mainline`, which is most bring-ups, therefore fails
+    `pmbootstrap install` at the point where it has already created the rootfs
+    chroot:
+
+        ERROR: Selected kernel (stable) is not valid for device
+        google-taimen. Please run 'pmbootstrap init' to select a valid kernel.
+
+    -- advice that cannot be followed in a workspace, about a value pmaports
+    already answers. Descriptions are returned as well as names because a
+    device with two flavours is a question for a human, and the description is
+    what makes it answerable.
+    """
+    if not codename:
+        return {}
+    # `device/<category>/device-<codename>`, the layout load_devices walks --
+    # NOT `<category>/device-<codename>`, which is where the aport for a
+    # non-device package lives and where this looked first time round.
+    base = pathlib.Path(pmaports) / "device"
+    for category in CATEGORIES:
+        path = base / category / f"device-{codename}" / "APKBUILD"
+        if path.is_file():
+            break
+    else:
+        return {}
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return {}
+    pkgname = ""
+    name_match = re.search(r'(?m)^[ \t]*pkgname=(.*)$', text)
+    if name_match:
+        pkgname = name_match.group(1).strip().strip("\"'")
+    prefix = f"device-{codename}-kernel-"
+    out = {}
+    for token in _quoted_body(text, "subpackages").split():
+        name = token.split(":", 1)[0]
+        if pkgname:
+            name = name.replace("${pkgname}", pkgname).replace("$pkgname",
+                                                               pkgname)
+        if name.startswith(prefix):
+            flavour = name[len(prefix):]
+            # The description lives in the subpackage function. Best effort --
+            # a missing one must not hide a flavour that exists.
+            func = token.split(":", 1)[1] if ":" in token else flavour
+            desc = re.search(rf'(?m)^{re.escape(func)}\(\)[^\n]*\n(?:.*\n)*?'
+                             rf'[ \t]*pkgdesc="([^"]*)"', text)
+            out[flavour] = desc.group(1) if desc else ""
+    return out
+
+
 def find_aports_upstream(pmaports) -> pathlib.Path | None:
     """Alpine's aports checkout, which pmbootstrap clones beside pmaports.
 

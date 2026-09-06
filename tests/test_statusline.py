@@ -502,5 +502,122 @@ def test_a_quiet_log_is_not_a_running_build():
     assert snap is None, f"a log quiet for an hour was read as a live build: {snap}"
 
 
+# ------------------------------------- can you tell it is still alive? --
+
+def test_a_running_row_carries_evidence_that_it_is_moving():
+    """The row was `image  [ unknown ]  --` and nothing else.
+
+    A kernel rung has no percentage -- there is no total to be a fraction of
+    -- so the bar renders `unknown` and the figure renders `--`, and that is
+    byte for byte what the row showed for a build in its first second, in its
+    tenth minute, and one that had quietly stopped saying anything. Meanwhile
+    `porthole build status`, reading the SAME snapshot, printed the phase, the
+    elapsed and the last line.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _fake_repo(pathlib.Path(tmp))
+        now = 1000.0
+        _write(repo, {"rung": "image", "phase": "package", "state": "running",
+                      "pid": os.getpid(), "elapsed": 659.7, "progress": None,
+                      "eta": None, "compile_lines": 3805,
+                      "last": "  AS  x.o", "last_at": now - 2})
+        with _only_these_logs(pathlib.Path(tmp) / "nope"):
+            row = sl.build_line(repo, 100, now)
+        assert row, "no row at all"
+        assert "10m59s" in row, row              # elapsed
+        assert "package" in row, row             # phase
+        assert "3805 lines" in row, row          # a number that ticks up
+
+
+def test_a_long_silence_is_said_out_loud():
+    """The field the reader actually wants: not "is there a build" but "has it
+    said anything lately". `porthole build status` has had it (as `(Nm ago)`
+    on the last line) since the stall notes were written."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _fake_repo(pathlib.Path(tmp))
+        now = 1000.0
+        _write(repo, {"rung": "image", "phase": "package", "state": "running",
+                      "pid": os.getpid(), "elapsed": 900.0, "progress": None,
+                      "eta": None, "compile_lines": 10,
+                      "last": "  AS  x.o", "last_at": now - 400})
+        with _only_these_logs(pathlib.Path(tmp) / "nope"):
+            row = sl.build_line(repo, 100, now)
+        assert row and "quiet" in row, row
+        assert "6m40s" in row, row
+
+
+def test_a_fresh_build_says_nothing_about_being_quiet():
+    """The positive control. A marker that is always on is not a marker."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _fake_repo(pathlib.Path(tmp))
+        now = 1000.0
+        _write(repo, {"rung": "image", "phase": "package", "state": "running",
+                      "pid": os.getpid(), "elapsed": 900.0, "progress": None,
+                      "eta": None, "compile_lines": 10,
+                      "last": "  AS  x.o", "last_at": now - 3})
+        with _only_these_logs(pathlib.Path(tmp) / "nope"):
+            row = sl.build_line(repo, 100, now)
+        assert row and "quiet" not in row, row
+
+
+def test_a_stale_run_does_not_get_a_moving_glyph():
+    """`stale` is exactly the case where the file still says `running` --
+    nothing wrote a final state because the process was killed -- so handing
+    the raw snapshot to `spinner` got a spinner frame back, and the row read
+    `. image  stale`: a moving glyph beside the word for not moving."""
+    import porthole_progress as pp
+
+    now = 1000.0
+    snap = {"rung": "image", "phase": "package", "state": "running",
+            "pid": 999999, "elapsed": 900.0, "progress": None,
+            "last": "x", "last_at": now - 5}
+    text = "".join(t for t, _ in sl.row_segments(snap, False, 100, now))
+    assert "stale" in text, text
+    frames = pp._SPIN + pp._SPIN_ASCII
+    assert not any(f in text for f in frames), text
+
+
+def test_a_finished_pmbootstrap_invocation_is_not_a_running_build():
+    """The row read
+
+        device-google-taimen  [ unknown ]  --  42m50s  build  · reattached
+
+    where the name came from a staged APKBUILD an unrelated build had left
+    behind 42 minutes earlier, and the freshness came from a `ccache -s` five
+    seconds before. The log is shared by the WHOLE workspace, so its mtime
+    says only that some pmbootstrap ran -- `status`, `index`, a `chroot --
+    ccache -s`, anything. A running build has not printed DONE!.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        base = pathlib.Path(tmp)
+        (base / "repo").mkdir()
+        repo = _fake_repo(base / "repo")
+        pmb = base / "pmb"
+        staged = pmb / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+        staged.mkdir(parents=True)
+        (staged / "APKBUILD").write_text("pkgname=device-google-taimen\n")
+        now = time.time()
+        os.utime(staged / "APKBUILD", (now - 2570, now - 2570))
+
+        (pmb / "log.txt").write_text(
+            "(1) [18:45] (native) % su pmos -c 'ccache -s'\n"
+            "(1) [18:45] NOTE: chroot is still active\n"
+            "(1) [18:45] DONE!\n")
+        os.utime(pmb / "log.txt", (now - 3, now - 3))
+        with _only_these_logs(pmb):
+            assert sl.build_line(repo, 100, now) is None
+
+        # THE POSITIVE CONTROL. The same stale staged name and the same fresh
+        # mtime, with a log that is mid-compile, must still draw the row --
+        # otherwise this fix is indistinguishable from deleting the feature.
+        (pmb / "log.txt").write_text(
+            "(1) [18:45]   CC      drivers/gpu/msm.o\n"
+            "(1) [18:45]   AR      built-in.a\n")
+        os.utime(pmb / "log.txt", (now - 3, now - 3))
+        with _only_these_logs(pmb):
+            row = sl.build_line(repo, 100, now)
+        assert row and "device-google-taimen" in row, row
+
+
 if __name__ == "__main__":
     sys.exit(main())

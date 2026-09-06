@@ -515,8 +515,8 @@ tb_before() { # tb_before A B -> "ok" when A appears before B in tkbuild()
 }
 is "tkbuild purges after _ph_make" \
    "$(tb_before '_ph_make || return 1' 'tkpurge-devpkgs || return 1')" "ok"
-is "tkbuild purges before pmbootstrap install" \
-   "$(tb_before 'tkpurge-devpkgs || return 1' 'pmbootstrap install --password')" "ok"
+is "tkbuild purges before it installs" \
+   "$(tb_before 'tkpurge-devpkgs || return 1' '_ph_install_rootfs')" "ok"
 
 # ----------------------------------------------- issue #20: the size guard --
 #
@@ -655,6 +655,102 @@ is "ABSENT is not resumable however good the record" "$(push ABSENT match)" "76"
 # satisfy the first assertion; a BOOTED device must still reach the push and
 # fail on the stubbed scp.
 is "BOOTED still pushes, and the stubs fail it"      "$(push BOOTED match)"  "1"
+
+# ---------------------------------------------------------------------------
+# `pmbootstrap install` in the rootless workspace.
+#
+# install builds any missing package in STRICT mode -- pmb.chroot.apk calls
+# pmb.build.packages() with the default strict=True, and no install flag
+# changes it. A strict build ends in zap_buildroots(), which umounts by path,
+# and the recursive /dev bind the rootless workspace needs leaves propagated
+# sub-mounts a userns cannot umount:
+#
+#   ERROR: Failed to umount: /pmb/chroot_buildroot_aarch64/dev/shm
+#
+# The zap runs in finish(), AFTER the apk is written and verified, so the
+# package that killed the run is built and the next attempt skips it. That is
+# what makes retrying correct rather than hopeful -- and it is also why only
+# THAT failure may be retried: a loop that retries real errors turns a
+# two-second failure into a twenty-minute one.
+# The value is irrelevant -- the stub never reads it -- and it is passed
+# through a variable so this file carries no `<something>PASSWORD=<literal>`,
+# which tests/test_secrets.py reads as a credential and is right to.
+PW=x
+install_loop() { # install_loop <fail-count> <log-text> -> "rc attempts"
+    rm -rf "$TMP/inst"; mkdir -p "$TMP/inst/pmb"
+    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+        PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" \
+        PORTHOLE_PMB_DIR="$TMP/inst/pmb" TK_PMOS_PASSWORD="$PW" \
+        TK_INSTALL_ATTEMPTS=6 FAILS="$1" LOGTEXT="$2" \
+        bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+                 tries=0
+                 pmbootstrap() {
+                     tries=$((tries + 1)); echo "$tries" > "$PORTHOLE_PMB_DIR/tries"
+                     printf "%s\n" "$LOGTEXT" > "$PORTHOLE_PMB_DIR/log.txt"
+                     [ "$tries" -gt "$FAILS" ]
+                 }
+                 _ph_install_rootfs >/dev/null 2>&1
+                 echo "$? $(cat "$PORTHOLE_PMB_DIR/tries")"'
+}
+ZAP="ERROR: Failed to umount: /pmb/chroot_buildroot_aarch64/dev/shm"
+is "a clean install runs once"                "$(install_loop 0 "$ZAP")" "0 1"
+is "the zap failure is retried until it goes" "$(install_loop 2 "$ZAP")" "0 3"
+is "the attempt ceiling is honoured"          "$(install_loop 9 "$ZAP")" "1 6"
+# THE POSITIVE CONTROL, and the whole reason the log is inspected rather than
+# the exit code: a real failure must cost one attempt, not the ceiling.
+is "any other failure is not retried" \
+   "$(install_loop 9 'ERROR: no space left on device')" "1 1"
+
+# Both rungs that run `pmbootstrap install` must go through it. tkbuild had the
+# identical defect and would have been left with it.
+for fn in tkbuild tksysimage; do
+    body=$(sed -n "/^$fn() {/,/^}/p" "$ROOT/tools/ph-build.sh")
+    is "$fn installs through _ph_install_rootfs" \
+       "$(saw "$body" "_ph_install_rootfs")" "yes"
+    is "$fn does not call pmbootstrap install itself" \
+       "$(saw "$body" "pmbootstrap install --password")" "no"
+done
+
+# The image rung needs no kernel tree -- that is the whole point of it -- so it
+# must not reach anything that compiles one.
+imgbody=$(sed -n "/^tksysimage() {/,/^}/p" "$ROOT/tools/ph-build.sh")
+is "tksysimage does not build the tree"  "$(saw "$imgbody" "_ph_make")"  "no"
+is "tksysimage pins the aport kernel"    "$(saw "$imgbody" "_ph_install_kernel_release")" "yes"
+is "tksysimage verifies against the apk" "$(saw "$imgbody" "_ph_dtb_from_apk")" "yes"
+
+
+# ---------------------------------------------------------------------------
+# The rootfs image: never flash one that did not come from this install.
+#
+# `install` writes boot.img into the rootfs chroot and THEN builds the disk
+# image, so in a good pair the image is never meaningfully older. A run that
+# died at `modprobe loop` had already run `truncate -s 1482M`, leaving a 1.5 GB
+# file with nothing in it exactly where flash_rootfs looks -- beside a
+# perfectly good boot.img, and indistinguishable from a real one. flash_rootfs
+# writes ~640 MB and is not undoable. Observed 2026-09-06.
+pair() { # pair <boot-age-s> <rootfs-age-s|none> -> rc of _ph_verify_rootfs_pair
+    rm -rf "$TMP/exp"; mkdir -p "$TMP/exp"
+    : > "$TMP/exp/boot.img"; touch -d "@$(( $(date +%s) - $1 ))" "$TMP/exp/boot.img"
+    if [ "$2" != none ]; then
+        echo x > "$TMP/exp/google-taimen.img"
+        touch -d "@$(( $(date +%s) - $2 ))" "$TMP/exp/google-taimen.img"
+    fi
+    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+        PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" \
+        EXP="$TMP/exp" \
+        bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+                 # Redirect the fixed export path at the fixture.
+                 readlink() { command readlink "${@/\/tmp\/postmarketOS-export/$EXP}"; }
+                 stat()     { command stat     "${@/\/tmp\/postmarketOS-export/$EXP}"; }
+                 _ph_verify_rootfs_pair "$EXP/boot.img" >/dev/null 2>&1; echo $?'
+}
+is "a pair written together is accepted"      "$(pair 10 12)"   "0"
+is "a rootfs older than boot.img is refused"  "$(pair 10 3600)" "1"
+is "no rootfs image at all is refused"        "$(pair 10 none)" "1"
+# THE POSITIVE CONTROL for the threshold: a few seconds of ordering inside one
+# install must not read as two different runs.
+is "seconds of skew inside one install pass"  "$(pair 0 30)"    "0"
+
 
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

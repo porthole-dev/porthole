@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_USAGE
 
 AUDIT = "/var/log/porthole-sandbox.log"
 SUDOERS_DST = "/etc/sudoers.d/60-porthole-sandbox"
@@ -46,6 +46,14 @@ LOCK_LABEL = "io.porthole.device-lock"
 # shadowing a path in the user's checkout is a confusing surprise.
 DEVICE_KEY = ".porthole/device_key"      # relative to $HOME
 DEVICE_KEY_IN = "/run/porthole/device_key"
+
+# Where pmaports lands inside the workspace. Exactly the path pmbootstrap
+# derives from `work` = /pmb, so both pmbootstrap and ph-build.sh's own
+# _PH_APORTS fallback find it with no extra configuration on either side.
+# Named once because three places have to agree: the mount, the pmbootstrap
+# config written into the work dir, and the check that the workspace can see
+# it at all.
+APORTS_IN = "/pmb/cache_git/pmaports"
 # Where the image keeps the pmbootstrap SOURCE checkout. The apk package
 # ships no helpers/, and helpers/envkernel.sh is what every build uses.
 PMBOOTSTRAP_SRC_IN = "/opt/pmbootstrap-src"
@@ -137,7 +145,67 @@ def _host_pmb_cfg() -> dict:
     return out
 
 
-def pmb_config_text(device: str, carry: dict | None = None) -> str:
+def resolve_pmb_kernel(cfg, pmaports, device: str) -> tuple[str, str]:
+    """(value, why) for pmbootstrap's `kernel` setting. "" when it has no say.
+
+    pmbootstrap defaults this to `stable` and only `pmbootstrap init` -- an
+    interactive command the workspace tier exists to avoid needing -- ever
+    changes it. A device offering only `mainline`, which is most bring-ups,
+    therefore fails INSIDE `pmbootstrap install`, after the rootfs chroot has
+    been created, with "run 'pmbootstrap init' to select a valid kernel": a
+    twenty-minute path to a question pmaports had already answered.
+
+    Precedence, and each step earns its place: an explicit
+    PORTHOLE_PMB_KERNEL is the developer's word; the host's own pmbootstrap
+    config is what they configured for host builds and the workspace should
+    not silently differ from it; and the derived answer is used only when the
+    device offers exactly one, because choosing between two flavours changes
+    which kernel lands on the phone and is not a guess to make for someone.
+    """
+    import porthole_pmaports as pmap
+
+    explicit = (cfg.get("PORTHOLE_PMB_KERNEL") or "").strip()
+    if explicit:
+        return explicit, "PORTHOLE_PMB_KERNEL"
+    carried = (_host_pmb_cfg().get("kernel") or "").strip()
+    if carried:
+        return carried, "the host's pmbootstrap config"
+    if not pmaports:
+        return "", ""
+    flavours = pmap.device_kernels(pmaports, device)
+    if len(flavours) == 1:
+        only = next(iter(flavours))
+        return only, f"the only one device-{device} offers"
+    return "", ""
+
+
+def pmb_kernel_problem(value: str, pmaports, device: str) -> str:
+    """Why pmbootstrap will refuse this `kernel` setting, or "".
+
+    Same check `pmb.install.get_kernel_package` makes, run before the build
+    rather than after the chroot work. An empty flavour set means the kernel
+    is hardcoded in the device package's depends and the setting is not
+    consulted at all -- so it cannot be wrong.
+    """
+    import porthole_pmaports as pmap
+
+    if not pmaports or value == "none":
+        return ""
+    flavours = pmap.device_kernels(pmaports, device)
+    if not flavours or value in flavours:
+        return ""
+    offered = ", ".join(sorted(flavours))
+    if not value:
+        return (f"pmbootstrap will default `kernel` to `stable`, which "
+                f"device-{device} does not offer ({offered}). Set "
+                f"PORTHOLE_PMB_KERNEL")
+    return (f"`kernel = {value}` is not one device-{device} offers "
+            f"({offered}) -- pmbootstrap refuses it inside `install`, after "
+            f"the rootfs chroot is built")
+
+
+def pmb_config_text(device: str, carry: dict | None = None,
+                    kernel: str = "") -> str:
     """The pmbootstrap config the workspace uses, as an INI string.
 
     `work` AND `aports` both have to be set. `aports` defaults to
@@ -146,9 +214,14 @@ def pmb_config_text(device: str, carry: dict | None = None) -> str:
     looking under /root -- which reads as "pmaports dir not found: /root/..."
     and looks like a missing clone rather than a config that half applied.
     """
-    rows = {"work": "/pmb", "aports": "/pmb/cache_git/pmaports"}
+    rows = {"work": "/pmb", "aports": APORTS_IN}
     if device:
         rows["device"] = device
+    # Resolved by the caller, which has already consulted `carry` -- so it is
+    # set here rather than setdefault'd, and an empty value leaves pmbootstrap
+    # its own default.
+    if kernel:
+        rows["kernel"] = kernel
     for key, value in (carry or {}).items():
         rows.setdefault(key, value)
     body = "".join(f"{k} = {v}\n" for k, v in rows.items())
@@ -222,7 +295,7 @@ def _mounts(root, pmb_dir, workdir, key, device, extra, aports=None):
     # so both pmbootstrap and ph-build.sh's own `_PH_APORTS` fallback find it
     # with no extra configuration on either side.
     if aports:
-        mounts.append((str(aports), "/pmb/cache_git/pmaports", "rw"))
+        mounts.append((str(aports), APORTS_IN, "rw"))
     # porthole's own user config layer (lib/porthole.py load_config), where
     # `porthole use` writes the active device. Without this the container
     # resolves a DIFFERENT PORTHOLE_DEVICE than the host, tk-device.sh
@@ -297,7 +370,7 @@ CONTAINER_PATH = ("/porthole/bin:/usr/local/sbin:/usr/local/bin:"
                   "/usr/sbin:/usr/bin:/sbin:/bin")
 
 
-def _up_argv(root, image, mounts, device) -> list[str]:
+def _up_argv(root, image, mounts, device, channels_cfg: str = "") -> list[str]:
     """The persistent workspace.
 
     Not `--rm`: all state lives in the mounts above, so the container itself is
@@ -379,6 +452,16 @@ def _up_argv(root, image, mounts, device) -> list[str]:
     # read-only 2026-09-01: the image does carry a working /usr/bin/adb from
     # android-tools, so `adb` is the right value when that change is made.
     argv += ["-e", "FASTBOOT=fastboot"]
+    # The sixth, and the one that stops a forked pmaports dead. pmbootstrap
+    # reads channels.cfg from `<upstream-remote>/main` and identifies the
+    # upstream by matching a remote URL against two hardcoded postmarketOS
+    # ones -- so a bring-up fork, which is the normal state for this tool,
+    # matches neither and every `pmbootstrap install` dies naming a remote
+    # rather than the file it wanted. Decided on the HOST, where git is
+    # reliable and the real checkout is, and sent as the CONTAINER path: the
+    # same translation PORTHOLE_KERNEL_TREE gets, and for the same reason.
+    if channels_cfg:
+        argv += ["-e", f"PMB_CHANNELS_CFG={APORTS_IN}/channels.cfg"]
     for src, dst, opts in mounts:
         argv += ["-v", f"{src}:{dst}:{opts}"]
     argv += [image, "sleep", "infinity"]
@@ -449,6 +532,82 @@ def _assert_lock_matches(ctx) -> None:
                    "`porthole sandbox down` and `up` again")
 
 
+def _container_mounts() -> set:
+    """Destination paths mounted into the running container, "" set on error.
+
+    A container is created ONCE, with the mounts its config named at that
+    moment. Set a working repo afterwards -- which `porthole init` now does,
+    and which is the ordinary order of events on a new host -- and the
+    workspace still has no /work: ph-build.sh dies on its own
+    `${PORTHOLE_WORKDIR:?}` with a message about a variable, naming neither the
+    container nor the fix.
+    """
+    try:
+        proc = subprocess.run(
+            ["podman", "inspect", "-f",
+             "{{range .Mounts}}{{.Destination}}\n{{end}}", CONTAINER],
+            capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if proc.returncode != 0:
+        return set()
+    return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+
+
+def _inside(path, base) -> bool:
+    """Is `path` at or under `base`? Resolved, so a symlink cannot lie."""
+    try:
+        pathlib.Path(path).resolve().relative_to(pathlib.Path(base).resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def aports_gap(cfg, mounts) -> str:
+    """Why the workspace cannot see pmaports, or "". PURE given `mounts`.
+
+    Two ways it can be there and only one of them is a mount: the workspace's
+    own work dir may hold a clone at the path pmbootstrap derives (`pmbootstrap
+    init` run inside the container puts one there), and that arrives through
+    /pmb rather than through a bind of its own. Checking the mount list alone
+    would call a working workspace broken.
+    """
+    if APORTS_IN in mounts:
+        return ""
+    own = _sandbox_pmb(cfg) / "cache_git" / "pmaports"
+    if (own / "device").is_dir():
+        return ""
+    # WHICH of the two problems it is. They have different fixes, and telling
+    # someone to go and find a pmaports checkout they have already configured
+    # is how "one command sets this host up" stops being believed.
+    import porthole_pmaports as pmap
+
+    found, via = pmap.find_pmaports_with_source(cfg)
+    if found:
+        return (f"the workspace cannot see pmaports ({found}, via {via}) -- "
+                f"it started before that was configured, and mounts are fixed "
+                f"when the container is created. `porthole sandbox down` then "
+                f"`up`")
+    return ("no pmaports checkout on this host, so nothing in the workspace "
+            "can build -- `porthole init` adopts one or clones it, then "
+            "`porthole sandbox down` and `up`")
+
+
+def workdir_drift(cfg, mounts) -> str:
+    """Why the running workspace cannot build for this device, or "". PURE.
+
+    Only the case that actually breaks a build: a working repo is configured
+    on the host and the container has no /work to find it at. The reverse --
+    a container carrying /work while the host has forgotten the key -- is the
+    host's problem and `porthole build` already names it.
+    """
+    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
+    if not workdir or "/work" in mounts:
+        return ""
+    return ("the running workspace has no working repo mounted, so no build "
+            "can run in it -- `porthole sandbox down` then `up`")
+
+
 def _container_running() -> bool:
     out = subprocess.run(
         ["podman", "ps", "-q", "-f", f"name=^{CONTAINER}$"],
@@ -462,6 +621,22 @@ def _up(ctx, args) -> int:
                    "the workspace needs it; see `porthole doctor`")
     if _container_running():
         _assert_lock_matches(ctx)
+        # "already up" was a complete answer only while the mounts could not
+        # go stale. They can: they are fixed at creation, so a workspace
+        # started before `porthole init` set the working repo has no /work and
+        # cannot build -- and `up`, the command someone runs to fix exactly
+        # that, said "already up" and changed nothing. Recreating it silently
+        # would be worse (it is the caller's container and a build may be in
+        # it), so say what is wrong and name the two commands.
+        mounts = _container_mounts()
+        stale = [m for m in (aports_gap(ctx.cfg, mounts),
+                             workdir_drift(ctx.cfg, mounts)) if m]
+        if stale:
+            for message in stale:
+                ctx.out.warn(message)
+            ctx.out.hint("porthole sandbox down     then `up` -- mounts are "
+                         "fixed when the container is created")
+            return EX_STATE
         ctx.out(f"  {CONTAINER} is already up")
         return EX_OK
 
@@ -487,26 +662,75 @@ def _up(ctx, args) -> int:
     # Written every `up`, not once: it is cheap, it keeps the device in step
     # with `porthole use`, and a config that silently went stale is the kind of
     # thing that surfaces four minutes into a build as the wrong device.
-    (pmb / PMB_CFG_NAME).write_text(
-        pmb_config_text(device, _host_pmb_cfg()))
+    # The kernel flavour has to be decided HERE, where pmaports is readable and
+    # the profile is loaded. Deciding it inside the container would mean
+    # `pmbootstrap init`, which is interactive and is the thing this tier
+    # exists to remove.
+    import porthole_pmaports as _pmap
 
-    # The host's pmaports checkout, shared rather than re-cloned. It lives in
-    # the HOST work dir, which the workspace otherwise does not touch.
-    host_pmb = pathlib.Path(ctx.cfg.get("PORTHOLE_PMB_DIR") or
-                            pathlib.Path.home() / ".local/var/pmbootstrap"
-                            ).expanduser()
-    aports = host_pmb / "cache_git" / "pmaports"
-    if not (aports / "device").is_dir():
-        ctx.out(ctx.out.paint(
-            f"  note: no pmaports checkout at {aports}\n"
-            f"  the workspace has nothing to build from. Run `pmbootstrap init`\n"
-            f"  on the host once to create it, then `porthole sandbox up` again.",
-            "yellow"))
+    _checkout = _pmap.find_pmaports(ctx.cfg)
+    kernel, kernel_why = resolve_pmb_kernel(ctx.cfg, _checkout, device)
+    (pmb / PMB_CFG_NAME).write_text(
+        pmb_config_text(device, _host_pmb_cfg(), kernel))
+    if kernel:
+        ctx.out(ctx.out.paint(f"  kernel: {kernel}  ({kernel_why})", "grey"))
+    problem = pmb_kernel_problem(kernel, _checkout, device)
+    if problem:
+        ctx.out.warn(problem)
+
+    # The host's pmaports checkout, shared rather than re-cloned.
+    #
+    # Through the SHARED resolver, not a hardcoded path. This looked only in
+    # `$PORTHOLE_PMB_DIR/cache_git/pmaports` -- pmbootstrap's own clone -- so a
+    # host whose pmaports is named by PORTHOLE_PMAPORTS or the per-device key
+    # was told "the workspace has nothing to build from, run `pmbootstrap init`
+    # on the host", which is both false and the opposite of what the workspace
+    # tier exists to avoid: `porthole init` had already ASKED for that checkout
+    # and written the key, and `sandbox up` did not read it. The workspace then
+    # came up with no pmaports mounted at all and every build in it would have
+    # failed on a missing aport.
+    #
+    # Four things can answer "where is pmaports" and find_pmaports_with_source
+    # is the one place that knows all four and can say which answered.
+    import porthole_pmaports as pmap
+
+    checkout, via = pmap.find_pmaports_with_source(ctx.cfg)
+    aports = checkout
+    if aports and _inside(aports, pmb):
+        # It already lives in the work dir mounted at /pmb, so it arrives in
+        # the container for free. Binding it over itself is at best redundant
+        # and at worst a nested mount podman has to unpick.
+        ctx.out(ctx.out.paint(f"  pmaports: {aports}  (inside the work dir)",
+                              "grey"))
         aports = None
+    elif aports:
+        ctx.out(ctx.out.paint(f"  pmaports: {aports}  (via {via})", "grey"))
+    else:
+        ctx.out(ctx.out.paint(
+            "  note: no pmaports checkout found on this host, so the "
+            "workspace\n"
+            "  has nothing to build from. `porthole init` adopts one or "
+            "clones it.",
+            "yellow"))
 
     mounts = _mounts(ctx.root, str(pmb), ctx.cfg.get("PORTHOLE_WORKDIR"), key,
                      device, args.mount, aports)
-    rc = subprocess.run(_up_argv(ctx.root, tag, mounts, device)).returncode
+    # Asked on the host, where git works and the checkout really is. Empty for
+    # a stock clone, which keeps pmbootstrap's own behaviour exactly.
+    # `checkout`, not `aports`: a clone that lives inside the work dir needs no
+    # mount and still needs this, and reading the one that was zeroed for the
+    # mount decision would skip exactly that case.
+    channels_cfg = pmap.channels_cfg_override(checkout) if checkout else ""
+    if channels_cfg:
+        ctx.out(ctx.out.paint(
+            "  pmaports has no postmarketOS remote (a fork), so pmbootstrap "
+            "cannot find\n"
+            "  channels.cfg the way it insists on reading it. Pointing "
+            "PMB_CHANNELS_CFG at\n"
+            "  the checkout's own copy -- its own documented override, and no "
+            "write to your repo.", "grey"))
+    rc = subprocess.run(
+        _up_argv(ctx.root, tag, mounts, device, channels_cfg)).returncode
     if rc == 0:
         # Device nodes are bind mounts and live in the container's mount
         # namespace, so a restart leaves empty files where a chroot's dev/null
@@ -685,6 +909,30 @@ def _container_state(root: pathlib.Path, cfg=None) -> dict:
     if out["image_built"] and not out["container_running"]:
         out["issues"].append(f"{CONTAINER} is not running -- "
                              f"run `porthole sandbox up`")
+    # The mounts are fixed at creation. A workspace started before the working
+    # repo was configured has no /work, so every build in it fails on
+    # ph-build.sh's own `${PORTHOLE_WORKDIR:?}` -- and `sandbox status`
+    # reported "sandbox is configured" the whole time, which is the shape of
+    # green this file has already been burned by twice.
+    out["workdir"] = ((cfg or {}).get("PORTHOLE_WORKDIR") or "").strip()
+    # Tri-state, the same shape as the device key one row below, and for the
+    # same reason: "no working repo is configured" and "one is configured and
+    # the container cannot see it" are different problems with different
+    # fixes, and only the second is the workspace's fault.
+    out["workdir_mounted"] = None
+    out["aports_visible"] = None
+    if out["container_running"]:
+        # One inspect answers both questions.
+        mounts = _container_mounts()
+        gap = aports_gap(cfg or {}, mounts)
+        out["aports_visible"] = not gap
+        if gap:
+            out["issues"].append(gap)
+        if out["workdir"]:
+            drift = workdir_drift(cfg or {}, mounts)
+            out["workdir_mounted"] = not drift
+            if drift:
+                out["issues"].append(drift)
     if not out["device_key"]:
         out["issues"].append("no device key yet -- `porthole sandbox up` "
                              "creates one so the workspace never needs ~/.ssh")
@@ -762,6 +1010,31 @@ def _status(ctx) -> int:
             line("device key", True,
                  f"{c['device_key']} " + o.paint("(device not reachable to "
                                                  "check)", "grey"))
+        # Without pmaports there is no aport to build and no device package,
+        # so a workspace missing it is up and useless -- which is exactly what
+        # it looked like, because nothing reported it.
+        if c.get("aports_visible") is True:
+            line("pmaports", True, f"mounted at {APORTS_IN}")
+        elif c.get("aports_visible") is False:
+            line("pmaports", False,
+                 o.paint("not visible in the workspace -- nothing can build",
+                         "red"))
+        # A kernel or image build cannot run without this, and its absence was
+        # invisible from every other row.
+        if c.get("workdir_mounted") is True:
+            line("working repo", True, f"{c['workdir']}  at /work")
+        elif c.get("workdir_mounted") is False:
+            line("working repo", False,
+                 o.paint(f"{c['workdir']} is NOT mounted -- this workspace "
+                         f"started before it was set", "red"))
+        elif not c["workdir"]:
+            # Not a cross: `porthole pkg build` needs no working repo, so a
+            # workspace without one is not broken -- only unable to build a
+            # kernel or a system image, which is what the note says.
+            o("  {} {:<22} {}".format(
+                o.mark("skip"), "working repo",
+                o.paint("none set -- `porthole init` writes it; kernel and "
+                        "image builds need it", "grey")))
         o.blank()
 
         o.heading("host sudo")

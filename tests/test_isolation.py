@@ -48,11 +48,22 @@ class Skip(Exception):
     """
 
 
-def needs_pmaports():
+def needs_pmaports() -> str:
+    """The pmaports checkout, as a path a subprocess can be handed.
+
+    Returned rather than merely asserted, because `run()` isolates
+    XDG_CONFIG_HOME on purpose -- this suite is ABOUT config resolution -- so
+    a subprocess sees none of the tester's config.env and cannot find a
+    checkout that config.env is the only record of. The guard passed and the
+    subprocess then failed with "no pmaports checkout found", which is a
+    harness fault reported as a product one.
+    """
     import porthole
     import porthole_pmaports as pmap
-    if not pmap.find_pmaports(porthole.load_config(root=ROOT)):
+    found = pmap.find_pmaports(porthole.load_config(root=ROOT))
+    if not found:
         raise Skip("no pmaports checkout on this host")
+    return str(found)
 
 
 TMPXDG = tempfile.mkdtemp(prefix="porthole-iso-")
@@ -179,10 +190,10 @@ def test_worktree_previews_or_refuses_but_never_writes_without_yes():
     """Two correct outcomes and no third: it previews, or it refuses because
     one already exists. What it must never do is create one -- a preview that
     modifies the user's pmbootstrap clone is not a preview."""
-    needs_pmaports()
+    where = {"PORTHOLE_PMAPORTS": needs_pmaports()}
     saw_preview = saw_refusal = False
     for device in DEVICES:
-        rc, out, err = run("aports", "worktree", "-d", device)
+        rc, out, err = run("aports", "worktree", "-d", device, env=where)
         if rc == 0:
             assert "would give" in out.lower(), out
             assert "now has its own" not in out, "it created one on a preview"
@@ -196,7 +207,7 @@ def test_worktree_previews_or_refuses_but_never_writes_without_yes():
 def test_worktree_refuses_to_clobber_an_existing_one():
     """Criterion 7. Recreating a worktree silently would throw away whatever
     was uncommitted in it."""
-    needs_pmaports()
+    where = {"PORTHOLE_PMAPORTS": needs_pmaports()}
     import porthole_cmd_use as use
     cfg_text = (ROOT / "profiles").parent  # noqa: F841 - readability only
     for device in DEVICES:
@@ -204,7 +215,8 @@ def test_worktree_refuses_to_clobber_an_existing_one():
         cfg = cfg_for(device)
         if not cfg.get(key):
             continue
-        rc, out, err = run("aports", "worktree", "-d", device, "--yes")
+        rc, out, err = run("aports", "worktree", "-d", device, "--yes",
+                           env=where)
         assert rc != 0, f"{device}: recreated an existing worktree without --force"
         assert "already exists" in (out + err), (out + err)
         return
