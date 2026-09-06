@@ -325,6 +325,7 @@ def check_host(ch: Checks, cfg, family: str) -> None:
 
     _check_envkernel(ch, cfg)
     _check_pmaports(ch, cfg)
+    _check_device_workdir(ch, cfg)
     _check_host_workdir(ch, cfg)
 
     # flock backs the device mutex. Without it parallel workers corrupt each
@@ -359,6 +360,39 @@ def _check_pmaports(ch: Checks, cfg) -> None:
     # computed in parallel with the search is a label that can disagree with
     # the path beside it, which is worse than printing no label at all.
     ch.add("host: pmaports", "ok", f"{found}  (via {via})")
+
+
+def _check_device_workdir(ch: Checks, cfg) -> None:
+    """The DEVICE working repo -- a third directory, and the one that was
+    reported nowhere.
+
+    doctor already prints two work dirs, both of them pmbootstrap's. This one
+    is the developer's: notes, logs, and the kernel tree if there is one.
+    Without it `porthole build`, `verify`, `dts` and six milestones have
+    nothing to read, and every one of them reported that as a variable name
+    rather than as a directory that does not exist -- with no row here to say
+    which of the three "work dir" things was meant.
+    """
+    device = cfg.get("PORTHOLE_DEVICE", "")
+    key = (f"PORTHOLE_WORKDIR_{device.upper().replace('-', '_')}"
+           if device else "PORTHOLE_WORKDIR")
+    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
+    if not workdir:
+        ch.add("host: working repo", "warn",
+               f"none for {device or 'this device'} -- `porthole build`, "
+               f"`verify` and `dts` need it",
+               fix="porthole init    finds or creates one and writes " + key)
+        return
+    if not pathlib.Path(workdir).is_dir():
+        ch.add("host: working repo", "fail",
+               f"{key} names {workdir}, which does not exist",
+               fix=f"mkdir -p {workdir}    # or `porthole init` to point it "
+                   f"somewhere real")
+        return
+    tree = pathlib.Path(workdir) / "linux"
+    note = ("" if (tree / "Makefile").is_file()
+            else "  (no kernel tree in it; `porthole build image` needs none)")
+    ch.add("host: working repo", "ok", f"{workdir}  (via {key}){note}")
 
 
 def _check_host_workdir(ch: Checks, cfg) -> None:
@@ -873,9 +907,17 @@ def _check_pmos_password(ch: Checks, env) -> None:
     if (env.get("TK_PMOS_PASSWORD") or "").strip():
         ch.add("host: TK_PMOS_PASSWORD", "ok", "set")
         return
+    # The rungs come from build's own table, so the two cannot drift. This row
+    # named `upgrade`, which does not run `pmbootstrap install` at all and has
+    # never needed the password -- avoiding the mkfs is the entire reason it
+    # is fast.
+    try:
+        from porthole_cmd_build import INSTALL_RUNGS as rungs
+    except Exception:  # noqa: BLE001 -- doctor must run when build cannot
+        rungs = ("kernel", "image")
+    named = " and ".join(f"`porthole build {r}`" for r in rungs)
     ch.add("host: TK_PMOS_PASSWORD", "warn",
-           "unset -- `porthole build kernel` and `upgrade` need it and stop "
-           "dead without it",
+           f"unset -- {named} need it and stop dead without it",
            fix="export TK_PMOS_PASSWORD=<the rootfs user password>"
                "    # an environment variable on purpose: a flag would show "
                "it in ps")
