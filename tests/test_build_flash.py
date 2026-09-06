@@ -10,6 +10,7 @@ PORTHOLE_ACTIVE_SLOT sat unread in the schema.
 
 Every test here is a refusal. Nothing in this file builds or flashes anything.
 """
+import argparse
 import json
 import re
 import os
@@ -53,6 +54,10 @@ class _FakeCtx:
         self.cfg = cfg or {}
         self.out = _FakeCtx._FakeOut()
         self.root = ROOT
+        # `_run` reads `--wait` off it to decide how long to queue for the
+        # buildroot lock. An argparse Namespace, because that is what the real
+        # ctx carries and `getattr(..., "wait", 0.0)` must find the same shape.
+        self.args = argparse.Namespace(wait=0.0)
 
 
 # ----------------------------------------------------------------- refusals --
@@ -698,6 +703,7 @@ def test_the_host_branch_names_both_cause_and_fix_with_no_pmbootstrap():
         root = str(ROOT)
         cfg = {}
         out = FakeOut()
+        args = argparse.Namespace(wait=0.0)
 
     real_which = shutil.which
     shutil.which = lambda name: None if name == "pmbootstrap" else real_which(name)
@@ -1237,7 +1243,8 @@ def test_the_ladder_and_the_verb_table_agree_about_boot():
     drifts from what the rung does is how --host got offered."""
     import porthole_cmd_build as build
     assert not any("no pmbootstrap" in text
-                   for row in build.LADDER for text in row), build.LADDER
+                   for row in build.LADDER for text in row
+                   if isinstance(text, str)), build.LADDER
 
 
 def test_the_host_branch_says_what_host_building_actually_needs():
@@ -1471,6 +1478,193 @@ def test_detach_argv_forwards_the_mod_arguments():
                               rest=["drivers/media/i2c/imx179.ko", "imx179"])
     argv = build.detach_argv("/x/bin/porthole", "mod", args)
     assert argv[-2:] == ["drivers/media/i2c/imx179.ko", "imx179"], argv
+
+
+# ------------------------------------------------- the tree-free rung --
+
+def test_image_is_the_one_rung_that_needs_no_kernel_tree():
+    """The gap this rung fills. Every other rung goes through `_ph_make`, so on
+    a host that has pmaports and no tree the preview offered six rungs and not
+    one of them could run -- with nothing saying which of the two missing
+    things was the problem."""
+    import porthole_cmd_build as build
+
+    assert "image" in build.ACTIONS
+    assert "image" in build.BUILD_ACTIONS
+    assert "image" not in build.TREE_RUNGS, (
+        "image is listed as needing a tree, which is the whole thing it does "
+        "not need")
+    for rung in ("mod", "boot", "fast", "kernel", "upgrade"):
+        assert rung in build.TREE_RUNGS, rung
+
+
+def test_the_ladder_says_which_rungs_need_a_tree():
+    """The preview dims the ones that cannot run, and it reads this to know."""
+    import porthole_cmd_build as build
+
+    rows = {name: needs for name, _c, _co, needs in build.LADDER}
+    assert rows["image"] is False, build.LADDER
+    assert rows["mod"] is True and rows["kernel"] is True, build.LADDER
+
+
+def test_image_does_not_demand_a_defconfig():
+    """PORTHOLE_DEFCONFIG configures a kernel COMPILE. Reported as missing, it
+    would make `image` unrunnable on exactly the host it exists for."""
+    import argparse
+
+    import porthole_cmd_build as build
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": str(ROOT), "PORTHOLE_KERNEL_PKG": "k",
+               "PORTHOLE_ARCH": "aarch64", "PORTHOLE_DTB": "qcom/x",
+               "PORTHOLE_DEVICE": DEV}
+        args = argparse.Namespace()
+
+    os.environ["TK_PMOS_PASSWORD"] = "x"
+    try:
+        problems = build._preflight(Ctx(), "image")
+    finally:
+        del os.environ["TK_PMOS_PASSWORD"]
+    assert not any("DEFCONFIG" in p for p in problems), problems
+
+
+def test_a_rung_that_installs_says_the_password_is_missing_before_it_runs():
+    """ph-build.sh enforces it with a shell parameter expansion, which dies
+    naming no verb and no rung -- and on `image` that lands after the chroot
+    work rather than before it."""
+    import argparse
+
+    import porthole_cmd_build as build
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": str(ROOT), "PORTHOLE_KERNEL_PKG": "k",
+               "PORTHOLE_ARCH": "aarch64", "PORTHOLE_DTB": "qcom/x",
+               "PORTHOLE_DEFCONFIG": "d", "PORTHOLE_DEVICE": DEV}
+        args = argparse.Namespace()
+
+    was = os.environ.pop("TK_PMOS_PASSWORD", None)
+    try:
+        for rung in build.INSTALL_RUNGS:
+            problems = build._preflight(Ctx(), rung)
+            assert any("TK_PMOS_PASSWORD" in p for p in problems), (rung, problems)
+        # `fast` and `upgrade` avoid the mkfs on purpose; demanding it there
+        # would block two rungs that never call install.
+        for rung in ("mod", "boot", "fast", "upgrade"):
+            problems = build._preflight(Ctx(), rung)
+            assert not any("TK_PMOS_PASSWORD" in p for p in problems), (
+                rung, problems)
+    finally:
+        if was is not None:
+            os.environ["TK_PMOS_PASSWORD"] = was
+
+
+def test_auto_never_routes_to_image():
+    """`auto` measures what a make rebuilt. `image` compiles nothing, so it
+    can never be the answer to that question -- and routing to it would turn a
+    one-module change into a twenty-minute rootfs rebuild."""
+    import porthole_cmd_build as build
+
+    for changed in ([], ["drivers/x/y.ko"], ["a/b.dtb"],
+                    ["arch/arm64/boot/Image.gz"],
+                    ["a/b.dtb", "drivers/x/y.ko"]):
+        rung, _args, _why = build._classify(changed)
+        assert rung != "image", changed
+
+
+def test_the_image_rung_pins_the_release_kernel_before_it_exports():
+    """Without the pin, `_ph_ref_dtb` falls back to the envkernel TREE build --
+    which on this rung was never built -- so `porthole flash` would refuse the
+    image the rung had just produced, naming a .dtb nobody asked for."""
+    src = (ROOT / "tools" / "ph-build.sh").read_text()
+    body = src.split("tksysimage() {", 1)[1].split("\n}\n", 1)[0]
+    for needle in ("_ph_install_kernel_release", "pmbootstrap install",
+                   "pmbootstrap export", "_ph_dtb_from_apk",
+                   "tkpurge-devpkgs"):
+        assert needle in body, f"tksysimage does not call {needle}"
+    assert body.index("_ph_install_kernel_release") < body.index("pmbootstrap export"), (
+        "the kernel must be pinned before the export it is the reference for")
+    assert body.index("pmbootstrap install") < body.index("_ph_install_kernel_release"), (
+        "_ph_install_kernel_release uses `pmbootstrap chroot -r`, which needs "
+        "the rootfs chroot `install` creates")
+
+
+def test_the_preview_says_where_the_build_will_run():
+    """It was printed only once the build had started, which is after the
+    point at which anybody could act on it."""
+    rc, out, err = run("build", "image", "-d", DEV)
+    assert rc == 0, err
+    assert "where" in out, out
+    assert ("workspace" in out or "this host" in out), out
+
+
+def test_a_tree_free_host_is_told_which_rung_it_can_run():
+    """`porthole build` on a fresh host listed six rungs, every one of which
+    compiles a tree the host does not have, and said nothing about the one
+    that does not."""
+    rc, out, err = run("build", "-d", DEV,
+                       env={"PORTHOLE_WORKDIR": str(TMPXDG)})
+    assert rc == 0, err
+    assert "no kernel tree" in out, out
+    assert "`image` is the rung that needs no tree" in out, out
+
+
+# ------------------------------------------------------- the compiler cache --
+
+def test_ccache_stats_parse_in_both_unit_shapes():
+    """ccache switched units between releases and both are in the field. A
+    parser that knows one reports 0 for the other -- and comparing a ceiling
+    in one unit against a size in another is how a cache reads 8% full while
+    it is already evicting."""
+    import porthole_cmd_build as build
+
+    gb = build.parse_ccache_stats(
+        "Cacheable calls:   3277 / 5180 (63.26%)\n"
+        "  Hits:               4 / 3277 ( 0.12%)\n"
+        "  Misses:          3273 / 3277 (99.88%)\n"
+        "Local storage:\n"
+        "  Cache size (GB):  0.4 /  5.0 ( 8.54%)\n")
+    assert gb["hits"] == 4 and gb["misses"] == 3273, gb
+    assert abs(gb["used"] - 0.4e9) < 1e6, gb
+    assert abs(gb["max"] - 5.0e9) < 1e6, gb
+
+    gib = build.parse_ccache_stats(
+        "Local storage:\n  Cache size (GiB): 2.0 / 25.0 ( 8.00%)\n")
+    assert abs(gib["used"] - 2 * 2**30) < 1, gib
+    assert abs(gib["max"] - 25 * 2**30) < 1, gib
+
+
+def test_an_uncompiled_cache_has_no_hit_rate():
+    """None, never 0.0: a cache nobody has compiled against has no rate, and
+    `0%` for it reads as "it is not working" about the one state that proves
+    nothing either way -- which is what makes people turn the cache off."""
+    import porthole_cmd_build as build
+
+    assert build.ccache_hit_rate({"hits": 0, "misses": 0}) is None
+    assert build.ccache_hit_rate({"hits": None, "misses": None}) is None
+    assert build.ccache_hit_rate({"hits": 1, "misses": 3}) == 0.25
+
+
+def test_each_arch_cache_is_read_from_its_own_chroot():
+    """pmbootstrap mounts `cache_ccache_$ARCH` at /mnt/pmbootstrap/ccache and
+    symlinks it to the build user's ~/.ccache, so a cache is reachable only
+    from inside the chroot for its own arch. The host's arch is the native
+    chroot and takes no `-b`."""
+    import porthole_cmd_build as build
+
+    assert build.ccache_chroot_args("x86_64", "x86_64") == []
+    assert build.ccache_chroot_args("aarch64", "x86_64") == ["-b", "aarch64"]
+    assert build.ccache_chroot_args("x86_64", "aarch64") == ["-b", "x86_64"]
+
+
+def test_ccache_is_an_action_with_its_own_flag():
+    """It must be reachable, and `--max` must parse as a value rather than as
+    one of build's own switches."""
+    rc, out, err = run("build", "ccache", "-d", DEV, "--json")
+    assert rc == 0, err
+    payload = json.loads(out)
+    assert "caches" in payload and "where" in payload, payload
 
 
 if __name__ == "__main__":
