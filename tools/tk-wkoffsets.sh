@@ -1,8 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: - (host only: nm and readelf)
+# needs: BOOTED -- to name the build under test; falls back to the newest apk,
+#        loudly, when the device does not answer. nm and readelf on the host.
 # env: TK_WK_APK_DIR (default the porthole sandbox package dir), TK_WK_VERSION
+#      (default: the version apk reports INSTALLED on the device)
 # exits: 0 printed · 1 packages not found · 64 usage
 # tk-wkoffsets.sh [SYMBOL...] -- uprobe offsets for WebKit phase entry points,
 # from the -dbg and plain webkit apk for the build INSTALLED on the device.
@@ -18,15 +20,29 @@
 # that it is right is that ThreadedCompositor::renderLayerTree comes out at
 # 0x226f588, the value tk-webframe.sh has hardcoded since r52.
 set -u
+# shellcheck source=tk-lib.sh
+source "$(dirname "$0")/tk-lib.sh"
 DIR=${TK_WK_APK_DIR:-$HOME/.local/var/porthole-sandbox/packages/edge/aarch64}
 VER=${TK_WK_VERSION:-}
+# ASK THE DEVICE, do not guess from the directory. The old default was the
+# newest -dbg apk by `sort -V`, which is the build under test only by luck: on
+# 2026-09-06 a --src build (2.52.6_p20260906130803-r63) sorted ABOVE the aport
+# r63 the phone was actually running, and its symbols sit 1-2 KB away -- every
+# uprobe would have landed inside a neighbouring function and reported numbers
+# for code nobody asked about. A wrong offset does not fail; it lies.
+if [ -z "$VER" ]; then
+	VER=$(tk_run "apk info -v" 2>/dev/null | sed -n 's/^webkit2gtk-6\.0-\(2\..*\)$/\1/p' | head -1)
+	[ -n "$VER" ] && echo "# installed on the device: webkit2gtk-6.0-$VER" >&2
+fi
 if [ -z "$VER" ]; then
 	VER=$(ls "$DIR" 2>/dev/null | sed -n 's/^webkit2gtk-6\.0-dbg-\(.*\)\.apk$/\1/p' | sort -V | tail -1)
+	echo "# device did not answer -- falling back to the newest apk, $VER. If the" >&2
+	echo "# phone is running anything else, every offset below is wrong." >&2
 fi
 [ -n "$VER" ] || { echo "no webkit2gtk-6.0-dbg-*.apk in $DIR" >&2; exit 1; }
 DBG=$DIR/webkit2gtk-6.0-dbg-$VER.apk
 SO=$DIR/webkit2gtk-6.0-$VER.apk
-[ -f "$DBG" ] && [ -f "$SO" ] || { echo "missing $DBG or $SO" >&2; exit 1; }
+[ -f "$DBG" ] && [ -f "$SO" ] || { echo "missing $DBG or $SO -- the device runs $VER and this host has no apk for it; build it, or install a build you have" >&2; exit 1; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 tar xzf "$SO" -C "$TMP" 2>/dev/null || true
