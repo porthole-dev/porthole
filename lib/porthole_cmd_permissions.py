@@ -238,6 +238,33 @@ def build_rules(root: pathlib.Path, device: str = "", device_shell: bool = True)
     return granted, held
 
 
+def stale_rules(target: pathlib.Path) -> list:
+    """Rules in a settings file that name a tool from before the rename.
+
+    `_merge` unions and never removes, and it is right not to: a settings file
+    is where a person keeps their own permissions. So a re-run after the tk- to
+    ph- rename GRANTS the new path and leaves the old one sitting there --
+    inert, because nothing resolves it any more, and invisible, because an
+    ineffective allow rule looks exactly like an effective one.
+
+    Reported rather than deleted, for the same reason `_merge` does not delete:
+    it is the reader's file.
+    """
+    if not target.exists():
+        return []
+    import json
+
+    try:
+        settings = json.loads(target.read_text())
+    except (OSError, ValueError):
+        return []                  # _merge says what is wrong with it, loudly
+    if not isinstance(settings, dict):
+        return []
+    allow = ((settings.get("permissions") or {}).get("allow") or [])
+    return sorted(r for r in allow
+                  if isinstance(r, str) and "tools/tk-" in r)
+
+
 def _merge(target: pathlib.Path, rules) -> tuple[list, list]:
     """Add rules to `permissions.allow`, keeping everything already there.
 
@@ -281,6 +308,7 @@ def cmd_permissions(args, ctx) -> int:
                            or pathlib.Path.cwd()).expanduser().resolve()
     target = project / LOCAL_SETTINGS
     added, kept, excluded, exclude_file = [], [], False, ""
+    stale = stale_rules(target)
 
     if getattr(args, "install", False):
         if not project.is_dir():
@@ -306,6 +334,16 @@ def cmd_permissions(args, ctx) -> int:
                           "grey"))
             elif excluded:
                 o(o.paint("  already ignored by this repo", "grey"))
+        if stale:
+            o.blank()
+            o(o.paint("  {} rule(s) name a tool from before the tk- to ph- "
+                      "rename.".format(len(stale)), "yellow"))
+            o(o.paint("  They match nothing now -- an inert allow rule looks "
+                      "exactly like a live one:", "grey"))
+            for one in stale:
+                o(o.paint("    {}".format(one), "grey"))
+            o(o.paint("  This run grants the current paths; remove those by "
+                      "hand, it is your file.", "grey"))
         o.blank()
         for path, why in sorted(DEVICE_SHELL.items()):
             if rule(path) in granted:
