@@ -1065,6 +1065,21 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
     painting = threading.Lock()
     last_note = 0.0
 
+    # The SAME block `porthole pkg watch` and `porthole build watch` draw --
+    # header, bar, spinner and activity -- rather than the bare one-line
+    # `tracker.line()` this used to paint. Same tracker, same numbers; the
+    # build was simply rendering the poorer of the two pictures, and the build
+    # is the one somebody sits and watches.
+    #
+    # Safe to walk the cursor over: in this mode nothing else writes to
+    # stdout. The raw stream goes there only under --verbose, which turns the
+    # bar off entirely because the two would fight.
+    def _write(text):
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+    paint_block, clear_block = progress.block_painter(_write)
+
     def _paint():
         """The one-line bar, repainted from the line loop AND the heartbeat.
 
@@ -1083,8 +1098,7 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
             if stop_beat.is_set():
                 return  # the finally below cleared the line -- leave it clear
             if tty:
-                sys.stdout.write("\r\033[2K  " + tracker.line())
-                sys.stdout.flush()
+                paint_block(progress.watch_lines(tracker.snapshot()))
             elif time.time() - last_note > 15:
                 # Not a terminal: an agent's pipe, or CI. A repainting bar
                 # would be thousands of useless lines, and silence is the
@@ -1147,8 +1161,7 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
         stop_beat.set()
         if tty and not verbose:
             with painting:
-                sys.stdout.write("\r\033[2K")
-                sys.stdout.flush()
+                clear_block()
         rc = proc.wait()
         # An installed-but-not-loaded module is not a failed build, here
         # either: `watch`, `status` and the status line all render this
