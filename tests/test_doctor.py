@@ -205,6 +205,75 @@ def test_an_absent_device_is_probed_once_not_twice():
     assert key and "could not be asked" in key[0], key
 
 
+def test_device_packages_skips_the_apk_query_when_the_device_is_not_booted():
+    """`cmd_doctor` already probed and knows the device is not BOOTED --
+    `check_device_packages` dialling apk over ssh anyway rediscovers the exact
+    same ABSENT and reports it in different words, 25s ssh timeout and all.
+
+    Asserted by refusing to let the device be dialled at all, the same
+    technique as test_no_device_does_not_open_a_connection_to_the_device
+    above: a timing assertion is flaky on a loaded box and green on a fast
+    one for the wrong reason."""
+    workdir = tempfile.mkdtemp(prefix="porthole-doctor-deps-")
+    pkg_dir = (pathlib.Path(workdir) / "pmaports" / "device" /
+              "testsoc-test" / "device-test-testboard")
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "APKBUILD").write_text('depends="mkbootimg linux-testboard"\n')
+    cfg = {"PORTHOLE_DEVICE_PKG": "device-test-testboard",
+          "PORTHOLE_WORKDIR": workdir}
+
+    class _NoDial:
+        def run_full(self, *a, **kw):
+            raise AssertionError(
+                "check_device_packages dialled the device after cmd_doctor "
+                "already knew it was not BOOTED")
+
+    class _Ctx:
+        root = pathlib.Path(workdir)
+
+        def device(self):
+            return _NoDial()
+
+    ch = doctor.Checks()
+    doctor.check_device_packages(ch, _Ctx(), cfg, "ABSENT")
+    row = _row(ch, "device: packages")
+    assert row["status"] == "skip", row
+    assert "ABSENT" in row["detail"], row
+    # Must not be confusable with the "asked, and apk could not answer" row
+    # below -- same widget could render either, so only the wording tells
+    # them apart.
+    assert "could not query apk" not in row["detail"], row
+
+
+def test_device_packages_still_asks_when_the_device_is_booted_and_fails():
+    """The `warn` for "asked, and apk could not answer" must stay reachable
+    when the device genuinely is BOOTED and the query itself fails -- the
+    skip above must not swallow this case too."""
+    workdir = tempfile.mkdtemp(prefix="porthole-doctor-deps-")
+    pkg_dir = (pathlib.Path(workdir) / "pmaports" / "device" /
+              "testsoc-test" / "device-test-testboard")
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "APKBUILD").write_text('depends="mkbootimg linux-testboard"\n')
+    cfg = {"PORTHOLE_DEVICE_PKG": "device-test-testboard",
+          "PORTHOLE_WORKDIR": workdir}
+
+    class _Fails:
+        def run_full(self, *a, **kw):
+            return 1, "", "connection reset"
+
+    class _Ctx:
+        root = pathlib.Path(workdir)
+
+        def device(self):
+            return _Fails()
+
+    ch = doctor.Checks()
+    doctor.check_device_packages(ch, _Ctx(), cfg, "BOOTED")
+    row = _row(ch, "device: packages")
+    assert row["status"] == "warn", row
+    assert "could not query apk on the device" in row["detail"], row
+
+
 def main():
     return _runner.run(globals())
 

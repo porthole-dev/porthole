@@ -711,7 +711,7 @@ def _declared_depends(cfg, root: pathlib.Path):
     return None, None
 
 
-def check_device_packages(ch: Checks, ctx, cfg) -> None:
+def check_device_packages(ch: Checks, ctx, cfg, device_state: str) -> None:
     """Declared dependencies versus what is actually installed.
 
     A rootfs reinstall silently replaced the pipewire audio backend with
@@ -728,6 +728,15 @@ def check_device_packages(ch: Checks, ctx, cfg) -> None:
     if not deps:
         ch.add("device: packages", "skip",
                "no device APKBUILD found (needs PORTHOLE_WORKDIR/pmaports)")
+        return
+    # `cmd_doctor` already probed and knows the device is not BOOTED -- a
+    # second dial here would rediscover the exact same ABSENT/FROZEN/etc and
+    # report it in different words, 25s timeout and all. `skip`, not `warn`:
+    # this must never look like the "asked, and apk could not answer" case
+    # below, which stays reachable whenever the device IS booted and the
+    # query itself fails.
+    if device_state != "BOOTED":
+        ch.add("device: packages", "skip", f"the device is {device_state}")
         return
     # Ask apk whether each dependency is SATISFIED, one round trip, and let it
     # answer -- rather than comparing the names it prints.
@@ -1275,7 +1284,7 @@ def cmd_doctor(args, ctx) -> int:
         ch.add("device: state", "skip", "--no-device")
     else:
         check_device(ch, ctx, cfg, elapsed=device_state_elapsed)
-        check_device_packages(ch, ctx, cfg)
+        check_device_packages(ch, ctx, cfg, device_state)
     if args.tools or args.all:
         check_tools(ch, ctx.root)
     if args.bench and not args.no_device:
