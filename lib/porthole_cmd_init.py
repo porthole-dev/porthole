@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 import porthole
-from porthole_cli import Bail, EX_FAIL, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 
 HEADER = """\
 # porthole identity -- written by `porthole init`.
@@ -654,7 +654,17 @@ def cmd_init(args, ctx) -> int:
         device = _choose_device(ctx, prompt, devices)
         devices = porthole.list_profiles(root)
     elif not device:
-        device = prompt.ask("device codename", devices[0] if devices else "")
+        # NOT `devices[0]`. A device is not a default: port 22 and the gadget
+        # address are things porthole can reasonably assume, and which phone
+        # you are porting is not. Headless, the old default picked the first
+        # profile alphabetically and reported success -- so an agent that
+        # forgot the positional configured the wrong device and was told it
+        # went fine.
+        raise Bail(
+            "no device codename, and one cannot be guessed", EX_USAGE,
+            "porthole init <codename>   known: {}".format(
+                ", ".join(devices)
+                or "(none -- porthole new-device <codename>)"))
 
     if device and device not in devices:
         raise Bail(
