@@ -320,6 +320,8 @@ NAMES_AN_OLD_NAME_ON_PURPOSE = {
     "lib/porthole_cmd_tools.py": "renamed() is what answers a request for an "
                                  "old name, and its docstring shows one",
     "tests/test_cli.py": "the test that asks for one and checks the answer",
+    "tests/test_permissions.py": "the fixture for a stale allow rule IS an "
+                                 "old path -- that is the thing being detected",
 }
 
 
