@@ -1030,6 +1030,15 @@ def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True) -> 
         ch.add("host: podman", "fail",
                "not found -- builds run in a rootless container",
                install_hint("podman", family))
+        # The device key check reads an ssh key file and asks the PHONE, not
+        # the container -- _container_state() already answered it above,
+        # before it ever looks at podman. Returning here used to throw that
+        # answer away too, so a host with no podman got no report on whether
+        # its device key even worked, and a runner's bare PATH (podman
+        # deliberately absent, tests/ci-local.sh) made
+        # test_an_absent_device_is_probed_once_not_twice fail for a reason
+        # that had nothing to do with the device.
+        _device_key_row(ch, state)
         return
     ch.add("host: podman", "ok", state["podman"])
     if state["image_built"]:
