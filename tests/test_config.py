@@ -203,7 +203,7 @@ def test_HOST_beats_TK_HOST_when_both_set():
 
 
 def test_host_falls_back_to_the_host_part_of_PHONE():
-    """tk-stream.sh does `HOST=${PHONE#*@}`. Someone who sets only PHONE must
+    """ph-stream.sh does `HOST=${PHONE#*@}`. Someone who sets only PHONE must
     still get a usable HOST for the ping probes."""
     tmp, xdg = sandbox()
     cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev", PHONE="bob@192.168.7.7")
@@ -330,6 +330,58 @@ def test_config_remembers_what_each_layer_displaced():
 
 def main():
     return _runner.run(globals())
+
+
+def test_the_cross_file_knobs_answer_to_both_names():
+    """Old name wins -- lib/porthole.py::legacy's docstring is the contract:
+    "That is the whole never-break-taimen contract in one function." A porter
+    with TK_PMOS_PASSWORD exported in a shell they have had open for a week
+    must not have a build stop dead because this repo renamed something.
+
+    TK_SSH_OPTS is deliberately absent. It is not a knob: lib/porthole.sh
+    BUILDS it from PORTHOLE_CONNECT_TIMEOUT, PORTHOLE_SSH_PORT and
+    PORTHOLE_SSH_KEY, so a PORTHOLE_SSH_OPTS input would be a second authority
+    over the same array rather than a twin of it.
+    Asserted against the CALL SITES, not against `legacy()` itself. `legacy`
+    is pure and has always been correct for any pair of names, so a test that
+    only exercises it passes whether or not a single caller was ever moved
+    onto it -- which is the whole shape this repo has been bitten by.
+    """
+    import os
+
+    import porthole_cmd_build as build
+    import porthole_cmd_sandbox as sandbox
+
+    # The rootfs password, read by `porthole build` on the install rungs.
+    real = dict(os.environ)
+    try:
+        os.environ.pop("TK_PMOS_PASSWORD", None)
+        os.environ.pop("PORTHOLE_PMOS_PASSWORD", None)
+        assert build.rootfs_password({"PORTHOLE_PMOS_PASSWORD": "new"}) == "new"
+        assert build.rootfs_password({"TK_PMOS_PASSWORD": "old"}) == "old"
+        assert build.rootfs_password({"TK_PMOS_PASSWORD": "old",
+                                      "PORTHOLE_PMOS_PASSWORD": "new"}) == "old", (
+            "TK_PMOS_PASSWORD must beat its twin: a porter's exported shell wins")
+        # ...and the environment is still read when the config says nothing.
+        os.environ["PORTHOLE_PMOS_PASSWORD"] = "from-env"
+        assert build.rootfs_password({}) == "from-env"
+    finally:
+        os.environ.clear()
+        os.environ.update(real)
+
+    # The device mutex path, which the container is launched with.
+    real = dict(os.environ)
+    try:
+        os.environ.pop("TK_DEVICE_LOCK", None)
+        os.environ["PORTHOLE_DEVICE_LOCK"] = "/tmp/new.lock"
+        assert sandbox._lock_path("taimen") == "/tmp/new.lock"
+        os.environ["TK_DEVICE_LOCK"] = "/tmp/old.lock"
+        assert sandbox._lock_path("taimen") == "/tmp/old.lock", (
+            "TK_DEVICE_LOCK must beat its twin, or one physical phone gets "
+            "two locks")
+    finally:
+        os.environ.clear()
+        os.environ.update(real)
 
 
 if __name__ == "__main__":

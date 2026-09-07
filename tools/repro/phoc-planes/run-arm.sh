@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: the device BOOTED and the arm script already staged in /tmp on it
-# env: PORTHOLE_* (tk-lib.sh)
+# env: PORTHOLE_* (ph-lib.sh)
 # exits: 0 the arm finished · 1 it never printed its DONE marker
 # run-arm.sh SCRIPT MARKER [SECONDS]  -- run a long device arm detached and poll
 # for its output file.
@@ -13,7 +13,7 @@
 # and its output is on disk either way.
 set -uo pipefail
 cd "$(dirname "$0")/../../.." || exit 1
-source tools/tk-lib.sh
+source tools/ph-lib.sh
 SCRIPT=${1:?arm script on the device, e.g. /tmp/planearm.sh}
 MARKER=${2:?the line the arm prints when it is done, e.g. PLANEARMDONE}
 SECS=${3:-420}

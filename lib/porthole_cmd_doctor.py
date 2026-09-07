@@ -661,7 +661,7 @@ def check_device(ch: Checks, ctx, cfg, elapsed: float) -> None:
     elif state == "FASTBOOT":
         ch.add("device: state", "warn",
                f"{detail} -- in the bootloader; nothing over ssh will work",
-               doc="tools/tk-reboot.sh, or fastboot set_active + reboot")
+               doc="tools/ph-reboot.sh, or fastboot set_active + reboot")
     elif state == "INITRAMFS":
         ch.add("device: state", "warn",
                f"{detail} -- stopped in the pmOS initramfs debug shell",
@@ -669,7 +669,7 @@ def check_device(ch: Checks, ctx, cfg, elapsed: float) -> None:
     elif state == "FROZEN":
         ch.add("device: state", "warn",
                f"{detail} -- kernel alive, userspace gone",
-               doc="brain/traps/frozen-is-not-hung.md; tools/tk-recover.sh")
+               doc="brain/traps/frozen-is-not-hung.md; tools/ph-recover.sh")
     else:
         ch.add("device: state", "warn",
                f"{detail} -- not reachable. Suspended, powered off, or "
@@ -920,8 +920,17 @@ def _check_pmos_password(ch: Checks, env) -> None:
     The VALUE is never printed. It is a rootfs password; see
     tests/test_secrets.py.
     """
-    if (env.get("TK_PMOS_PASSWORD") or "").strip():
-        ch.add("host: TK_PMOS_PASSWORD", "ok", "set")
+    # The same reader `porthole build` uses, so the two cannot disagree about
+    # whether this host has it -- including about which of the two names it
+    # was set under.
+    try:
+        from porthole_cmd_build import rootfs_password
+    except Exception:  # noqa: BLE001 -- doctor must run when build cannot
+        def rootfs_password(cfg):
+            return (cfg.get("TK_PMOS_PASSWORD")
+                    or cfg.get("PORTHOLE_PMOS_PASSWORD") or "").strip()
+    if rootfs_password(env):
+        ch.add("host: PORTHOLE_PMOS_PASSWORD", "ok", "set")
         return
     # The rungs come from build's own table, so the two cannot drift. This row
     # named `upgrade`, which does not run `pmbootstrap install` at all and has
@@ -932,9 +941,9 @@ def _check_pmos_password(ch: Checks, env) -> None:
     except Exception:  # noqa: BLE001 -- doctor must run when build cannot
         rungs = ("kernel", "image")
     named = " and ".join(f"`porthole build {r}`" for r in rungs)
-    ch.add("host: TK_PMOS_PASSWORD", "warn",
+    ch.add("host: PORTHOLE_PMOS_PASSWORD", "warn",
            f"unset -- {named} need it and stop dead without it",
-           fix="export TK_PMOS_PASSWORD=<the rootfs user password>"
+           fix="export PORTHOLE_PMOS_PASSWORD=<the rootfs user password>"
                "    # an environment variable on purpose: a flag would show "
                "it in ps")
 
@@ -1277,7 +1286,7 @@ def _check_gadget_steals_default_route(ch: Checks, ctx) -> None:
 def _check_legacy_host_override(ch: Checks, ctx) -> None:
     """HOST and PHONE outrank PORTHOLE_HOST, and nothing says so.
 
-    tk-lib.sh's compatibility surface takes TK_HOST, then PHONE, then
+    ph-lib.sh's compatibility surface takes TK_HOST, then PHONE, then
     PORTHOLE_HOST -- deliberately, so an old setup keeps working. The cost is
     that setting the DOCUMENTED variable does nothing when a legacy one is
     exported, and the tools keep talking to the old address with no message at
@@ -1296,7 +1305,7 @@ def _check_legacy_host_override(ch: Checks, ctx) -> None:
                    f"${name}={got} outranks PORTHOLE_HOST={want}, so the tools "
                    f"talk to {addr}",
                    fix=f"unset {name}    # or set it to the same address."
-                       " tk-lib.sh takes TK_HOST, then PHONE, then"
+                       " ph-lib.sh takes TK_HOST, then PHONE, then"
                        " PORTHOLE_HOST, and says nothing when they disagree")
             return
     ch.add("host: address override", "ok",

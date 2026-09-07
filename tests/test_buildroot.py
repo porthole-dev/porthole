@@ -41,7 +41,7 @@ def test_a_second_build_is_refused_while_one_holds_the_buildroot():
 
 def test_the_refusal_names_who_is_building_rather_than_just_saying_busy():
     """"Someone has it" sends you looking. The holder file is what turns that
-    into an answer -- the same reason tk-device.sh records one."""
+    into an answer -- the same reason ph-device.sh records one."""
     with tempfile.TemporaryDirectory() as d:
         with buildroot.hold(d, "webkit2gtk-6.0"):
             assert "webkit2gtk-6.0" in buildroot.lock_holder(d)

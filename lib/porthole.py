@@ -111,7 +111,7 @@ class FastbootUnavailable(Exception):
 
     69 (EX_UNAVAILABLE), never 1: the check did not happen, which is not the
     same as the check failing. See brain/laws/exit-codes-are-an-api.md, and
-    ph_need_fastboot in tools/tk-lib.sh, which guards the shell side.
+    ph_need_fastboot in tools/ph-lib.sh, which guards the shell side.
     """
 
 
@@ -154,7 +154,7 @@ class Config(dict):
 
 # The keys where a stale shell silently changes WHAT GETS BUILT OR FLASHED.
 # Deliberately short. Everything else stays overridable without comment,
-# because `PHONE=... tk-foo.sh` is a documented shape and the docs are full of
+# because `PHONE=... ph-foo.sh` is a documented shape and the docs are full of
 # it -- a guard that refuses those gets worked around, and then it protects
 # nothing.
 # Split by CONSEQUENCE, not by importance. A stale shell on one of these
@@ -324,7 +324,7 @@ def load_config(root: str | os.PathLike | None = None,
 
     Lowest to highest: defaults, profile, user config.env, root .env, process
     environment. The process environment winning is what keeps every
-    `PHONE=... tk-foo.sh` line in the taimen docs working unchanged.
+    `PHONE=... ph-foo.sh` line in the taimen docs working unchanged.
     """
     env = dict(os.environ if env is None else env)
     root = pathlib.Path(
@@ -420,7 +420,7 @@ def resolve_host(cfg: dict) -> str:
     """The bare device IP.
 
     HOST and TK_HOST are honoured first because the taimen tools and docs use
-    them. PHONE is mined last: tk-stream.sh does `HOST=${PHONE#*@}`, so
+    them. PHONE is mined last: ph-stream.sh does `HOST=${PHONE#*@}`, so
     somebody who sets only PHONE must still get a pingable address.
     """
     for key in ("HOST", "TK_HOST"):

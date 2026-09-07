@@ -5,7 +5,7 @@ scope: generic
 subsystem: method
 severity: law
 confidence: proven
-evidence: taimen tools/tk-lib.sh header; porthole lib/porthole.sh
+evidence: taimen tools/ph-lib.sh header; porthole lib/porthole.sh
 first-learned: 2026-07-25
 ---
 
@@ -19,7 +19,7 @@ excuse for waiting a fixed interval "just in case".
 The shape:
 
 ```sh
-. "$PORTHOLE_ROOT/tools/tk-lib.sh"
+. "$PORTHOLE_ROOT/tools/ph-lib.sh"
 OLD=$(tk_boot_id)
 ... do the thing ...
 tk_wait_ssh "$OLD" "$(tk_deadline_ms 300)" && echo up

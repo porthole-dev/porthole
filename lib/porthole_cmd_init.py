@@ -24,7 +24,7 @@ HEADER = """\
 # which IS committed and shared.
 #
 # Anything here is overridden by the process environment, so a one-off
-# `PHONE=other@host tools/tk-fps.py` works without editing this.
+# `PHONE=other@host tools/ph-fps.py` works without editing this.
 #
 # `porthole init` is safe to re-run: it reads what is here, offers it back as
 # the default for every question, and rewrites only the lines you change.

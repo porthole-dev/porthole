@@ -30,7 +30,7 @@ the problem".
 
 **What to do** -- choose the target `WebKitWebProcess` by thread count
 (`max(len(os.listdir(f"/proc/{pid}/task")))`), and match thread names by
-substring against the last 15 characters. `tools/tk-stallcatch.py` does both;
+substring against the last 15 characters. `tools/ph-stallcatch.py` does both;
 `threadcpu.py` matches by cmdline substring and is safe. Before believing any
 null from such an instrument, print which pid and which tid it attached to --
 the run that finally caught the blur printed `pid=59014 tid=59043

@@ -30,7 +30,7 @@ flash**, and that changes the shape of the whole bring-up:
 - A serial console matters more than usual, because you cannot iterate your way
   out of a boot that produces no output.
 
-`tk-flash-boot.sh` already flashes rather than RAM-boots, so no tool needs
+`ph-flash-boot.sh` already flashes rather than RAM-boots, so no tool needs
 changing. What needed changing was the *documentation that promised a safety net
 this device does not have* — the generated `new-device` checklist no longer
 asserts it, and instead tells you to check

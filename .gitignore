@@ -24,7 +24,7 @@ mkdocs.yml
 docs/superpowers/
 
 # Device capture: raw dmesg, journal dumps, wifi-soak JSON with a real BSSID in
-# every heartbeat line. tools/tk-capture.sh writes here by default and brain
+# every heartbeat line. tools/ph-capture.sh writes here by default and brain
 # notes cite it as evidence, so it is produced constantly and is never a thing
 # to publish. It was untracked but NOT ignored, which is one `git add -A` from
 # a leak. See docs/HANDOFF-contribution-rules.md section 4.5.

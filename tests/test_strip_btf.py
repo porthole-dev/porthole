@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""tk-strip-btf.py: making a module's .BTF invisible to the module loader.
+"""ph-strip-btf.py: making a module's .BTF invisible to the module loader.
 
 Checked against ELF64 images this test builds itself, because the thing being
 verified is byte-level surgery on a section header table and "it loaded on the
@@ -15,7 +15,7 @@ properties the fix depends on:
     is the obvious way to get this wrong with a prefix match.
 
 It also pins the thing a correct tool cannot pin about itself: that the rung
-which pushes a module actually CALLS it. tk-push-module.sh has since the trap
+which pushes a module actually CALLS it. ph-push-module.sh has since the trap
 was written; `porthole build mod` did not, for the whole life of the verb.
 
 Needs no device, no root, no cross toolchain and no real module.
@@ -30,7 +30,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location(
-    "tk_strip_btf", ROOT / "tools" / "tk-strip-btf.py")
+    "tk_strip_btf", ROOT / "tools" / "ph-strip-btf.py")
 tk_strip_btf = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(tk_strip_btf)
 
@@ -162,7 +162,7 @@ def main():
     #
     # Observed 2026-08-31 on taimen: `porthole build mod` on ath10k_core
     # unloaded the old driver and could not load the new one, leaving the
-    # phone with no wifi at all. tk-push-module.sh had neutered .BTF since the
+    # phone with no wifi at all. ph-push-module.sh had neutered .BTF since the
     # trap was written; tkmod pushed the raw .ko and nothing said so. A tool
     # that is correct and never called is not a fix.
     src = (ROOT / "tools" / "ph-build.sh").read_text()
@@ -178,9 +178,9 @@ def main():
 
     # The other path that puts a tree-built .ko on the device. It has always
     # stripped; nothing asserted it, which is how tkmod's copy went missing.
-    push = (ROOT / "tools" / "tk-push-module.sh").read_text()
-    check("tk-push-module.sh still strips before its scp",
-          0 <= push.find("tk-strip-btf.py") < push.find("scp "))
+    push = (ROOT / "tools" / "ph-push-module.sh").read_text()
+    check("ph-push-module.sh still strips before its scp",
+          0 <= push.find("ph-strip-btf.py") < push.find("scp "))
 
     # 7. and it does what it says, called for real.
     mod = write("staged.ko", build_elf([".BTF", ".text"]))

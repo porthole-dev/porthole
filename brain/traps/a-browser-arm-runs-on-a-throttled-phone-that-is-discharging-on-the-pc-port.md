@@ -18,7 +18,7 @@ DT's passive trip (`cpu*-thermal trip_point_0 = 75000`) engages, and
 of 2.36 on the big cluster, 300-600 MHz of 1.9 on the little one. It stays
 there for as long as the page plays. Compare arms only against each other at
 the same temperature; print the hottest zone and the cap next to every
-number (`tk-webarm.sh` does not yet; `thermal-arm` style loops do).
+number (`ph-webarm.sh` does not yet; `thermal-arm` style loops do).
 
 Meanwhile the charger reports `Charging` but the PC port is an SDP:
 `pmi8998-charger usb_type = Unknown [SDP] DCP CDP`, input 470 mA at 4.98 V.

@@ -136,7 +136,7 @@ still runs: the rootfs chroot is populated and `pmbootstrap export` packs
 
 **What the workspace does not produce is the rootfs disk IMAGE.** `pmbootstrap
 flasher flash_rootfs` needs that file, so a full rootfs+boot flash is a
-`--host` job; `porthole run tools/tk-flash-boot.sh` flashes the boot image the
+`--host` job; `porthole run tools/ph-flash-boot.sh` flashes the boot image the
 workspace did build. `fuse2fs` is *not* a way around this — it mounts a
 filesystem, and what pmbootstrap wants a loop device for is a **partitioned
 disk**; see `brain/findings/fuse2fs-cannot-replace-the-loop-device.md` and
@@ -168,7 +168,7 @@ kills a build with exit 78 from deep inside pmbootstrap, naming nothing.
 
 `tests/test_sandbox_container.py` covers the workspace, and its assertions are
 the same idea: that the mount set never exposes `~/.ssh`, that the device key
-is read-only, that the lock path matches `tools/tk-device.sh` exactly, that
+is read-only, that the lock path matches `tools/ph-device.sh` exactly, that
 `--command` omits `-it`, that `down` never passes `-v`, and that a failed
 `podman inspect` refuses rather than reading as "no drift".
 

@@ -41,9 +41,9 @@ fired is not a measurement --
 **And on this kernel, read `tracing/trace`, not perf.** With the probes armed
 before launch, ftrace's buffer filled while `perf record -a -e wk:<name>` on
 the same probes still captured nothing. Whatever that is, ftrace is the path
-that works; `tools/tk-wkphase.sh` uses it for that reason.
+that works; `tools/ph-wkphase.sh` uses it for that reason.
 
 This retroactively puts a question mark over any measurement taken by arming
-probes against an already-running browser -- `tools/tk-webframe.sh` and
-`tools/tk-webdraws.sh` are both written that way. Related:
+probes against an already-running browser -- `tools/ph-webframe.sh` and
+`tools/ph-webdraws.sh` are both written that way. Related:
 [[the-instrument-is-guilty-until-proven-innocent]].

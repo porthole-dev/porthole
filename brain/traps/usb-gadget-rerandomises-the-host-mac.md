@@ -28,7 +28,7 @@ netpoll transmit path and that succeeds.
 moment you arm, next to the write that consumes it. And do not accept
 `enabled=1` as proof: push a token through `/dev/kmsg` and require the sink to
 print it back, which is the only statement about this channel worth trusting.
-`tools/tk-capture.sh` does both, and its forever mode re-reads the address on
+`tools/ph-capture.sh` does both, and its forever mode re-reads the address on
 every re-arm.
 
 The same caution applies to anything else that pins the peer by hardware

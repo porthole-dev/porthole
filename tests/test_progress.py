@@ -1558,7 +1558,7 @@ def test_prose_about_a_step_does_not_become_the_step():
     keeps = [
         ">>   this rung flashes the aport apk, so the tree cannot affect it.",
         ">>   device. boot.img above is complete and flashable:",
-        ">>     porthole run tools/tk-flash-boot.sh",
+        ">>     porthole run tools/ph-flash-boot.sh",
         ">> NOTE: no rootfs image was made -- this workspace has no loop",
         ">> WARNING: no .device-uuids -- flashing the export UUIDs unchecked",
         ">>   and `pmbootstrap export` packs boot.img from it.",

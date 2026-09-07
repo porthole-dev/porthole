@@ -2,7 +2,7 @@
 """`porthole run` -- run a tool with the config applied.
 
 Optional convenience, never mandatory: tools resolve config themselves, so
-`tools/tk-fps.py` works directly and always will. This exists for the cases
+`tools/ph-fps.py` works directly and always will. This exists for the cases
 where it genuinely helps -- running a profile-scoped tool without knowing which
 directory it landed in, and holding the device mutex without spelling it out.
 """
@@ -12,8 +12,8 @@ import os
 import shlex
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, child_env
-from porthole_cmd_tools import collect
+from porthole_cli import Bail, EX_FAIL, EX_USAGE, child_env
+from porthole_cmd_tools import collect, renamed
 
 
 def cmd_run(args, ctx) -> int:
@@ -23,13 +23,17 @@ def cmd_run(args, ctx) -> int:
     tools.update({t.path.stem: t for t in collect(ctx.root, device)
                   if t.path.stem not in tools})
 
-    # `porthole run tools/tk-reboot.sh` is what the skills, the rung messages
+    # `porthole run tools/ph-reboot.sh` is what the skills, the rung messages
     # and every runbook print, and it was rejected: the table is keyed on the
     # bare name. Fixing the caller means fixing every caller forever, so the
     # lookup takes the basename instead (#37).
     want = os.path.basename(args.tool)
     tool = tools.get(want)
     if tool is None:
+        moved = renamed(want, tools)
+        if moved:
+            raise Bail(f"{want} is now {moved}", EX_USAGE,
+                       f"porthole run {moved}")
         near = [n for n in tools if want in n]
         raise Bail(f"no tool named {want!r}", EX_FAIL,
                    f"did you mean: {', '.join(sorted(near)[:5])}?" if near
@@ -52,7 +56,7 @@ def cmd_run(args, ctx) -> int:
         # second beats queueing ten minutes for a device that was never going
         # to answer. See brain/laws/the-lock-says-who-not-what.md.
         need = tool.needs.upper()
-        wrapper = [str(ctx.root / "tools" / "tk-device.sh")]
+        wrapper = [str(ctx.root / "tools" / "ph-device.sh")]
         if need in ("BOOTED", "FASTBOOT"):
             wrapper.append(f"--need-{need.lower()}")
         env.setdefault("TK_AGENT", cfg.get("PORTHOLE_AGENT") or os.environ.get("USER", "porthole"))
@@ -101,7 +105,7 @@ def _run_on_device(tool, args, ctx, cfg) -> int:
 
     argv = ["ssh", *porthole.ssh_opts(cfg), porthole.resolve_phone(cfg), remote]
     if args.lock:
-        wrapper = [str(ctx.root / "tools" / "tk-device.sh"), "--need-booted"]
+        wrapper = [str(ctx.root / "tools" / "ph-device.sh"), "--need-booted"]
         argv = wrapper + argv
 
     ctx.out(ctx.out.paint(f"  running {tool.name} on the device", "grey"))
@@ -115,7 +119,7 @@ SPEC = {
     "group": "knowledge",
     "help": "run a tool with the config applied",
     "description": (
-        "Optional. Tools resolve config themselves, so `tools/tk-fps.py` works\n"
+        "Optional. Tools resolve config themselves, so `tools/ph-fps.py` works\n"
         "directly. Use this to reach a profile-scoped tool by name, or with\n"
         "--lock to take the device mutex with the right state declared."),
     "args": [
@@ -129,8 +133,8 @@ SPEC = {
     "reports": False,
     "run": cmd_run,
     "examples": [
-        "porthole run tk-fps.py",
-        "porthole run --lock tk-suspend-cycle.sh 20",
-        "porthole run tk-sysstate.sh    # an on-device tool: piped over, not run here",
+        "porthole run ph-fps.py",
+        "porthole run --lock ph-suspend-cycle.sh 20",
+        "porthole run ph-sysstate.sh    # an on-device tool: piped over, not run here",
     ],
 }

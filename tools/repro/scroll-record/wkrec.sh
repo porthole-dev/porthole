@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: runs ON THE DEVICE. /tmp/sess.sh, /tmp/tk-wkphase.sh, /tmp/tk-scrollarm.sh
+# needs: runs ON THE DEVICE. /tmp/sess.sh, /tmp/ph-wkphase.sh, /tmp/ph-scrollarm.sh
 #        and the python helpers scrollarm needs, all staged in /tmp.
 # env: TK_WKPHASE_OFFSETS (required)
 # exits: 0 measured · 1 the arm is void
@@ -16,7 +16,7 @@
 # fire there were attached, which makes the drag window's null real.
 set -u
 [ -f /tmp/wkoff.sh ] && . /tmp/wkoff.sh
-: "${TK_WKPHASE_OFFSETS:?run tools/tk-wkoffsets.sh on the host}"
+: "${TK_WKPHASE_OFFSETS:?run tools/ph-wkoffsets.sh on the host}"
 export TK_WKPHASE_OFFSETS
 [ -n "${TK_SCROLL_URL:-}" ] && export TK_SCROLL_URL
 . /tmp/sess.sh
@@ -32,13 +32,13 @@ N=$(pgrep -fc WebKitWebProcess 2>/dev/null || echo 0)
 echo "webprocs before arming: $N"
 [ "$N" -eq 0 ] || { echo "REFUSE: a browser is still running, probes would not attach"; echo WKRECDONE; exit 1; }
 
-sh /tmp/tk-wkphase.sh arm
+sh /tmp/ph-wkphase.sh arm
 
 # The hook runs after the page is up and before the drag: settle, then start the
 # measurement detached so it spans the drag scrollarm is about to run.
 rm -f /tmp/wk-drag.out
-TK_SCROLL_HOOK="sleep ${TK_SETTLE:-20}; setsid sh -c \"sh /tmp/tk-wkphase.sh measure 16 > /tmp/wk-drag.out 2>&1; cp /tmp/wk.trace /tmp/wk-drag.trace; echo DRAGWINDOWDONE >> /tmp/wk-drag.out\" </dev/null >/dev/null 2>&1 &" \
-	sh /tmp/tk-scrollarm.sh rec
+PORTHOLE_SCROLL_HOOK="sleep ${PORTHOLE_SETTLE:-20}; setsid sh -c \"sh /tmp/ph-wkphase.sh measure 16 > /tmp/wk-drag.out 2>&1; cp /tmp/wk.trace /tmp/wk-drag.trace; echo DRAGWINDOWDONE >> /tmp/wk-drag.out\" </dev/null >/dev/null 2>&1 &" \
+	sh /tmp/ph-scrollarm.sh rec
 RC=$?
 
 # The drag is shorter than the window that measures it, so scrollarm returns
@@ -54,15 +54,15 @@ echo "=== DRAG WINDOW (settled scroll) ==="
 cat /tmp/wk-drag.out 2>/dev/null || echo "no drag output"
 
 echo "=== CONTROL: forced layout in the same instance ==="
-setsid sh -c "sh /tmp/tk-wkphase.sh measure 8 > /tmp/wk-ctl.out 2>&1; cp /tmp/wk.trace /tmp/wk-ctl.trace" </dev/null >/dev/null 2>&1 &
+setsid sh -c "sh /tmp/ph-wkphase.sh measure 8 > /tmp/wk-ctl.out 2>&1; cp /tmp/wk.trace /tmp/wk-ctl.trace" </dev/null >/dev/null 2>&1 &
 sleep 2
 for _ in 1 2 3; do
-	python3 /tmp/tk-webeval.py 'document.body.appendChild(document.createElement("hr")); document.body.offsetHeight' >/dev/null 2>&1
+	python3 /tmp/ph-webeval.py 'document.body.appendChild(document.createElement("hr")); document.body.offsetHeight' >/dev/null 2>&1
 	sleep 1
 done
 sleep 6
 cat /tmp/wk-ctl.out 2>/dev/null || echo "no control output"
 
-sh /tmp/tk-wkphase.sh off
+sh /tmp/ph-wkphase.sh off
 echo "arm exit $RC"
 echo WKRECDONE

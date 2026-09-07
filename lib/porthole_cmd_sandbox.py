@@ -260,13 +260,16 @@ def _ensure_device_key(home: pathlib.Path) -> pathlib.Path:
 
 
 def _lock_path(device: str) -> str:
-    """Must match tools/tk-device.sh:32 exactly, or the mutex is not shared.
+    """Must match tools/ph-device.sh:32 exactly, or the mutex is not shared.
 
-    TK_DEVICE_LOCK overrides the default there, same as here -- an operator
-    who sets it on the host and not for the container would otherwise get two
-    different locks guarding the one physical phone.
+    TK_DEVICE_LOCK -- or its twin PORTHOLE_DEVICE_LOCK, with the old name
+    winning -- overrides the default there, same as here: an operator who sets
+    it on the host and not for the container would otherwise get two different
+    locks guarding the one physical phone.
     """
-    return os.environ.get("TK_DEVICE_LOCK") or f"/tmp/porthole-{device or 'device'}.lock"
+    return (os.environ.get("TK_DEVICE_LOCK")
+            or os.environ.get("PORTHOLE_DEVICE_LOCK")
+            or f"/tmp/porthole-{device or 'device'}.lock")
 
 
 def _mounts(root, pmb_dir, workdir, key, device, extra, aports=None):
@@ -298,13 +301,13 @@ def _mounts(root, pmb_dir, workdir, key, device, extra, aports=None):
         mounts.append((str(aports), APORTS_IN, "rw"))
     # porthole's own user config layer (lib/porthole.py load_config), where
     # `porthole use` writes the active device. Without this the container
-    # resolves a DIFFERENT PORTHOLE_DEVICE than the host, tk-device.sh
+    # resolves a DIFFERENT PORTHOLE_DEVICE than the host, ph-device.sh
     # computes a different lock path from that, and the device-mutex mount
     # above ends up guarding nothing while looking correct.
     #
     # READ-ONLY, and it must stay that way. config.env sets FASTBOOT and ADB
     # (lib/porthole.py), and the HOST executes those values as commands --
-    # tools/tk-flash-boot.sh, tools/ph-build.sh, lib/porthole.py's Device.
+    # tools/ph-flash-boot.sh, tools/ph-build.sh, lib/porthole.py's Device.
     # Writable, anything in the container could put `FASTBOOT=/tmp/evil.sh`
     # in that file and get arbitrary execution as you on the host's next
     # flash. The mount exists so both sides resolve the same device; that
@@ -398,7 +401,7 @@ def _up_argv(root, image, mounts, device, channels_cfg: str = "") -> list[str]:
             "--security-opt", "label=disable",
             "--hostname", CONTAINER,
             # So the in-container load_config finds the config mounted at
-            # /run/porthole/config/porthole above, and tk-device.sh computes
+            # /run/porthole/config/porthole above, and ph-device.sh computes
             # the SAME lock path the host mounted rather than a different one
             # for the same device -- the whole point of that mount.
             "-e", "XDG_CONFIG_HOME=/run/porthole/config",

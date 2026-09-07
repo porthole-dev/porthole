@@ -178,12 +178,12 @@ def test_host_python_tools_can_start():
             return None
         # A cwd PER TOOL, not one shared between them. In a throwaway cwd
         # because a tool that takes an output path as argv[1] treats "--help"
-        # as one: tk-tone.py wrote a WAV named `--help` into the repo root the
+        # as one: ph-tone.py wrote a WAV named `--help` into the repo root the
         # first time this ran. Now that these run concurrently, a shared cwd
         # would let two such tools race for the same filename.
         scratch = os.path.join(root, path.stem)
         os.makedirs(scratch, exist_ok=True)
-        # stdin=DEVNULL, or a tool that prompts (tk-mount-cal.py walks you
+        # stdin=DEVNULL, or a tool that prompts (ph-mount-cal.py walks you
         # through four physical poses) blocks forever on input() instead of
         # failing. The timeout stays as a backstop, not as the mechanism.
         proc = subprocess.run([sys.executable, str(path), "--help"],
@@ -238,11 +238,11 @@ def test_tools_with_a_shebang_are_executable():
                      + "\n\nchmod +x them, and commit the mode change.")
 
 
-def test_tk_lib_is_a_symlink_to_the_shared_lib():
+def test_ph_lib_is_a_symlink_to_the_shared_lib():
     """It has been materialised into a real file by a stray `sed -i` before.
     That silently forks the shared library: edits to lib/porthole.sh stop
     reaching every shell tool, and nothing errors."""
-    link = ROOT / "tools" / "tk-lib.sh"
+    link = ROOT / "tools" / "ph-lib.sh"
     assert link.is_symlink(), (
         f"{link} must be a symlink to ../lib/porthole.sh, not a copy "
         f"(a `sed -i` over tools/*.sh will do this -- use `sed --follow-symlinks` "
@@ -262,8 +262,8 @@ def test_tools_that_need_a_device_mention_the_mutex_or_use_the_lib():
         text = path.read_text(errors="replace")
         if field(path, "lib-exempt"):
             continue      # declared and justified in the tool's own header
-        ok = ("tk-lib.sh" in text or "import porthole" in text
-              or "tk-device.sh" in text or "porthole.Device" in text
+        ok = ("ph-lib.sh" in text or "import porthole" in text
+              or "ph-device.sh" in text or "porthole.Device" in text
               or "TK_SSH_OPTS" in text or "tk_device_state" in text)
         if not ok:
             bad.append(f"{path.name} (needs {needs})")
@@ -286,7 +286,7 @@ def test_no_bashisms_in_posix_sh_scripts():
     not degrade -- it is a syntax error at the point of use.
 
     This exists because a bulk edit added `${BASH_SOURCE[0]:-$0}` to eight
-    `#!/bin/sh` tools. Every one of them silently failed to find tk-lib.sh, and
+    `#!/bin/sh` tools. Every one of them silently failed to find ph-lib.sh, and
     only shellcheck in CI noticed."""
     bad = []
     for path in tools():
@@ -528,7 +528,7 @@ def test_no_shell_function_ends_in_a_test_that_guards_a_side_effect():
 def test_a_missing_objcopy_is_cannot_compare_not_a_crc_mismatch():
     """Issue #57: exit codes are an API, and 1 is an ANSWER.
 
-    tk-modcrc.py gates `porthole build mod`: 1 means "these two modules
+    ph-modcrc.py gates `porthole build mod`: 1 means "these two modules
     disagree" and the rung refuses the push on it. Inside the workspace there
     is no llvm-objcopy on PATH, `subprocess.run` raised FileNotFoundError, and
     a traceback exits 1 -- so every venus_core push for a week was refused
@@ -547,7 +547,7 @@ def test_a_missing_objcopy_is_cannot_compare_not_a_crc_mismatch():
         nowhere = pathlib.Path(d, "bin")
         nowhere.mkdir()
         proc = subprocess.run(
-            [sys.executable, str(ROOT / "tools" / "tk-modcrc.py"),
+            [sys.executable, str(ROOT / "tools" / "ph-modcrc.py"),
              str(ko), str(ko)],
             capture_output=True, text=True, timeout=60,
             env=dict(os.environ, PATH=str(nowhere)))

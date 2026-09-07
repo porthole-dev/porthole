@@ -5,7 +5,7 @@ scope: device:google-taimen
 subsystem: media
 severity: finding
 confidence: proven
-evidence: 2026-09-01, kernel 7.2.2 #25 aport r24. tk-mempressure.sh at 1-2 Hz across two live YouTube sessions driven by the user; two-arm gst-launch positive/negative control on a generated VP9 1080p30 clip; /dev/video7 fd holders; per-process VmRSS; dmesg fault census.
+evidence: 2026-09-01, kernel 7.2.2 #25 aport r24. ph-mempressure.sh at 1-2 Hz across two live YouTube sessions driven by the user; two-arm gst-launch positive/negative control on a generated VP9 1080p30 clip; /dev/video7 fd holders; per-process VmRSS; dmesg fault census.
 refutes: venus is idle during Epiphany playback; WebKit never sheds at memory.high; GEM grows monotonically past memory.high; the top-right/frame-drop symptoms are a5xx GPU faults; the v4l2 element ranks are wrong; the WebKit sandbox hides /dev/video7
 first-learned: 2026-09-01
 ---
@@ -71,7 +71,7 @@ which is the dropped and re-presented ("rollback") frames.
   present is `v4l2vp9dec0`. `dav1ddec` is installed at primary (256) and would
   take AV1 if it were served, but it is not being used.
 
-**How it was established** — `tk-mempressure.sh` at 1-2 Hz across two live
+**How it was established** — `ph-mempressure.sh` at 1-2 Hz across two live
 YouTube sessions the user drove by hand, with playback confirmed by the user
 and by the positive controls the tool demands (GPU pinned 710 MHz, tmax 74-76 C).
 The decoder probe was validated in both directions before any conclusion was
@@ -80,8 +80,8 @@ scanning `/proc/*/fd`; fault census by `dmesg`.
 
 **Two instrument traps paid for here.** `sudo -E` is refused by this busybox
 sudo ("preserving the entire environment is not supported"), so
-`TK_INTERVAL=... sudo sh tk-mempressure.sh` silently samples at 1 Hz -- pass
-`sudo env TK_INTERVAL=...` instead. And a detached sampler started over ssh
+`PORTHOLE_INTERVAL=... sudo sh ph-mempressure.sh` silently samples at 1 Hz -- pass
+`sudo env PORTHOLE_INTERVAL=...` instead. And a detached sampler started over ssh
 died exactly when the scope hit its bound, losing the window it existed to
 capture; write to a file on the device and expect to lose the tail.
 

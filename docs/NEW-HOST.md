@@ -122,7 +122,7 @@ passes `--no-image` and says so: you get a populated rootfs chroot and a
 complete, verified `boot.img`, and no rootfs image.
 
 ```sh
-porthole run tools/tk-flash-boot.sh    # in the workspace: boot only
+porthole run tools/ph-flash-boot.sh    # in the workspace: boot only
 porthole build image --yes --host      # if you need the rootfs image too
 ```
 

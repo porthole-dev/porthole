@@ -1,0 +1,15 @@
+# scope: generic
+# needs: -  (host only, no device)
+# env: -
+# exits: 0 ok · non-zero on failure
+[Unit]
+Description=ph-lifeline: reboot to bootloader if the USB host is unreachable
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ph-lifeline
+TimeoutStartSec=15min
+
+# Triggered by ph-lifeline.timer, not by a target -- see that file for why.
+# No [Install] here: this unit is never `systemctl enable`d directly, only
+# started by the timer.

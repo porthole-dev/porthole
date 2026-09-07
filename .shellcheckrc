@@ -1,4 +1,4 @@
-# tk-lib.sh is resolved at runtime relative to the script, so shellcheck cannot
+# ph-lib.sh is resolved at runtime relative to the script, so shellcheck cannot
 # follow it statically. Every tool that sources it carries a `# shellcheck
 # source=` directive for the cases where it can.
 disable=SC1091
@@ -9,5 +9,5 @@ disable=SC1091
 disable=SC2086
 
 # `cmd; if [ $? -ne 0 ]` is used deliberately where the exit code must be
-# observed rather than acted on immediately (see tk-device.sh).
+# observed rather than acted on immediately (see ph-device.sh).
 disable=SC2181
