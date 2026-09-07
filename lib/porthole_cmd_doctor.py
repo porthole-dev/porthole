@@ -999,7 +999,7 @@ def _workspace_fastboot_row(ch: Checks, sandbox) -> None:
                    "(platform-tools) does not exist in there")
 
 
-def check_workspace(ch: Checks, ctx, family: str) -> None:
+def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True) -> None:
     """podman and the build workspace.
 
     podman is the ONE thing that still needs a package manager. Everything else
@@ -1009,7 +1009,7 @@ def check_workspace(ch: Checks, ctx, family: str) -> None:
     """
     import porthole_cmd_sandbox as sandbox
 
-    state = sandbox._container_state(ctx.root, ctx.cfg)
+    state = sandbox._container_state(ctx.root, ctx.cfg, probe_device)
     if not state["podman"]:
         ch.add("host: podman", "fail",
                "not found -- builds run in a rootless container",
@@ -1238,7 +1238,7 @@ def cmd_doctor(args, ctx) -> int:
     cfg = ctx.cfg
 
     check_host(ch, cfg, family)
-    check_workspace(ch, ctx, family)
+    check_workspace(ch, ctx, family, probe_device=not args.no_device)
     check_drift(ch, cfg)
     check_profile(ch, cfg, ctx.root)
     check_identity(ch, cfg)

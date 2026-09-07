@@ -536,6 +536,33 @@ def test_a_missing_host_work_dir_is_not_a_warning():
     assert "host builds only" in row["detail"], row
 
 
+def test_no_device_does_not_open_a_connection_to_the_device():
+    """`--no-device` says it skips anything that touches the device, and the
+    row it was not skipping cost 5.09 s of a 5.5 s run: the workspace check
+    asks the phone whether it accepts the device key, over ssh, with a five
+    second connect timeout, on a host whose device is unplugged.
+
+    Asserted by refusing to let ssh exist rather than by timing: a timing
+    assertion is flaky on a loaded box and green on a fast one for the wrong
+    reason."""
+    import porthole_cmd_sandbox as sandbox
+
+    calls = []
+    real = sandbox.subprocess.run
+
+    def spy(argv, *a, **kw):
+        if argv and str(argv[0]).endswith("ssh"):
+            calls.append(argv)
+        return real(argv, *a, **kw)
+
+    sandbox.subprocess.run = spy
+    try:
+        sandbox._container_state(ROOT, {"PHONE": "user@172.16.42.1"},
+                                 probe_device=False)
+    finally:
+        sandbox.subprocess.run = real
+    assert not calls, f"--no-device still opened ssh: {calls}"
+
 
 if __name__ == "__main__":
     sys.exit(main())
