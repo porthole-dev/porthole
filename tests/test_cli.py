@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -528,6 +529,41 @@ def test_the_resolved_config_beats_the_shell_it_was_launched_from():
     assert env.get("PATH") == "/usr/bin"
     assert env.get("HOME") != "/should/not/cross", "a non-PORTHOLE key crossed"
     assert "PORTHOLE_N" not in env, "a non-string cfg value crossed"
+
+
+# 192.0.2.0/24 is TEST-NET-1 (RFC 5737): guaranteed unrouteable, so a verb
+# that dials the device hangs for its full connect timeout instead of failing
+# fast against a real address that happens to refuse.
+BLACKHOLE = "192.0.2.1"
+
+
+def test_the_host_only_verbs_stay_under_their_budget():
+    """A budget, not a benchmark. These four run with no device and no
+    container, so a wait on the network is the only way to be slow -- which is
+    exactly how `doctor --no-device` came to spend 5.1 s of a 5.5 s run inside
+    one ssh with ConnectTimeout=5.
+
+    Two things make it survive a loaded runner rather than being deleted for
+    flapping. The device address is unrouteable, so any dial costs a full
+    timeout and not a fast refusal -- the signal is seconds, not milliseconds.
+    And the budget is 8 s: this suite runs its tests in parallel and each of
+    these spawns a CLI subprocess, so several seconds of pure scheduling delay
+    is normal and must not be a failure.
+    """
+    budget_s = 8.0
+    env = {"PORTHOLE_DEVICE_STATE": "absent",
+           "PORTHOLE_HOST": BLACKHOLE, "PHONE": "pmos@" + BLACKHOLE}
+    slow = []
+    for argv in (["--help"], ["version"], ["devices"],
+                 ["doctor", "--no-device"]):
+        started = time.monotonic()
+        run(*argv, env=env)
+        took = time.monotonic() - started
+        if took > budget_s:
+            slow.append(f"porthole {' '.join(argv)}: {took:.1f}s")
+    assert not slow, (
+        "these run with no device attached and must not wait on the network:\n  "
+        + "\n  ".join(slow) + "\n(docs/PERFORMANCE.md, 'The verbs')")
 
 
 def main():
