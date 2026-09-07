@@ -148,6 +148,7 @@ generic notes as well.
 | [build-mod-against-an-aport-kernel-fails-at-the-next-boot](traps/build-mod-against-an-aport-kernel-fails-at-the-next-boot.md) | `generic` | build mod from the tree against a kernel that ships from the aport is refused by MODVERSIONS -- and on a no-reload module the refusal lands at the next boot, with the shipped module already gone |
 | [busybox-reboot-eats-the-mode-string](traps/busybox-reboot-eats-the-mode-string.md) | `generic` | busybox `reboot bootloader` silently discards the word "bootloader |
 | [critical-chain-shows-the-longest-path-not-the-floor](traps/critical-chain-shows-the-longest-path-not-the-floor.md) | `generic` | systemd-analyze critical-chain shows the longest path, not the floor |
+| [crossdirect-replaces-the-environment-on-exec](traps/crossdirect-replaces-the-environment-on-exec.md) | `generic` | No CCACHE_ export reaches a cross compile, because crossdirect execs with a literal environment |
 | [dmesg-can-be-empty-about-boot](traps/dmesg-can-be-empty-about-boot.md) | `generic` | dmesg can be empty about boot while the journal still has everything |
 | [dtbo-must-match-the-kernel](traps/dtbo-must-match-the-kernel.md) | `generic` | The dtbo must match the kernel, and the bootloader reads it from the active slot |
 | [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
@@ -225,7 +226,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 111
+- `generic` — 112
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1

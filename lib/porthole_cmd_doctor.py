@@ -1027,8 +1027,36 @@ def _workspace_fastboot_row(ch: Checks, sandbox) -> None:
                    "(platform-tools) does not exist in there")
 
 
+def _ccache_rows(ch: Checks, ctx, deep: bool) -> None:
+    """The one build-speed fact that is cheap to check and expensive to miss.
+
+    `porthole build ccache` has always known when a cache was about to start
+    evicting -- and nobody runs that verb before a build. doctor is what people
+    run.
+
+    Behind `--all` because it is not free: reading it is one `podman exec` per
+    arch, measured at 1.9s against doctor's own 0.7s, and tripling the cost of
+    the verb everybody runs is how a check gets skipped by everybody. The
+    everyday run says the rows are there and how to see them.
+    """
+    import porthole_cmd_build as build
+
+    if not deep:
+        ch.add("workspace: ccache", "skip", "not read -- one podman exec per "
+               "arch", doc="porthole doctor --all")
+        return
+    for arch, stats in build.ccache_stats_by_arch(ctx):
+        level, why = build.ccache_pressure(stats)
+        if level == "skip":
+            continue
+        ch.add("workspace: ccache {}".format(arch), level, why,
+               fix=("porthole build ccache --max 25G"
+                    if level == "fail" else ""),
+               doc="porthole build ccache")
+
+
 def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True,
-                    skip_reason: str = "") -> None:
+                    skip_reason: str = "", deep: bool = False) -> None:
     """podman and the build workspace.
 
     podman is the ONE thing that still needs a package manager. Everything else
@@ -1066,6 +1094,7 @@ def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True,
     if state["container_running"]:
         ch.add("workspace: container", "ok", sandbox.CONTAINER)
         _workspace_fastboot_row(ch, sandbox)
+        _ccache_rows(ch, ctx, deep)
     else:
         ch.add("workspace: container", "warn", "not running",
                doc="porthole sandbox up")
@@ -1309,7 +1338,7 @@ def cmd_doctor(args, ctx) -> int:
         key_skip_reason = ""
     check_workspace(ch, ctx, family,
                     probe_device=(device_state == "BOOTED"),
-                    skip_reason=key_skip_reason)
+                    skip_reason=key_skip_reason, deep=args.all)
     check_drift(ch, cfg)
     check_profile(ch, cfg, ctx.root)
     check_identity(ch, cfg)
