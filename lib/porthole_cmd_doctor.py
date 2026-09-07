@@ -939,7 +939,7 @@ def _check_pmos_password(ch: Checks, env) -> None:
                "it in ps")
 
 
-def _device_key_row(ch: Checks, state) -> None:
+def _device_key_row(ch: Checks, state, skip_reason: str = "") -> None:
     """The workspace's device key, reported by whether the phone accepts it.
 
     doctor printed `✓ device key /home/you/.porthole/device_key` for a key the
@@ -950,6 +950,13 @@ def _device_key_row(ch: Checks, state) -> None:
     The fix is printed and never applied: installing a key is a privileged
     write to the device, and doctor's contract is that it names fixes it will
     not run itself.
+
+    `None` now means two different things: asked and could not tell, or
+    deliberately not asked (`--no-device`, or a device already known to be
+    something other than BOOTED). `check_device_packages` drew this same
+    line as `skip ... the device is ABSENT` rather than `warn`, precisely so
+    it cannot be confused with an actual failed probe -- this row now makes
+    the same distinction, on `state["device_key_probed"]`.
     """
     key = state.get("device_key")
     if not key:
@@ -966,6 +973,11 @@ def _device_key_row(ch: Checks, state) -> None:
                f"print the public half here, then add that ONE line to the "
                f"phone's ~/.ssh/authorized_keys:\n"
                f"          ssh-keygen -y -f {key}")
+    elif not state.get("device_key_probed", True):
+        ch.add("workspace: device key", "skip",
+               f"{key} exists -- not asked ({skip_reason or 'not probed'})",
+               doc="a key file is not a working key; re-run with the device "
+                   "booted and reachable")
     else:
         ch.add("workspace: device key", "warn",
                f"{key} -- present, but the device could not be asked whether "
@@ -1015,13 +1027,18 @@ def _workspace_fastboot_row(ch: Checks, sandbox) -> None:
                    "(platform-tools) does not exist in there")
 
 
-def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True) -> None:
+def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True,
+                    skip_reason: str = "") -> None:
     """podman and the build workspace.
 
     podman is the ONE thing that still needs a package manager. Everything else
     the build needs -- pmbootstrap, the toolchain, fuse2fs, android-tools --
     lives in the image, which is why this is the only host prerequisite worth
     failing on.
+
+    `skip_reason` names why the device key was not probed, for the caller
+    that already knows -- it says `--no-device` or `the device is ABSENT`
+    where `_device_key_row` only has the bool.
     """
     import porthole_cmd_sandbox as sandbox
 
@@ -1038,7 +1055,7 @@ def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True) -> 
         # deliberately absent, tests/ci-local.sh) made
         # test_an_absent_device_is_probed_once_not_twice fail for a reason
         # that had nothing to do with the device.
-        _device_key_row(ch, state)
+        _device_key_row(ch, state, skip_reason)
         return
     ch.add("host: podman", "ok", state["podman"])
     if state["image_built"]:
@@ -1082,7 +1099,7 @@ def check_workspace(ch: Checks, ctx, family: str, probe_device: bool = True) -> 
     else:
         ch.add("workspace: work dir", "ok", str(pmb))
 
-    _device_key_row(ch, state)
+    _device_key_row(ch, state, skip_reason)
 
     # binfmt is host-global and needs root once. Named, never automated: it is
     # a person installing software on their own machine, not a privilege the
@@ -1284,8 +1301,15 @@ def cmd_doctor(args, ctx) -> int:
         start = time.monotonic()
         device_state = ctx.device().state()
         device_state_elapsed = (time.monotonic() - start) * 1000
+    if args.no_device:
+        key_skip_reason = "--no-device"
+    elif device_state and device_state != "BOOTED":
+        key_skip_reason = f"the device is {device_state}"
+    else:
+        key_skip_reason = ""
     check_workspace(ch, ctx, family,
-                    probe_device=(device_state == "BOOTED"))
+                    probe_device=(device_state == "BOOTED"),
+                    skip_reason=key_skip_reason)
     check_drift(ch, cfg)
     check_profile(ch, cfg, ctx.root)
     check_identity(ch, cfg)

@@ -486,6 +486,23 @@ def test_the_device_key_row_reports_three_states():
     assert seen == {True: "ok", False: "fail", None: "warn"}, seen
 
 
+def test_a_skipped_probe_is_not_reported_as_a_failed_one():
+    """`None` now means two different things: asked and could not tell, or
+    deliberately not asked (--no-device, or a device known to be something
+    other than BOOTED). `check_device_packages` drew this line as `skip ...
+    the device is ABSENT` rather than `warn`, precisely so the two cannot be
+    confused; the device-key row must draw it the same way."""
+    ch = doctor.Checks()
+    doctor._device_key_row(ch, {"device_key": "/k", "device_key_authorized": None,
+                                "device_key_probed": False},
+                           skip_reason="the device is ABSENT")
+    row = ch.rows[-1]
+    assert row["status"] == "skip", row
+    assert "ABSENT" in row["detail"], row
+    # Must not be confusable with the "asked, and could not tell" warn above.
+    assert "could not be asked" not in row["detail"], row
+
+
 def test_a_missing_key_is_not_reported_as_refused():
     ch = doctor.Checks()
     doctor._device_key_row(ch, {"device_key": "", "device_key_authorized": None})
