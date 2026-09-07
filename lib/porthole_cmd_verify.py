@@ -395,6 +395,7 @@ def _collect_warnings(ctx, work, source) -> list:
 SPEC = {
     "verb": "verify",
     "order": 24,
+    "group": "knowledge",
     "help": "every check that runs with no device attached",
     "description": (
         "A locked or absent device is the normal day-one state, so the offline\n"

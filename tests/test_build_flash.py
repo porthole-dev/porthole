@@ -20,6 +20,8 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 CLI = ROOT / "bin" / "porthole"
 sys.path.insert(0, str(ROOT / "lib"))
 
@@ -808,21 +810,7 @@ def test_every_module_staging_path_strips_btf():
 
 
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"  ok   {name}")
-        except AssertionError as exc:
-            failed += 1
-            print(f"  FAIL {name}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"  ERR  {name}: {type(exc).__name__}: {exc}")
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 
@@ -1665,6 +1653,91 @@ def test_ccache_is_an_action_with_its_own_flag():
     assert rc == 0, err
     payload = json.loads(out)
     assert "caches" in payload and "where" in payload, payload
+
+
+def test_a_bare_build_names_the_rung_it_picked():
+    """`porthole build` runs `auto` and never said so. `auto` measures an
+    incremental make and then ROUTES on what it rebuilt -- it can end up
+    doing a full kernel -- so the reader is owed the name before the work,
+    not in the summary line afterwards."""
+    rc, out, err = run("build")
+    assert "auto" in out.lower(), out
+    first = [l for l in out.splitlines() if l.strip()][0]
+    assert "auto" in first.lower(), (
+        "the rung must be named up front, not in the summary:\n" + out)
+
+
+class _RecordingOut(_FakeCtx._FakeOut):
+    """`_FakeOut.__call__` is a no-op; these two gates are ONLY provable by
+    seeing whether it was called at all."""
+
+    def __init__(self):
+        self.lines = []
+
+    def __call__(self, *a, **k):
+        self.lines.append(a)
+
+
+def test_json_suppresses_the_auto_line_before_ctx_emit():
+    """BLOCKER 1, gate 1 (porthole_cmd_build.py ~:1853): the "auto" rung-
+    naming line printed unconditionally, before cmd_build ever reaches
+    ctx.emit, so `porthole build --json` printed prose ahead of its own
+    JSON document. Now gated on `not args.action and not args.json`.
+
+    test_json_output_actually_parses's `build status --json` and
+    `build ccache --json` return at porthole_cmd_build.py:1871-1875 --
+    BEFORE this gate is ever reached -- so those are real coverage of a
+    different, never-broken contract and reverting this gate would go
+    unnoticed by them. This drives cmd_build itself with args.action unset,
+    so the gated print is the very first thing it can do; whatever
+    _assert_no_drift does next against a bare fake cfg (it has none of
+    Config's methods) is irrelevant -- only what printed before that
+    matters, so any exception past the print is swallowed on purpose."""
+    import porthole_cmd_build as build
+
+    ctx = _FakeCtx({})
+    ctx.out = _RecordingOut()
+    ctx.args = argparse.Namespace(action=None, json=True, timeout=60,
+                                  yes=False, allow_env_override=False,
+                                  host=False, verbose=False, kernel=False)
+    try:
+        build.cmd_build(ctx.args, ctx)
+    except Exception:
+        pass
+    assert not ctx.out.lines, f"printed under --json: {ctx.out.lines}"
+
+
+def test_json_suppresses_the_tree_autoselect_banner():
+    """BLOCKER 1, gate 2 (porthole_cmd_build.py ~:1655): _maybe_autoselect_
+    tree's "tree:" banner also printed before ctx.emit -- pre-existing and
+    conditional (only fires when a tree is actually autoselected, which is
+    why the original reviewer's own environment never saw it). Now gated on
+    ctx.args.json, checked AFTER the PORTHOLE_KERNEL_TREE mutation so
+    autoselection itself is unaffected -- only the human-only banner is
+    suppressed.
+
+    _autoselect_tree is monkeypatched to force the "found one" branch
+    without a real git worktree on disk: the gate under test is the print,
+    not _autoselect_tree's own branch-matching, which
+    test_autoselect_finds_a_real_worktree_on_the_product_branch and its
+    neighbours above already cover."""
+    import porthole_cmd_build as build
+
+    ctx = _FakeCtx({"PORTHOLE_KERNEL_BRANCH": "taimen-v7.2"})
+    ctx.out = _RecordingOut()
+    ctx.args = argparse.Namespace(json=True)
+    real_autoselect = build._autoselect_tree
+    real_env = os.environ.get("PORTHOLE_KERNEL_TREE")
+    build._autoselect_tree = lambda *a, **k: "/some/other/tree"
+    try:
+        build._maybe_autoselect_tree(ctx, "mod")
+    finally:
+        build._autoselect_tree = real_autoselect
+        if real_env is None:
+            os.environ.pop("PORTHOLE_KERNEL_TREE", None)
+        else:
+            os.environ["PORTHOLE_KERNEL_TREE"] = real_env
+    assert not ctx.out.lines, f"printed under --json: {ctx.out.lines}"
 
 
 if __name__ == "__main__":

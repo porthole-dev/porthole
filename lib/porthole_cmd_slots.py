@@ -255,6 +255,7 @@ def cmd_slots(args, ctx) -> int:
 SPEC = {
     "verb": "slots",
     "order": 16,
+    "group": "device",
     "help": "read A/B slot policy from the device, never guess it",
     "description": (
         "Slot policy must be settled before anything is written to the\n"

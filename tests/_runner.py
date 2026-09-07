@@ -42,25 +42,45 @@ def jobs() -> int:
 
 
 def _invoke(name: str):
-    """Run ONE test, by name, in the worker. Returns (name, message-or-None).
+    """Run ONE test, by name, in the worker. Returns (name, status, message).
 
     By name rather than by function object: the pool would otherwise have to
-    ship a callable defined in __main__, and how that is shipped depends on the
-    start method. Looking the name up in the child's own __main__ works the
-    same way whichever method is in use.
+    ship a callable defined in __main__, and how that is shipped depends on
+    the start method. Looking the name up in the child's own __main__ works
+    the same way whichever method is in use.
+
+    `Skip` is looked up the same way rather than passed in, for the same
+    reason -- it is the CALLER's class, defined in the caller's __main__, and
+    a fork already has it. A suite with no Skip class simply has none, and
+    every exception stays an error.
     """
-    fn = getattr(sys.modules["__main__"], name)
+    main = sys.modules["__main__"]
+    skip = getattr(main, "Skip", None)
+    fn = getattr(main, name)
     try:
         fn()
     except AssertionError as exc:
-        return name, "FAIL {}:\n  {}".format(name, exc)
+        return name, "fail", "FAIL {}:\n  {}".format(name, exc)
     except Exception as exc:  # noqa: BLE001
-        return name, "ERROR {}: {}: {}".format(name, type(exc).__name__, exc)
-    return name, None
+        if skip is not None and isinstance(exc, skip):
+            return name, "skip", "  skip {}: {}".format(name, exc)
+        return name, "fail", "ERROR {}: {}: {}".format(
+            name, type(exc).__name__, exc)
+    return name, "pass", None
 
 
-def run(namespace) -> int:
-    """The repo's standard runner. Pass `globals()`."""
+def run(namespace, suffix: str = "") -> int:
+    """The repo's standard runner. Pass `globals()`.
+
+    `suffix`, if given, is folded onto the summary line rather than printed
+    separately -- two `tail -1` consumers (`Makefile`'s `floor` target and
+    `tests/ci-local.sh`'s smoke check) read only the LAST line a suite prints,
+    and before this runner existed that line already carried both the tally
+    and a suite-specific count (e.g. "18/18 passed (150 tools checked)"). A
+    suffix printed on its own line would still be true, but invisible to
+    those two callers -- so it goes on this line instead, byte-compatible
+    with what those suites printed before.
+    """
     tests = [n for n, f in sorted(namespace.items())
              if n.startswith("test_") and callable(f)]
 
@@ -80,8 +100,21 @@ def run(namespace) -> int:
             # which worker finished first.
             results = list(pool.map(_invoke, tests))
 
-    failures = [msg for _n, msg in results if msg]
+    failures = [msg for _n, st, msg in results if st == "fail"]
+    skips = [msg for _n, st, msg in results if st == "skip"]
     for msg in failures:
         print(msg)
-    print("{}/{} passed".format(len(tests) - len(failures), len(tests)))
+    # Lowercase, and only when there are any. `make console` greps the suite
+    # output for uppercase SKIP to assert the console suites did NOT skip
+    # wholesale; a per-test skip wearing that word would turn that assertion
+    # into a silent pass.
+    for msg in skips:
+        print(msg)
+    tail = ", {} skipped".format(len(skips)) if skips else ""
+    # Skip count first, suffix last: the tally and the skip count are both
+    # about which tests ran, the suffix is a different axis (what the suite
+    # found), so it reads as the trailing annotation on the line.
+    head = "{}/{} passed{}".format(
+        len(tests) - len(failures) - len(skips), len(tests), tail)
+    print("{} {}".format(head, suffix) if suffix else head)
     return 1 if failures else 0

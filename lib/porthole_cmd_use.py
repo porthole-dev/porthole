@@ -80,8 +80,8 @@ def cmd_use(args, ctx) -> int:
             if not profiles:
                 o(o.paint("  none yet", "grey"))
             o.blank()
-            o.hint("porthole use <codename>       switch to one")
-            o.hint("porthole new-device <name>    create one")
+            o.hint("porthole use <codename>", "switch to one")
+            o.hint("porthole new-device <name>", "create one")
 
         return ctx.emit(payload, render)
 
@@ -153,10 +153,10 @@ def cmd_use(args, ctx) -> int:
         if branch and branch not in ("master", "main"):
             o.hint(f"pmaports is on {branch!r} — shared across devices, and it "
                    f"did NOT switch")
-            o.hint("porthole aports status    check before you build")
+            o.hint("porthole aports status", "check before you build")
         if not workdir:
-            o.hint(f"porthole use {codename} --workdir <path>   set its repo")
-        o.hint('cd "$(porthole cd)"       go to the device repo')
+            o.hint(f"porthole use {codename} --workdir <path>", "set its repo")
+        o.hint('cd "$(porthole cd)"', "go to the device repo")
 
     return ctx.emit(payload, render)
 
@@ -210,6 +210,7 @@ def cmd_cd(args, ctx) -> int:
 SPEC = {
     "verb": "use",
     "order": 12,
+    "group": "start",
     "help": "switch the active device profile, and its working repo",
     "description": (
         "Rewrites PORTHOLE_DEVICE in your config.env, so every tool, every\n"

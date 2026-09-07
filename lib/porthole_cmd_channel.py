@@ -76,7 +76,7 @@ def cmd_channel(args, ctx) -> int:
             o.blank()
             o(f"  current: {o.paint(now or 'unknown', 'bold')}")
             o.blank()
-            o.hint("porthole channel <name>   switch")
+            o.hint("porthole channel <name>", "switch")
         return ctx.emit(payload, render)
 
     if args.name not in chans:
@@ -109,7 +109,7 @@ def cmd_channel(args, ctx) -> int:
             ctx.out.blank()
 
     if not args.yes:
-        ctx.out.hint(f"porthole channel {args.name} --yes    to go ahead")
+        ctx.out.hint(f"porthole channel {args.name} --yes", "to go ahead")
         return EX_OK
 
     require_channel_key(args.name, info, pmaports)
@@ -117,7 +117,7 @@ def cmd_channel(args, ctx) -> int:
     if rc != 0:
         raise Bail("pmbootstrap refused the channel change", EX_FAIL)
     ctx.out(ctx.out.paint(f"  channel is now {args.name}", "green"))
-    ctx.out.hint("pmbootstrap pull     # sync pmaports to the new branch")
+    ctx.out.hint("pmbootstrap pull", "sync pmaports to the new branch")
     return EX_OK
 
 
@@ -156,6 +156,7 @@ def _dirty(pmaports) -> list[str]:
 SPEC = {
     "verb": "channel",
     "order": 44,
+    "group": "device",
     "help": "see and switch the postmarketOS release channel",
     "description": (
         "A channel selects a pmaports branch and an Alpine mirror. Switching\n"

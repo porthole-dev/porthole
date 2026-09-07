@@ -17,6 +17,7 @@ Both are drift bugs: the knowledge existed and the delivery did not. Tests here
 assert the delivery, not the knowledge.
 """
 import json
+import multiprocessing
 import os
 import pathlib
 import subprocess
@@ -24,10 +25,24 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 CLI = ROOT / "bin" / "porthole"
 sys.path.insert(0, str(ROOT / "lib"))
 
 TMPXDG = tempfile.mkdtemp(prefix="porthole-brain-test-")
+
+# `brain new` and the index comparison both have no choice but to touch the
+# live brain/ tree -- `porthole brain new` writes wherever bin/porthole's own
+# ROOT resolves to, and "is the index current" is a question about THIS
+# repo's committed brain/, not a copy of it. Under the parallel runner those
+# two raced with each other. Built as a Lock() here, before the pool forks
+# under the "fork" context tests/_runner.py pins (a lock built off the
+# multiprocessing default context takes a different SemLock path once
+# forkserver is the platform default), so every worker inherits the same OS
+# semaphore -- only these two tests wait on each other; the rest of the suite
+# still runs in parallel.
+_BRAIN_LOCK = multiprocessing.get_context("fork").Lock()
 
 
 def run(*args, env=None):
@@ -134,24 +149,30 @@ def test_refutes_on_a_non_finding_is_rejected():
 
 def test_brain_new_finding_lands_in_findings_with_its_own_template():
     """A finding must not borrow the trap template -- the shapes differ."""
-    rc, out, err = run("brain", "new", "a-test-finding", "--severity", "finding",
-                       "--refutes", "the old theory")
-    try:
-        assert rc == 0, err
-        made = ROOT / "brain" / "findings" / "a-test-finding.md"
-        assert made.is_file(), out
-        text = made.read_text()
-        assert "refutes: the old theory" in text
-        assert "**The question**" in text and "**What this rules out**" in text
-        assert "**Symptom**" not in text, "it used the trap template"
-    finally:
-        (ROOT / "brain" / "findings" / "a-test-finding.md").unlink(missing_ok=True)
+    with _BRAIN_LOCK:
+        rc, out, err = run("brain", "new", "a-test-finding", "--severity", "finding",
+                           "--refutes", "the old theory")
+        try:
+            assert rc == 0, err
+            made = ROOT / "brain" / "findings" / "a-test-finding.md"
+            assert made.is_file(), out
+            text = made.read_text()
+            assert "refutes: the old theory" in text
+            assert "**The question**" in text and "**What this rules out**" in text
+            assert "**Symptom**" not in text, "it used the trap template"
+        finally:
+            (ROOT / "brain" / "findings" / "a-test-finding.md").unlink(missing_ok=True)
 
 
 def _lint_a_finding(body_extra, evidence):
-    """Write one finding into the repo, lint it, remove it. Returns the
+    """Lint one synthetic finding in a tempdir -- `_lint_note` takes `root`
+    as a parameter, same as the other lint tests above, so this needs no
+    subprocess and never touches this repo's own brain/. Returns the
     complaint about instruments, or "" if there was none."""
-    note = ROOT / "brain" / "findings" / "zz-instrument-probe.md"
+    import porthole_cmd_brain as B
+    d = pathlib.Path(tempfile.mkdtemp(prefix="brain-lint-instrument-"))
+    (d / "brain" / "findings").mkdir(parents=True)
+    note = d / "brain" / "findings" / "zz-instrument-probe.md"
     note.write_text(
         "---\n"
         "id: zz-instrument-probe\n"
@@ -166,16 +187,11 @@ def _lint_a_finding(body_extra, evidence):
         "---\n\n"
         "**The question** — does the instrument rule fire?\n\n"
         f"**The answer** — {body_extra}\n")
-    try:
-        out = subprocess.run(
-            [sys.executable, str(ROOT / "bin" / "porthole"), "brain", "lint"],
-            capture_output=True, text=True).stdout
-        for line in out.splitlines():
-            if "commit the instrument" in line:
-                return line.strip()
-        return ""
-    finally:
-        note.unlink(missing_ok=True)
+    problems = B._lint_note(B.parse_note(note), {}, d)
+    for p in problems:
+        if "commit the instrument" in p:
+            return p.strip()
+    return ""
 
 
 def test_a_bare_instrument_name_is_still_refused():
@@ -286,9 +302,10 @@ def test_the_index_is_current():
     Failing here means: run `make brain-index` and commit the result.
     """
     import porthole_cmd_brain as B
-    notes = B.load_notes(ROOT)
-    want = B.render_index(ROOT, notes)
-    have = (ROOT / "brain" / "INDEX.md").read_text(encoding="utf-8")
+    with _BRAIN_LOCK:
+        notes = B.load_notes(ROOT)
+        want = B.render_index(ROOT, notes)
+        have = (ROOT / "brain" / "INDEX.md").read_text(encoding="utf-8")
     if want == have:
         return
     # Only sections the index actually renders. brain/memory/ is not one, so
@@ -303,21 +320,7 @@ def test_the_index_is_current():
 
 
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"  ok   {name}")
-        except AssertionError as exc:
-            failed += 1
-            print(f"  FAIL {name}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"  ERR  {name}: {type(exc).__name__}: {exc}")
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 if __name__ == "__main__":

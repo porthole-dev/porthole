@@ -41,6 +41,7 @@ def cmd_tui(args, ctx) -> int:
 SPEC = {
     "verb": "tui",
     "order": 11,
+    "group": "knowledge",
     "help": "open the console: progress, devices, tools, notes, in one screen",
     "description": (
         "An always-open front end over the same library. It loads the config,\n"

@@ -235,6 +235,7 @@ def _maybe_offer(args, ctx, nxt) -> None:
 SPEC = {
     "verb": "next",
     "order": 14,
+    "group": "device",
     "help": "where am I in this port, and what is the one next thing",
     "description": (
         "Derives the port's state from what is actually on disk -- the profile,\n"

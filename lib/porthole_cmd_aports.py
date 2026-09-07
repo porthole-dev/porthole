@@ -188,10 +188,10 @@ def cmd_status(args, ctx, pmaports) -> int:
             for path in forks:
                 o(f"  {path}")
             o.blank()
-        o.hint("porthole aports diff            what changed")
-        o.hint("porthole aports start <topic>   a branch for a new change")
-        o.hint("porthole aports patch           a series ready to send")
-        o.hint("porthole pkg search <text>      what else is buildable")
+        o.hint("porthole aports diff", "what changed")
+        o.hint("porthole aports start <topic>", "a branch for a new change")
+        o.hint("porthole aports patch", "a series ready to send")
+        o.hint("porthole pkg search <text>", "what else is buildable")
 
     return ctx.emit(payload, render)
 
@@ -235,7 +235,7 @@ def cmd_start(args, ctx, pmaports) -> int:
     ctx.out(ctx.out.paint(f"  on {topic} (from {base})", "green"))
     ctx.out.blank()
     ctx.out.hint("porthole aports status")
-    ctx.out.hint("pmbootstrap checksum <pkg>   after editing an APKBUILD's sources")
+    ctx.out.hint("pmbootstrap checksum <pkg>", "after editing an APKBUILD's sources")
     return EX_OK
 
 
@@ -1180,7 +1180,7 @@ def cmd_patches(args, ctx, pmaports) -> int:
         o.blank()
         o.hint(f"porthole aports build {pkgname} --force")
         o.hint("porthole aports lint")
-        o.hint("porthole aports patch      when it is ready to send")
+        o.hint("porthole aports patch", "when it is ready to send")
 
     return ctx.emit(payload, render)
 
@@ -1347,6 +1347,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "aports",
     "order": 42,
+    "group": "sources",
     "help": "work on pmaports: status, feature branches, diffs, patches",
     "description": (
         "pmaports is a shared checkout that pmbootstrap also writes to, on a\n"
@@ -1364,42 +1365,46 @@ SPEC = {
                     "help": "start: branch name. new: device codename. "
                             "build/lint/checksum/bump: package"}),
         (["--base"], {"metavar": "REF", "help": "branch/patch/patches base"}),
-        (["--mine"], {"action": "store_true",
-                      "help": "diff: only your device's packages"}),
-        (["--staged"], {"action": "store_true", "help": "diff: staged changes"}),
-        (["--stat"], {"action": "store_true", "help": "diff: summary only"}),
+        (["--mine"], {"action": "store_true", "group": "diff",
+                      "help": "only your device's packages"}),
+        (["--staged"], {"action": "store_true", "group": "diff",
+                        "help": "staged changes"}),
+        (["--stat"], {"action": "store_true", "group": "diff",
+                      "help": "summary only"}),
         (["--out"], {"metavar": "DIR",
                      "help": "patch: output directory. worktree: where to put it"}),
-        (["--soc"], {"metavar": "SOC",
-                     "help": "new: seed from the closest sibling on this SoC"}),
-        (["--category"], {"metavar": "DIR",
-                          "help": "new: pmaports category (default testing)"}),
-        (["--kernel"], {"metavar": "PKG",
-                        "help": "new: the kernel package to depend on"}),
-        (["--module"], {"action": "append", "metavar": "NAME",
-                        "help": "new: initramfs module (repeatable)"}),
-        (["--changed"], {"action": "store_true",
-                         "help": "checksum: every package with unstaged changes"}),
-        (["--arch"], {"metavar": "ARCH", "help": "build: target architecture"}),
-        (["--fast"], {"action": "store_true", "help": "ci: fast scripts only"}),
+        (["--soc"], {"metavar": "SOC", "group": "new",
+                     "help": "seed from the closest sibling on this SoC"}),
+        (["--category"], {"metavar": "DIR", "group": "new",
+                          "help": "pmaports category (default testing)"}),
+        (["--kernel"], {"metavar": "PKG", "group": "new",
+                        "help": "the kernel package to depend on"}),
+        (["--module"], {"action": "append", "metavar": "NAME", "group": "new",
+                        "help": "initramfs module (repeatable)"}),
+        (["--changed"], {"action": "store_true", "group": "checksum",
+                         "help": "every package with unstaged changes"}),
+        (["--arch"], {"metavar": "ARCH", "group": "build",
+                      "help": "target architecture"}),
+        (["--fast"], {"action": "store_true", "group": "ci",
+                      "help": "fast scripts only"}),
         (["--timeout"], {"type": int, "default": 3600, "metavar": "SEC",
                          "help": "build/ci: seconds before giving up"}),
-        (["--tree"], {"metavar": "PATH",
-                      "help": "patches: the kernel checkout (default "
+        (["--tree"], {"metavar": "PATH", "group": "patches",
+                      "help": "the kernel checkout (default "
                               "$PORTHOLE_WORKDIR)"}),
-        (["--pkg"], {"metavar": "PKG",
-                     "help": "patches: the kernel package to write into"}),
+        (["--pkg"], {"metavar": "PKG", "group": "patches",
+                     "help": "the kernel package to write into"}),
         (["--force"], {"action": "store_true",
                        "help": "new: overwrite. build: rebuild anyway"}),
         (["--allow-dirty"], {"action": "store_true", "dest": "allow_dirty",
                              "help": "start: branch despite uncommitted changes"}),
         (["--yes"], {"action": "store_true",
                      "help": "start/new/patches: actually do it"}),
-        (["--append"], {"action": "store_true",
-                        "help": "patches: add these commits after the existing "
+        (["--append"], {"action": "store_true", "group": "patches",
+                        "help": "add these commits after the existing "
                                 "series instead of replacing it"}),
-        (["--drop"], {"action": "store_true",
-                      "help": "patches: allow the rewrite to delete patches "
+        (["--drop"], {"action": "store_true", "group": "patches",
+                      "help": "allow the rewrite to delete patches "
                               "the tree does not reproduce"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],

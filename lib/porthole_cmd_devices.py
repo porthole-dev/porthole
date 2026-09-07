@@ -39,7 +39,7 @@ def cmd_devices(args, ctx) -> int:
     def render():
         if not rows:
             ctx.out("no device profiles yet.")
-            ctx.out.hint("porthole new-device <codename>   to start one")
+            ctx.out.hint("porthole new-device <codename>", "to start one")
             return
         width = max(len(r["codename"]) for r in rows)
         swidth = max((len(r["soc"]) for r in rows), default=4)
@@ -59,6 +59,7 @@ def cmd_devices(args, ctx) -> int:
 SPEC = {
     "verb": "devices",
     "order": 40,
+    "group": "start",
     "help": "list device profiles",
     "description": "Every device profile in profiles/, and how complete it is.",
     "args": [(["--json"], {"action": "store_true", "help": "machine-readable"})],

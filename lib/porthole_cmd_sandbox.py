@@ -634,8 +634,8 @@ def _up(ctx, args) -> int:
         if stale:
             for message in stale:
                 ctx.out.warn(message)
-            ctx.out.hint("porthole sandbox down     then `up` -- mounts are "
-                         "fixed when the container is created")
+            ctx.out.hint("porthole sandbox down",
+                         "then `up` -- mounts are fixed when the container is created")
             return EX_STATE
         ctx.out(f"  {CONTAINER} is already up")
         return EX_OK
@@ -860,7 +860,7 @@ def _device_key_authorized(cfg, key):
     return False if "Permission denied" in proc.stderr else None
 
 
-def _container_state(root: pathlib.Path, cfg=None) -> dict:
+def _container_state(root: pathlib.Path, cfg=None, probe_device: bool = True) -> dict:
     out = {"podman": shutil.which("podman"), "image": _image_tag(root),
            "image_built": False, "container_running": False,
            "device_key": "", "issues": []}
@@ -886,7 +886,15 @@ def _container_state(root: pathlib.Path, cfg=None) -> dict:
     # push failed with `scp: Connection closed`. Same class of error as
     # trusting an exit code over content: the file being present is a PROXY for
     # the thing that matters, and the proxy held while the thing did not.
-    out["device_key_authorized"] = _device_key_authorized(cfg or {}, key)
+    # `None` is already this field's "could not tell" -- an unreachable device
+    # is not evidence the key is bad -- so a skipped probe needs no new state
+    # and no reader has to change. See _device_key_authorized.
+    out["device_key_authorized"] = (
+        _device_key_authorized(cfg or {}, key) if probe_device else None)
+    # So a reader of `device_key_authorized is None` can tell "asked, and
+    # could not tell" from "deliberately not asked" -- see
+    # porthole_cmd_doctor._device_key_row.
+    out["device_key_probed"] = probe_device
     if not out["podman"]:
         out["issues"].append("podman not installed -- the workspace is "
                              "unavailable. `porthole doctor` has install hints")
@@ -1050,8 +1058,8 @@ def _status(ctx) -> int:
                 o(f"  {o.paint(o.sym('•', '-'), 'yellow')} {issue}")
             o.blank()
             if not workspace_up:
-                o.hint("porthole sandbox up          start the workspace")
-            o.hint("docs/SANDBOX.md             the threat model")
+                o.hint("porthole sandbox up", "start the workspace")
+            o.hint("docs/SANDBOX.md", "the threat model")
         else:
             o(o.paint("sandbox is configured", "green"))
 
@@ -1207,6 +1215,7 @@ def _shell(ctx, args) -> int:
 SPEC = {
     "verb": "sandbox",
     "order": 22,
+    "group": "build",
     "help": "run pmbootstrap without handing the host to an agent",
     "description": (
         "pmbootstrap needs root. The usual workaround -- a multi-day sudo\n"

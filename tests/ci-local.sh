@@ -180,9 +180,14 @@ assert fastboot["status"] == "fail", (
 # zypper spell it that way; `pacman -S` and `apk add` do not, and doctor prints
 # whichever the host uses -- so this assertion was green on the Debian runner
 # and red on every Arch and Alpine machine, about a fix that was perfectly
-# correct. Checked against the set doctor can actually emit.
+# correct. Checked against the set doctor can actually emit -- which means
+# every manager in install_hint's table in lib/porthole_cmd_doctor.py, not
+# just the ones on hand when this list was first written: `rpm-ostree
+# install` (fedora-atomic) was missing the same way, and was red on an
+# ostree host about a fix -- unpack the SDK, or rpm-ostree install -- that
+# was correct too. Add here whenever that table gains a new manager.
 MANAGERS = ("apt install", "pacman -S", "dnf install", "apk add",
-            "zypper install", "brew install")
+            "zypper install", "brew install", "rpm-ostree install")
 assert any(m in fastboot["fix"] for m in MANAGERS), (
     f"the fix should be an install command, got {fastboot['fix']!r}")
 PYEOF

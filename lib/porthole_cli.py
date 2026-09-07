@@ -146,9 +146,36 @@ class Out:
             line += self.paint(f"   {note}", "grey")
         print(line, file=self.stream)
 
-    def hint(self, text: str):
-        print("  {} {}".format(self.mark("note"), self.paint(text, "cyan")),
-              file=self.stream)
+    # Wide enough for the longest hint command in the tree
+    # (`porthole build ccache --max 25G`, 31), and a hint longer than that
+    # simply pushes its own note along rather than truncating: a command that
+    # does not fit is still a command somebody has to type.
+    HINT_COLUMN = 34
+
+    def hint(self, text: str, note: str = ""):
+        """A command worth running, and optionally what it is for.
+
+        The COLUMN is here rather than at the call site. 52 call sites padded
+        their own and picked 21 different widths, so `porthole doctor` landed
+        in a different column depending which verb printed it.
+
+        Padded BEFORE it is painted, never after: an escape sequence counts
+        toward `{:<N}`'s width and toward nothing the terminal shows, so
+        painting first makes every column a different width by exactly the
+        length of a colour code.
+
+        `{:<N}` pads UP TO N -- it does not guarantee a separator once the
+        command is already >= N chars, and a note glued straight onto a
+        command with zero gap (`google-taimenthe values worth copying`) is
+        worse than the ragged columns this method exists to fix. Padding to
+        N-1 and appending a literal space keeps the same column for anything
+        that fits and guarantees one space when it does not.
+        """
+        command = text if not note else "{:<{}} ".format(text, self.HINT_COLUMN - 1)
+        body = self.paint(command, "cyan")
+        if note:
+            body += self.paint(note, "grey")
+        print("  {} {}".format(self.mark("note"), body), file=self.stream)
 
     def warn(self, text: str):
         print(self.paint(f"warning: {text}", "yellow"), file=sys.stderr)
@@ -441,11 +468,67 @@ def with_device(parser: argparse.ArgumentParser,
     return parser
 
 
+# What a reader is trying to do, in the order they do it. `order` still sorts
+# WITHIN a group; the group is what makes a 35-verb list scannable at all.
+GROUPS = ("start", "build", "device", "sources", "knowledge", "meta")
+GROUP_TITLES = {
+    "start":     "getting set up",
+    "build":     "building",
+    "device":    "the device in front of you",
+    "sources":   "pmaports and the kernel tree",
+    "knowledge": "what this port knows",
+    "meta":      "the toolkit itself",
+}
+
+
+def add_args(parser, args) -> None:
+    """Attach a SPEC's args, honouring the porthole-only `group` key.
+
+    ONE function, called from both the fast path and the full parser. Two
+    copies of this loop is how `--no-color` came to work before the verb and
+    not after it.
+    """
+    groups = {}
+    for flags, kwargs in args:
+        kwargs = dict(kwargs)
+        name = kwargs.pop("group", "")
+        target = parser
+        if name:
+            if name not in groups:
+                groups[name] = parser.add_argument_group(name)
+            target = groups[name]
+        target.add_argument(*flags, **kwargs)
+
+
+def grouped_help(kwargs: dict) -> str:
+    """An arg's help text, with its `group` restored as a "name: " prefix.
+
+    `add_args` above renders `group` as an argparse heading -- literally
+    "diff:" the way `porthole aports --help` shows it -- which is where an
+    argument's grouped-flags help strings dropped their old "diff: "/"new: "
+    prefix. That is fine for `--help`, which draws the heading itself, and a
+    regression for anything else that walks the same SPEC and has no heading
+    of its own: completion scripts and the docs table rendered the bare help
+    text with the context gone. Those consumers get it back here instead of
+    the SPEC strings growing the prefix again, which would duplicate the
+    heading `--help` already shows.
+    """
+    help_text = kwargs.get("help") or ""
+    group = kwargs.get("group")
+    return f"{group}: {help_text}" if group else help_text
+
+
 def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
-    epilog = ["verbs:"]
+    epilog = []
     width = max((len(s["verb"]) for s in specs), default=10)
-    for spec in specs:
-        epilog.append(f"  {spec['verb']:<{width}}  {spec['help']}")
+    for group in GROUPS:
+        rows = [s for s in specs if s.get("group") == group]
+        if not rows:
+            continue
+        epilog.append("")
+        epilog.append(GROUP_TITLES[group] + ":")
+        for spec in rows:
+            epilog.append(f"  {spec['verb']:<{width}}  {spec['help']}")
     epilog += [
         "",
         "examples:",
@@ -481,14 +564,13 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
         # the failure the registry exists to survive.
         try:
             child = with_device(sub.add_parser(
-                spec["verb"], help=spec["help"],
+                spec["verb"],
                 description=spec.get("description", spec["help"]),
                 epilog=("examples:\n  " + "\n  ".join(spec["examples"])
                         if spec["examples"] else None),
                 formatter_class=argparse.RawDescriptionHelpFormatter),
                 device_flag=spec.get("device_flag", True))
-            for flags, kwargs in spec["args"]:
-                child.add_argument(*flags, **kwargs)
+            add_args(child, spec["args"])
         except (argparse.ArgumentError, TypeError, ValueError) as exc:
             print(f"porthole: skipping verb {spec['verb']!r}: {exc}",
                   file=sys.stderr)
@@ -542,13 +624,13 @@ def overview(root: pathlib.Path, out: Out) -> int:
     out.blank()
 
     if not device or not configured:
-        out.hint("porthole init <codename>   set this host up")
+        out.hint("porthole init <codename>", "set this host up")
         if not profiles:
-            out.hint("porthole new-device <codename>      port something new")
+            out.hint("porthole new-device <codename>", "port something new")
     else:
-        out.hint("porthole next                       where am I, what is next?")
-        out.hint("porthole doctor                     check the host and device")
-        out.hint("porthole tools                      what can I run?")
+        out.hint("porthole next", "where am I, what is next?")
+        out.hint("porthole doctor", "check the host and device")
+        out.hint("porthole tools", "what can I run?")
     out.blank()
     out("`porthole --help` for all verbs.")
     return EX_OK
@@ -581,8 +663,7 @@ def main(argv: list[str], root: pathlib.Path) -> int:
                            description=spec.get("description", spec["help"]),
                            formatter_class=argparse.RawDescriptionHelpFormatter),
             device_flag=spec.get("device_flag", True))
-        for flags, kwargs in spec["args"]:
-            child.add_argument(*flags, **kwargs)
+        add_args(child, spec["args"])
         child.set_defaults(_spec=spec)
         args = parser.parse_args(argv)
         out = Out(force_colour=False if getattr(args, "no_color", False) else None)

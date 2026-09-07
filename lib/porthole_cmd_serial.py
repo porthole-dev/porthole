@@ -148,7 +148,7 @@ def cmd_list(args, ctx) -> int:
             o.blank()
             o("Nothing is plugged in, or the adapter has no driver.")
             o.blank()
-            o.hint("porthole serial hardware   what to buy and how to wire it")
+            o.hint("porthole serial hardware", "what to buy and how to wire it")
             return
         o.heading(f"{len(ports)} serial port(s)")
         o.blank()
@@ -169,7 +169,7 @@ def cmd_list(args, ctx) -> int:
         if hidden:
             o(o.paint(f"  {hidden} built-in port(s) hidden — `--all` to see them",
                       "grey"))
-        o.hint("porthole serial console   attach to one")
+        o.hint("porthole serial console", "attach to one")
 
     return ctx.emit(payload, render)
 
@@ -250,8 +250,8 @@ def cmd_hardware(args, ctx) -> int:
                   "cyan"))
         o(o.paint(f'    PORTHOLE_SERIAL_BAUD="115200"', "cyan"))
         o.blank()
-        o.hint("porthole serial list      is the adapter visible")
-        o.hint("porthole serial console   attach to it")
+        o.hint("porthole serial list", "is the adapter visible")
+        o.hint("porthole serial console", "attach to it")
 
     return ctx.emit({"soc": soc, "earlycon": earlycon, "baud": baud}, render)
 
@@ -368,6 +368,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "serial",
     "order": 32,
+    "group": "device",
     "help": "UART console: the channel that works before anything else does",
     "description": (
         "ssh needs userspace, the USB gadget needs driver probe, the debug\n"

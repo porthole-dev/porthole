@@ -10,6 +10,8 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 from porthole_tui import gate  # noqa: E402
@@ -44,20 +46,7 @@ def test_gate_does_not_drag_in_textual():
 
 
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except AssertionError as exc:
-            failed += 1
-            print("FAIL {}:\n  {}".format(name, exc))
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print("ERROR {}: {}: {}".format(name, type(exc).__name__, exc))
-    print("{}/{} passed".format(len(tests) - failed, len(tests)))
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 if __name__ == "__main__":

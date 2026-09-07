@@ -1647,6 +1647,13 @@ def _maybe_autoselect_tree(ctx, action: str = "") -> None:
     # one of the two is how the host and the container end up building
     # different trees.
     os.environ["PORTHOLE_KERNEL_TREE"] = chosen
+    # Gated on --json for the same reason as the `auto` line in cmd_build:
+    # this fires before ctx.emit ever runs, so nothing arbitrates it out of a
+    # --json stream, and it is prose for a human, not part of the reported
+    # document. The autoselected tree itself is already in every payload that
+    # reads it (`_tree(ctx.cfg)`), so an agent loses no information here.
+    if getattr(ctx.args, "json", False):
+        return
     _, pkgrel = aport_version(ctx)
     release = f"r{pkgrel}" if pkgrel else ""
     ctx.out(ctx.out.paint(
@@ -1833,7 +1840,7 @@ def _ccache(ctx, args) -> int:
                   "ccache evicts, and", "grey"))
         o(o.paint("  an evicted entry turns the next rebuild back into a "
                   "full one, silently.", "grey"))
-        o.hint("porthole build ccache --max 25G    raise it")
+        o.hint("porthole build ccache --max 25G", "raise it")
 
     return ctx.emit(payload, render)
 
@@ -1843,6 +1850,22 @@ def cmd_build(args, ctx) -> int:
     # `status` and `auto` are actions, not flags. A store_true `--status` would
     # be a MODE encoded as a boolean, which permits nonsense combinations and
     # is what tests/test_cli_rules.py forbids repo-wide.
+    if not args.action and not getattr(args, "json", False):
+        # `auto` is not a synonym for "build": it measures an incremental
+        # make and then routes on what that rebuilt, which can be anything
+        # from a module push to a full kernel. A reader who did not type it
+        # is owed the name before the work starts, not in the summary after.
+        #
+        # Gated on --json: this is chrome for a human deciding what to type
+        # next, not part of the reported document, and `ctx.emit` has not run
+        # yet to arbitrate between the two. Printing it to stderr instead was
+        # the other option; skipping it under --json was chosen because an
+        # agent asking for --json already knows which rung it asked for (or
+        # didn't) from the JSON's own "action" field, so the line has nothing
+        # to tell it.
+        ctx.out(ctx.out.paint(
+            "  auto  no rung given -- measuring, then routing on what "
+            "rebuilds  (porthole build --help for the rungs)", "grey"))
     if action == "status":
         return _status(ctx)
     if action == "watch":
@@ -1993,6 +2016,7 @@ def cmd_build(args, ctx) -> int:
 SPEC = {
     "verb": "build",
     "order": 36,
+    "group": "build",
     "help": "build the kernel and package it, through envkernel",
     "description": (
         "The envkernel loop, as a verb. It was only ever a shell file you had\n"
@@ -2005,7 +2029,12 @@ SPEC = {
         "Every rung compiles a kernel tree except `image`, which builds the\n"
         "whole system from pmaports as it stands and is what a host with a\n"
         "pmaports checkout and no tree can run today. Builds go to the\n"
-        "workspace container when one is up; the preview says which."),
+        "workspace container when one is up; the preview says which.\n\n"
+        "With no ACTION, `build` runs `auto`: it times an incremental make and\n"
+        "then picks the rung that matches what actually rebuilt -- a module push\n"
+        "if one module changed, a boot image if the dtbs did, a full kernel if\n"
+        "the tree moved under it. It is the safe default and it is never a no-op\n"
+        "disguised as one; `porthole build status` says what the last one did."),
     "escapes_scope": True,
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
@@ -2015,8 +2044,8 @@ SPEC = {
                               + " | ".join(ACTIONS) + "  (default: auto)"}),
         (["rest"], {"nargs": "*", "metavar": "ARG",
                     "help": "mod: MODULE.ko NAME"}),
-        (["--kernel"], {"action": "store_true",
-                        "help": "boot: rebuild Image.gz too, not just dtbs"}),
+        (["--kernel"], {"action": "store_true", "group": "boot",
+                        "help": "rebuild Image.gz too, not just dtbs"}),
         (["--timeout"], {"type": int, "default": 5400, "metavar": "SEC",
                          "help": "seconds before giving up (default 5400)"}),
         (["--allow-env-override"], {"action": "store_true",
@@ -2034,9 +2063,10 @@ SPEC = {
                         "help": "start the build in its own session and "
                                 "return; follow it with `build watch`"}),
         (["--interval"], {"type": float, "default": 1.0, "metavar": "SEC",
-                          "help": "watch: seconds between reads (default 1)"}),
-        (["--max"], {"metavar": "SIZE",
-                     "help": "ccache: raise the cache ceiling, e.g. 25G"}),
+                          "group": "watch",
+                          "help": "seconds between reads (default 1)"}),
+        (["--max"], {"metavar": "SIZE", "group": "ccache",
+                     "help": "raise the cache ceiling, e.g. 25G"}),
         (["--wait"], {"type": float, "default": 0.0, "metavar": "SEC",
                       "help": "queue for this long if the buildroot is busy "
                               "(default: fail immediately)"}),
