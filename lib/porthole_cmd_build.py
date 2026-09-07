@@ -1747,6 +1747,66 @@ def ccache_pressure(stats: dict):
     return "ok", "{:.0%} of {}".format(frac, _fmt_bytes(ceiling))
 
 
+# What a cross build of something big actually needs. webkit2gtk alone is
+# several GB of objects; at ccache's own 5 GB default it evicts its own
+# earlier translation units before the build that produced them has finished.
+#
+# DECIMAL, not 2**30, and that is the whole reason `ccache_max_arg` exists.
+# ccache counts in GB: `-M 25G` stores 25_000_000_000 bytes and `-s` reports
+# `25.0`, which parse_ccache_stats faithfully returns as 25e9. Written as
+# 25 * 2**30 this constant was 26.84e9 -- 7% above anything ccache would ever
+# report back -- so `ensure_ccache_ceiling` found every ceiling short, raised
+# it again, and printed `ceiling raised to 25G` on every `sandbox up` forever.
+# Measured on the reference host: ratio 0.931, on both arches, every run.
+CCACHE_DEFAULT_MAX = 25 * (10 ** 9)
+
+
+def ccache_max_arg(size_bytes) -> str:
+    """`-M` argument for a byte count, in the unit ccache means by `G`. PURE.
+
+    The seam that makes the unit checkable without a container: dividing by
+    2**30 here would ask for `23G` while the caller believed it had asked for
+    25, and nothing downstream could tell.
+    """
+    return "{:.0f}G".format(size_bytes / 10 ** 9)
+
+
+def ensure_ccache_ceiling(ctx, want, stats=None, apply=None) -> list:
+    """Raise every arch's ccache ceiling to at least `want` bytes. Returns the
+    arches it changed.
+
+    NEVER lowers one. A ceiling somebody raised on purpose is a decision, and
+    a setting that silently reverts on the next `sandbox up` is worse than no
+    setting at all.
+
+    `stats` and `apply` are injected so this is testable with no container:
+    everything below the seam is one `ccache -M` in a chroot.
+    """
+    read = stats or ccache_stats_by_arch
+    write = apply or _ccache_set_max
+    raised = []
+    for arch, row in read(ctx):
+        current = row.get("max")
+        if current is not None and current >= want:
+            continue
+        write(ctx, arch, want)
+        raised.append(arch)
+    return raised
+
+
+def _ccache_set_max(ctx, arch: str, size_bytes: int) -> None:
+    """`ccache -M` in the chroot that owns this arch's cache.
+
+    The config FILE, not an environment variable, and that is not a style
+    choice: crossdirect replaces the environment on exec, so no CCACHE_*
+    export reaches a cross compile at all. See
+    brain/traps/crossdirect-replaces-the-environment-on-exec.md.
+    """
+    usable, _why = _workspace_usable(ctx)
+    _ccache_run(ctx, usable, arch, platform.machine(),
+                ["-M", ccache_max_arg(size_bytes)])
+
+
 def _fmt_bytes(value) -> str:
     if value is None:
         return "?"

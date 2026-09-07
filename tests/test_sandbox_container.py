@@ -1022,5 +1022,56 @@ def test_the_channels_override_reaches_the_container_as_a_container_path():
         sandbox._up_argv("/repo", "img", [], "google-taimen", ""))
 
 
+def test_the_ceiling_is_raised_once_and_never_lowered():
+    """5 GB is ccache's default, not a decision. But a ceiling somebody
+    deliberately raised to 60G must survive `sandbox up` -- a setting that
+    silently reverts is worse than no setting."""
+    import porthole_cmd_build as build
+
+    GB = 2 ** 30
+    calls = []
+
+    class FakeCtx:
+        pass
+
+    def fake_stats(_ctx):
+        return [("aarch64", {"used": 1 * GB, "max": 5 * GB}),
+                ("x86_64", {"used": 1 * GB, "max": 60 * GB})]
+
+    def fake_set(_ctx, arch, size):
+        calls.append((arch, size))
+
+    raised = build.ensure_ccache_ceiling(
+        FakeCtx(), 25 * GB, stats=fake_stats, apply=fake_set)
+    assert raised == ["aarch64"], raised
+    assert calls == [("aarch64", 25 * GB)], calls
+
+
+def test_the_ceiling_it_asks_for_is_the_ceiling_it_reads_back():
+    """ccache counts in GB, not GiB: `-M 25G` stores 25_000_000_000 bytes and
+    `-s` reports 25.0, which is what parse_ccache_stats returns.
+
+    Written as `25 * 2**30` the target was 26.84e9 -- 7% above anything ccache
+    would ever report -- so every ceiling looked short, `sandbox up` raised it
+    again, and printed `ceiling raised to 25G` on every run forever. Measured
+    on the reference host before the fix: ratio 0.931, both arches, every run.
+    The mirror-image bug is in the writer, which divided by 2**30 and would
+    have asked for `23G` while its caller believed it had said 25."""
+    import porthole_cmd_build as build
+
+    want = build.CCACHE_DEFAULT_MAX
+    assert build.ccache_max_arg(want) == "25G", build.ccache_max_arg(want)
+
+    # What ccache holds and reports after exactly one raise to `want`.
+    stored = float(build.ccache_max_arg(want).rstrip("G")) * 10 ** 9
+    calls = []
+    raised = build.ensure_ccache_ceiling(
+        None, want,
+        stats=lambda _c: [("aarch64", {"used": 1e9, "max": stored})],
+        apply=lambda _c, arch, size: calls.append((arch, size)))
+    assert raised == [], "a second `sandbox up` raised it again: {}".format(raised)
+    assert calls == [], calls
+
+
 if __name__ == "__main__":
     sys.exit(main())

@@ -615,6 +615,30 @@ def _container_running() -> bool:
     return bool(out.strip())
 
 
+def _raise_ccache_ceiling(ctx) -> None:
+    """Set the compiler cache ceiling once, here, rather than as a hint in a
+    verb nobody runs before a build.
+
+    5G is ccache's own default and nobody chose it. Past the ceiling ccache
+    evicts entries the next build asks for again, and the only symptom is that
+    a rebuild takes as long as the first build did.
+
+    Called on BOTH of `up`'s success paths. A container that is already
+    running is the common case by a wide margin -- it is created once and
+    lives for weeks -- so wiring this into creation alone would have set the
+    ceiling for almost nobody. It never lowers one somebody raised further;
+    see `ensure_ccache_ceiling`.
+    """
+    import porthole_cmd_build as build
+
+    raised = build.ensure_ccache_ceiling(ctx, build.CCACHE_DEFAULT_MAX)
+    if raised:
+        ctx.out(ctx.out.paint(
+            "  compiler cache ceiling raised to {} for {}".format(
+                build.ccache_max_arg(build.CCACHE_DEFAULT_MAX),
+                ", ".join(raised)), "grey"))
+
+
 def _up(ctx, args) -> int:
     if not shutil.which("podman"):
         raise Bail("podman is not installed", EX_FAIL,
@@ -638,6 +662,7 @@ def _up(ctx, args) -> int:
                          "then `up` -- mounts are fixed when the container is created")
             return EX_STATE
         ctx.out(f"  {CONTAINER} is already up")
+        _raise_ccache_ceiling(ctx)
         return EX_OK
 
     tag = _image_tag(ctx.root)
@@ -737,6 +762,7 @@ def _up(ctx, args) -> int:
         # was. Re-arm before anything runs; see the image's porthole-devnodes.
         subprocess.run(["podman", "exec", CONTAINER, "porthole-devnodes"],
                        capture_output=True)
+        _raise_ccache_ceiling(ctx)
         stamped, why = _stamp_work_version()
         if not stamped:
             ctx.out(ctx.out.paint(
