@@ -54,8 +54,12 @@ def cli(*args, env=None, xdg=None):
             "PORTHOLE_ROOT": str(ROOT), "NO_COLOR": "1",
             "XDG_CONFIG_HOME": xdg or tempfile.mkdtemp(prefix="porthole-init-")}
     base.update(env or {})
+    # stdin closed, because that is what tells `init` nobody is there to
+    # answer: `interactive` is `sys.stdin.isatty()`, and a test inheriting the
+    # runner's tty would take the interactive path and hang.
     p = subprocess.run([sys.executable, str(CLI), *args],
-                       capture_output=True, text=True, env=base)
+                       capture_output=True, text=True, env=base,
+                       stdin=subprocess.DEVNULL)
     return p.returncode, p.stdout, p.stderr
 
 
@@ -343,7 +347,7 @@ def test_a_headless_run_writes_the_per_device_working_repo():
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp) / "taimen"
         repo.mkdir()
-        rc, out, err = cli("init", DEV, "--non-interactive",
+        rc, out, err = cli("init", DEV, "--non-interactive", "--yes",
                            "--workdir", str(repo), "--json", xdg=xdg)
         assert rc == 0, err
         payload = json.loads(out)
@@ -365,7 +369,8 @@ def test_a_second_headless_run_changes_nothing():
         repo.mkdir()
         for _ in range(2):
             rc, out, err = cli("init", DEV, "--non-interactive", "--force",
-                               "--workdir", str(repo), "--json", xdg=xdg)
+                               "--yes", "--workdir", str(repo), "--json",
+                               xdg=xdg)
             assert rc == 0, err
         payload = json.loads(out)
         verdicts = {k: v["verdict"] for k, v in payload["keys"].items()}
@@ -379,6 +384,93 @@ def test_json_stays_parseable_with_every_step_in_play():
     rc, out, err = cli("init", DEV, "--non-interactive", "--json", xdg=xdg)
     assert rc == 0, err
     json.loads(out)
+
+
+def test_a_headless_run_previews_before_it_writes():
+    """Every other verb that writes outside its own profile previews first and
+    acts on --yes: `porthole pkg fork` prints the package, the source and the
+    destination, then names the command that does it. init was the one
+    exception, and it is the command an agent runs before it knows anything.
+
+    The interactive path keeps no --yes: six answered questions ARE the
+    confirmation, and demanding a flag after them would be hostile."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-preview-")
+    config = pathlib.Path(xdg) / "porthole" / "config.env"
+    rc, out, err = cli("init", DEV, "--user", "u", "--host", "10.0.0.1",
+                       "--json", xdg=xdg)
+    assert rc == 0, err
+    payload = json.loads(out)
+    assert payload["would_write"] is True, payload
+    assert not config.exists(), "a preview must not write the file"
+
+    rc, out, err = cli("init", DEV, "--user", "u", "--host", "10.0.0.1",
+                       "--yes", "--json", xdg=xdg)
+    assert rc == 0, err
+    payload = json.loads(out)
+    assert payload["would_write"] is False, payload
+    assert config.exists(), "--yes must write it"
+
+
+def test_a_headless_run_with_no_codename_refuses_rather_than_picking_one():
+    """It picked `devices[0]` -- the first profile alphabetically -- and
+    reported success. On a host with two profiles that is a coin toss the
+    caller is never told about, and the whole point of this command is that
+    everything after it reads the device it wrote.
+
+    A device is not a default. Every other unknowable here has a real default
+    (port 22, the gadget address, the workspace tier); which phone you are
+    porting is the one thing porthole cannot infer."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-nodev-")
+    rc, out, err = cli("init", "--json", xdg=xdg)
+    assert rc == 64, "expected EX_USAGE, got {}: {}{}".format(rc, out, err)
+    assert "codename" in (out + err).lower(), (out, err)
+    # It must name the choices rather than just refusing.
+    assert DEV in (out + err), (out, err)
+    assert not (pathlib.Path(xdg) / "porthole" / "config.env").exists()
+
+
+def test_a_headless_rerun_that_would_change_nothing_succeeds():
+    """init's own banner promises `running it again changes nothing you keep`.
+    True for humans, false for agents: any headless re-run hit `already
+    exists` and exit 1, whose only escape was --force -- a real overwrite --
+    so the safe answer was unavailable to the caller most likely to re-run
+    setup.
+
+    Three outcomes, not two: nothing to change (ok), something to change
+    (refuse, and say what), --force (take them)."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-rerun-")
+    argv = ("init", DEV, "--user", "u", "--host", "10.0.0.1")
+    rc, out, err = cli(*argv, "--yes", "--json", xdg=xdg)
+    assert rc == 0, err
+
+    rc, out, err = cli(*argv, "--yes", "--json", xdg=xdg)
+    assert rc == 0, "an idempotent re-run must succeed: {}{}".format(out, err)
+    payload = json.loads(out)
+    assert all(k["verdict"] == "kept" for k in payload["keys"].values()), payload
+
+
+def test_a_headless_rerun_that_would_change_something_still_refuses():
+    """The refusal is right and stays: with no human present nobody sees the
+    defaults, so taking flags over an existing identity IS a silent overwrite.
+    It must name what would change, so the caller can decide."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-differs-")
+    rc, out, err = cli("init", DEV, "--user", "u", "--host", "10.0.0.1",
+                       "--yes", "--json", xdg=xdg)
+    assert rc == 0, err
+
+    rc, out, err = cli("init", DEV, "--user", "SOMEONE", "--host", "10.0.0.1",
+                       "--yes", "--json", xdg=xdg)
+    assert rc == 1, "a changed identity must not be taken silently: {}{}".format(
+        out, err)
+    assert "PORTHOLE_USER" in (out + err), (out, err)
+    assert "--force" in (out + err), "the refusal must name the way through"
+    # ...and it refuses BEFORE writing. The refusal used to fire before a
+    # single value was resolved; moved after the resolve so it can name the
+    # keys, it now sits between the verdicts and the first set_key, and this
+    # is what pins it there.
+    text = (pathlib.Path(xdg) / "porthole" / "config.env").read_text()
+    assert "PORTHOLE_USER=u" in text, text
+    assert "SOMEONE" not in text, "the refused value reached the file"
 
 
 if __name__ == "__main__":

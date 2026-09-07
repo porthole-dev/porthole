@@ -12,7 +12,8 @@ from __future__ import annotations
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import _runner  # noqa: E402
 
@@ -135,6 +136,49 @@ def test_a_pmbootstrap_that_still_has_the_channel_key_is_not_blocked():
 
 def main():
     return _runner.run(globals())
+
+
+def test_the_guard_names_every_subcommand_porthole_invokes():
+    """This module exists because pmbootstrap 3.11.1 removed `lint` and
+    dropped the `channel` config key, and porthole rendered both
+    disappearances as ANSWERS rather than as breakage -- the cardinal sin in
+    AGENTS.md section 6.
+
+    It then guarded 7 of the 18 subcommands porthole actually calls. `export`
+    was not among them, and `porthole build image` ends in `pmbootstrap
+    export`: a rename upstream would leave this suite green and break the
+    build in the field.
+
+    Scanned rather than listed, so the guard cannot narrow again while this
+    test keeps passing."""
+    invoked = api.invoked_subcommands(ROOT)
+    guarded = api.PORTHOLE_USES["subcommands"]
+    # Guarded calls are the UNCONDITIONAL ones. A call behind a `missing()`
+    # check is deliberately absent -- listing it here would fail the guard on
+    # every pmbootstrap that dropped it, which is the point of guarding it.
+    unguarded = invoked - guarded - api.GUARDED_AT_CALL_SITE
+    assert not unguarded, (
+        "porthole invokes these and nothing checks they still exist:\n  "
+        + "\n  ".join(sorted(unguarded)))
+
+    # THE ASSERTION ABOVE CANNOT DETECT A SCAN THAT FINDS TOO LITTLE. Losing a
+    # source only shrinks `invoked`, which makes `unguarded` empty -- so a
+    # broken pattern reads as a clean bill of health. Both sources therefore
+    # need naming, or the scan quietly stops scanning and this test applauds:
+    #
+    #   the shell scan of tools/*.sh is the ONLY source for these four, and
+    #   `export` is the one that matters -- `porthole build image` ends in
+    #   `pmbootstrap export`, which is what this whole task is about.
+    assert {"export", "flasher", "index", "install"} <= invoked, sorted(invoked)
+    #   porthole_cmd_aports.pmb() builds pmbootstrap's argv itself, so the
+    #   subcommand never appears beside the word and the argv pattern misses
+    #   it. All three are guarded already, so the omission would have surfaced
+    #   only as the NEXT one being missed.
+    assert {"checksum", "lint", "pkgrel_bump"} <= invoked, sorted(invoked)
+    # Finding too MUCH needs no assertion of its own: this repo's comments and
+    # hints mention `pmbootstrap status`, `log`, `pull` and `zap` constantly,
+    # and a regex loose enough to sweep prose puts all four in `unguarded` and
+    # fails above. Verified by loosening it on purpose.
 
 
 if __name__ == "__main__":

@@ -498,5 +498,22 @@ def main():
     return _runner.run(globals())
 
 
+def test_a_failure_is_machine_readable_when_json_was_asked_for():
+    """`--json` means "I am not a human reading this". Half of that promise
+    was kept: every verb emitted JSON when it succeeded and prose when it
+    failed, so the one path a caller MUST handle was the one it could not
+    parse. Found against `porthole init`, but the handler is shared, so every
+    verb had it.
+
+    stdout, not stderr: a caller that redirected stderr to a log -- the normal
+    thing to do with a chatty tool -- would otherwise parse an empty string
+    and see success."""
+    rc, out, err = run("init", "--non-interactive", "--json")
+    assert rc != 0, (rc, out, err)
+    payload = json.loads(out)
+    assert payload["error"], payload
+    assert payload["code"] == rc, payload
+
+
 if __name__ == "__main__":
     sys.exit(main())
