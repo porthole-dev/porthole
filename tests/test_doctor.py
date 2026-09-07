@@ -658,8 +658,24 @@ def test_no_device_does_not_open_a_connection_to_the_device():
 
     Asserted by refusing to let ssh exist rather than by timing: a timing
     assertion is flaky on a loaded box and green on a fast one for the wrong
-    reason."""
+    reason.
+
+    `_container_state` reaches ssh only through `_device_key_authorized`,
+    which returns early -- before ever looking at `probe_device` -- when
+    `~/.porthole/device_key` does not exist. This is called IN-PROCESS, so
+    `pathlib.Path.home()` is the real HOME: on a clean HOME (any CI runner,
+    `make smoke`'s bare-PATH empty-HOME clone, `make floor`'s container) the
+    early return already guarantees zero ssh calls with probe_device=True,
+    so this test could not have caught a regression on the only surfaces
+    that run it. A temp HOME with a fake key makes probe_device=False the
+    only thing standing between here and an ssh call -- same technique as
+    test_an_absent_device_is_probed_once_not_twice above."""
     import porthole_cmd_sandbox as sandbox
+
+    fake_home = tempfile.mkdtemp(prefix="porthole-doctor-home-")
+    key_dir = pathlib.Path(fake_home) / ".porthole"
+    key_dir.mkdir()
+    (key_dir / "device_key").write_text("fake key, never read\n")
 
     calls = []
     real = sandbox.subprocess.run
@@ -670,11 +686,17 @@ def test_no_device_does_not_open_a_connection_to_the_device():
         return real(argv, *a, **kw)
 
     sandbox.subprocess.run = spy
+    real_home = os.environ.get("HOME")
+    os.environ["HOME"] = fake_home
     try:
         sandbox._container_state(ROOT, {"PHONE": "user@172.16.42.1"},
                                  probe_device=False)
     finally:
         sandbox.subprocess.run = real
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
     assert not calls, f"--no-device still opened ssh: {calls}"
 
 
