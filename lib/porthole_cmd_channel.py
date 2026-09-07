@@ -156,6 +156,7 @@ def _dirty(pmaports) -> list[str]:
 SPEC = {
     "verb": "channel",
     "order": 44,
+    "group": "device",
     "help": "see and switch the postmarketOS release channel",
     "description": (
         "A channel selects a pmaports branch and an Alpine mirror. Switching\n"

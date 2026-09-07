@@ -59,6 +59,7 @@ def cmd_devices(args, ctx) -> int:
 SPEC = {
     "verb": "devices",
     "order": 40,
+    "group": "start",
     "help": "list device profiles",
     "description": "Every device profile in profiles/, and how complete it is.",
     "args": [(["--json"], {"action": "store_true", "help": "machine-readable"})],

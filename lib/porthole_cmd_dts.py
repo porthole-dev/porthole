@@ -605,6 +605,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "dts",
     "order": 28,
+    "group": "sources",
     "help": "write and check a device tree without starting from blank",
     "description": (
         "A mainline device tree is layered: the SoC dtsi is already written,\n"

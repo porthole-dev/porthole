@@ -322,6 +322,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "kconfig",
     "order": 34,
+    "group": "sources",
     "help": "catch the kernel symbols olddefconfig silently dropped",
     "description": (
         "`pmbootstrap kconfig check` validates a config against pmaports'\n"

@@ -1211,6 +1211,7 @@ def _shell(ctx, args) -> int:
 SPEC = {
     "verb": "sandbox",
     "order": 22,
+    "group": "build",
     "help": "run pmbootstrap without handing the host to an agent",
     "description": (
         "pmbootstrap needs root. The usual workaround -- a multi-day sudo\n"

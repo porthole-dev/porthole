@@ -126,6 +126,7 @@ def _q(text: str) -> str:
 SPEC = {
     "verb": "completion",
     "order": 90,
+    "group": "meta",
     "help": "emit a shell completion script (bash, zsh, fish)",
     "description": (
         "Generated from the live command registry, so a new verb gets\n"

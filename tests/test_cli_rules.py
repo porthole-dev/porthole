@@ -369,6 +369,28 @@ def test_completion_covers_every_verb():
             assert spec["verb"] in out, f"{spec['verb']} missing from {shell}"
 
 
+def test_every_verb_declares_a_group():
+    """35 verbs in one flat list is a wall, and `order` -- a bare integer --
+    cannot say why `slots` sits between `brief` and `statusline`. The group is
+    what the reader scans; the order is what sorts within it."""
+    specs = porthole_cli.discover(ROOT)
+    bad = [s["verb"] for s in specs
+           if s.get("group") not in porthole_cli.GROUPS]
+    assert not bad, (
+        "these verbs declare no group, or one that is not in "
+        f"{porthole_cli.GROUPS}:\n  " + "\n  ".join(sorted(bad)))
+
+
+def test_the_help_lists_each_verb_once():
+    """argparse's own positional dump and the hand-built epilog were both
+    printed, so every verb appeared twice and the page ran to 111 lines."""
+    rc, out, err = run("--help")
+    assert rc == 0, err
+    for verb in ("doctor", "build", "brain"):
+        assert out.count("\n  " + verb + " ") + out.count("\n    " + verb + " ") == 1, (
+            f"{verb} appears more than once in `porthole --help`:\n{out}")
+
+
 def main():
     return _runner.run(globals())
 

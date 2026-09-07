@@ -123,6 +123,7 @@ def cmd_ui(args, ctx) -> int:
 SPEC = {
     "verb": "ui",
     "order": 45,
+    "group": "device",
     "help": "see and switch the compositor / desktop",
     "description": (
         "pmOS ships 20-odd user interfaces. This lists the ones built for a\n"

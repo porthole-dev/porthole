@@ -368,6 +368,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "serial",
     "order": 32,
+    "group": "device",
     "help": "UART console: the channel that works before anything else does",
     "description": (
         "ssh needs userspace, the USB gadget needs driver probe, the debug\n"

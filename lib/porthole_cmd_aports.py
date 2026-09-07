@@ -1347,6 +1347,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "aports",
     "order": 42,
+    "group": "sources",
     "help": "work on pmaports: status, feature branches, diffs, patches",
     "description": (
         "pmaports is a shared checkout that pmbootstrap also writes to, on a\n"

@@ -241,6 +241,7 @@ def cmd_experiment(args, ctx) -> int:
 SPEC = {
     "verb": "experiment",
     "order": 45,
+    "group": "device",
     "help": "run something with the device state captured either side",
     "description": (
         "Most wrong conclusions on a bring-up are confounds, not bad logic: a\n"

@@ -1620,6 +1620,7 @@ def cmd_pkg(args, ctx) -> int:
 SPEC = {
     "verb": "pkg",
     "order": 21,
+    "group": "build",
     "help": "find, fork and build a userspace aport, with a real progress bar",
     "description": (
         "`porthole build` is the kernel loop; every rung of it produces a\n"

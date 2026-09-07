@@ -445,6 +445,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "blobs",
     "order": 30,
+    "group": "device",
     "help": "get at vendor firmware during bring-up, without root",
     "description": (
         "pmOS packages firmware by fetching it in the aport. Before you can\n"

@@ -210,6 +210,7 @@ def cmd_cd(args, ctx) -> int:
 SPEC = {
     "verb": "use",
     "order": 12,
+    "group": "start",
     "help": "switch the active device profile, and its working repo",
     "description": (
         "Rewrites PORTHOLE_DEVICE in your config.env, so every tool, every\n"

@@ -441,11 +441,30 @@ def with_device(parser: argparse.ArgumentParser,
     return parser
 
 
+# What a reader is trying to do, in the order they do it. `order` still sorts
+# WITHIN a group; the group is what makes a 35-verb list scannable at all.
+GROUPS = ("start", "build", "device", "sources", "knowledge", "meta")
+GROUP_TITLES = {
+    "start":     "getting set up",
+    "build":     "building",
+    "device":    "the device in front of you",
+    "sources":   "pmaports and the kernel tree",
+    "knowledge": "what this port knows",
+    "meta":      "the toolkit itself",
+}
+
+
 def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
-    epilog = ["verbs:"]
+    epilog = []
     width = max((len(s["verb"]) for s in specs), default=10)
-    for spec in specs:
-        epilog.append(f"  {spec['verb']:<{width}}  {spec['help']}")
+    for group in GROUPS:
+        rows = [s for s in specs if s.get("group") == group]
+        if not rows:
+            continue
+        epilog.append("")
+        epilog.append(GROUP_TITLES[group] + ":")
+        for spec in rows:
+            epilog.append(f"  {spec['verb']:<{width}}  {spec['help']}")
     epilog += [
         "",
         "examples:",
@@ -481,7 +500,7 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
         # the failure the registry exists to survive.
         try:
             child = with_device(sub.add_parser(
-                spec["verb"], help=spec["help"],
+                spec["verb"],
                 description=spec.get("description", spec["help"]),
                 epilog=("examples:\n  " + "\n  ".join(spec["examples"])
                         if spec["examples"] else None),

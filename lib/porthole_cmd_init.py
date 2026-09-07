@@ -844,6 +844,7 @@ def cmd_init(args, ctx) -> int:
 SPEC = {
     "verb": "init",
     "order": 10,
+    "group": "start",
     "help": "set this host up: identity, address, build tier, pmaports, repo",
     "description": (
         "Sets this host up, and is safe to re-run on a half-configured one:\n"

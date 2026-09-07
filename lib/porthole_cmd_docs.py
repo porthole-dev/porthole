@@ -770,6 +770,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "docs",
     "order": 92,
+    "group": "meta",
     "help": "generate the documentation site",
     "description": (
         "The site is generated, never hand-maintained: the CLI reference from\n"
