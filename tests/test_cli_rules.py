@@ -248,7 +248,16 @@ def test_json_output_actually_parses():
     for argv in (["devices", "--json"], ["soc", "list", "--json"],
                  ["brain", "search", "--severity", "law", "--json"],
                  ["tools", "--json"], ["tools", "audit", "--json"],
-                 ["build", "--json"]):
+                 # NOT bare ["build", "--json"]: with no rung named, `auto`
+                 # runs a real incremental make and streams a progress bar to
+                 # stdout whenever a kernel tree is present -- that is not a
+                 # document, and never was on this branch or before it. This
+                 # harness's isolated env has no tree, so bare `build --json`
+                 # would pass here and fail on any host with one configured.
+                 # `status` and `ccache` are the reporting actions -- the
+                 # `--json` contract this test enforces is about them, not
+                 # about `auto`'s streamed build output.
+                 ["build", "status", "--json"], ["build", "ccache", "--json"]):
         rc, out, err = run(*argv)
         assert rc == 0, f"{argv} -> rc={rc} {err}"
         json.loads(out)
