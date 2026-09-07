@@ -54,8 +54,12 @@ def cli(*args, env=None, xdg=None):
             "PORTHOLE_ROOT": str(ROOT), "NO_COLOR": "1",
             "XDG_CONFIG_HOME": xdg or tempfile.mkdtemp(prefix="porthole-init-")}
     base.update(env or {})
+    # stdin closed, because that is what tells `init` nobody is there to
+    # answer: `interactive` is `sys.stdin.isatty()`, and a test inheriting the
+    # runner's tty would take the interactive path and hang.
     p = subprocess.run([sys.executable, str(CLI), *args],
-                       capture_output=True, text=True, env=base)
+                       capture_output=True, text=True, env=base,
+                       stdin=subprocess.DEVNULL)
     return p.returncode, p.stdout, p.stderr
 
 
@@ -343,7 +347,7 @@ def test_a_headless_run_writes_the_per_device_working_repo():
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp) / "taimen"
         repo.mkdir()
-        rc, out, err = cli("init", DEV, "--non-interactive",
+        rc, out, err = cli("init", DEV, "--non-interactive", "--yes",
                            "--workdir", str(repo), "--json", xdg=xdg)
         assert rc == 0, err
         payload = json.loads(out)
@@ -365,7 +369,8 @@ def test_a_second_headless_run_changes_nothing():
         repo.mkdir()
         for _ in range(2):
             rc, out, err = cli("init", DEV, "--non-interactive", "--force",
-                               "--workdir", str(repo), "--json", xdg=xdg)
+                               "--yes", "--workdir", str(repo), "--json",
+                               xdg=xdg)
             assert rc == 0, err
         payload = json.loads(out)
         verdicts = {k: v["verdict"] for k, v in payload["keys"].items()}
@@ -379,6 +384,31 @@ def test_json_stays_parseable_with_every_step_in_play():
     rc, out, err = cli("init", DEV, "--non-interactive", "--json", xdg=xdg)
     assert rc == 0, err
     json.loads(out)
+
+
+def test_a_headless_run_previews_before_it_writes():
+    """Every other verb that writes outside its own profile previews first and
+    acts on --yes: `porthole pkg fork` prints the package, the source and the
+    destination, then names the command that does it. init was the one
+    exception, and it is the command an agent runs before it knows anything.
+
+    The interactive path keeps no --yes: six answered questions ARE the
+    confirmation, and demanding a flag after them would be hostile."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-preview-")
+    config = pathlib.Path(xdg) / "porthole" / "config.env"
+    rc, out, err = cli("init", DEV, "--user", "u", "--host", "10.0.0.1",
+                       "--json", xdg=xdg)
+    assert rc == 0, err
+    payload = json.loads(out)
+    assert payload["would_write"] is True, payload
+    assert not config.exists(), "a preview must not write the file"
+
+    rc, out, err = cli("init", DEV, "--user", "u", "--host", "10.0.0.1",
+                       "--yes", "--json", xdg=xdg)
+    assert rc == 0, err
+    payload = json.loads(out)
+    assert payload["would_write"] is False, payload
+    assert config.exists(), "--yes must write it"
 
 
 if __name__ == "__main__":
