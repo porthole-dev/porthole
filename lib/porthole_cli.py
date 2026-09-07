@@ -500,6 +500,24 @@ def add_args(parser, args) -> None:
         target.add_argument(*flags, **kwargs)
 
 
+def grouped_help(kwargs: dict) -> str:
+    """An arg's help text, with its `group` restored as a "name: " prefix.
+
+    `add_args` above renders `group` as an argparse heading -- literally
+    "diff:" the way `porthole aports --help` shows it -- which is where an
+    argument's grouped-flags help strings dropped their old "diff: "/"new: "
+    prefix. That is fine for `--help`, which draws the heading itself, and a
+    regression for anything else that walks the same SPEC and has no heading
+    of its own: completion scripts and the docs table rendered the bare help
+    text with the context gone. Those consumers get it back here instead of
+    the SPEC strings growing the prefix again, which would duplicate the
+    heading `--help` already shows.
+    """
+    help_text = kwargs.get("help") or ""
+    group = kwargs.get("group")
+    return f"{group}: {help_text}" if group else help_text
+
+
 def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
     epilog = []
     width = max((len(s["verb"]) for s in specs), default=10)

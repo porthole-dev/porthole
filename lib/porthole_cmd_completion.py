@@ -7,7 +7,7 @@ with the CLI. That is the whole reason not to check these in as static files.
 """
 from __future__ import annotations
 
-from porthole_cli import Bail, EX_OK, EX_USAGE, discover
+from porthole_cli import Bail, EX_OK, EX_USAGE, discover, grouped_help
 
 BASH = """\
 # porthole bash completion. Install with:
@@ -95,7 +95,7 @@ def cmd_completion(args, ctx) -> int:
                         lines.append(
                             f"complete -c porthole -n '__fish_seen_subcommand_from "
                             f"{spec['verb']}' -l {flag.lstrip('-')} "
-                            f"-d {_q(kw.get('help', ''))}")
+                            f"-d {_q(grouped_help(kw))}")
         print(FISH.format(lines="\n".join(lines)))
     else:
         raise Bail(f"unsupported shell: {args.shell}", EX_USAGE,
@@ -115,7 +115,7 @@ def _zsh_flags(spec) -> str:
     for flags, kw in spec["args"]:
         for flag in flags:
             if flag.startswith("-"):
-                parts.append(f"'{flag}[{kw.get('help', '')}]'")
+                parts.append(f"'{flag}[{grouped_help(kw)}]'")
     return " ".join(parts) or "'--help[show help]'"
 
 

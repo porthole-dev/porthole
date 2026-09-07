@@ -21,7 +21,8 @@ import shutil
 import subprocess
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE, discover, version
+from porthole_cli import (Bail, EX_FAIL, EX_OK, EX_USAGE, discover,
+                          grouped_help, version)
 
 SITE_SRC = "site-src"
 
@@ -146,7 +147,7 @@ def page_cli(root: pathlib.Path) -> str:
             out += ["| argument | description |", "|---|---|"]
             for flags, kwargs in spec["args"]:
                 names = ", ".join(f"`{f}`" for f in flags)
-                help_text = (kwargs.get("help") or "").replace("|", "\\|")
+                help_text = grouped_help(kwargs).replace("|", "\\|")
                 choices = kwargs.get("choices")
                 if choices:
                     help_text += f" *(one of: {', '.join(map(str, choices))})*"

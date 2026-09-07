@@ -371,6 +371,29 @@ def test_completion_covers_every_verb():
             assert spec["verb"] in out, f"{spec['verb']} missing from {shell}"
 
 
+def test_grouped_flags_keep_their_context_off_help():
+    """`porthole aports --help` restores a grouped flag's action via an
+    argparse heading ("diff:") once the redundant "diff: " prefix was dropped
+    from the help STRING. zsh, fish, and the docs table draw no heading of
+    their own, so a user completing `porthole aports --mine` -- or reading
+    the published CLI reference -- lost that context entirely. `grouped_help`
+    in porthole_cli.py puts it back for exactly those three consumers."""
+    rc, out, err = run("completion", "zsh")
+    assert rc == 0, err
+    assert "'--mine[diff: only your device's packages]'" in out, out
+
+    rc, out, err = run("completion", "fish")
+    assert rc == 0, err
+    # fish's own quoting (_q) strips apostrophes from the help text -- not
+    # this fix's concern, so the assertion matches what fish actually emits.
+    assert "-l mine -d 'diff: only your devices packages'" in out, out
+
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_docs
+    page = porthole_cmd_docs.page_cli(ROOT)
+    assert "| `--mine` | diff: only your device's packages |" in page, page
+
+
 def test_every_verb_declares_a_group():
     """35 verbs in one flat list is a wall, and `order` -- a bare integer --
     cannot say why `slots` sits between `brief` and `statusline`. The group is
