@@ -323,8 +323,8 @@ def test_the_session_contract_exists_and_names_the_first_command():
 
 
 def main():
-    print("({} invocations scanned)".format(len(documented())))
-    return _runner.run(globals())
+    return _runner.run(globals(),
+                       "({} invocations scanned)".format(len(documented())))
 
 
 if __name__ == "__main__":
