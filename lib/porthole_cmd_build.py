@@ -1843,6 +1843,14 @@ def cmd_build(args, ctx) -> int:
     # `status` and `auto` are actions, not flags. A store_true `--status` would
     # be a MODE encoded as a boolean, which permits nonsense combinations and
     # is what tests/test_cli_rules.py forbids repo-wide.
+    if not args.action:
+        # `auto` is not a synonym for "build": it measures an incremental
+        # make and then routes on what that rebuilt, which can be anything
+        # from a module push to a full kernel. A reader who did not type it
+        # is owed the name before the work starts, not in the summary after.
+        ctx.out(ctx.out.paint(
+            "  auto  no rung given -- measuring, then routing on what "
+            "rebuilds  (porthole build --help for the rungs)", "grey"))
     if action == "status":
         return _status(ctx)
     if action == "watch":
@@ -2006,7 +2014,12 @@ SPEC = {
         "Every rung compiles a kernel tree except `image`, which builds the\n"
         "whole system from pmaports as it stands and is what a host with a\n"
         "pmaports checkout and no tree can run today. Builds go to the\n"
-        "workspace container when one is up; the preview says which."),
+        "workspace container when one is up; the preview says which.\n\n"
+        "With no ACTION, `build` runs `auto`: it times an incremental make and\n"
+        "then picks the rung that matches what actually rebuilt -- a module push\n"
+        "if one module changed, a boot image if the dtbs did, a full kernel if\n"
+        "the tree moved under it. It is the safe default and it is never a no-op\n"
+        "disguised as one; `porthole build status` says what the last one did."),
     "escapes_scope": True,
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",

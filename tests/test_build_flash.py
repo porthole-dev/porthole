@@ -1655,5 +1655,17 @@ def test_ccache_is_an_action_with_its_own_flag():
     assert "caches" in payload and "where" in payload, payload
 
 
+def test_a_bare_build_names_the_rung_it_picked():
+    """`porthole build` runs `auto` and never said so. `auto` measures an
+    incremental make and then ROUTES on what it rebuilt -- it can end up
+    doing a full kernel -- so the reader is owed the name before the work,
+    not in the summary line afterwards."""
+    rc, out, err = run("build")
+    assert "auto" in out.lower(), out
+    first = [l for l in out.splitlines() if l.strip()][0]
+    assert "auto" in first.lower(), (
+        "the rung must be named up front, not in the summary:\n" + out)
+
+
 if __name__ == "__main__":
     sys.exit(main())
