@@ -561,6 +561,12 @@ def test_the_host_only_verbs_stay_under_their_budget():
     The unrouteable device address (192.0.2.0/24 is RFC 5737 TEST-NET-1) forces
     a dial to cost a full connect timeout, not a fast refusal -- signal is
     seconds, not milliseconds.
+
+    Retry on budget exceedance: When a verb exceeds budget, re-measure both the
+    control and that verb. Only report failure if it exceeds again on the second
+    reading. This filters transient scheduling jitter in a shared test runner
+    (where a contention burst can land on one verb while the pool is quiet) from
+    real regressions like a network dial, which repeat consistently.
     """
     env = {"PORTHOLE_DEVICE_STATE": "absent",
            "PORTHOLE_HOST": BLACKHOLE, "PHONE": "pmos@" + BLACKHOLE}
@@ -588,9 +594,18 @@ def test_the_host_only_verbs_stay_under_their_budget():
         run(*argv, env=env)
         took = time.monotonic() - started
         if took > control + relative_budget_s or took > absolute_budget_s:
-            slow.append(
-                f"porthole {' '.join(argv)}: {took:.2f}s "
-                f"(control {control:.2f}s, delta {took - control:.2f}s)")
+            # Budget exceeded; retry both control and verb to filter transient jitter.
+            started = time.monotonic()
+            run("version", env=env)
+            control_retry = time.monotonic() - started
+            started = time.monotonic()
+            run(*argv, env=env)
+            took_retry = time.monotonic() - started
+            # Only fail if it repeats on the second reading.
+            if took_retry > control_retry + relative_budget_s or took_retry > absolute_budget_s:
+                slow.append(
+                    f"porthole {' '.join(argv)}: {took_retry:.2f}s (second reading) "
+                    f"(control {control_retry:.2f}s, delta {took_retry - control_retry:.2f}s)")
     assert not slow, (
         "these run with no device attached and must not wait on the network:\n  "
         + "\n  ".join(slow)

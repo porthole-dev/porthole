@@ -405,7 +405,12 @@ def test_an_arg_group_never_reaches_add_argument():
 def test_a_grouped_flag_is_rendered_under_its_action():
     rc, out, err = run("aports", "--help")
     assert rc == 0, err
-    assert "new:" in out and "patches:" in out, (
+    # The test checks for actual argument group headings (a line that is only
+    # the heading text), not substring matches. Substring matching would pass
+    # on the old flat output where --soc's help text read "new: seed from...".
+    lines = out.split("\n")
+    headings_found = {line.strip() for line in lines if line.strip() in ("new:", "patches:")}
+    assert headings_found == {"new:", "patches:"}, (
         "aports has 23 flags and 15 of them name their action in prose; "
         "they must be grouped in the parser too:\n" + out)
 
