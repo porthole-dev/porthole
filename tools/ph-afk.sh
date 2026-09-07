@@ -4,12 +4,12 @@
 # needs: BOOTED
 # env: PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_RUN_TIMEOUT
 # exits: 0 ok · 1 the device did not end up in the state that was asked for · 64 usage
-# tk-afk.sh -- stop the phone suspending itself while nobody is at the keyboard.
+# ph-afk.sh -- stop the phone suspending itself while nobody is at the keyboard.
 #
 # Usage:
-#   tools/tk-afk.sh                 print the state right now  (default)
-#   tools/tk-afk.sh on [duration]   mask suspend; unmask again after `duration`
-#   tools/tk-afk.sh off             unmask, and cancel any pending expiry
+#   tools/ph-afk.sh                 print the state right now  (default)
+#   tools/ph-afk.sh on [duration]   mask suspend; unmask again after `duration`
+#   tools/ph-afk.sh off             unmask, and cancel any pending expiry
 #
 #   `duration` is whatever systemd parses -- 90m, 4h, '1h 30min'. Given none,
 #   the mask is INDEFINITE and survives reboots. That is the point, and it is
@@ -35,7 +35,7 @@
 # WHY THREE UNITS
 #   logind starts suspend.target, so masking that is the one that blocks it.
 #   The other two cost nothing and close the gap: a guard on the wrong unit is
-#   this repo's most expensive suspend lesson -- tk-suspend-guard-check.sh
+#   this repo's most expensive suspend lesson -- ph-suspend-guard-check.sh
 #   exists because one was attached to a unit whose ordering let the real work
 #   run first anyway.
 #
@@ -46,8 +46,8 @@
 set -u
 
 cd "$(dirname "$0")" || exit 1
-# shellcheck source=tk-lib.sh
-. ./tk-lib.sh
+# shellcheck source=ph-lib.sh
+. ./ph-lib.sh
 
 UNITS="sleep.target suspend.target systemd-suspend.service"
 EXPIRE=porthole-afk-expire
@@ -76,7 +76,7 @@ status)
     echo ">> suspend on $PHONE:"
     report
     if [ "$(masked_count)" = 3 ]; then
-        echo ">> AFK: suspend is MASKED. \`tools/tk-afk.sh off\` puts it back."
+        echo ">> AFK: suspend is MASKED. \`tools/ph-afk.sh off\` puts it back."
     fi
     ;;
 on)
@@ -100,7 +100,7 @@ on)
         echo ">> AFK for $DUR. It unmasks itself; nothing has to remember."
     else
         echo ">> AFK indefinitely, ACROSS REBOOTS. Nothing will undo this but you."
-        echo ">> Prefer \`tools/tk-afk.sh on 4h\` if you know when you are back."
+        echo ">> Prefer \`tools/ph-afk.sh on 4h\` if you know when you are back."
     fi
     ;;
 off)

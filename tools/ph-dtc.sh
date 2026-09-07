@@ -4,7 +4,7 @@
 # needs: - (host only, no device)
 # env: HOST, TK_DTC_OUT
 # exits: 0 ok · 1 failed
-# tk-dtc.sh [board.dts] -- compile a board DTS on the HOST, before asking for a
+# ph-dtc.sh [board.dts] -- compile a board DTS on the HOST, before asking for a
 # kernel build.
 #
 # Why this exists: docs/HANDOFF-audio.md section 5 rule 2 -- a bad devicetree on

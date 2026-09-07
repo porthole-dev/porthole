@@ -907,7 +907,7 @@ MILESTONES = [
         "storage", "storage, usb, ssh", "Storage probes and partitions enumerate",
         why="Without it the rootfs never appears and the boot looks exactly "
             "like a hang.",
-        how="porthole run tk-sysstate.sh",
+        how="porthole run ph-sysstate.sh",
         playbook="brain/playbooks/20-storage-usb-ssh.md",
         probe=probe_reachable, safe=False),
     Milestone(
@@ -975,7 +975,7 @@ MILESTONES = [
     Milestone(
         "suspend", "subsystems", "Suspend and resume survive a cycle",
         why="This dominates whether the port is a daily driver.",
-        how="porthole run --lock tk-suspend-cycle.sh",
+        how="porthole run --lock ph-suspend-cycle.sh",
         playbook="brain/playbooks/40-suspend.md",
         probe=probe_from_matrix("suspend"), safe=False),
     Milestone(

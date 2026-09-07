@@ -1,10 +1,10 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: device:google-taimen
-# needs: on-device (run it on the device: `porthole run tk-dmic-sweep.sh`)
+# needs: on-device (run it on the device: `porthole run ph-dmic-sweep.sh`)
 # env: -
 # exits: 0 ok · non-zero on failure
-# tk-dmic-sweep.sh [seconds] -- runs ON THE PHONE.
+# ph-dmic-sweep.sh [seconds] -- runs ON THE PHONE.
 #
 # Records every DMIC0..DMIC5 in turn through DEC7/TX7, each as its own stream
 # with the mixer set BEFORE the stream and untouched during it, and all other
@@ -22,7 +22,7 @@
 # the middle of a session, to someone who had run it to read a mixer value.
 # greetd is brought back on exit, however the script ends.
 #
-# This sourced ../../../tools/tk-lib.sh -- a path on the HOST -- while its header
+# This sourced ../../../tools/ph-lib.sh -- a path on the HOST -- while its header
 # said it runs on the phone, so it ran in neither place. It uses nothing from
 # tk-lib, so the source is simply gone and `needs: on-device` now routes it
 # correctly through `porthole run`.

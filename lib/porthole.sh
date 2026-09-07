@@ -3,7 +3,7 @@
 # porthole config resolution and device helpers for the shell tools.
 # SOURCE this, don't run it.
 #
-# This is the generic form of taimen's tools/tk-lib.sh. The tk_* names are
+# This is the generic form of taimen's tools/ph-lib.sh. The tk_* names are
 # FROZEN as the compatibility surface -- every taimen script and every command
 # line in its docs calls them, so they keep their names and their semantics
 # forever. New helpers are named ph_*.
@@ -39,7 +39,7 @@
 # pmaports checkout, an agent's scratch dir. The cwd tells us nothing.
 if [ -z "${PORTHOLE_ROOT:-}" ]; then
     _ph_self=${BASH_SOURCE[0]}
-    # Resolve the symlink: tools/tk-lib.sh points here, and a tool that sources
+    # Resolve the symlink: tools/ph-lib.sh points here, and a tool that sources
     # it must still find profiles/ relative to the real file.
     while [ -L "$_ph_self" ]; do
         _ph_link=$(readlink "$_ph_self")
@@ -155,7 +155,7 @@ export PORTHOLE_ARCH_DIR
 
 # ------------------------------------------------- the compatibility surface --
 
-# HOST: the legacy names win, then the host part of PHONE (tk-stream.sh does
+# HOST: the legacy names win, then the host part of PHONE (ph-stream.sh does
 # `HOST=${PHONE#*@}`, so someone who set only PHONE still needs a pingable
 # address), then the profile.
 if [ -z "${HOST:-}" ]; then
@@ -272,7 +272,7 @@ ph_timed() {
 
 # ph_have_fastboot -- can $FASTBOOT be executed? Asked quietly: it RETURNS,
 # for the callers that want to ANNOTATE what the device is doing rather than
-# insist on it. tk-device.sh's holder file is the one that matters -- a caller
+# insist on it. ph-device.sh's holder file is the one that matters -- a caller
 # that named no --need-* is not asking about the device at all, it wants the
 # mutex, and neither a refusal nor its four lines of advice belong there.
 ph_have_fastboot() { command -v "$FASTBOOT" >/dev/null 2>&1; }
@@ -447,11 +447,11 @@ tk_pkill() {
 # 2026-08-27, and its absence is why "never hand-roll what a tool does" kept
 # getting broken: with no primitive for the single most common operation in the
 # toolbox, every caller -- and every agent -- wrote its own
-# `ssh "${TK_SSH_OPTS[@]}" "$PHONE" ...`, or worse, misread tools/tk-device.sh
+# `ssh "${TK_SSH_OPTS[@]}" "$PHONE" ...`, or worse, misread tools/ph-device.sh
 # (which wraps a HOST command) as the way to reach the phone.
 #
 # Deliberately NOT taking the mutex: the lock is declared explicitly, by
-# tools/tk-device.sh, because only the caller knows which device state it
+# tools/ph-device.sh, because only the caller knows which device state it
 # needs. A primitive that silently locked would make nesting the two deadlock.
 #
 # Arguments are joined with spaces and run by the device's shell, so quote as

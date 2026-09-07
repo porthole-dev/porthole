@@ -303,7 +303,7 @@ def main():
 
 # ------------------------------------------- a tool that could not run --
 #
-# The shell side learned this the hard way (ph_need_fastboot, tools/tk-lib.sh).
+# The shell side learned this the hard way (ph_need_fastboot, tools/ph-lib.sh).
 # These pin the Python twin: `wait_fastboot` polls until its deadline, so a
 # $FASTBOOT that cannot run made it insist for a full budget that a phone
 # sitting in the bootloader had never arrived.

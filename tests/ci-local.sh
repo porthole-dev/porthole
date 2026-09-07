@@ -29,7 +29,7 @@ SANDBOX_HOME="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$SANDBOX_HOME"' EXIT
 
 # `git archive`, not a copy loop: it preserves file MODES and SYMLINKS, and
-# tools/tk-lib.sh is a symlink whose identity a test checks. A cp-based copy
+# tools/ph-lib.sh is a symlink whose identity a test checks. A cp-based copy
 # reported five false failures before this was noticed -- a simulation that
 # lies costs more than no simulation.
 git -C "$ROOT" archive HEAD | tar -x -C "$WORK"

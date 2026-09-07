@@ -9,9 +9,9 @@
 The laptop has a speaker and a microphone and the phone sits next to it, so
 both directions are a closed acoustic loop:
 
-  tk-acoustic.py speaker      phone plays a tone, THIS MACHINE records it
-  tk-acoustic.py mic          this machine plays a tone, the PHONE records it
-  tk-acoustic.py selftest     the phone plays AND listens with its own mic
+  ph-acoustic.py speaker      phone plays a tone, THIS MACHINE records it
+  ph-acoustic.py mic          this machine plays a tone, the PHONE records it
+  ph-acoustic.py selftest     the phone plays AND listens with its own mic
 
 Both end in the same verdict: a Goertzel filter at the played frequency
 against the off-tone noise floor.  That is the rule that matters -- section 4's
@@ -54,7 +54,7 @@ PASS_DB = 20.0   # tone-vs-floor margin that counts as audible; the host
                  # speaker-to-host mic loop measures +73 dB, and pure room
                  # noise has produced +10, so 12 was too close to the noise.
 
-_spec = importlib.util.spec_from_file_location("tk_lab", os.path.join(HERE, "tk-lab.py"))
+_spec = importlib.util.spec_from_file_location("tk_lab", os.path.join(HERE, "ph-lab.py"))
 tk_lab = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(tk_lab)
 
@@ -248,7 +248,7 @@ def trials(kind, f, dur, sets, n):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="tk-acoustic.py")
+    p = argparse.ArgumentParser(prog="ph-acoustic.py")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("speaker", "mic", "selftest"):
         s = sub.add_parser(name)

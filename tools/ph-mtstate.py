@@ -8,7 +8,7 @@
 
 Run ON THE DEVICE, as root. Stdlib only.
 
-tk-evtest.py shows the event *stream*; this shows the kernel's retained slot
+ph-evtest.py shows the event *stream*; this shows the kernel's retained slot
 state, which is what a compositor sees when it opens the device. The two differ
 in exactly the case that matters here: if the controller never sends a LEAVE for
 a finger, the stream looks idle while the state still holds a contact down. A
@@ -18,7 +18,7 @@ like "the app froze" and like "touch stopped working", from one cause.
 
 A healthy idle touchscreen reports tracking_id -1 in every slot.
 
-  tk-mtstate.py [/dev/input/eventN]      default: auto-pick the ftm4 node
+  ph-mtstate.py [/dev/input/eventN]      default: auto-pick the ftm4 node
 """
 import fcntl
 import glob

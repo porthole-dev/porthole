@@ -4,7 +4,7 @@
 # needs: - (host only, no device)
 # env: -
 # exits: 0 ok · non-zero on failure
-# tk-perf-ab.sh -- interleaved A/B of a tuning knob against real frame timings.
+# ph-perf-ab.sh -- interleaved A/B of a tuning knob against real frame timings.
 # Run ON THE DEVICE as root.
 #
 # WHY INTERLEAVED, AND WHY NOT AVERAGE FPS
@@ -15,14 +15,14 @@
 #   as spread within an arm instead of as a result.
 #
 #   And the number reported is the frame-interval distribution from
-#   tk-gesture-bench.py, not average FPS. A session that renders 58 frames in a
+#   ph-gesture-bench.py, not average FPS. A session that renders 58 frames in a
 #   second but stalls 100 ms mid-scroll reads as broken to a human and as fine
 #   to an average. p95 and max are the numbers that match what a user feels.
 #
 # Usage:
-#   tk-perf-ab.sh ratelimit SCENE [REPEATS] [B_VALUE_US]   default B = 1000
-#   tk-perf-ab.sh dmalatency SCENE [REPEATS]               B = 0 us via /dev/cpu_dma_latency
-#   tk-perf-ab.sh uclamp SCENE [REPEATS] [B_UCLAMP_MIN]     A=0, default B = 256
+#   ph-perf-ab.sh ratelimit SCENE [REPEATS] [B_VALUE_US]   default B = 1000
+#   ph-perf-ab.sh dmalatency SCENE [REPEATS]               B = 0 us via /dev/cpu_dma_latency
+#   ph-perf-ab.sh uclamp SCENE [REPEATS] [B_UCLAMP_MIN]     A=0, default B = 256
 #     Uses the already-shipped /usr/libexec/taimen-uclamp-session (per-task
 #     sched_setattr on phoc+phosh, see that script's header for the mechanism)
 #     with UCLAMP_MIN substituted per arm via sed into a throwaway copy --
@@ -35,7 +35,7 @@
 # that says the answer is not yet resolvable.
 set -u
 
-BENCH=${BENCH:-/tmp/tk-gesture-bench.py}
+BENCH=${BENCH:-/tmp/ph-gesture-bench.py}
 KNOB=${1:?knob: ratelimit|dmalatency|uclamp}
 SCENE=${2:-grid-fling}
 REPS=${3:-4}
@@ -49,10 +49,10 @@ P4=/sys/devices/system/cpu/cpufreq/policy4/schedutil/rate_limit_us
 ORIG0=$(cat $P0 2>/dev/null); ORIG4=$(cat $P4 2>/dev/null)
 LATPID=
 UCLAMP_SRC=/usr/libexec/taimen-uclamp-session
-UCLAMP_TMP=/tmp/tk-perf-ab-uclamp.py
+UCLAMP_TMP=/tmp/ph-perf-ab-uclamp.py
 
 apply_uclamp() {
-	sed "s/^UCLAMP_MIN = .*/UCLAMP_MIN = $1  # tk-perf-ab.sh override/" \
+	sed "s/^UCLAMP_MIN = .*/UCLAMP_MIN = $1  # ph-perf-ab.sh override/" \
 		"$UCLAMP_SRC" > "$UCLAMP_TMP"
 	python3 "$UCLAMP_TMP"
 }

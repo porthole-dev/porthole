@@ -14,7 +14,7 @@ this worth decoding is rptr/wptr: the CP stops where it choked, so the dwords
 between rptr and wptr are exactly the packets it never got through, and the ones
 just before rptr are what it was chewing on when it died.
 
-  tk-ringdump.py DUMP [--from N] [--to N]
+  ph-ringdump.py DUMP [--from N] [--to N]
 
 Opcode names are parsed straight out of the kernel's adreno_pm4.xml.h so this
 cannot drift from the tree it is being used against.

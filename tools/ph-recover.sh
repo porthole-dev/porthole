@@ -4,7 +4,7 @@
 # needs: any (probes state; handles BOOTED and FASTBOOT)
 # env: FASTBOOT, HOST, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_IMG
 # exits: 0 ok · 1 failed · 2 usage · 3 see source · 4 see source · 5 see source · 6 see source · 7 see source
-# tk-recover.sh -- one command to get taimen back after the 2026-08-01 incident,
+# ph-recover.sh -- one command to get taimen back after the 2026-08-01 incident,
 # and after any hang that leaves it off the bus.
 #
 # It detects which of the four states the phone is in and does the right thing,
@@ -19,7 +19,7 @@
 # what distinguishes them (d001 = our gadget, 4ee0 = real fastboot), never the
 # lsusb text.
 #
-# Usage: tk-recover.sh [--flash]     (--flash allows reflashing if it finds fastboot)
+# Usage: ph-recover.sh [--flash]     (--flash allows reflashing if it finds fastboot)
 set -u
 
 cd "$(dirname "$0")" || exit 1
@@ -32,7 +32,7 @@ DO_FLASH=0
 
 say() { echo ">> $*"; }
 # StrictHostKeyChecking=no + a /dev/null known-hosts file: the phone's host
-# key changes on essentially every boot (tk-lib.sh header). Without these a
+# key changes on essentially every boot (ph-lib.sh header). Without these a
 # changed key makes ssh fail, which this script reads as "ssh does not
 # answer" -- so a perfectly healthy phone is classified FROZEN and rebooted.
 ssh_d() { timeout 15 ssh -o BatchMode=yes -o ConnectTimeout=6 \
@@ -81,8 +81,8 @@ FASTBOOT)
 		exit 4
 	fi
 	[ -s "$IMG" ] || { say "FATAL: $IMG missing/empty"; exit 5; }
-	say "reflashing known-good boot.img via tk-flash-boot.sh"
-	./tk-flash-boot.sh "$IMG" 240 || { say "flash failed"; exit 6; }
+	say "reflashing known-good boot.img via ph-flash-boot.sh"
+	./ph-flash-boot.sh "$IMG" 240 || { say "flash failed"; exit 6; }
 	STATE=$(detect)
 	say "state after flash: $STATE"
 	[ "$STATE" = BOOTED ] || exit 7

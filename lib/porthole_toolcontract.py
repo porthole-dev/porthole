@@ -96,14 +96,14 @@ def _exempted(line, tag):
 
 def check_pkill_pattern(name, text):
     """`pkill -f <pattern>` over ssh matches the command line CARRYING the
-    pattern and kills its own session. tk-thermal.sh already carries a comment
+    pattern and kills its own session. ph-thermal.sh already carries a comment
     saying this costs an afternoon; it cost two probe runs while the design
     that replaces it was being written. It also misses grandchildren, and is
     unportable. Stopping the cgroup slice replaces every use.
 
     A line that only documents the hazard is not the hazard: a `#`-led
     comment line is skipped before the pattern is even tried, so a warning
-    like tk-capture.sh's "never pkill -f over ssh" is not itself a finding.
+    like ph-capture.sh's "never pkill -f over ssh" is not itself a finding.
     """
     out = []
     for i, line in enumerate(text.splitlines(), 1):

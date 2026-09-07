@@ -6,8 +6,8 @@
 # exits: 0 ok
 """Poke Easel registers live through BAR2 (HANDOFF §42b).
 
-  tk-easel-poke.py 0x040110e8 1      write
-  tk-easel-poke.py 0x04011110        read
+  ph-easel-poke.py 0x040110e8 1      write
+  ph-easel-poke.py 0x04011110        read
 
 Requires easel-mipi loaded with the BAR2 window at 0x04000000.
 """

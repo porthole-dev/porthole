@@ -73,7 +73,7 @@ path is certain -- the flag, the four mac80211 sites, the disable call and the
 vendor's setting are all quoted above. What has *not* been shown is that this
 is what produced the observed failures. That needs a soak in which the link is
 genuinely idle, and it is easy to accidentally disprove: **a monitoring probe
-is itself a keepalive.** The first version of `tools/tk-wifi-soak.sh` pinged
+is itself a keepalive.** The first version of `tools/ph-wifi-soak.sh` pinged
 the gateway every 60 s and would have prevented the bug it was watching for;
 it now samples passively and probes only every tenth sample.
 

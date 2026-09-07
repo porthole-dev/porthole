@@ -9,11 +9,11 @@
 Consumes:
   stock : `strings logs/ramoops.bin | grep TKDUMP` output (RUNBOOK-stock-dump.md)
           lines like: TKDUMP csiphy1 +0a0: 00000000 00000004 ...
-  ours  : tk-regdump.py / tk-phystat.py style dumps, lines like
+  ours  : ph-regdump.py / ph-phystat.py style dumps, lines like
           "0a0: 00000000 00000004 ..." or "csiphy1 +0a0: ..." -- anything with
           an offset followed by 32-bit words.
 
-Usage: tk-dumpdiff.py STOCK.txt OURS.txt [--block csiphy1]
+Usage: ph-dumpdiff.py STOCK.txt OURS.txt [--block csiphy1]
 
 Prints one line per differing word: offset, stock value, our value. The
 whole point of the stock dump is this diff, so keep it dumb and lossless.

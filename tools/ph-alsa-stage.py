@@ -12,7 +12,7 @@ output (HANDOFF-audio.md 5), so the usual "read the oops" move is unavailable.
 so a hang only tells you "somewhere in there".
 
 This drives libasound directly and writes a distinct marker to /dev/kmsg before
-*each* call. With the host-side dmesg stream armed (tools/tk-stream.sh), the
+*each* call. With the host-side dmesg stream armed (tools/ph-stream.sh), the
 last marker that reaches the host names the last call that started, and the
 absent one names the call that never returned. That pins the failing stage in a
 SINGLE run and with NO kernel rebuild.
@@ -22,7 +22,7 @@ before the dangerous call runs -- a marker still sitting in a buffer when the
 SoC stops is a marker you never see.
 
 Usage (as root, for /dev/kmsg):
-    sudo python3 tk-alsa-stage.py [--device hw:0,1] [--playback] [--stop-after STAGE]
+    sudo python3 ph-alsa-stage.py [--device hw:0,1] [--playback] [--stop-after STAGE]
 
 --stop-after lets you bisect by *not* running the fatal call, e.g.
 `--stop-after prepare` exercises everything up to and including prepare and

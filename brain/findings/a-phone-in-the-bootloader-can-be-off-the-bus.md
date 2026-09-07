@@ -67,7 +67,7 @@ reads identically inside the rootless workspace. `unknown` when the profile
 names no IDs -- a guess is worse than silence, since the whole value is that an
 operator can act on `absent` without checking by hand.
 
-`tools/tk-to-fastboot.sh` now switches every failure message on it, stops
+`tools/ph-to-fastboot.sh` now switches every failure message on it, stops
 calling a phone that left the bus "swallowed", prints the bus state during the
 wait rather than only at the end, and says **"the bootloader never answered"**
 instead of "never reached the bootloader" -- the second is a claim about the
@@ -81,7 +81,7 @@ replug fixed it immediately. Candidates not yet separated: an xHCI port left in
 a state where it misses the reconnect, the bootloader's gadget coming up before
 the port was ready, or the cable. Nothing here distinguishes them.
 
-Note what porthole **cannot** do about it either way. `tools/tk-usb-wake.py`
+Note what porthole **cannot** do about it either way. `tools/ph-usb-wake.py`
 already issues `USBDEVFS_RESET` on the gadget, which is the software equivalent
 of a replug -- but it acts on a device node, and in state 3 there is no node to
 act on. A recovery would have to power-cycle the **root hub port**, which needs

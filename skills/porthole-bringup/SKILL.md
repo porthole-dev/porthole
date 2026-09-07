@@ -244,10 +244,10 @@ Generated from `lib/porthole_rules.py` — the full set, with levels and
 enforcers, is `AGENTS.md` section 1. The mutex call, concretely:
 
 ```sh
-TK_AGENT=<you> tools/tk-device.sh --need-booted <command>
+TK_AGENT=<you> tools/ph-device.sh --need-booted <command>
 ```
 
-Shell tools get the config layer with `. tools/tk-lib.sh`, python with
+Shell tools get the config layer with `. tools/ph-lib.sh`, python with
 `import porthole`. `ls tools/` is over 120 files — list the whole directory
 before concluding something does not exist.
 

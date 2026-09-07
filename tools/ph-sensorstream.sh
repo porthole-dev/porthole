@@ -4,8 +4,8 @@
 # needs: - (host only, no device)
 # env: -
 # exits: 0 ok · 1 failed
-# tk-sensorstream.sh -- stream the REAL sensor path, imx179 -> CSIPHY -> CSID ->
-# ISPIF -> VFE, as opposed to tk-tgstream.sh which cuts the CSIPHY out and feeds
+# ph-sensorstream.sh -- stream the REAL sensor path, imx179 -> CSIPHY -> CSID ->
+# ISPIF -> VFE, as opposed to ph-tgstream.sh which cuts the CSIPHY out and feeds
 # the CSID's own test generator.
 #
 # This is the pipeline for blocker #1 (the sensor transmits, every CSIPHY is
@@ -15,7 +15,7 @@
 #
 # Run ON the phone.
 #
-# ponytail: subdev nodes resolved BY NAME, same as tk-tgstream.sh -- v4l-subdevN
+# ponytail: subdev nodes resolved BY NAME, same as ph-tgstream.sh -- v4l-subdevN
 # renumbers on every module reload.
 set -u
 

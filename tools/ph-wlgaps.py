@@ -6,7 +6,7 @@
 # exits: 0 ok · 1 nothing to read
 """Where a client's late frames actually are, from a WAYLAND_DEBUG=1 log.
 
-tk-gesture-bench.py's client column answers "how many" and deliberately drops
+ph-gesture-bench.py's client column answers "how many" and deliberately drops
 every interval over 250 ms as idle -- so its `max` is pinned just under 250 and
 says nothing, and its "presented every N vsyncs" prints only the four commonest
 N, which hides a handful of very long stalls behind a crowd of short ones. Both
@@ -18,9 +18,9 @@ drag can be told apart from one scattered through it. That distinction is the
 difference between a wake-up cost and a steady-state cost, and no summary
 statistic can make it.
 
-  tk-wlgaps.py LOG [WORST]      WORST: how many long gaps to name (default 12)
+  ph-wlgaps.py LOG [WORST]      WORST: how many long gaps to name (default 12)
 
-Read it against the gesture the arm ran: tk-scrollarm.sh drags 8 times with a
+Read it against the gesture the arm ran: ph-scrollarm.sh drags 8 times with a
 1.0 s pause between, so a gap of ~60 vsyncs every ~1.5 s is the pause itself,
 not a stall.
 """

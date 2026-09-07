@@ -47,7 +47,7 @@ grim -s 0.5 /tmp/shot.png     # then look at it
 ```
 
 **To raise the window**, tap its card in the carousel -- that both closes the
-grid and activates the toplevel. Panel coordinates, via `tk-touch.py tap X Y`;
+grid and activates the toplevel. Panel coordinates, via `ph-touch.py tap X Y`;
 swipe the carousel first if the card is not centred. Nothing programmatic was
 found that beats the layer-shell overlay.
 

@@ -6,7 +6,7 @@
 # exits: 0 same ABI · 1 CRC mismatch · 69 cannot compare
 """Compare the __versions (modversions) sections of two .ko files.
 
-Run this BEFORE tk-push-module.sh. Exit 0 only when every symbol the new
+Run this BEFORE ph-push-module.sh. Exit 0 only when every symbol the new
 module imports carries the same CRC as the reference module built against the
 running kernel.
 
@@ -20,7 +20,7 @@ Reference module: pull the packaged one off the phone. Note the path --
 symlink apk does not resolve; use /usr/lib/modules/...
 
     scp phone:/usr/lib/modules/$(uname -r)/kernel/.../foo.ko /tmp/ref.ko
-    tools/tk-modcrc.py /tmp/ref.ko linux/.output/.../foo.ko
+    tools/ph-modcrc.py /tmp/ref.ko linux/.output/.../foo.ko
 """
 import struct, subprocess, sys, tempfile, os
 

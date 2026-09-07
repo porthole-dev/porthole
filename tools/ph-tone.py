@@ -12,7 +12,7 @@ rule on room noise alone (ac ~ 15), which cannot tell you anything about what
 the capture path does to a signal. With a known sweep you can read the time
 base and the distortion straight off the spectrum.
 
-    tk-tone.py probe.wav && paplay probe.wav      # while the phone records
+    ph-tone.py probe.wav && paplay probe.wav      # while the phone records
 
 The sweep is the useful part: analyse the capture per window and compare the
 peak against the sweep's own f(t). If the fundamental lands where it was

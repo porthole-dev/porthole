@@ -11,10 +11,10 @@
 # corrupt each other -- the second mount stacks on the first and `make` builds a
 # tree that is not the one you think it is. That has already cost a session.
 #
-# tk-device.sh guards the phone. This guards the chroot. Same flock pattern, so
+# ph-device.sh guards the phone. This guards the chroot. Same flock pattern, so
 # there is one idiom to learn, not two.
 #
-# Usage:  tools/tk-build.sh <command> [args...]
+# Usage:  tools/ph-build-lock.sh <command> [args...]
 #   env:  TK_BUILD_LOCK     lock path (default /tmp/taimen-build.lock)
 #         TK_BUILD_TIMEOUT  seconds to wait (default 5400 -- kernel builds are slow)
 #         TK_AGENT          holder label, for the "who has it" file

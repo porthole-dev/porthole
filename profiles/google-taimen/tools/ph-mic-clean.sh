@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: PHONE
 # exits: 0 ok · 1 failed
-# tk-mic-clean.sh [mic] [seconds] [stray] -- runs ON THE PHONE.
+# ph-mic-clean.sh [mic] [seconds] [stray] -- runs ON THE PHONE.
 #
 # mic:    mic1 (DMIC0->DEC7->TX7) | mic2 (DMIC2->DEC5->TX5) | mic3 (DMIC4->DEC6->TX6)
 #         -- the three physical taimen mics, per the vendor's mictest-taimen-* paths.
@@ -22,7 +22,7 @@
 set -e
 
 # shellcheck source=../../../lib/porthole.sh
-. "$(dirname "$0")/../../../tools/tk-lib.sh"
+. "$(dirname "$0")/../../../tools/ph-lib.sh"
 MIC=${1:-mic1}
 DUR=${2:-25}
 STRAY=$3

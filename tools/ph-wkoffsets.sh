@@ -6,10 +6,10 @@
 # env: TK_WK_APK_DIR (default the porthole sandbox package dir), TK_WK_VERSION
 #      (default: the version apk reports INSTALLED on the device)
 # exits: 0 printed · 1 packages not found · 64 usage
-# tk-wkoffsets.sh [SYMBOL...] -- uprobe offsets for WebKit phase entry points,
+# ph-wkoffsets.sh [SYMBOL...] -- uprobe offsets for WebKit phase entry points,
 # from the -dbg and plain webkit apk for the build INSTALLED on the device.
 #
-# Prints a line to eval, giving tk-wkphase.sh the offsets for the build under
+# Prints a line to eval, giving ph-wkphase.sh the offsets for the build under
 # test. Run it again after every rebuild; that is the whole point.
 #
 # THE ARITHMETIC, because getting it wrong measures a random instruction:
@@ -18,10 +18,10 @@
 # from the .debug file -- the debug file's LOAD entries have zero file size and
 # its offsets are meaningless. On 2.52.6 that delta is 0x10000, and the check
 # that it is right is that ThreadedCompositor::renderLayerTree comes out at
-# 0x226f588, the value tk-webframe.sh has hardcoded since r52.
+# 0x226f588, the value ph-webframe.sh has hardcoded since r52.
 set -u
-# shellcheck source=tk-lib.sh
-source "$(dirname "$0")/tk-lib.sh"
+# shellcheck source=ph-lib.sh
+source "$(dirname "$0")/ph-lib.sh"
 DIR=${TK_WK_APK_DIR:-$HOME/.local/var/porthole-sandbox/packages/edge/aarch64}
 VER=${TK_WK_VERSION:-}
 # ASK THE DEVICE, do not guess from the directory. The old default was the

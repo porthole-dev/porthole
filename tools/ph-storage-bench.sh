@@ -1,13 +1,13 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # scope: soc:qcom
-# needs: on-device (pipe with `tk-device.sh ssh "$PHONE" 'sudo -n bash -s'`)
+# needs: on-device (pipe with `ph-device.sh ssh "$PHONE" 'sudo -n bash -s'`)
 # env: PHONE, TK_AGENT
 # exits: 0 ok · 1 failed
 # UFS / block / swap measurement for taimen. Run ON THE DEVICE as root:
 #
-#   TK_AGENT=<you> tools/tk-device.sh ssh "$PHONE" 'sudo -n bash -s' \
-#       < tools/tk-storage-bench.sh
+#   TK_AGENT=<you> tools/ph-device.sh ssh "$PHONE" 'sudo -n bash -s' \
+#       < tools/ph-storage-bench.sh
 #
 # What it answers, in order:
 #   1. what gear/rate/lane the UFS link actually negotiated, idle and busy

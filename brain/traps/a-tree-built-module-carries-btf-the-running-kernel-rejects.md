@@ -11,8 +11,8 @@ first-learned: 2026-08-31
 
 
 **Do not push a tree-built module without dropping its `.BTF` first.**
-`tools/tk-push-module.sh` and `porthole build mod` both do this for you via
-`tools/tk-strip-btf.py`; this note is why, and what it looks like when
+`tools/ph-push-module.sh` and `porthole build mod` both do this for you via
+`tools/ph-strip-btf.py`; this note is why, and what it looks like when
 something bypasses it.
 
 `mod` did not, for the whole life of the verb. This note said the fix was
@@ -60,9 +60,9 @@ reboot. Always add a knob or check you can *see*, so "did my code run" has an
 answer that is not the bug you are hunting.
 
 **Why the fix is a 4-byte edit and not `strip`.** `llvm-strip --strip-debug`
-would work, but `tk-push-module.sh` runs on the **host**, which has no
+would work, but `ph-push-module.sh` runs on the **host**, which has no
 aarch64-capable strip -- and making the cheapest rung in the ladder depend on a
-cross toolchain is a worse trade than the alternative. `tk-strip-btf.py`
+cross toolchain is a worse trade than the alternative. `ph-strip-btf.py`
 instead sets the `.BTF` section header's `sh_name` to 0. The loader finds
 sections by name, so an unnamed section is simply not there; nothing moves, no
 offsets change, and it is idempotent and reversible.

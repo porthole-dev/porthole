@@ -19,7 +19,7 @@ Two GPIOs must be right before the AP can see anything on this bus:
   tlmm 89  -- reset, active low. Must be released (high) and HELD; releasing
               the line lets it float, since the pin has no bias configured.
 
-  tk-i2c-probe.py [BUS]     e.g. tk-i2c-probe.py 5   (default: scan all)
+  ph-i2c-probe.py [BUS]     e.g. ph-i2c-probe.py 5   (default: scan all)
 """
 import fcntl
 import os

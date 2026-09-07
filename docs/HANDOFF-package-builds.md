@@ -88,7 +88,7 @@ unpacking, no lock anywhere -- 37 minutes of an 8233-object build gone, and the
 failure blamed clang++ for missing source files rather than naming the
 collision. See `brain/traps/two-pmbootstrap-builds-destroy-each-other.md`.
 
-The phone already has this guard: `tools/tk-device.sh` takes an flock and exits
+The phone already has this guard: `tools/ph-device.sh` takes an flock and exits
 75 when it cannot, because one physical device cannot serve two callers. The
 buildroot has exactly the same property. A package-build verb is the natural
 home for the same idiom, and shipping the verb *without* it would make the
@@ -340,7 +340,7 @@ written to go upstream — it exposes no class of device `bindV4l()` was not
 already binding, it only stops the set depending on enumeration order.
 
 **Remaining:** finish the build, install, and verify `hwdec` goes YES with CPU
-near 41% on the same clip. The measurement harness is `tools/tk-mempressure.sh`
+near 41% on the same clip. The measurement harness is `tools/ph-mempressure.sh`
 (its `hwdec` field reads the decoder subdevice's `runtime_status`, which is
 valid only while `power/control` is `auto` — it reports `pinned` otherwise).
 
@@ -390,5 +390,5 @@ before.
   test.
 - `brain/findings/lax-build-buys-nothing-measurable.md` — `--lax` is a
   correctness requirement in the workspace, not a speed knob.
-- `tools/tk-pkgcheck.sh` now covers `pmaports/temp/`, which is how a fork that
+- `tools/ph-pkgcheck.sh` now covers `pmaports/temp/`, which is how a fork that
   upstream has overtaken gets caught.

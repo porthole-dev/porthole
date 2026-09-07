@@ -10,8 +10,8 @@ peek.py is fine for a handful of registers but costs a process start each; this
 is for sweeping whole blocks, which is what you want once you have run out of
 registers you can name a hypothesis for.
 
-  tk-regdump.py 0x0ca10000 0x000 0x100      # VFE0 core
-  tk-regdump.py 0x0ca10000 0x400 0x0a0      # VFE0 bus bridge
+  ph-regdump.py 0x0ca10000 0x000 0x100      # VFE0 core
+  ph-regdump.py 0x0ca10000 0x400 0x0a0      # VFE0 bus bridge
 
 Run ON the phone, as root, while the block is clocked -- reading an unclocked
 Qualcomm block hangs the bus and takes the watchdog with it.

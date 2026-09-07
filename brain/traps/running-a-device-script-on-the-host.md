@@ -15,7 +15,7 @@ and it does not error. It reads `/proc/loadavg`, `/proc/meminfo` and `ps` — al
 of which exist on both machines — and prints a perfectly well-formed result
 about the wrong computer.
 
-**The worked example.** `porthole run tk-sysstate.sh` executed locally and
+**The worked example.** `porthole run ph-sysstate.sh` executed locally and
 printed `memavail=22481444kB procs=457 top=[firefox]`. That is a workstation.
 The phone has 2.5 GB and no firefox. Nothing in the output said so; the numbers
 were internally consistent and the format was exactly right.

@@ -17,17 +17,17 @@
 #
 # The three verbs are meant to bracket every arm:
 #
-#   tools/tk-thermal.sh prep          dim the panel, note the starting die temp
-#   tools/tk-thermal.sh down          kill the usual suspects, dim, report
-#   tools/tk-thermal.sh cool [mC]     block until the die is under the floor
-#   tools/tk-thermal.sh guard N [mC]  background watchdog: for N seconds, kill
+#   tools/ph-thermal.sh prep          dim the panel, note the starting die temp
+#   tools/ph-thermal.sh down          kill the usual suspects, dim, report
+#   tools/ph-thermal.sh cool [mC]     block until the die is under the floor
+#   tools/ph-thermal.sh guard N [mC]  background watchdog: for N seconds, kill
 #                                     the workload if the die passes the ceiling
 #
 # `cool` is the one that matters for back-to-back arms, and `guard` is the one
 # that matters when nobody is watching.
 set -uo pipefail
-# shellcheck source=tk-lib.sh
-. "$(dirname "$0")/tk-lib.sh"
+# shellcheck source=ph-lib.sh
+. "$(dirname "$0")/ph-lib.sh"
 
 CEIL=${TK_THERMAL_CEILING:-82000}
 FLOOR=${TK_THERMAL_FLOOR:-55000}
@@ -62,7 +62,7 @@ killarms() {
     tk_run 'pkill -f epipha""ny; pkill -f MiniBrow""ser; pkill -f glmark""2; true' >/dev/null 2>&1 || true  # contract: pkill-ok scope names for MiniBrowser/glmark2 are unverified on-device; see comment above
 }
 
-usage() { echo "usage: tools/tk-thermal.sh prep|down|cool [mC]|guard SECONDS [mC]" >&2; exit 64; }
+usage() { echo "usage: tools/ph-thermal.sh prep|down|cool [mC]|guard SECONDS [mC]" >&2; exit 64; }
 [ $# -ge 1 ] || usage
 
 case "$1" in

@@ -7,7 +7,7 @@
 #        them as `nm` vaddr minus the text LOAD delta (readelf -l) and edit ADDR.
 # env: -
 # exits: 0 ran
-# tk-webframe.sh [SECONDS] -- where each compositor frame's period goes.
+# ph-webframe.sh [SECONDS] -- where each compositor frame's period goes.
 #
 # Uprobes on ThreadedCompositor::renderLayerTree (entry + return),
 # AcceleratedSurface::didRenderFrame and ::frameDone, plus the msm GPU

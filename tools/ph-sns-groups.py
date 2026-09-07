@@ -13,7 +13,7 @@ hand-derived per-key map instead, which is missing 15 of the 53 groups taimen's
 SMGR reads -- and a short answer makes SLPI assert in sns_smgr_reg.c and reboot
 in a loop, so SMGR never publishes.
 
-    tk-sns-groups.py sensors.qcom > groups.conf
+    ph-sns-groups.py sensors.qcom > groups.conf
 
 Self-check: the table is only accepted if the slices tile sns.reg exactly, i.e.
 max(offset + size) equals the registry length (0x6e0e on taimen).
@@ -73,6 +73,6 @@ if __name__ == '__main__':
         sys.exit("no group table found (does this sensors.qcom match the device?)")
 
     print("# group_id offset size -- extracted from /vendor/bin/sensors.qcom")
-    print("# by tools/tk-sns-groups.py; consumed by sns-reg as /etc/sns-reg.d/groups.conf")
+    print("# by tools/ph-sns-groups.py; consumed by sns-reg as /etc/sns-reg.d/groups.conf")
     for gid, addr, size in sorted(table):
         print(gid, addr, size)

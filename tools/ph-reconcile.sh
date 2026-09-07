@@ -4,7 +4,7 @@
 # needs: - (host only, no device)
 # env: TK_BASE_TAG
 # exits: 0 ok · 1 failed
-# tk-reconcile.sh -- does the aport series and the linux/ tree contain the same code?
+# ph-reconcile.sh -- does the aport series and the linux/ tree contain the same code?
 #
 # WHY THIS EXISTS
 #   On 2026-08-20 two regressions landed on the phone from the same cause: the

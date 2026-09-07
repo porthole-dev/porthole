@@ -12,8 +12,8 @@ the same thing phosh will, rather than some driver-private sysfs knob.
 
 Stdlib only.
 
-  tk-vibrate.py [MAGNITUDE_PCT] [MS] [REPEATS]      default 100 300 3
-  tk-vibrate.py --list                              show ff-capable devices
+  ph-vibrate.py [MAGNITUDE_PCT] [MS] [REPEATS]      default 100 300 3
+  ph-vibrate.py --list                              show ff-capable devices
 """
 import fcntl
 import glob

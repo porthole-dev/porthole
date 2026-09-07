@@ -17,7 +17,7 @@ turned. Sampling while it is rotated through as many orientations as possible
 and taking the midpoint of each axis' range recovers it (hard-iron only; soft
 iron would need an ellipsoid fit, and is usually a smaller effect).
 
-    tk-compass-cal.py [seconds]     # default 40
+    ph-compass-cal.py [seconds]     # default 40
 
 Rotate the phone slowly through every orientation you can for the whole window
 -- the usual figure-of-eight, plus a full spin about each of the three axes.

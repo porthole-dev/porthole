@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device with passwordless sudo; CONFIG_UPROBE_EVENTS. Offsets come
-#        from TK_WKPHASE_OFFSETS, which tools/tk-wkoffsets.sh computes on the
+#        from TK_WKPHASE_OFFSETS, which tools/ph-wkoffsets.sh computes on the
 #        HOST from the -dbg package for the build that is installed.
 # env: TK_WKPHASE_OFFSETS (required for `arm`), TK_WKPHASE_LIB
 # exits: 0 ok · 64 usage or no offsets
-# tk-wkphase.sh arm|measure [SECONDS]|off -- where the WebKit MAIN THREAD's
+# ph-wkphase.sh arm|measure [SECONDS]|off -- where the WebKit MAIN THREAD's
 # per-frame time goes: style, layout, compositing, intersection observers.
 #
-# tk-webframe.sh answers the same question for the COMPOSITOR thread. This is
+# ph-webframe.sh answers the same question for the COMPOSITOR thread. This is
 # the other half, and it exists because the 2026-09-05 scroll campaign found the
 # main thread busy for contiguous runs of up to 215 ms with no hot spot in a
 # flat profile -- nothing above 2%, spread over thousands of functions. A flat
@@ -22,11 +22,11 @@
 # never called". See brain/traps/uprobes-do-not-attach-to-an-already-mapped-
 # library. So:
 #
-#   eval "$(tools/tk-wkoffsets.sh)"     # on the host; prints the export
-#   tk-wkphase.sh arm                   # BEFORE the browser exists
+#   eval "$(tools/ph-wkoffsets.sh)"     # on the host; prints the export
+#   ph-wkphase.sh arm                   # BEFORE the browser exists
 #   <launch the browser, load the page, let it settle>
-#   tk-wkphase.sh measure 12            # then drive the gesture
-#   tk-wkphase.sh off
+#   ph-wkphase.sh measure 12            # then drive the gesture
+#   ph-wkphase.sh off
 #
 # It reads tracing/trace rather than perf: with the probes armed before launch,
 # ftrace filled its buffer while `perf record -a -e wk:<name>` on the very same
@@ -39,7 +39,7 @@ CMD=${1:-}
 case "$CMD" in
 arm)
 	OFF=${TK_WKPHASE_OFFSETS:-}
-	[ -n "$OFF" ] || { echo "TK_WKPHASE_OFFSETS is required; run tools/tk-wkoffsets.sh on the host" >&2; exit 64; }
+	[ -n "$OFF" ] || { echo "TK_WKPHASE_OFFSETS is required; run tools/ph-wkoffsets.sh on the host" >&2; exit 64; }
 	sudo -n sh -c "echo > $T/uprobe_events; echo 32768 > $T/buffer_size_kb"
 	for spec in $OFF; do
 		n=${spec%%=*}; a=${spec#*=}
@@ -95,5 +95,5 @@ off)
 	sudo -n sh -c "echo 0 > $T/events/wk/enable; echo > $T/uprobe_events"
 	;;
 *)
-	echo "usage: tk-wkphase.sh arm|measure [SECONDS]|off" >&2; exit 64 ;;
+	echo "usage: ph-wkphase.sh arm|measure [SECONDS]|off" >&2; exit 64 ;;
 esac

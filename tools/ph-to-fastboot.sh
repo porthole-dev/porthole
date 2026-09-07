@@ -23,7 +23,7 @@
 # `mode-bootloader = <2>` and pm8916-pon is bound to it, so the reboot-mode
 # framework writes 2 to the PMIC PON_SOFT_RB_SPARE register that the Pixel 2
 # bootloader reads on the next boot. Only userspace was missing: nothing in this
-# rootfs issues RESTART2 with a mode string, so tk-lib.sh makes the raw syscall
+# rootfs issues RESTART2 with a mode string, so ph-lib.sh makes the raw syscall
 # through python3. See tk_request_bootloader() there for the constants.
 #
 # This path does NOT burn a boot retry -- the bootloader stops deliberately, so
@@ -40,11 +40,11 @@
 #
 # The fallback deliberately never calls set_active: re-arming mid-loop would
 # reset the counter to 3 and the loop would never converge. Recovery belongs on
-# the way OUT (tk-reboot.sh), never on the way in.
+# the way OUT (ph-reboot.sh), never on the way in.
 #
 # Corollary: if you got here via the fallback the counter is at 0, so a bare
 # `fastboot reboot` drops straight back into the bootloader. Always
-# `set_active b` before rebooting out -- tk-reboot.sh and tk-flash-boot.sh do.
+# `set_active b` before rebooting out -- ph-reboot.sh and ph-flash-boot.sh do.
 #
 # Outcomes are told apart like this:
 #   - bootloader: `fastboot devices` prints a line. The ONLY reliable tell --
@@ -61,7 +61,7 @@
 #     USB did not come up on this host until the cable was replugged, 26
 #     minutes of which were spent following advice for a different fault.
 #
-# Usage: tk-to-fastboot.sh [timeout_seconds]   (default 180, or $TK_TIMEOUT)
+# Usage: ph-to-fastboot.sh [timeout_seconds]   (default 180, or $TK_TIMEOUT)
 #   env: TK_ATTEMPT   seconds to wait per reboot        (default 60)
 #        TK_TRIES     fallback reboots before giving up (default 4)
 #        TK_NO_SYSCALL=1  skip the fast path, force the retry-burn fallback
@@ -69,7 +69,7 @@
 set -u
 
 cd "$(dirname "$0")" || exit 1
-. ./tk-lib.sh
+. ./ph-lib.sh
 
 TIMEOUT=${1:-${TK_TIMEOUT:-180}}
 ATTEMPT_S=${TK_ATTEMPT:-60}

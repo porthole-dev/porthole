@@ -10,7 +10,7 @@ A data lane sits in LP-11 (stop state) between packets, so a single read
 cannot distinguish "never bursts" from "sampled during blanking". This polls
 flat-out and reports how often each lane left stop state.
 
-  tk-easel-poll.py [rxdev] [samples]
+  ph-easel-poll.py [rxdev] [samples]
 """
 import mmap, os, struct, sys
 

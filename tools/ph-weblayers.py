@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: on-device; tk-webvq.py beside it; browser launched with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222
+# needs: on-device; ph-webvq.py beside it; browser launched with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222
 # env: TK_INSPECTOR
 # exits: 0 ok
 """Dump the composited layer tree of the current page through the remote inspector.
@@ -12,7 +12,7 @@ backing store, and WebKit's own reason for compositing it -- the number that
 says why one page composites at 60 Hz and another at 20.
 """
 import importlib.util, json, os, re, sys, urllib.request, collections
-spec = importlib.util.spec_from_file_location("webvq", os.path.join(os.path.dirname(os.path.abspath(__file__)), "tk-webvq.py"))
+spec = importlib.util.spec_from_file_location("webvq", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ph-webvq.py"))
 vq = importlib.util.module_from_spec(spec); spec.loader.exec_module(vq)
 HOST = vq.HOST
 html = urllib.request.urlopen(f"http://{HOST}/", timeout=5).read().decode()

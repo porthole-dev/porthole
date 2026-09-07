@@ -17,12 +17,12 @@ samples all three and never perturbs any of them:
   evdev      /dev/input/event1, i.e. how many packets reached userspace.
 
 Reading the FIFO is deliberately NOT done here -- that would steal events from
-the driver and turn a passive observation into an experiment. tk-ftm4-poke.py
+the driver and turn a passive observation into an experiment. ph-ftm4-poke.py
 is the tool for poking; this one only watches. The two together separate
 "controller stopped scanning" (gpio stays high) from "irq not delivered" (gpio
 goes low, count flat) from "driver drops it" (count rises, evdev flat).
 
-  tk-ftm4-log.py [SECONDS]      default 3600
+  ph-ftm4-log.py [SECONDS]      default 3600
 """
 import fcntl
 import os

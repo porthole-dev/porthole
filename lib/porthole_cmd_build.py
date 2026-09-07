@@ -99,7 +99,7 @@ TKMOD_REFUSED = {
 TKMOD_INSTALLED_NOT_LOADED = {
     3: ("installed, but not loaded this boot -- something still holds it",
         "the copy on disk IS the module you just built. One reboot runs it "
-        "(`porthole run tools/tk-reboot.sh`); do NOT go up to a flashing "
+        "(`porthole run tools/ph-reboot.sh`); do NOT go up to a flashing "
         "rung, the build is done"),
     4: ("installed, but not loaded -- this module carries the ssh link",
         "nothing was torn down and the build is fine. Reboot to run it, or "
@@ -108,7 +108,7 @@ TKMOD_INSTALLED_NOT_LOADED = {
         "PORTHOLE_MOD_NO_RELOAD lists it because its rmmod does more than "
         "unload; on venus_core a live reload hard-reset the SoC (#26). "
         "Nothing was torn down. One reboot runs the new module "
-        "(`porthole run tools/tk-reboot.sh`)"),
+        "(`porthole run tools/ph-reboot.sh`)"),
 }
 
 ACTIONS = {

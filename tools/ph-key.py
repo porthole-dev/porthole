@@ -6,22 +6,22 @@
 # exits: 0 ok · 2 usage
 """Inject a key press through /dev/uinput. Run ON THE DEVICE as root.
 
-Same idiom as tools/tk-touch.py -- plain ioctl + struct, no ctypes, no deps.
+Same idiom as tools/ph-touch.py -- plain ioctl + struct, no ctypes, no deps.
 Exists because the panel is owned by the compositor: with the output asleep
 there is no wlopm here, and writing the backlight does nothing while the DRM
 connector is disabled. A power-key press is the path the compositor listens on.
 
-  tk-key.py power        one KEY_POWER press/release
-  tk-key.py type 123456  type digits
-  tk-key.py type -       read the digits from stdin instead of argv
-  tk-key.py enter        one KEY_ENTER
+  ph-key.py power        one KEY_POWER press/release
+  ph-key.py type 123456  type digits
+  ph-key.py type -       read the digits from stdin instead of argv
+  ph-key.py enter        one KEY_ENTER
 
 NEVER pass a real lock-screen PIN as an argument. It lands in `ps`, in shell
 history, and -- because /dev/uinput needs root -- in journald, which logs
-sudo's whole command line: `COMMAND=/usr/bin/python3 tk-key.py type <pin>`
+sudo's whole command line: `COMMAND=/usr/bin/python3 ph-key.py type <pin>`
 is then on disk in plaintext for as long as the journal is kept. Pipe it:
 
-    printf %s "$PIN" | sudo python3 tk-key.py type -
+    printf %s "$PIN" | sudo python3 ph-key.py type -
 """
 import fcntl, os, struct, sys, time
 
@@ -66,7 +66,7 @@ elif cmd == "type":
             press(DIGITS[ch])
     press(KEY_ENTER)
 else:
-    print("usage: tk-key.py power|enter|type DIGITS"); sys.exit(2)
+    print("usage: ph-key.py power|enter|type DIGITS"); sys.exit(2)
 time.sleep(0.3)
 fcntl.ioctl(fd, UI_DEV_DESTROY)
 os.close(fd)

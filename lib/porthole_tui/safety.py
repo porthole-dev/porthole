@@ -17,8 +17,8 @@ from __future__ import annotations
 # milestone table, and a table can be edited in a hurry. If either the table or
 # this list says stop, we stop.
 # "ramp" and "recover" were added when `porthole permissions` started deriving
-# an agent's allowlist from this tuple and found tk-thermal-ramp.sh and
-# tk-recover.sh on the safe side of it. Both are named by hand in AGENTS.md
+# an agent's allowlist from this tuple and found ph-thermal-ramp.sh and
+# ph-recover.sh on the safe side of it. Both are named by hand in AGENTS.md
 # section 1 (`confirm-before-irreversible` lists thermal ramps outright), so
 # the omission was in this list rather than in that rule. "ramp" rather than
 # "thermal", so that READING a thermal zone stays a read.

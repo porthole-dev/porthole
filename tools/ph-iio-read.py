@@ -9,7 +9,7 @@
 The SMGR driver only pushes into a kfifo buffer, so `cat in_accel_x_raw` does
 not exist -- you have to enable the scan elements and read /dev/iio:deviceN.
 
-    tk-iio-read.py qcom-smgr-accel [count]
+    ph-iio-read.py qcom-smgr-accel [count]
 
 Prints scaled values in IIO units (m/s^2, rad/s, gauss, kPa, ...).
 """

@@ -5,13 +5,13 @@ scope: device:google-taimen
 subsystem: media
 severity: trap
 confidence: proven
-evidence: 2026-09-04 17:50: insmod of the tree's venus-core.ko (BTF neutered, CRCs identical to the installed copy) was followed 6 s later by rtkit 'canary thread starving' and a watchdog reset (bootreason=watchdog). git log v7.2.2..taimen-v7.2 -- drivers/media/platform/qcom/venus listed 3 commits; the aport series carried 13, and WRAPPER_CLOCK_CONFIG existed only in the header. porthole aports patches (dry) would have replaced 210 patches with 197. The refusal itself was tk-modcrc.py dying on a missing llvm-objcopy inside the workspace (exit 1 = 'mismatch'), fixed in porthole 73a248d.
+evidence: 2026-09-04 17:50: insmod of the tree's venus-core.ko (BTF neutered, CRCs identical to the installed copy) was followed 6 s later by rtkit 'canary thread starving' and a watchdog reset (bootreason=watchdog). git log v7.2.2..taimen-v7.2 -- drivers/media/platform/qcom/venus listed 3 commits; the aport series carried 13, and WRAPPER_CLOCK_CONFIG existed only in the header. porthole aports patches (dry) would have replaced 210 patches with 197. The refusal itself was ph-modcrc.py dying on a missing llvm-objcopy inside the workspace (exit 1 = 'mismatch'), fixed in porthole 73a248d.
 first-learned: 2026-09-04
 ---
 
 **Symptom** -- `porthole build mod venus-core.ko venus_core --yes` refuses
 with "does not share an ABI ... CONFIG skew", the config diff against
-`/proc/config.gz` is empty, a hand check with `tk-modcrc.py` reports zero
+`/proc/config.gz` is empty, a hand check with `ph-modcrc.py` reports zero
 CRC mismatches, and after a hand `insmod` of the tree's module the phone
 logs `rtkit-daemon: The canary thread is apparently starving` six seconds
 later and comes back with `bootreason=watchdog`.
@@ -24,7 +24,7 @@ threshold restore, no power collapse, hfi_trace) and three others never
 became commits. A venus_core built without the wrapper unlock touches the
 VBIF page and stalls the MMSS NoC -- the exact signature of
 [[the-venus-wedge-was-wrapper-clock-auto-gating]]. Separately, the mod
-rung's refusal was a false alarm: `tk-modcrc.py` runs inside the workspace,
+rung's refusal was a false alarm: `ph-modcrc.py` runs inside the workspace,
 where there is no `llvm-objcopy`, and its traceback exits 1, which the
 rung reads as "CRCs disagree" (fixed: porthole 73a248d prints the checker's
 words and treats a missing tool as "cannot compare").
@@ -33,7 +33,7 @@ words and treats a missing tool as "cannot compare").
 lists venus_core/dec/enc because the firmware does not survive a
 shutdown-and-reboot in one boot ([[venus-decode-works-and-what-it-took]]).
 The rung replaces the on-disk copy and the next boot runs it; that is the
-designed path, and `tools/tk-reboot.sh` is the reboot.
+designed path, and `tools/ph-reboot.sh` is the reboot.
 
 **The sync that fixed it** (2026-09-04): export the series out of the
 container-owned pmaports (`porthole sandbox shell --command 'tar ... |

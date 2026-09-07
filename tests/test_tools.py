@@ -178,12 +178,12 @@ def test_host_python_tools_can_start():
             return None
         # A cwd PER TOOL, not one shared between them. In a throwaway cwd
         # because a tool that takes an output path as argv[1] treats "--help"
-        # as one: tk-tone.py wrote a WAV named `--help` into the repo root the
+        # as one: ph-tone.py wrote a WAV named `--help` into the repo root the
         # first time this ran. Now that these run concurrently, a shared cwd
         # would let two such tools race for the same filename.
         scratch = os.path.join(root, path.stem)
         os.makedirs(scratch, exist_ok=True)
-        # stdin=DEVNULL, or a tool that prompts (tk-mount-cal.py walks you
+        # stdin=DEVNULL, or a tool that prompts (ph-mount-cal.py walks you
         # through four physical poses) blocks forever on input() instead of
         # failing. The timeout stays as a backstop, not as the mechanism.
         proc = subprocess.run([sys.executable, str(path), "--help"],
@@ -528,7 +528,7 @@ def test_no_shell_function_ends_in_a_test_that_guards_a_side_effect():
 def test_a_missing_objcopy_is_cannot_compare_not_a_crc_mismatch():
     """Issue #57: exit codes are an API, and 1 is an ANSWER.
 
-    tk-modcrc.py gates `porthole build mod`: 1 means "these two modules
+    ph-modcrc.py gates `porthole build mod`: 1 means "these two modules
     disagree" and the rung refuses the push on it. Inside the workspace there
     is no llvm-objcopy on PATH, `subprocess.run` raised FileNotFoundError, and
     a traceback exits 1 -- so every venus_core push for a week was refused
@@ -547,7 +547,7 @@ def test_a_missing_objcopy_is_cannot_compare_not_a_crc_mismatch():
         nowhere = pathlib.Path(d, "bin")
         nowhere.mkdir()
         proc = subprocess.run(
-            [sys.executable, str(ROOT / "tools" / "tk-modcrc.py"),
+            [sys.executable, str(ROOT / "tools" / "ph-modcrc.py"),
              str(ko), str(ko)],
             capture_output=True, text=True, timeout=60,
             env=dict(os.environ, PATH=str(nowhere)))

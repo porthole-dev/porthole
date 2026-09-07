@@ -264,7 +264,7 @@ def test_a_flag_survives_a_variadic_positional():
 
     `porthole run` declares `args` with nargs="...", so argparse hands it
     EVERYTHING after the positionals. Building positionals-first produced
-    `porthole run tk-suspend-cycle.sh 20 --lock`, argparse swallowed --lock
+    `porthole run ph-suspend-cycle.sh 20 --lock`, argparse swallowed --lock
     into args, and lock came back False -- a tool told to take the lock ran
     without it. Flags go first whenever a positional is variadic.
     """
@@ -273,7 +273,7 @@ def test_a_flag_survives_a_variadic_positional():
     import porthole_cmd_run as run
 
     fields = argspec.fields(run.SPEC)
-    example = "porthole run --lock tk-suspend-cycle.sh 20"
+    example = "porthole run --lock ph-suspend-cycle.sh 20"
     built = argspec.build("run", fields,
                           argspec.parse_example(example, "run", fields))
 

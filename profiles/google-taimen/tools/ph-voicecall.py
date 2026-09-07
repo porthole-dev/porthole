@@ -5,7 +5,7 @@
 # env: -
 # exits: 0 ok - 1 the ADSP refused a command - 2 no bridge
 # lib-exempt: runs on the device, not the host -- there is no mutex or
-#             tk-lib.sh there. Invoke it through the mutex from the host.
+#             ph-lib.sh there. Invoke it through the mutex from the host.
 """Drive an ADSP voice-call session over the q6voice debugfs bridge.
 
 Mainline has no voice service, so nothing sets up the modem<->ADSP<->codec

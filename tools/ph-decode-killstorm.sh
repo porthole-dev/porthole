@@ -4,7 +4,7 @@
 # needs: on-device (gstreamer + a v4l2 stateful decoder; kill by PID only)
 # env: -
 # exits: 0 no wedge in N rounds · 1 a post-kill decode failed
-# tk-decode-killstorm.sh -- SIGKILL a hardware decode mid-flight, N times,
+# ph-decode-killstorm.sh -- SIGKILL a hardware decode mid-flight, N times,
 # verifying after every kill that the NEXT decode still completes.
 #
 # Exists because "SIGKILL mid-decode wedges venus until reboot" was reported,
@@ -16,8 +16,8 @@
 # VP9 run took 34 s for a 20 s clip and a short timeout misreads that as a
 # wedge, which is precisely how the original misdiagnosis happened.
 #
-#   tk-decode-killstorm.sh [DECODER] [CLIP] [ROUNDS] [PROBE_TIMEOUT_S]
-#   tk-decode-killstorm.sh v4l2vp9dec /tmp/clip.webm 10 90
+#   ph-decode-killstorm.sh [DECODER] [CLIP] [ROUNDS] [PROBE_TIMEOUT_S]
+#   ph-decode-killstorm.sh v4l2vp9dec /tmp/clip.webm 10 90
 DEC=${1:-v4l2h264dec}; CLIP=${2:-/tmp/h264_1080p.mp4}; N=${3:-10}; T=${4:-70}
 case $CLIP in
 *.webm) DEMUX="matroskademux ! queue";;

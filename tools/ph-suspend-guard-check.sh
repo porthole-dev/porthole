@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST
 # exits: 0 ok · 1 failed
-# tk-suspend-guard-check.sh -- prove the suspend guard actually blocks, WITHOUT
+# ph-suspend-guard-check.sh -- prove the suspend guard actually blocks, WITHOUT
 # ever suspending the phone.
 #
 # WHY THIS EXISTS
@@ -33,7 +33,7 @@
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}

@@ -24,19 +24,19 @@
 # The trade: an auto-login device is unlocked at boot. Only for a test device,
 # and `disable` puts it back. The config is backed up on first enable.
 #
-#   tools/tk-autologin.sh status
-#   tools/tk-autologin.sh enable    # then reboot
-#   tools/tk-autologin.sh disable   # then reboot
+#   tools/ph-autologin.sh status
+#   tools/ph-autologin.sh enable    # then reboot
+#   tools/ph-autologin.sh disable   # then reboot
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
-source tools/tk-lib.sh
+source tools/ph-lib.sh
 
 CFG=/etc/phrog/greetd-config.toml
 BAK=$CFG.pre-autologin
-USER_NAME=$PORTHOLE_USER  # tk-lib.sh already defaults this to "user"
+USER_NAME=$PORTHOLE_USER  # ph-lib.sh already defaults this to "user"
 
-usage() { echo "usage: tools/tk-autologin.sh status|enable|disable" >&2; exit 64; }
+usage() { echo "usage: tools/ph-autologin.sh status|enable|disable" >&2; exit 64; }
 [ $# -eq 1 ] || usage
 
 tk_run "test -f $CFG" || { echo "no greetd config at $CFG" >&2; exit 69; }

@@ -41,7 +41,7 @@ say "mem_sleep"         "$(cat /sys/power/mem_sleep 2>/dev/null || echo none)"
 # 2026-08-02, when the phone suspended anyway and needed a hands-on power cycle.
 # Read the assertion and the arming file. NEVER `systemctl show -p
 # AssertPathExists` (prints nothing even when installed), and NEVER by
-# attempting a suspend -- use tools/tk-suspend-guard-check.sh. See PLAN v2 6.5a.
+# attempting a suspend -- use tools/ph-suspend-guard-check.sh. See PLAN v2 6.5a.
 say "suspend guard"     "$(systemctl cat systemd-suspend.service 2>/dev/null | grep -c '^AssertPathExists') assertion(s) on systemd-suspend.service"
 say "suspend ALLOWED"   "$([ -e /run/taimen-suspend-is-safe ] && echo 'YES -- HAZARD, ipa hang is armed' || echo 'no (guarded)')"
 say "wakeup sources"    "$(grep -c . /sys/kernel/debug/wakeup_sources 2>/dev/null || echo '?') entries"

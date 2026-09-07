@@ -398,7 +398,7 @@ def _device_traps(cfg) -> list[str]:
                    f"Only `fastboot devices` discriminates.")
     if cfg.get("PORTHOLE_REBOOT_MODE_VIA_SYSCALL") == "1":
         out.append("`reboot bootloader` is busybox and discards the mode string. "
-                   "Use tools/tk-to-fastboot.sh.")
+                   "Use tools/ph-to-fastboot.sh.")
     if cfg.get("PORTHOLE_SLOT_FORBIDDEN"):
         out.append(f"NEVER set_active {cfg['PORTHOLE_SLOT_FORBIDDEN']} — no "
                    f"known-good image on that slot.")
@@ -498,11 +498,11 @@ def _next_steps(cfg, device: str, state: str, gaps: list[str]) -> list[str]:
     if state == "ABSENT":
         steps.append("attach and power the device, then `porthole doctor`")
     elif state == "FASTBOOT":
-        steps.append("tools/tk-reboot.sh   # leave the bootloader, re-arming the slot")
+        steps.append("tools/ph-reboot.sh   # leave the bootloader, re-arming the slot")
     elif state == "INITRAMFS":
         steps.append("tools/tsh.py 'dmesg | grep pmOS-rd'   # why root did not mount")
     elif state == "FROZEN":
-        steps.append("tools/tk-recover.sh   # kernel alive, userspace gone")
+        steps.append("tools/ph-recover.sh   # kernel alive, userspace gone")
     elif state == "BOOTED":
         steps.append("porthole doctor   # confirm sudo -n works before anything else")
     if gaps:

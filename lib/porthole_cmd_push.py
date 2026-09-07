@@ -98,7 +98,7 @@ def cmd_push(args, ctx) -> int:
 
     if not files:
         raise Bail("nothing to push", EX_USAGE,
-                   "porthole push tools/tk-foo.sh   (or: push list | push clear)")
+                   "porthole push tools/ph-foo.sh   (or: push list | push clear)")
 
     paths = []
     for name in files:
@@ -125,7 +125,7 @@ def cmd_push(args, ctx) -> int:
             f"printf '%s' {q(blob)} | base64 -d > /tmp/{q(p.name)}.push\n"
             # Verify what LANDED, never that the transfer exited 0. A module
             # once arrived 0 bytes and the tool that sent it reported success;
-            # tools/tk-push-module.sh carries the same rule and the same scar.
+            # tools/ph-push-module.sh carries the same rule and the same scar.
             f"got=$(sha256sum /tmp/{q(p.name)}.push | cut -d' ' -f1)\n"
             f"[ \"$got\" = {q(want)} ] || {{ echo \"TRANSFER CORRUPT: $got\"; exit 1; }}\n"
             f"sudo -n install -m 0755 /tmp/{q(p.name)}.push {q(target)}\n"
@@ -180,7 +180,7 @@ SPEC = {
     ],
     "run": cmd_push,
     "examples": [
-        "porthole push tools/tk-sysstate.sh",
+        "porthole push tools/ph-sysstate.sh",
         "porthole push list",
         "porthole push clear --yes",
     ],

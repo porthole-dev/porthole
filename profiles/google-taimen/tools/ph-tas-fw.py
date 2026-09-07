@@ -17,7 +17,7 @@ big-endian u32 fields, a 64-byte DDC name and a NUL-terminated description,
 then PLL / program / configuration sections, each a u16 count followed by
 items of (64-byte name, NUL description, payload).
 
-    tk-tas-fw.py blobs/work/tas2557/tas2557s_PG21_uCDSP.bin
+    ph-tas-fw.py blobs/work/tas2557/tas2557s_PG21_uCDSP.bin
 """
 import struct
 import sys

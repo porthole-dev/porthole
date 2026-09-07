@@ -17,8 +17,8 @@ suspended, so the host can still reach the port, and a USBDEVFS_RESET on it is
 seen by the device side as bus activity. That was enough to get the phone moving
 again on every attempt.
 
-    tk-usb-wake.py            # find the gadget by VID:PID and reset it
-    tk-usb-wake.py 001 117    # or name the bus/device explicitly
+    ph-usb-wake.py            # find the gadget by VID:PID and reset it
+    ph-usb-wake.py 001 117    # or name the bus/device explicitly
 
 Needs root on the HOST (it writes to /dev/bus/usb), not on the phone -- which is
 the point, since the phone is not answering.

@@ -53,22 +53,22 @@
 # granularity -- the win is on the bootloader-recovery path, where the old code
 # burned two fixed 30s sleeps, and from TK_FORCE=1.
 #
-# Usage: tk-reboot.sh [timeout_seconds]      (default 180, or $TK_TIMEOUT)
+# Usage: ph-reboot.sh [timeout_seconds]      (default 180, or $TK_TIMEOUT)
 #   env: TK_FORCE=1  skip OpenRC shutdown (~15s faster, syncs first)
 # Exit:  0 back up, 1 timed out.
 set -u
 
 cd "$(dirname "$0")" || exit 1
-. ./tk-lib.sh
+. ./ph-lib.sh
 
 TIMEOUT=${1:-${TK_TIMEOUT:-180}}
-# Checked BEFORE anything is asked of the device. `tk-reboot.sh --help` took
+# Checked BEFORE anything is asked of the device. `ph-reboot.sh --help` took
 # "--help" as the timeout, issued a real reboot, and then waited against an
 # empty deadline -- so the phone went down and nothing was left waiting for it
 # to come back. An argument this script does not understand must cost nothing.
 case $TIMEOUT in
     ''|*[!0-9]*)
-        echo ">> usage: tk-reboot.sh [timeout_seconds]  (default 180, or \$TK_TIMEOUT)" >&2
+        echo ">> usage: ph-reboot.sh [timeout_seconds]  (default 180, or \$TK_TIMEOUT)" >&2
         echo ">>   env: TK_FORCE=1  skip service shutdown (~15s faster, syncs first)" >&2
         exit 64 ;;
 esac

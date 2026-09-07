@@ -4,12 +4,12 @@
 # needs: on-device (pipe with `ssh ... sudo -n sh -s`)
 # env: PHONE, TK_AGENT
 # exits: 0 ok · 1 failed
-# tk-applaunch-bench.sh -- cold/warm application launch latency under phosh.
+# ph-applaunch-bench.sh -- cold/warm application launch latency under phosh.
 # Run ON THE DEVICE as root:
 #
-#   TK_AGENT=<you> tools/tk-device.sh bash -c \
-#     'source tools/tk-lib.sh; ssh "${TK_SSH_OPTS[@]}" "$PHONE" "sudo -n sh -s" \
-#      < tools/tk-applaunch-bench.sh' [ROUNDS] [APP:PROCNAME ...]
+#   TK_AGENT=<you> tools/ph-device.sh bash -c \
+#     'source tools/ph-lib.sh; ssh "${TK_SSH_OPTS[@]}" "$PHONE" "sudo -n sh -s" \
+#      < tools/ph-applaunch-bench.sh' [ROUNDS] [APP:PROCNAME ...]
 #
 # WHICH SESSION -- RESOLVED AT RUN TIME, NOT HARDCODED
 #   Do not assume a uid. This device's seated session has been uid 113
@@ -144,7 +144,7 @@ bench_one() {
 }
 
 # summarize LABEL SAMPLES... -> min/median/max/mean, and the honest verdict
-# tk-perf-ab.sh already established: if the spread inside one arm is as wide
+# ph-perf-ab.sh already established: if the spread inside one arm is as wide
 # as the gap between two arms, don't trust the gap.
 summarize() {
 	label=$1; shift

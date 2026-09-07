@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device with passwordless sudo; perf; CONFIG_UPROBE_EVENTS; a running
-#        WebKitWebProcess. Offsets are per build (see ADDR and tk-webframe.sh).
+#        WebKitWebProcess. Offsets are per build (see ADDR and ph-webframe.sh).
 # env: -
 # exits: 0 ran
-# tk-webdraws.sh [SECONDS] -- the compositor's draw census per frame.
+# ph-webdraws.sh [SECONDS] -- the compositor's draw census per frame.
 #
 # Fetches the FloatRect argument of every TextureMapper::drawTexture (and the
 # NV12 video draw, and BitmapTexturePool::acquireTexture) through uprobes and

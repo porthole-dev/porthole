@@ -74,7 +74,7 @@ with the FloatRect argument fetched (`w=+8(%x2):u32`), plus
 `drm_msm_gpu:msm_gpu_submit`/`_retired` recorded system-wide; offsets are
 `nm` vaddr minus the text LOAD delta (0x10000), and change with every
 relink. Every arm asserted the page state through the inspector first
-(`tk-webarm.sh`: `<video>` present, `play()`, `currentTime` advancing). Overturned
+(`ph-webarm.sh`: `<video>` present, `play()`, `currentTime` advancing). Overturned
 by: a page where the two halves are not serialized, or a kernel submit count
 that scales with layers.
 

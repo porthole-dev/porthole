@@ -4,7 +4,7 @@
 # needs: - (host only, no device)
 # env: -
 # exits: 0 ok · 1 failed · 2 usage
-# tk-wifi-audit.sh -- end-to-end WiFi stack audit for taimen (ath10k/WCN3990).
+# ph-wifi-audit.sh -- end-to-end WiFi stack audit for taimen (ath10k/WCN3990).
 #
 # Runs ON THE DEVICE. Answers, with evidence rather than impressions:
 #   1. Is the calibration/board data actually being served? (empty firmware
@@ -19,7 +19,7 @@
 #   5. Optionally: full association -> DHCP -> DNS -> throughput on a real AP.
 #
 # Usage:
-#   tk-wifi-audit.sh [COUNTRY] [SSID] [PSK]
+#   ph-wifi-audit.sh [COUNTRY] [SSID] [PSK]
 #     COUNTRY  two-letter code to audit against (default IT). Supported
 #              profiles: IT/EU (ETSI) and US (FCC).
 #     SSID PSK optional; if given, an association test is run at the end.

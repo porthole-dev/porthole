@@ -15,7 +15,7 @@
 > the container has. So the intended key was **never offered at all**, which is
 > why the error was `scp: Connection closed` and not a refusal. The key does
 > also need authorizing, so both causes were real. Four sites, not one, plus
-> the same defect in `tk-mic-check.sh`; a contract test now covers the build
+> the same defect in `ph-mic-check.sh`; a contract test now covers the build
 > path, and it was checked by reintroducing the bug.
 >
 > **(2) §4e's attribution is wrong.** Nothing in the repo calls
@@ -176,7 +176,7 @@ command and let a human run it, the way `porthole doctor` already prints fixes i
 will not apply itself.
 
 The workaround used here: push from the host with
-`tools/tk-push-module.sh`, which uses the host's own ssh and works.
+`tools/ph-push-module.sh`, which uses the host's own ssh and works.
 
 ---
 
@@ -184,14 +184,14 @@ The workaround used here: push from the host with
 
 Both in `tools/`, both tool-level rather than core:
 
-- **`tools/tk-strip-btf.py`** (new) — a module built from the tree carries
+- **`tools/ph-strip-btf.py`** (new) — a module built from the tree carries
   `.BTF` referencing the *aport* kernel's BTF by type id. MODVERSIONS passes,
   BTF does not, and `btf_module_notify()` fails the load with `-40`, which
   modprobe renders as `could not insert 'mac80211': Symbolic link loop`. On this
-  device that meant a reboot with **no `wlan0` at all**. `tk-push-module.sh` now
+  device that meant a reboot with **no `wlan0` at all**. `ph-push-module.sh` now
   calls it. Covered by `tests/test_strip_btf.py`. Full story in
   `brain/traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md`.
-- **`tools/tk-push-module.sh`** — now stages modules into a temp dir before
+- **`tools/ph-push-module.sh`** — now stages modules into a temp dir before
   touching them, because `.output` belongs to the workspace container's uid and
   is not writable by the host (nor ours to rewrite). Done after the existing
   sibling-mismatch warning, which needs the real build paths.
@@ -295,10 +295,10 @@ happens to have.
 
 ### 4e. Minor: `tk_expired` called with no argument
 
-`tools/tk-to-fastboot.sh` into `tk_wait_fastboot` prints this five times:
+`tools/ph-to-fastboot.sh` into `tk_wait_fastboot` prints this five times:
 
 ```
-tools/tk-lib.sh: line 230: [: : integer expected
+tools/ph-lib.sh: line 230: [: : integer expected
 ```
 
 Harmless, but it is noise in exactly the window where a human is watching for

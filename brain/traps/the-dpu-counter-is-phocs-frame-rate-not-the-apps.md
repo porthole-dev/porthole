@@ -9,7 +9,7 @@ evidence: taimen 2026-09-02, phoc 0.57.0-r51, Epiphany/webkit2gtk-6.0 2.52.6 on 
 first-learned: 2026-09-02
 ---
 
-`tools/tk-fps.py` and `tools/tk-gesture-bench.py` read the DPU's frame
+`tools/ph-fps.py` and `tools/ph-gesture-bench.py` read the DPU's frame
 counter. That is the number of frames **phoc** sent to the panel. phoc
 repaints every vsync while any client is animating (and the video subsurface
 keeps it animating), so the counter sits at 60 whatever the client does. A
@@ -21,9 +21,9 @@ Three different frame rates exist in a browser, and only one is on the panel:
 
 | stage | how to read it | YouTube on 2026-09-02 |
 |---|---|---|
-| media pipeline -> WebKit compositor | `tk-webvq.py` (getVideoPlaybackQuality via the inspector) | 60/s, ~0 dropped |
+| media pipeline -> WebKit compositor | `ph-webvq.py` (getVideoPlaybackQuality via the inspector) | 60/s, ~0 dropped |
 | WebKit compositor -> its window (the app's real frame rate) | `WAYLAND_DEBUG=1` commit intervals, or `wp_presentation_feedback.presented` sequence deltas | 12-15 fps idle video, ~30 fps drag |
-| phoc -> panel | tk-fps.py / tk-gesture-bench | 60 |
+| phoc -> panel | ph-fps.py / tk-gesture-bench | 60 |
 
 So: **the DPU number is the control, never the verdict.** For an app, count
 its own commits. `WAYLAND_DEBUG=1 app 2>log`, then intervals between

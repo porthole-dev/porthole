@@ -4,13 +4,13 @@
 # needs: on-device (scp it over, or pipe with `ssh ... sh -s`)
 # env: PHONE, TK_AGENT
 # exits: 0 ok · 1 failed
-# tk-session-cpu.sh -- rank a graphical session's user units by cumulative CPU.
+# ph-session-cpu.sh -- rank a graphical session's user units by cumulative CPU.
 # Run ON THE DEVICE as root:
 #
-#   TK_AGENT=<you> tools/tk-device.sh --need-booted bash -c \
-#     'source tools/tk-lib.sh
-#      scp "${TK_SSH_OPTS[@]}" tools/tk-session-cpu.sh "$PHONE":/tmp/ >/dev/null
-#      ssh "${TK_SSH_OPTS[@]}" "$PHONE" "sh /tmp/tk-session-cpu.sh"'
+#   TK_AGENT=<you> tools/ph-device.sh --need-booted bash -c \
+#     'source tools/ph-lib.sh
+#      scp "${TK_SSH_OPTS[@]}" tools/ph-session-cpu.sh "$PHONE":/tmp/ >/dev/null
+#      ssh "${TK_SSH_OPTS[@]}" "$PHONE" "sh /tmp/ph-session-cpu.sh"'
 #
 # WHY THIS EXISTS
 #   "The session is slow" needs a culprit, and on this device the candidates
@@ -28,7 +28,7 @@
 # the second read showed 3 ms of growth in 20 s.
 #
 # WHICH SESSION -- resolved at run time, never hardcoded, and deliberately the
-# same rule tools/tk-applaunch-bench.sh uses: prefer the first seated
+# same rule tools/ph-applaunch-bench.sh uses: prefer the first seated
 # Class=user session, fall back to a seated Class=greeter one. A bare ssh login
 # is Class=user with NO seat and must not be picked. Numbers from a greeter
 # session and a user session are not comparable and the header says which.

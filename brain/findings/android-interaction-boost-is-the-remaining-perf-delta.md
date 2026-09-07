@@ -70,7 +70,7 @@ forbids them during interaction); skin-temp stepped throttling vs our junction
 **How it was established** — taimen factory vendor.raw read with debugfs (no
 root): /etc/powerhint.json is the entire hint table, /etc/init/hw/init.taimen.rc
 the boot sysfs writes, the vendor power script under /bin the bus-DCVS setup. Device side:
-tk-gesture-bench.py grid-fling 4 / latency, three runs per config on the same
+ph-gesture-bench.py grid-fling 4 / latency, three runs per config on the same
 UI state (MobileSettings open -- the latency scene's centre-screen tap LAUNCHES
 an app and changes the state for the next run; relaunch it before comparing).
 Overturned by: a jank distribution that does not shrink under floors+dma on a

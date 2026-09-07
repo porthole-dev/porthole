@@ -4,7 +4,7 @@
 # needs: - (host only, no device)
 # env: -
 # exits: 0 ok · 1 failed
-# tk-tgstream.sh -- capture from the CSID's own test generator.
+# ph-tgstream.sh -- capture from the CSID's own test generator.
 #
 # The point is that NOTHING upstream of the CSID is involved: the CSIPHY link is
 # disabled, so the sensor and the PHY are entirely out of the picture. That

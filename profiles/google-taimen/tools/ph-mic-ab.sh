@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: PHONE
 # exits: 0 ok · non-zero on failure
-# tk-mic-ab.sh [seconds] -- runs ON THE PHONE.
+# ph-mic-ab.sh [seconds] -- runs ON THE PHONE.
 #
 # Records the SAME mic twice, in the two setups that behave differently, and
 # snapshots the codec registers during each:
@@ -19,7 +19,7 @@
 set -e
 
 # shellcheck source=../../../lib/porthole.sh
-. "$(dirname "$0")/../../../tools/tk-lib.sh"
+. "$(dirname "$0")/../../../tools/ph-lib.sh"
 DUR=${1:-25}
 REG=/sys/kernel/debug/regmap/217:250:1:0
 

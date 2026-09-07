@@ -14,7 +14,7 @@ answer.  A 48 kHz word clock cannot read all-low over hundreds of samples.
 Section 5 rule 0: TLMM is APPS-owned and pinctrl-msm reads exactly these
 registers, so this is inside the rules.  Do not point it at another block.
 
-    tk-pins.py 58 59 61 [-n 400]
+    ph-pins.py 58 59 61 [-n 400]
 """
 import mmap
 import os

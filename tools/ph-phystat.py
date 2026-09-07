@@ -6,7 +6,7 @@
 # exits: 0 ok · non-zero on failure
 """Read (and optionally poke) the SoC CSIPHY common block live.
 
-  tk-phystat.py [phybase] [ctrl6val]
+  ph-phystat.py [phybase] [ctrl6val]
 """
 import mmap, os, struct, sys
 

@@ -313,5 +313,34 @@ def test_no_suite_hand_rolls_its_own_test_loop():
         "`_runner.run(globals())` instead:\n  " + "\n  ".join(bad))
 
 
+def test_no_file_names_a_tool_that_no_longer_exists():
+    """The rename is only finished when nothing points at the old names.
+
+    Deliberately NOT a ban on the string `tk-`: `tk_*` shell helpers are a
+    frozen surface (see test_the_tk_helper_surface_is_frozen, which forbids
+    the opposite thing) and brain notes quote historical sessions verbatim.
+    What is banned is naming a FILE that is not there -- a doc whose command
+    cannot be copy-pasted, or a lib that builds an argv from a path that does
+    not resolve.
+    """
+    # The OLD prefix only. A `ph-` name that does not resolve is a different
+    # thing and often a legitimate one -- a design doc naming a tool nobody has
+    # written yet, prose saying a tool was deleted, a /tmp path a script
+    # writes. All three are in this tree and none of them is a stale pointer.
+    named = re.compile(r"\b(tk-[a-z0-9-]+\.(?:sh|py))\b")
+    bad = []
+    for path in _tracked():
+        if path.suffix not in TEXT_SUFFIXES or not path.exists():
+            continue
+        if path.relative_to(ROOT).parts[0] == "brain":
+            continue            # notes quote the sessions they came from
+        for name in sorted(set(named.findall(path.read_text(errors="replace")))):
+            if not ((ROOT / "tools" / name).exists()
+                    or list(ROOT.glob("profiles/*/tools/" + name))):
+                bad.append("{}: {}".format(path.relative_to(ROOT), name))
+    assert not bad, (
+        "these name a tool file that does not exist:\n  " + "\n  ".join(bad))
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

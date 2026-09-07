@@ -7,8 +7,8 @@
 # One real s2idle cycle, driven from the host, with evidence that survives the
 # reset that a failed one ends in.
 #
-#   tk-suspend-cycle.sh [alarm_sec] [prep_file] [post_file]
-#   PHONE=user@host tk-suspend-cycle.sh 20
+#   ph-suspend-cycle.sh [alarm_sec] [prep_file] [post_file]
+#   PHONE=user@host ph-suspend-cycle.sh 20
 #
 # Three things this encodes, each of which cost real time on 2026-08-02:
 #
@@ -35,14 +35,14 @@
 # too, not a harness failure.
 set -u
 # TK_SSH_OPTS (StrictHostKeyChecking=no + a /dev/null known-hosts file) is
-# mandatory, not laziness -- see tk-lib.sh's header: the phone's host key
+# mandatory, not laziness -- see ph-lib.sh's header: the phone's host key
 # changes on essentially every boot. This script used bare ssh/scp against a
 # hardcoded address until 2026-08-10, and the first run over the phone's WiFi
 # address died with "Host key verification failed": every scp silently failed,
 # try.sh was never uploaded, and the suspend never happened -- while the host
 # side still printed ">> suspending". A harness that cannot reach the phone
 # must not look like a device result.
-. "$(dirname "$0")/tk-lib.sh"
+. "$(dirname "$0")/ph-lib.sh"
 H=${TK_HOST:-$PHONE}
 A=${1:-20}; PREP=${2:-}; POST=${3:-}
 LOG=/var/log/tk-suspend-try.log
@@ -65,7 +65,7 @@ SUSPEND_CMD=${TK_SUSPEND_CMD:-"echo freeze > /sys/power/state"}
 log() { echo "$*" >> $LOG; sync; }
 log "=== TRY $(date +%FT%T) alarm=+${ALARM}s btime=$(awk '/btime/{print $2}' /proc/stat) uptime=$(cut -d. -f1 /proc/uptime)s ==="
 log "boot_id_before=$(cat /proc/sys/kernel/random/boot_id) cmd=[$SUSPEND_CMD]"
-[ -f /tmp/tk-prep.sh ] && { log "--- prep ---"; . /tmp/tk-prep.sh >> $LOG 2>&1; sync; log "--- prep done ---"; }
+[ -f /tmp/ph-prep.sh ] && { log "--- prep ---"; . /tmp/ph-prep.sh >> $LOG 2>&1; sync; log "--- prep done ---"; }
 log "success_before=$(cat /sys/power/suspend_stats/success) fail_before=$(cat /sys/power/suspend_stats/fail)"
 echo "+$ALARM" > /sys/class/rtc/rtc0/wakealarm
 log "SUSPEND_ENTER $(date +%s)"
@@ -75,21 +75,21 @@ log "boot_id_after=$(cat /proc/sys/kernel/random/boot_id)"
 log "SUSPEND_RETURN $(date +%s) rc=$RC success=$(cat /sys/power/suspend_stats/success) fail=$(cat /sys/power/suspend_stats/fail) wakeirq=$(cat /sys/power/pm_wakeup_irq 2>/dev/null)"
 log "last_failed_dev=$(cat /sys/power/suspend_stats/last_failed_dev 2>/dev/null)"
 log "udc=$(cat /sys/class/udc/a800000.usb/state) speed=$(cat /sys/class/udc/a800000.usb/current_speed)"
-[ -f /tmp/tk-post.sh ] && { log "--- post ---"; . /tmp/tk-post.sh >> $LOG 2>&1; sync; log "--- post done ---"; }
+[ -f /tmp/ph-post.sh ] && { log "--- post ---"; . /tmp/ph-post.sh >> $LOG 2>&1; sync; log "--- post done ---"; }
 log "=== TRY DONE ==="
 DEVEOF
 
-S "sudo rm -f /tmp/tk-prep.sh /tmp/tk-post.sh" >/dev/null
-[ -n "$PREP" ] && scp -q "${TK_SSH_OPTS[@]}" "$PREP" "$H:/tmp/tk-prep.sh"
-[ -n "$POST" ] && scp -q "${TK_SSH_OPTS[@]}" "$POST" "$H:/tmp/tk-post.sh"
+S "sudo rm -f /tmp/ph-prep.sh /tmp/ph-post.sh" >/dev/null
+[ -n "$PREP" ] && scp -q "${TK_SSH_OPTS[@]}" "$PREP" "$H:/tmp/ph-prep.sh"
+[ -n "$POST" ] && scp -q "${TK_SSH_OPTS[@]}" "$POST" "$H:/tmp/ph-post.sh"
 scp -q "${TK_SSH_OPTS[@]}" "$DEV" "$H:/tmp/try.sh"
-S "sudo cp /tmp/try.sh /usr/local/bin/tk-suspend-try.sh; sudo chmod +x /usr/local/bin/tk-suspend-try.sh; sudo truncate -s0 $LOG; sudo sync"
+S "sudo cp /tmp/try.sh /usr/local/bin/ph-suspend-try.sh; sudo chmod +x /usr/local/bin/ph-suspend-try.sh; sudo truncate -s0 $LOG; sudo sync"
 
 echo ">> suspending (alarm=+${A}s, prep=${PREP:-none})"
 # The trailing sleep matters: without it ssh closes the channel before sudo has
 # even exec'd, and the run silently never happens.
 timeout 20 ssh -o ConnectTimeout=6 "${TK_SSH_OPTS[@]}" "$H" \
-	"sudo TK_ALARM=$A TK_SUSPEND_CMD=\"${TK_SUSPEND_CMD:-}\" setsid /usr/local/bin/tk-suspend-try.sh </dev/null >/dev/null 2>&1 & sleep 4" >/dev/null 2>&1
+	"sudo TK_ALARM=$A TK_SUSPEND_CMD=\"${TK_SUSPEND_CMD:-}\" setsid /usr/local/bin/ph-suspend-try.sh </dev/null >/dev/null 2>&1 & sleep 4" >/dev/null 2>&1
 
 for _ in $(seq 1 60); do
 	[ "$(S "grep -q 'TRY DONE' $LOG && echo READY" 12)" = READY ] && break

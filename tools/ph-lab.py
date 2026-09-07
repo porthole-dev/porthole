@@ -12,13 +12,13 @@ codec registers *during* the stream, pull everything back, and apply the
 docs/HANDOFF-audio.md section 4 acceptance rule.  A sweep of a dozen recipes
 runs unattended in a few minutes.
 
-  tk-lab.py snap  TAG                 state snapshot (regs + dapm + mixer + irq)
-  tk-lab.py diff  TAG_A TAG_B         symbolic register diff
-  tk-lab.py show  REG...              symbolic read (name or 0xADDR), live
-  tk-lab.py poke  REG VAL             live register write (needs write-debugfs)
-  tk-lab.py cap   NAME [-d SEC] [-s 'Ctl=Val']...
-  tk-lab.py sweep NAME [-d SEC]       run a named recipe group from RECIPES
-  tk-lab.py verdict FILE.wav          re-analyse a pulled capture
+  ph-lab.py snap  TAG                 state snapshot (regs + dapm + mixer + irq)
+  ph-lab.py diff  TAG_A TAG_B         symbolic register diff
+  ph-lab.py show  REG...              symbolic read (name or 0xADDR), live
+  ph-lab.py poke  REG VAL             live register write (needs write-debugfs)
+  ph-lab.py cap   NAME [-d SEC] [-s 'Ctl=Val']...
+  ph-lab.py sweep NAME [-d SEC]       run a named recipe group from RECIPES
+  ph-lab.py verdict FILE.wav          re-analyse a pulled capture
 
 Rules this encodes, all learned expensively (see docs/HANDOFF-audio.md):
   - the mixer is set ONCE before the stream and never touched during it
@@ -134,7 +134,7 @@ def pull_regs(which=RM_CODEC, full=False, pages=None):
     # name or a path that is a directory rather than .../registers comes back
     # as an empty string -- which parse_dump() turns into {} and every caller
     # reads as "nothing is set". A blank dump is a broken instrument, never a
-    # measurement. This has cost a session already; so has tk-fps.py reading a
+    # measurement. This has cost a session already; so has ph-fps.py reading a
     # nonexistent encoder and printing 0 fps all evening.
     if not parse_dump(txt):
         sys.exit(f"tk-lab: regmap '{which}' returned no registers -- check that "
@@ -308,7 +308,7 @@ def cmd_hunt(trials, dur, sets, reboot_every=0):
     for n in range(trials):
         if reboot_every and n and n % reboot_every == 0:
             print(f"  [{n:3d}] rebooting")
-            subprocess.run([os.path.join(HERE, "tk-to-fastboot.sh")],
+            subprocess.run([os.path.join(HERE, "ph-to-fastboot.sh")],
                            capture_output=True)
             subprocess.run([fastboot, "boot", "/tmp/boot-audio-fix.img"],
                            capture_output=True)
@@ -819,7 +819,7 @@ def cmd_sweep(group, dur):
 
 def main():
     os.makedirs(LAB, exist_ok=True)
-    p = argparse.ArgumentParser(prog="tk-lab.py")
+    p = argparse.ArgumentParser(prog="ph-lab.py")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("snap"); s.add_argument("tag"); s.add_argument("--no-regs", action="store_true")
     s = sub.add_parser("diff"); s.add_argument("a"); s.add_argument("b"); s.add_argument("-p", "--prefix")

@@ -51,7 +51,7 @@ DEFAULT_TIMEOUT = 4 * 60 * 60
 
 # Where an aport can live. Two levels because device aports are nested
 # (device/testing/<name>) and everything else is not (temp/<name>,
-# main/<name>). Same lookup tk-pkgcheck.sh does, for the same reason: which
+# main/<name>). Same lookup ph-pkgcheck.sh does, for the same reason: which
 # tree a package lives in is not something the caller should have to know.
 _APORT_GLOBS = ("*/{}/APKBUILD", "*/*/{}/APKBUILD")
 

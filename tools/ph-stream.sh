@@ -23,22 +23,22 @@
 # run. The phone's /tmp is a tmpfs, so anything pushed there is gone after a
 # reboot -- which is precisely when a reconnect happens.
 #
-# Usage: tk-stream.sh OUTFILE REMOTE_COMMAND...
-#   eg:  tk-stream.sh /tmp/dmesg.log dmesg -w
-#        tk-stream.sh /tmp/syslog.log logread -f
-#        TK_PUSH=tools/tk-display-watch.py \
-#          tk-stream.sh /tmp/display.log sudo python3 -u /tmp/tk-display-watch.py
+# Usage: ph-stream.sh OUTFILE REMOTE_COMMAND...
+#   eg:  ph-stream.sh /tmp/dmesg.log dmesg -w
+#        ph-stream.sh /tmp/syslog.log logread -f
+#        TK_PUSH=tools/ph-display-watch.py \
+#          ph-stream.sh /tmp/display.log sudo python3 -u /tmp/ph-display-watch.py
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 HOST=${PHONE#*@}
 
-OUT=${1:?usage: tk-stream.sh OUTFILE REMOTE_COMMAND...}
+OUT=${1:?usage: ph-stream.sh OUTFILE REMOTE_COMMAND...}
 shift
-[ $# -ge 1 ] || { echo "usage: tk-stream.sh OUTFILE REMOTE_COMMAND..."; exit 1; }
+[ $# -ge 1 ] || { echo "usage: ph-stream.sh OUTFILE REMOTE_COMMAND..."; exit 1; }
 
 SSH_OPTS=(-o ConnectTimeout=5
           -o StrictHostKeyChecking=no

@@ -5,7 +5,7 @@ scope: device:google-taimen
 subsystem: audio
 severity: trap
 confidence: proven
-evidence: taimen docs/HANDOFF-audio.md §2.0 ("modprobe -r/modprobe is also not equivalent to a reboot for this card: capture then fails at hw_params until you reboot"), §12.4, docs/PROMPT-resume-audio.md, and tools/tk-gap.py, whose sweep reboots per trial for exactly this reason
+evidence: taimen docs/HANDOFF-audio.md §2.0 ("modprobe -r/modprobe is also not equivalent to a reboot for this card: capture then fails at hw_params until you reboot"), §12.4, docs/PROMPT-resume-audio.md, and tools/ph-gap.py, whose sweep reboots per trial for exactly this reason
 first-learned: 2026-08-20
 ---
 
@@ -23,10 +23,10 @@ to the patch under test and to nothing else.
 
 **What to do** — reboot between trials. Sweep module parameters through
 `/etc/modprobe.d/` rather than `modprobe -r`/`modprobe` arguments, which is
-exactly what `tools/tk-gap.py sweep` does and why it reboots per value:
+exactly what `tools/ph-gap.py sweep` does and why it reboots per value:
 
 ```sh
-tools/tk-gap.py sweep snd_soc_wcd934x slim_watermark 0 1 2 3
+tools/ph-gap.py sweep snd_soc_wcd934x slim_watermark 0 1 2 3
 ```
 
 A related instance of the same property: **a failed stream leaves the PCM wedged
@@ -43,7 +43,7 @@ is only the `insmod` at the end that you cannot trust here. So the loop is
 
 ```sh
 porthole build mod sound/soc/codecs/foo.ko foo --yes    # installs; the load is moot
-tools/tk-reboot.sh                                       # this is what makes it live
+tools/ph-reboot.sh                                       # this is what makes it live
 ```
 
 `porthole build fast` would also work and costs ~6 minutes instead of ~40

@@ -34,7 +34,7 @@ pixels are missing, and nothing in the DOM knows that.
 swipe before launching. The PIN is disabled on this device, so the swipe is
 the whole unlock and is harmless when nothing was locked:
 
-    sudo -n python3 /tmp/tk-touch.py swipe 720 2600 720 1000 350
+    sudo -n python3 /tmp/ph-touch.py swipe 720 2600 720 1000 350
 
 Every "proper" API lies about this -- logind `LockedHint`,
 `org.gnome.ScreenSaver.GetActive` and `lswt` all say unlocked while the

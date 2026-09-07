@@ -76,8 +76,8 @@ running.
 - **"The window is dead on entry to hw_init."** `RBBM_STATUS=00000001` at the
   entry crumb, including on the run that died.
 
-**How it was established** — `tools/tk-wake-cycle.py` for the wakes,
-`tools/tk-capture.sh` for netconsole (verified end to end before every run), and
+**How it was established** — `tools/ph-wake-cycle.py` for the wakes,
+`tools/ph-capture.sh` for netconsole (verified end to end before every run), and
 two `pr_info` crumbs reading `RBBM_STATUS` inside `a5xx_hw_init()`, built with
 `porthole build mod drivers/gpu/drm/msm/msm.ko msm` against
 `PORTHOLE_KERNEL_TREE=.../worktrees/tk-voice`. The control is the pair count:

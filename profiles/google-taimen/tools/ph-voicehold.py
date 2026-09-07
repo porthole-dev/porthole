@@ -4,7 +4,7 @@
 # needs: BOOTED (runs ON the device)
 # env: -
 # exits: 0 ok · 1 could not open a stream
-# lib-exempt: runs on the device, not the host -- there is no tk-lib.sh there.
+# lib-exempt: runs on the device, not the host -- there is no ph-lib.sh there.
 """Hold the voice PCM open for the duration of a call.
 
 This is the counterpart of what Android's audio HAL does, and it is needed for

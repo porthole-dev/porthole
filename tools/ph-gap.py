@@ -11,8 +11,8 @@ its own. What characterises this defect is the *shape* of the loss: N samples
 delivered, then M slots empty, at a fixed period. So report the period, the
 duty, and the real sample rate -- those are what a fix has to move.
 
-    tk-gap.py sweep snd_soc_wcd934x slim_watermark 0 1 2 3
-    tk-gap.py once [tag]
+    ph-gap.py sweep snd_soc_wcd934x slim_watermark 0 1 2 3
+    ph-gap.py once [tag]
 
 Each trial reboots the phone: a module reload re-registers the card but
 capture then fails at hw_params until a reboot (2.5a).

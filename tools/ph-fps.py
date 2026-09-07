@@ -26,7 +26,7 @@ Columns:
   phoc%   compositor CPU. A compositor pegged at 100% is CPU-bound, not
           GPU-bound, and no amount of devfreq tuning will help it.
 
-  tk-fps.py [SECONDS] [-q]     default 10
+  ph-fps.py [SECONDS] [-q]     default 10
 """
 import glob
 import os

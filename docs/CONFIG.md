@@ -95,7 +95,7 @@ command line in older documentation keeps working:
 | `TK_AGENT` | beats `PORTHOLE_AGENT` |
 | `TK_FORCE` | unchanged |
 | `TK_DEVICE_LOCK`/`_TIMEOUT`/`_MAX`/`_STATE` | unchanged |
-| `tools/tk-lib.sh` | still sourceable — a symlink to `lib/porthole.sh` |
+| `tools/ph-lib.sh` | still sourceable — a symlink to `lib/porthole.sh` |
 
 Every row is asserted in `tests/test_config.py` and `tests/test_shell_lib.sh`,
 so a future refactor cannot quietly break one.

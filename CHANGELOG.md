@@ -337,7 +337,7 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   and its two `ssh`s omitted `TK_SSH_OPTS`, which is where
   `-i $PORTHOLE_SSH_KEY` lives — so in the workspace, where that key is the
   only one the container has, every push failed with an error that named
-  nothing. Same one-line defect in `tk-mic-check.sh`. A contract test covers
+  nothing. Same one-line defect in `ph-mic-check.sh`. A contract test covers
   the build path now.
 - The `boot` rung seeds its own base image from the device's active boot
   partition, cached under `.run` keyed on the device's kernel release. The old
@@ -430,4 +430,4 @@ Initial extraction from the taimen (Pixel 2 XL, MSM8998) port.
   tearing the control master down first.
 - Full backward compatibility with the taimen invocations: `PHONE`, `HOST`,
   `TK_HOST`, `FASTBOOT`, `TK_POLL`, `TK_AGENT`, `TK_DEVICE_*`, and a sourceable
-  `tools/tk-lib.sh`.
+  `tools/ph-lib.sh`.

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: on-device; tk-webvq.py beside it; browser launched with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222
+# needs: on-device; ph-webvq.py beside it; browser launched with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222
 # env: TK_INSPECTOR
 # exits: 0 ok · 1 error
 """Evaluate JavaScript in the current page through WebKit's remote inspector.
 
 A tap at a coordinate is not an instrument: it lands on a consent wall, a
 paused player or the app grid and nothing in the numbers says so. This asks
-the page. `tk-webeval.py "document.title"`; with -j the result is printed as
+the page. `ph-webeval.py "document.title"`; with -j the result is printed as
 JSON so a script can branch on it.
-  tk-webeval.py [-j] EXPRESSION
+  ph-webeval.py [-j] EXPRESSION
 """
 import importlib.util, json, os, re, sys, urllib.request
-spec = importlib.util.spec_from_file_location("webvq", os.path.join(os.path.dirname(os.path.abspath(__file__)), "tk-webvq.py"))
+spec = importlib.util.spec_from_file_location("webvq", os.path.join(os.path.dirname(os.path.abspath(__file__)), "ph-webvq.py"))
 vq = importlib.util.module_from_spec(spec); spec.loader.exec_module(vq)
 args = sys.argv[1:]; as_json = False
 if args and args[0] == "-j": as_json = True; args = args[1:]

@@ -14,7 +14,7 @@ Four states, and treating them as two costs hours:
 | state | how it looks | what to do |
 |---|---|---|
 | BOOTED | ssh answers | — |
-| FROZEN | ping answers, ssh does not | rescue shell; `tk-recover.sh` |
+| FROZEN | ping answers, ssh does not | rescue shell; `ph-recover.sh` |
 | FASTBOOT | `fastboot devices` prints a line | `set_active` + `fastboot reboot` |
 | ABSENT | nothing on USB at all | **needs a human**: long-press power |
 

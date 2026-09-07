@@ -4,7 +4,7 @@
 # needs: on-device (run as root; scp it over, or pipe with `ssh ... sh -s`)
 # env: TK_SCOPE_GLOB, TK_INTERVAL
 # exits: 0 ok · non-zero on failure
-# tk-mempressure.sh -- one line per second of the memory-ceiling vital signs.
+# ph-mempressure.sh -- one line per second of the memory-ceiling vital signs.
 #
 # WHY THIS EXISTS
 #   brain/findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault closed the
@@ -27,15 +27,15 @@
 #     gpu/tmax   the heat side: an A540 pinned at max with hot silicon is the
 #                signature of compositing a working set that does not fit.
 #
-# NOT /sys/kernel/debug/dri/0/gpu -- that one wedges the GPU (tk-sysstate.sh
+# NOT /sys/kernel/debug/dri/0/gpu -- that one wedges the GPU (ph-sysstate.sh
 # carries the same warning). `gem` is a different file and is safe to read.
 #
-# Usage, on the device as root:   sh tk-mempressure.sh
-#        one-shot single sample:  sh tk-mempressure.sh 1
+# Usage, on the device as root:   sh ph-mempressure.sh
+#        one-shot single sample:  sh ph-mempressure.sh 1
 # From the host, both phases into one file for a before/after diff:
-#   TK_AGENT=<you> tools/tk-device.sh --need-booted bash -c '. tools/tk-lib.sh
-#     scp "${TK_SSH_OPTS[@]}" tools/tk-mempressure.sh "$PHONE":/tmp/ >/dev/null
-#     ssh "${TK_SSH_OPTS[@]}" "$PHONE" "sudo sh /tmp/tk-mempressure.sh"'
+#   TK_AGENT=<you> tools/ph-device.sh --need-booted bash -c '. tools/ph-lib.sh
+#     scp "${TK_SSH_OPTS[@]}" tools/ph-mempressure.sh "$PHONE":/tmp/ >/dev/null
+#     ssh "${TK_SSH_OPTS[@]}" "$PHONE" "sudo sh /tmp/ph-mempressure.sh"'
 set -u
 
 # The scope name carries the launching PID, so it changes every time the
