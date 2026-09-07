@@ -17,6 +17,8 @@ to add them now -- a check that holds the day it lands catches the first
 regression, while the same check added afterwards is an argument instead.
 """
 import ast
+import contextlib
+import io
 import os
 import pathlib
 import re
@@ -243,6 +245,52 @@ def test_a_child_process_environment_comes_from_child_env():
         "porthole_cli.child_env(), or add the file to "
         "ENV_COPIES_THAT_SPAWN_NOTHING with the reason it spawns nothing:\n  "
         + "\n  ".join(bad))
+
+
+def test_the_runner_reports_a_skip_as_a_skip():
+    """A suite whose subject is absent on this host must say so, not pass.
+    Two suites hand-rolled their own loop for exactly this and so could not
+    use the parallel runner; the runner is where the third outcome belongs."""
+    import types
+    sys.path.insert(0, str(ROOT / "tests"))
+    import _runner
+
+    ns = types.ModuleType("__main__")
+
+    class Skip(Exception):
+        pass
+
+    def test_a():
+        pass
+
+    def test_b():
+        raise Skip("no pmaports checkout on this host")
+
+    ns.Skip, ns.test_a, ns.test_b = Skip, test_a, test_b
+    saved = sys.modules["__main__"]
+    saved_jobs = os.environ.get("PORTHOLE_TEST_JOBS")
+    sys.modules["__main__"] = ns
+    # Serial, so the assertions read the buffer this process redirected --
+    # a forked worker writes to the real stdout, not to a StringIO the
+    # parent swapped in after the fork.
+    os.environ["PORTHOLE_TEST_JOBS"] = "1"
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = _runner.run({"test_a": test_a, "test_b": test_b})
+        out = buf.getvalue()
+    finally:
+        sys.modules["__main__"] = saved
+        if saved_jobs is None:
+            del os.environ["PORTHOLE_TEST_JOBS"]
+        else:
+            os.environ["PORTHOLE_TEST_JOBS"] = saved_jobs
+    assert rc == 0, f"a skip is not a failure: rc={rc}\n{out}"
+    assert "1/2 passed" in out, out
+    assert "1 skipped" in out, out
+    assert "SKIP" not in out, (
+        "uppercase SKIP means 'this whole file skipped' and `make console` "
+        "greps for it -- a per-test skip must not wear that word:\n" + out)
 
 
 if __name__ == "__main__":
