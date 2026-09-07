@@ -734,9 +734,19 @@ def cmd_init(args, ctx) -> int:
     workdir = (cfg_now.get(f"PORTHOLE_WORKDIR_{device.upper().replace('-', '_')}")
                or cfg_now.get("PORTHOLE_WORKDIR") or "")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        target.write_text(HEADER)
+    # Deciding is separated from writing, so the headless path can preview the
+    # way every other verb that writes outside its own profile already does --
+    # `porthole pkg fork` prints what it would do and acts on --yes. Everything
+    # above ran either way: a preview that does not resolve is not a preview of
+    # anything.
+    #
+    # The interactive path needs no --yes. Six answered questions ARE the
+    # confirmation, and asking for a flag after them would be hostile.
+    write = interactive or args.yes
+    if write:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_text(HEADER)
     # set_key rewrites one line and leaves the rest of the file -- comments,
     # hand-added keys, another device's overrides -- exactly where they were.
     verdicts = {}
@@ -745,17 +755,18 @@ def cmd_init(args, ctx) -> int:
             continue
         verdicts[key] = ("kept" if before.get(key) == value
                          else "changed" if key in before else "added")
-        if verdicts[key] != "kept":
+        if write and verdicts[key] != "kept":
             use.set_key(target, key, value)
 
-    # Everything below reads the host as it NOW is, not as it was when this
-    # process started -- see Ctx.reload.
-    ctx.reload()
+    if write:
+        # Everything below reads the host as it NOW is, not as it was when this
+        # process started -- see Ctx.reload.
+        ctx.reload()
 
     payload = {
         "config": str(target), "device": device, "user": user,
         "host": host, "port": port, "agent": agent, "tier": tier,
-        "workdir": workdir,
+        "workdir": workdir, "would_write": not write,
         "keys": {k: {"value": resolved[k], "verdict": v}
                  for k, v in verdicts.items()},
     }
@@ -837,6 +848,11 @@ def cmd_init(args, ctx) -> int:
             o.warn(f"could not work out the next step: {exc}")
         o.hint("porthole doctor", "check host and device")
 
+        if not write:
+            o.blank()
+            o.hint("porthole init {} --yes".format(device),
+                   "write these values")
+
     return ctx.emit(payload, render)
 
 
@@ -859,6 +875,8 @@ SPEC = {
     # The positional IS the device. `device_pos` used to exist only because the
     # injected --device selector collided with it; both go away together.
     "device_flag": False,
+    # It writes ~/.config/porthole/config.env, which is outside any profile.
+    "escapes_scope": True,
     "args": [
         (["codename"], {"nargs": "?", "metavar": "CODENAME",
                         "help": "device profile to use"}),
@@ -875,6 +893,9 @@ SPEC = {
         (["--pmaports"], {"metavar": "PATH",
                           "help": "adopt this pmaports checkout"}),
         (["--force"], {"action": "store_true", "help": "overwrite an existing config"}),
+        (["--yes"], {"action": "store_true",
+                     "help": "headless: actually write the config "
+                             "(interactive runs never need it)"}),
         (["--non-interactive"], {"action": "store_true",
                                  "help": "never prompt, even at a terminal"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
