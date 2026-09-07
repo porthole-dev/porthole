@@ -21,6 +21,8 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "porthole"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 import porthole_cli  # noqa: E402
@@ -368,25 +370,7 @@ def test_completion_covers_every_verb():
 
 
 def main():
-    tests = [(name, fn) for name, fn in sorted(globals().items())
-             if name.startswith("test_") and callable(fn)]
-    failed = skipped = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"  ok   {name}")
-        except Skip as exc:
-            skipped += 1
-            print(f"  skip {name}: {exc}")
-        except AssertionError as exc:
-            failed += 1
-            print(f"  FAIL {name}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"  ERR  {name}: {type(exc).__name__}: {exc}")
-    tail = f", {skipped} skipped" if skipped else ""
-    print(f"\n{len(tests) - failed - skipped}/{len(tests)} passed{tail}")
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 if __name__ == "__main__":
