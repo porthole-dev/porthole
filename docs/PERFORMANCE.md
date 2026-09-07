@@ -71,7 +71,10 @@ unrouteable device address using a three-tier budget:
   tool versions and git metadata; 0.09–0.14 s is typical. A 4 s budget is ~30×
   the real cost, leaving headroom for scheduling jitter on a loaded runner, while
   sitting well below ~5.5 s a single ssh connect timeout costs. This budget
-  exists to catch a regression if a dial ever leaked into the control itself.
+  catches a dial of the magnitude the test was written for (~5.5 s, one
+  ConnectTimeout=5 ssh). A partial dial under ~3.9 s would pass all tiers because
+  the control baseline shifts with it, leaving the deltas flat and the relative
+  check blind.
 - **Host-only verbs (--help, devices, doctor --no-device): 3 s relative to the
   control, AND 8 s absolute.** The relative check catches regressions even on a
   loaded runner because both verbs and control share scheduling jitter equally.
