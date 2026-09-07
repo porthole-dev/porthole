@@ -32,7 +32,7 @@ round trips after warming):
 Reproduce it yourself:
 
 ```sh
-PORTHOLE_NO_MUX=1 bash -c '. tools/tk-lib.sh; ssh "${TK_SSH_OPTS[@]}" "$PHONE" true
+PORTHOLE_NO_MUX=1 bash -c '. tools/ph-lib.sh; ssh "${TK_SSH_OPTS[@]}" "$PHONE" true
   s=$(date +%s%3N); for i in 1 2 3 4 5; do ssh "${TK_SSH_OPTS[@]}" "$PHONE" true; done
   e=$(date +%s%3N); echo "$(( (e-s)/5 ))ms each"'
 ```
@@ -117,7 +117,7 @@ PORTHOLE_TIMING=1 <any tool> # per-probe timings to stderr
 
 ## What is deliberately not optimised
 
-**The mutex double-probe.** `tk-device.sh` checks device state before queueing
+**The mutex double-probe.** `ph-device.sh` checks device state before queueing
 and again after taking the lock, because the previous holder may have moved the
 device while you waited. That second probe is correctness, not waste.
 

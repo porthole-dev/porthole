@@ -147,6 +147,27 @@ class Tool:
 NOT_TOOLS = (".service", ".timer", ".rules", ".conf", ".md", ".txt")
 
 
+def renamed(want: str, names) -> str:
+    """The current name of a tool somebody asked for by its old one, or "".
+
+    A prefix swap, not a table: the tk- to ph- rename was mechanical, so its
+    inverse is too, and a table would be one more thing to keep current. See
+    docs/superpowers/plans/2026-09-07-tk-to-ph-rename.md.
+
+    Deliberately not a compatibility symlink. `collect()` skips symlinks, so a
+    `tk-fps.py -> ph-fps.py` shim would sit in the tree invisible to the
+    catalogue, to docs/TOOLS.md and to `porthole tools audit` -- a second copy
+    of everything, that nothing checks.
+
+    Returns "" when the swapped name does not exist either, because an answer
+    nobody can act on is worse than admitting the name is unknown.
+    """
+    if not want.startswith("tk-"):
+        return ""
+    moved = "ph-" + want[3:]
+    return moved if moved in names else ""
+
+
 def collect(root: pathlib.Path, device: str = "") -> list[Tool]:
     def usable(p):
         return (p.is_file() and not p.is_symlink()
@@ -171,7 +192,7 @@ def cmd_tools(args, ctx) -> int:
 
     # A leading ACTION word is a mode; anything else is a tool name. The
     # collision set is three words now, and one of them is no longer free of
-    # collateral: tk-daily-audit.sh contains "audit", so
+    # collateral: ph-daily-audit.sh contains "audit", so
     # `porthole tools audit` no longer substring-matches it -- it stays
     # reachable by its full name or via `--grep audit`. That trade is
     # accepted.
@@ -238,6 +259,11 @@ def cmd_tools(args, ctx) -> int:
                  or t.path.stem == args.name]
         chosen = exact or [t for t in tools if args.name in t.name]
         if not chosen:
+            moved = renamed(os.path.basename(args.name),
+                            {t.name for t in tools})
+            if moved:
+                raise Bail(f"{args.name} is now {moved}", EX_FAIL,
+                           f"porthole tools {moved}")
             raise Bail(f"no tool matching {args.name!r}", EX_FAIL,
                        "`porthole tools` lists them all")
         if len(chosen) == 1:
@@ -296,7 +322,7 @@ def show(tool: Tool, ctx) -> int:
     ctx.out.kv("path", str(tool.path.relative_to(ctx.root)), width)
     ctx.out.blank()
     if tool.needs.upper() in ("BOOTED", "FASTBOOT"):
-        ctx.out.hint(f"TK_AGENT=$USER tools/tk-device.sh "
+        ctx.out.hint(f"TK_AGENT=$USER tools/ph-device.sh "
                      f"--need-{tool.needs.lower()} {tool.path.relative_to(ctx.root)}")
     else:
         ctx.out.hint(f"{tool.path.relative_to(ctx.root)}")
@@ -330,7 +356,7 @@ SPEC = {
         "porthole tools",
         "porthole tools --needs BOOTED",
         "porthole tools --grep suspend",
-        "porthole tools tk-suspend-cycle.sh",
+        "porthole tools ph-suspend-cycle.sh",
         "porthole tools lint",
         "porthole tools audit",
     ],

@@ -12,7 +12,7 @@ A confound is invisible in the result. The measurement succeeds, the number is
 real, and it is answering a question about a device you were not testing.
 
 So: snapshot the device before, refuse if it is already contaminated, run the
-thing, snapshot after, and diff. The pattern is lifted from `tools/tk-lab.py`,
+thing, snapshot after, and diff. The pattern is lifted from `tools/ph-lab.py`,
 whose snap/diff loop made audio experiments repeatable -- generalised here so it
 is not one subsystem's private discipline.
 
@@ -269,7 +269,7 @@ SPEC = {
     "run": cmd_experiment,
     "examples": [
         "porthole experiment probes",
-        "porthole experiment --tag mic-gain tools/tk-capture.sh 20",
-        "porthole experiment tools/tk-suspend-cycle.sh 5",
+        "porthole experiment --tag mic-gain tools/ph-capture.sh 20",
+        "porthole experiment tools/ph-suspend-cycle.sh 5",
     ],
 }

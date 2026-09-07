@@ -1,14 +1,14 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: runs ON THE DEVICE. /tmp/sess.sh, /tmp/tk-wkphase.sh, /tmp/tk-webeval.py.
-# env: TK_WKPHASE_OFFSETS (required), TK_VID_URL, TK_VID_LIMIT, TK_VID_QUALITY
+# needs: runs ON THE DEVICE. /tmp/sess.sh, /tmp/ph-wkphase.sh, /tmp/ph-webeval.py.
+# env: TK_WKPHASE_OFFSETS (required), PORTHOLE_VID_URL, PORTHOLE_VID_LIMIT, PORTHOLE_VID_QUALITY
 # exits: 0 measured · 1 the arm is void
 # vidrec.sh -- one steady-state YouTube playback arm, probed, with a control.
 #
 # Three things here are not decoration, and each of them cost an arm:
 #
-# 1. NO DRAG. tk-webarm.sh drags mid-arm; that scrolls the player out of the
+# 1. NO DRAG. ph-webarm.sh drags mid-arm; that scrolls the player out of the
 #    viewport, and MediaPlayerPrivateGStreamer::setVisibleInViewport() puts the
 #    whole pipeline into GST_STATE_PAUSED for a MUTED video. Every frame
 #    statistic after that describes a stopped decoder.
@@ -21,14 +21,14 @@
 #    reads as a stall that never happened. Sample it and print the series.
 set -u
 [ -f /tmp/wkoff.sh ] && . /tmp/wkoff.sh
-: "${TK_WKPHASE_OFFSETS:?run tools/tk-wkoffsets.sh on the host}"
+: "${TK_WKPHASE_OFFSETS:?run tools/ph-wkoffsets.sh on the host}"
 export TK_WKPHASE_OFFSETS
 . /tmp/sess.sh
-EV=/tmp/tk-webeval.py
-URL=${TK_VID_URL:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}
-LIMIT=${TK_VID_LIMIT:-2560x1440@60}
-QUAL=${TK_VID_QUALITY:-hd1440}
-WIN=${TK_VID_WINDOW:-30}
+EV=/tmp/ph-webeval.py
+URL=${PORTHOLE_VID_URL:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}
+LIMIT=${PORTHOLE_VID_LIMIT:-2560x1440@60}
+QUAL=${PORTHOLE_VID_QUALITY:-hd1440}
+WIN=${PORTHOLE_VID_WINDOW:-30}
 
 for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do
 	systemctl --user stop "$u" 2>/dev/null
@@ -38,14 +38,14 @@ N=$(pgrep -f WebKitWebProc""ess | wc -l)
 echo "webprocs before arming: $N"
 [ "$N" -eq 0 ] || { echo "REFUSE: a browser is still running, probes would not attach"; echo VIDRECDONE; exit 1; }
 
-sh /tmp/tk-wkphase.sh arm
+sh /tmp/ph-wkphase.sh arm
 rm -f /tmp/wl-vid.log
 setsid systemd-run --user --scope --quiet --slice=app.slice \
 	-u "app-gnome-org.gnome.Epiphany-$$.scope" \
 	env WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2 \
 	WEBKIT_LAYERS_TILE_SIZE=1440x1024 WEBKIT_GST_VIDEO_DECODING_LIMIT="$LIMIT" \
 	WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 WAYLAND_DEBUG=1 \
-	${TK_VID_ENV:-} epiphany "$URL" >/tmp/eph-vid.log 2>/tmp/wl-vid.log </dev/null &
+	${PORTHOLE_VID_ENV:-} epiphany "$URL" >/tmp/eph-vid.log 2>/tmp/wl-vid.log </dev/null &
 
 st=-1
 for _ in $(seq 1 40); do
@@ -79,19 +79,19 @@ advancing() {
 ADV=$(advancing)
 for _ in 1 2; do
 	[ "$ADV" = advancing ] && break
-	python3 /tmp/tk-ui.py unblank >/dev/null 2>&1
-	sudo -n python3 /tmp/tk-touch.py tap 720 600 >/dev/null 2>&1
+	python3 /tmp/ph-ui.py unblank >/dev/null 2>&1
+	sudo -n python3 /tmp/ph-touch.py tap 720 600 >/dev/null 2>&1
 	sleep 5
 	python3 $EV 'var v=document.querySelector("video"); v.muted=true; v.play(); "play"' >/dev/null 2>&1
 	sleep 4
 	ADV=$(advancing)
 done
 echo "[vid] $(python3 $EV 'var v=document.querySelector("video"),p=document.getElementById("movie_player");JSON.stringify({w:v.videoWidth,h:v.videoHeight,q:p&&p.getPlaybackQuality?p.getPlaybackQuality():"?"})' 2>/dev/null) $ADV"
-[ "$ADV" = advancing ] || { echo "[vid] VIDEO NOT PLAYING -- arm void"; sh /tmp/tk-wkphase.sh off; echo VIDRECDONE; exit 1; }
+[ "$ADV" = advancing ] || { echo "[vid] VIDEO NOT PLAYING -- arm void"; sh /tmp/ph-wkphase.sh off; echo VIDRECDONE; exit 1; }
 
 S0=$(wc -l < /tmp/wl-vid.log)
 rm -f /tmp/vid-win.out
-setsid sh -c "sh /tmp/tk-wkphase.sh measure $WIN > /tmp/vid-win.out 2>&1; echo VIDWINDOWDONE >> /tmp/vid-win.out" </dev/null >/dev/null 2>&1 &
+setsid sh -c "sh /tmp/ph-wkphase.sh measure $WIN > /tmp/vid-win.out 2>&1; echo VIDWINDOWDONE >> /tmp/vid-win.out" </dev/null >/dev/null 2>&1 &
 (sleep 2; python3 /tmp/threadcpu.py 10 > /tmp/tc-vid.txt 2>&1) &
 echo "=== frame series (5 s apart, steady playback, no gesture) ==="
 i=0
@@ -109,7 +109,7 @@ cat /tmp/vid-win.out 2>/dev/null
 
 echo "=== CONTROL: a seek, which must flush the pipeline ==="
 rm -f /tmp/vid-ctl.out
-setsid sh -c "sh /tmp/tk-wkphase.sh measure 12 > /tmp/vid-ctl.out 2>&1; echo CTLDONE >> /tmp/vid-ctl.out" </dev/null >/dev/null 2>&1 &
+setsid sh -c "sh /tmp/ph-wkphase.sh measure 12 > /tmp/vid-ctl.out 2>&1; echo CTLDONE >> /tmp/vid-ctl.out" </dev/null >/dev/null 2>&1 &
 sleep 2
 python3 $EV 'var v=document.querySelector("video"); v.currentTime=v.currentTime+45; "seek"' >/dev/null 2>&1
 sleep 4
@@ -139,7 +139,7 @@ print("client %s: commits=%d p50=%.1f p90=%.1f p99=%.1f max=%.1f jank>33ms=%d" %
 print("presented every N vsyncs:", dict(collections.Counter(pd).most_common(5)))
 PY
 grep . /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -t: -k2 -rn | head -1
-sh /tmp/tk-wkphase.sh off
+sh /tmp/ph-wkphase.sh off
 for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do
 	systemctl --user stop "$u" 2>/dev/null
 done

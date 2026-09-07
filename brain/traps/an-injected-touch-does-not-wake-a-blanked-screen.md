@@ -5,7 +5,7 @@ scope: generic
 subsystem: display
 severity: trap
 confidence: proven
-evidence: taimen 2026-09-05 -- with the panel blanked, `tk-gesture-bench.py drag 720 2400 720 900 500 3` moved `window.scrollY` 0 -> 0 and counted 0 frames in 10.2 s; the identical drag after `org.gnome.ScreenSaver.SetActive false` moved it 0 -> 1721. Writing `bl_power=0` as root lit the backlight and the same drag still moved 0 px
+evidence: taimen 2026-09-05 -- with the panel blanked, `ph-gesture-bench.py drag 720 2400 720 900 500 3` moved `window.scrollY` 0 -> 0 and counted 0 frames in 10.2 s; the identical drag after `org.gnome.ScreenSaver.SetActive false` moved it 0 -> 1721. Writing `bl_power=0` as root lit the backlight and the same drag still moved 0 px
 first-learned: 2026-09-05
 ---
 
@@ -45,8 +45,8 @@ user** -- from root the session bus answers `Call failed: Socket not connected`:
     busctl --user call org.gnome.ScreenSaver /org/gnome/ScreenSaver \
         org.gnome.ScreenSaver SetActive b false
 
-`tools/tk-ui.py unblank` is that call, dropping back to the session user with
-`sudo -u` when it is invoked as root, and `tk-gesture-bench.py` now runs it
+`tools/ph-ui.py unblank` is that call, dropping back to the session user with
+`sudo -u` when it is invoked as root, and `ph-gesture-bench.py` now runs it
 before every measurement -- so every arm in this tree that drives a gesture is
 covered without changing the arm. If you are driving the screen some other way,
 call it yourself before you believe a frame count.

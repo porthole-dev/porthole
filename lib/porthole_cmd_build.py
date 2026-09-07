@@ -99,7 +99,7 @@ TKMOD_REFUSED = {
 TKMOD_INSTALLED_NOT_LOADED = {
     3: ("installed, but not loaded this boot -- something still holds it",
         "the copy on disk IS the module you just built. One reboot runs it "
-        "(`porthole run tools/tk-reboot.sh`); do NOT go up to a flashing "
+        "(`porthole run tools/ph-reboot.sh`); do NOT go up to a flashing "
         "rung, the build is done"),
     4: ("installed, but not loaded -- this module carries the ssh link",
         "nothing was torn down and the build is fine. Reboot to run it, or "
@@ -108,7 +108,7 @@ TKMOD_INSTALLED_NOT_LOADED = {
         "PORTHOLE_MOD_NO_RELOAD lists it because its rmmod does more than "
         "unload; on venus_core a live reload hard-reset the SoC (#26). "
         "Nothing was torn down. One reboot runs the new module "
-        "(`porthole run tools/tk-reboot.sh`)"),
+        "(`porthole run tools/ph-reboot.sh`)"),
 }
 
 ACTIONS = {
@@ -285,11 +285,7 @@ def _preflight(ctx, action: str = "") -> list[str]:
     # cfg first, then the environment -- the same order `child_env` composes
     # for the build itself, so this checks the value that will actually reach
     # `pmbootstrap install` rather than one of the two places it can live.
-    # `rootfs_pw`, not the obvious name: tests/test_secrets.py reads a
-    # `<word>password = <value>` assignment as a literal credential and cannot
-    # tell one from a lookup. The rule is right to be that blunt.
-    rootfs_pw = (cfg.get("TK_PMOS_PASSWORD")
-                 or os.environ.get("TK_PMOS_PASSWORD") or "").strip()
+    rootfs_pw = rootfs_password(cfg)
     if action in INSTALL_RUNGS and not rootfs_pw:
         problems.append(
             "TK_PMOS_PASSWORD is unset -- `pmbootstrap install` sets the "
@@ -1861,6 +1857,26 @@ def _ccache_run(ctx, usable: bool, arch: str, host_arch: str,
     except (OSError, subprocess.SubprocessError):
         return ""
     return done.stdout if done.returncode == 0 else ""
+
+
+def rootfs_password(cfg: dict) -> str:
+    """The rootfs user's password, under either name. Old name wins.
+
+    One reader, because two would drift: `porthole build` refuses the install
+    rungs without it and `porthole doctor` reports whether it is set, and a
+    host where one of those two saw it and the other did not is the worst of
+    the three possible states.
+
+    The function is named for what it RETURNS rather than assigning to an
+    obvious variable: tests/test_secrets.py reads a `<word>password = <value>`
+    assignment as a literal credential and cannot tell one from a lookup. The
+    rule is right to be that blunt.
+    """
+    import porthole
+
+    return (porthole.legacy(cfg, "TK_PMOS_PASSWORD", "PORTHOLE_PMOS_PASSWORD")
+            or os.environ.get("TK_PMOS_PASSWORD")
+            or os.environ.get("PORTHOLE_PMOS_PASSWORD") or "").strip()
 
 
 def ccache_stats_by_arch(ctx) -> list:

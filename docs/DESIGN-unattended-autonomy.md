@@ -12,14 +12,14 @@ together.
 1. **The session locks.** A blanked panel and a phosh lockscreen sit in front
    of every arm, and every "proper" API lies about the latter --
    `LockedHint`, `org.gnome.ScreenSaver.GetActive` and `lswt` all report
-   unlocked while the lockscreen is plainly on screen. `tk-session.sh` solves
+   unlocked while the lockscreen is plainly on screen. `ph-session.sh` solves
    this by looking at the framebuffer, and nothing calls it automatically.
 2. **The phone suspends and disappears.** An unattended run that suspends is
    an unattended run that ends with a human pressing the power button.
-   `tk-afk.sh` can mask suspend, with an expiry, and nothing arms it.
+   `ph-afk.sh` can mask suspend, with an expiry, and nothing arms it.
 3. **Debug processes outlive the work.** Arms leave browsers, decoders and
    tracers running; the die sits at 80 C for hours and every thermal number
-   after the first is taken on a saturated die. `tk-thermal.sh` has
+   after the first is taken on a saturated die. `ph-thermal.sh` has
    `prep/down/cool/guard` and a hardcoded three-entry `pkill` list, and
    nothing brackets an arm with it.
 4. **Tools are killed by blind timeouts.** `ph_run` wraps every remote command
@@ -39,7 +39,7 @@ None of these is a missing tool. All of them are a missing contract.
 - **Portable across init systems.** postmarketOS ships both systemd and
   OpenRC, and this project holds an OpenRC-parity convention for systemd
   fixes.
-- **The device mutex must not regress.** `tk-device.sh`'s `flock` is
+- **The device mutex must not regress.** `ph-device.sh`'s `flock` is
   per-command and kernel-released on holder death. That property is load
   bearing and is not to be traded for a longer-lived lock.
 - **Probes induce nothing.** `porthole_capabilities.py` established that a
@@ -84,12 +84,12 @@ the shape `tests/test_cli_rules.py` already enforces for every verb.
 `start` establishes, idempotently:
 
 1. **Screen awake and unlocked.** `ph-screen.sh ensure` (today
-   `tk-session.sh`). The PIN is read from `lib/porthole_secrets.py` and piped
+   `ph-session.sh`). The PIN is read from `lib/porthole_secrets.py` and piped
    to `ph-key.py type -` on stdin, never passed as an argument -- an argv
    lands in journald. The device's PIN is currently disabled, which makes the
    swipe the whole unlock; the secrets path exists so that setting a PIN does
    not silently break unattended work.
-2. **Suspend masked**, using `ph-afk.sh` (today `tk-afk.sh`) **armed with the
+2. **Suspend masked**, using `ph-afk.sh` **armed with the
    lease's TTL**. Never indefinite: an indefinite mask is a phone that never
    sleeps and a battery that explains itself badly a week later.
 3. **The thermal guard armed**, `ph-thermal.sh guard`, ceiling from the
@@ -129,7 +129,7 @@ advance, on the device.
 
 ### What the lease deliberately does not own
 
-- **Not the device mutex.** `ph-device.sh` (today `tk-device.sh`; renamed in
+- **Not the device mutex.** `ph-device.sh` (renamed in
   phase 2 with everything else, behaviour untouched) keeps its `flock`. The lease owns device
   *state*; the mutex owns device *access*. Two agents may hold leases at once
   because the state each wants is identical and idempotent, so there is
@@ -155,7 +155,7 @@ the convenient front end to it. Neither backend adds a dependency.
 
 `pkill -f <pattern>` is removed from the codebase. Over ssh the pattern
 matches the command line carrying it, so the tool kills its own session --
-`tk-thermal.sh` already carries a comment saying this costs an afternoon, and
+`ph-thermal.sh` already carries a comment saying this costs an afternoon, and
 it cost two probe runs during the writing of this document. It is also
 unportable and misses grandchildren. "Stop the slice" replaces every use.
 
@@ -209,7 +209,7 @@ adds a tool without reading the others:
 
 - **`exits:` uses the shared codes only** (`EX_OK` 0, `EX_FAIL` 1,
   `EX_USAGE` 64, `EX_UNAVAILABLE` 69, `EX_LOCK` 75, `EX_STATE` 76,
-  `EX_TIMEOUT` 124, `EX_INTERRUPT` 130). `tk-recover.sh` currently declares
+  `EX_TIMEOUT` 124, `EX_INTERRUPT` 130). `ph-recover.sh` currently declares
   "3 see source - 4 see source - 5 see source"; "see source" is not an API,
   and `brain/laws/exit-codes-are-an-api.md` already says so. The law exists;
   nothing enforced it.
@@ -256,14 +256,25 @@ be falsifying the record.
 | `TK_*` env vars | ~75 | 561 |
 | `tk_*` functions | 23 | ~290 |
 | device-side paths | ~30 | -- |
-| units installed on the phone | `tk-lifeline.service`, `tk-lifeline.timer` | -- |
+| units installed on the phone | `ph-lifeline.service`, `ph-lifeline.timer` (a phone set up before the rename has `tk-lifeline.*`) | -- |
 | transient unit names | `tk-load`, `tk-load-gpu`, `tk-micwatch` | -- |
 | references in the taimen repo | -- | 866 |
 
 ### Migration mechanics
 
+> **Executed.** The files, the references and the knobs moved in the tk- to ph-
+> rename. Two things went differently from the plan below: `tools/ph-lib.sh`
+> was **kept** as a symlink rather than deleted (36 tools source it, and
+> `tests/test_tools.py::test_ph_lib_is_a_symlink_to_the_shared_lib` still
+> guards it against being materialised into a fork), and identifiers moved by
+> one whole-tree replacement per name -- which cannot half-rename a knob the
+> way a per-file pass can -- with
+> `tests/test_conventions.py::test_no_new_environment_knob_carries_the_old_prefix`
+> holding the kept list closed instead of per-identifier count assertions.
+
+
 1. **Files:** `git mv`, so history survives.
-2. **`tools/tk-lib.sh` is deleted, not renamed.** It is a symlink to
+2. **`tools/ph-lib.sh` is deleted, not renamed.** It is a symlink to
    `../lib/porthole.sh`; the real library already has the right name. Tools
    source `../lib/porthole.sh` directly. Keeping a `ph-lib.sh` alias would
    re-create the exact defect `tests/test_tools.py::test_tk_lib_is_a_symlink_to_the_shared_lib`
@@ -280,7 +291,13 @@ be falsifying the record.
    a rename landing in one and not the other breaks 866 references the same
    afternoon.
 5. **Device-side state cannot be sed'd.** A phone with `tk-lifeline.service`
-   enabled keeps running the old unit after the host is clean. `porthole
+   enabled keeps running it after the host is clean -- the repo renaming a unit
+   does not touch one already installed. Disable it on the phone before
+   installing the new pair:
+
+       ssh "$PHONE" 'sudo systemctl disable --now tk-lifeline.timer'
+       ssh "$PHONE" 'sudo rm -f /etc/systemd/system/tk-lifeline.* /usr/local/sbin/tk-lifeline'
+ `porthole
    doctor` grows one **read-only** check reporting stale `tk-*` units, paths
    and files found on the device, and names the fix. It reports; it does not
    migrate. Inducing nothing is the doctrine.
@@ -300,8 +317,8 @@ be falsifying the record.
    the tool headers. Both must be re-run as part of the rename, not as an
    afterthought once something fails. This does not cover everything:
    `SKILL.md` carries hand-written `tk-` references *outside* its generated
-   block -- `TK_BOOT_DEADLINE` (line 159), `` TK_AGENT=<you> tools/tk-device.sh ``
-   (line 239), and `` . tools/tk-lib.sh `` (line 242, and `tools/tk-lib.sh` is
+   block -- `TK_BOOT_DEADLINE` (line 159), `` TK_AGENT=<you> tools/ph-device.sh ``
+   (line 239), and `` . tools/ph-lib.sh `` (line 242, and `tools/ph-lib.sh` is
    deleted outright by step 2) -- and the generator will not touch prose it
    does not own. Those need the same explicit reviewed pass as the
    identifiers in step 3.
@@ -366,7 +383,7 @@ Note: on that working branch `pkill-pattern` and `bare-sleep` moved
 (7 and 22) once two checker defects were fixed, not because tools changed.
 `check_pkill_pattern` and `check_fixed_timeout` were reading comment lines as
 code, so two tools' comments *warning never to `pkill -f` over ssh*
-(`tk-capture.sh`, `tk-dmic-sweep.sh`) counted as three of the violations they
+(`ph-capture.sh`, `ph-dmic-sweep.sh`) counted as three of the violations they
 document; a shared comment-line guard removed them. `check_bare_sleep`'s
 loop-depth counter leaked on one-line loops and on a Python `for` inside a
 shell heredoc, silencing every later top-level `sleep` in the file; keying

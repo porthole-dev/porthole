@@ -5,7 +5,7 @@ scope: device:google-taimen
 subsystem: browser
 severity: finding
 confidence: proven
-evidence: 2026-09-06, webkit2gtk-6.0 2.52.6-r61, epiphany 50.6-r50, tools/repro/scroll-record/wkrec.sh with uprobes from tk-wkoffsets.sh on EventHandler::handleWheelEvent, ThreadedScrollingTree::handleWheelEvent, ThreadedScrollingTree::displayDidRefreshOnScrollingThread, ScrollingTreeFrameScrollingNodeCoordinated::repositionScrollingLayers, ScrollingTree::applyLayerPositions and LocalFrameViewLayoutContext::performLayout; 20 drags of 500 ms on the long desktop Wikipedia article. Per thread over 12 s: treeWheel 272 (Core: Scrolling), mainWheel 0, refresh 441, reposition 205 on the scrolling thread + 416 on the main thread, performLayout 10 calls, 63 ms total, max 13 ms. Client: 795 commits, presented on consecutive vsyncs 358/388, 34 frames over 33 ms, max 138 ms. The 2026-09-05 arm on r60 measured 289 layouts / 1629 ms for the same drag.
+evidence: 2026-09-06, webkit2gtk-6.0 2.52.6-r61, epiphany 50.6-r50, tools/repro/scroll-record/wkrec.sh with uprobes from ph-wkoffsets.sh on EventHandler::handleWheelEvent, ThreadedScrollingTree::handleWheelEvent, ThreadedScrollingTree::displayDidRefreshOnScrollingThread, ScrollingTreeFrameScrollingNodeCoordinated::repositionScrollingLayers, ScrollingTree::applyLayerPositions and LocalFrameViewLayoutContext::performLayout; 20 drags of 500 ms on the long desktop Wikipedia article. Per thread over 12 s: treeWheel 272 (Core: Scrolling), mainWheel 0, refresh 441, reposition 205 on the scrolling thread + 416 on the main thread, performLayout 10 calls, 63 ms total, max 13 ms. Client: 795 commits, presented on consecutive vsyncs 358/388, 34 frames over 33 ms, max 138 ms. The 2026-09-05 arm on r60 measured 289 layouts / 1629 ms for the same drag.
 refutes: the scroll stall is the page's JavaScript forcing 289 layouts per drag; finger drags are handled on the main thread; async scrolling is off on GTK
 first-learned: 2026-09-06
 ---
@@ -37,7 +37,7 @@ r61 was [[the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail]].
 
 **How it was established** -- the same uprobe arm as the 2026-09-05 finding,
 with the routing functions added and the trace split by thread (the summary
-table of `tk-wkphase.sh measure` only knows the fixed phase list; the raw
+table of `ph-wkphase.sh measure` only knows the fixed phase list; the raw
 `/tmp/wk-drag.trace` carries every probe as `name:` / `name_ret:` with the
 thread's comm in front). Still open: the residual 34 janks per 10 s (max
 138 ms) with the main thread at 27 % and the compositor at 14.5 %, and the

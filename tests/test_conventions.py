@@ -313,5 +313,98 @@ def test_no_suite_hand_rolls_its_own_test_loop():
         "`_runner.run(globals())` instead:\n  " + "\n  ".join(bad))
 
 
+# The two files whose SUBJECT is an old name, which is the one honest reason
+# to write one. Same shape as ENV_COPIES_THAT_SPAWN_NOTHING above: an explicit
+# pair with its reason, rather than a rule loose enough to miss a real one.
+NAMES_AN_OLD_NAME_ON_PURPOSE = {
+    "lib/porthole_cmd_tools.py": "renamed() is what answers a request for an "
+                                 "old name, and its docstring shows one",
+    "tests/test_cli.py": "the test that asks for one and checks the answer",
+    "tests/test_permissions.py": "the fixture for a stale allow rule IS an "
+                                 "old path -- that is the thing being detected",
+}
+
+
+def test_no_file_names_a_tool_that_no_longer_exists():
+    """The rename is only finished when nothing points at the old names.
+
+    Deliberately NOT a ban on the string `tk-`: `tk_*` shell helpers are a
+    frozen surface (see test_the_tk_helper_surface_is_frozen, which forbids
+    the opposite thing) and brain notes quote historical sessions verbatim.
+    What is banned is naming a FILE that is not there -- a doc whose command
+    cannot be copy-pasted, or a lib that builds an argv from a path that does
+    not resolve.
+    """
+    # The OLD prefix only. A `ph-` name that does not resolve is a different
+    # thing and often a legitimate one -- a design doc naming a tool nobody has
+    # written yet, prose saying a tool was deleted, a /tmp path a script
+    # writes. All three are in this tree and none of them is a stale pointer.
+    named = re.compile(r"\b(tk-[a-z0-9-]+\.(?:sh|py))\b")
+    bad = []
+    for path in _tracked():
+        if path.suffix not in TEXT_SUFFIXES or not path.exists():
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.split("/")[0] == "brain":
+            continue            # notes quote the sessions they came from
+        if rel in NAMES_AN_OLD_NAME_ON_PURPOSE:
+            continue
+        for name in sorted(set(named.findall(path.read_text(errors="replace")))):
+            if not ((ROOT / "tools" / name).exists()
+                    or list(ROOT.glob("profiles/*/tools/" + name))):
+                bad.append("{}: {}".format(path.relative_to(ROOT), name))
+    assert not bad, (
+        "these name a tool file that does not exist:\n  " + "\n  ".join(bad))
+
+
+def test_no_new_tool_carries_the_old_prefix():
+    """The rename is finished. `tk_*` shell FUNCTIONS are still frozen and
+    still fine -- see test_the_tk_helper_surface_is_frozen, which forbids the
+    opposite thing. This is about files."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_tools
+
+    bad = [t.name for t in porthole_cmd_tools.collect(ROOT)
+           if t.name.startswith("tk-")]
+    assert not bad, (
+        "tools are ph-, not tk-:\n  " + "\n  ".join(sorted(bad)))
+
+
+# The knobs that keep the old name, each of which also answers to a
+# PORTHOLE_* twin with the OLD name winning -- lib/porthole.py::legacy is the
+# contract and lib/porthole.sh line ~180 is its shell half. A fourteenth entry
+# is a regression, and this list is where the exception has to be argued for.
+#
+# `TK_SSH_OPTS` is kept and is NOT a knob: lib/porthole.sh builds it from
+# PORTHOLE_CONNECT_TIMEOUT, PORTHOLE_SSH_PORT and PORTHOLE_SSH_KEY, so an
+# input of that name would be a second authority over the array.
+# `TK_DEVICE_` is not a name at all -- it is the brace-expansion fragment in
+# `TK_DEVICE_{LOCK,TIMEOUT,MAX,STATE}`, which documents four kept names.
+KEPT_LEGACY_KNOBS = {
+    "TK_HOST", "TK_AGENT", "TK_POLL", "TK_DEVICE_STATE", "TK_FORCE",
+    "TK_SSH_OPTS", "TK_PMOS_PASSWORD", "TK_DEVICE_LOCK", "TK_RUN_TIMEOUT",
+    "TK_WKPHASE_OFFSETS", "TK_SCROLL_URL", "TK_LOGIN_PASSWORD",
+    "TK_BOOT_DEADLINE", "TK_DEVICE_TIMEOUT", "TK_DEVICE_MAX",
+    "TK_DEVICE_",
+}
+
+
+def test_no_new_environment_knob_carries_the_old_prefix():
+    """Everything else moved to PORTHOLE_* outright, because each was read by
+    one tool and an alias for a name nothing else says is dead weight."""
+    found = set()
+    for path in _tracked():
+        if path.suffix not in (".py", ".sh") or not path.exists():
+            continue
+        if path.relative_to(ROOT).parts[0] == "brain":
+            continue
+        found |= set(re.findall(r"\bTK_[A-Z0-9_]+\b",
+                                path.read_text(errors="replace")))
+    extra = sorted(found - KEPT_LEGACY_KNOBS)
+    assert not extra, (
+        "new knobs are PORTHOLE_*; these are neither that nor on the kept "
+        "list:\n  " + "\n  ".join(extra))
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

@@ -174,11 +174,11 @@ remember a filename:
 
 ```console
 $ porthole tools --needs BOOTED
-  tk-fps.py            Measure real frame delivery on the device [BOOTED]
-  tk-suspend-cycle.sh  One real s2idle cycle, with evidence [BOOTED]
+  ph-fps.py            Measure real frame delivery on the device [BOOTED]
+  ph-suspend-cycle.sh  One real s2idle cycle, with evidence [BOOTED]
 
 $ porthole tools --grep suspend
-$ porthole tools tk-suspend-cycle.sh          # read its contract
+$ porthole tools ph-suspend-cycle.sh          # read its contract
 ```
 
 Every tool documents itself in its first lines, so `head -20 <tool>` works too:
@@ -186,7 +186,7 @@ Every tool documents itself in its first lines, so `head -20 <tool>` works too:
 ```
 # scope: generic
 # needs: BOOTED
-# env:   PHONE, TK_ALARM, TK_HOST
+# env:   PHONE, PORTHOLE_ALARM, TK_HOST
 # exits: 0 ok · non-zero on failure
 ```
 
@@ -197,7 +197,7 @@ Everything that touches it goes through the mutex, **declaring the state it
 needs**:
 
 ```sh
-TK_AGENT=$USER tools/tk-device.sh --need-booted ssh "$PHONE" 'uname -a'
+TK_AGENT=$USER tools/ph-device.sh --need-booted ssh "$PHONE" 'uname -a'
 ```
 
 Two exit codes carry the whole protocol:

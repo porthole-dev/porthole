@@ -83,7 +83,7 @@ def clamp_app_threads(libc, app_slice, util_min):
     INTERACTION and LAUNCH both move frequency; top-app moves PLACEMENT.
 
     WHAT IT IS WORTH: unknown, and measured null so far. On taimen 2026-09-05,
-    tk-scrollarm.sh, jank frames >33 ms in a 10 s drag of a 79000px document:
+    ph-scrollarm.sh, jank frames >33 ms in a 10 s drag of a 79000px document:
 
         eleven control arms, five sweeps   32 36 37 38 38 39 41 42 43 43 44 46
                                            -> mean 40.1, sd 4.1

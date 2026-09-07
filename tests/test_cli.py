@@ -292,7 +292,7 @@ def test_init_converges_instead_of_rewriting_the_file():
                        "--yes", env={"XDG_CONFIG_HOME": xdg})
     assert rc == 0, f"rc={rc} err={err}"
     after = cfg.read_text()
-    assert "TK_MY_OWN_KEY=keepme" in after, "init dropped a hand-added key"
+    assert "MY_OWN_KEY=keepme" in after, "init dropped a hand-added key"
     assert "# a note I wrote myself" in after, "init dropped a comment"
     assert "/opt/mine/" in after, (
         "init overwrote a tool path the developer set deliberately")
@@ -389,9 +389,9 @@ def test_run_refuses_to_execute_an_on_device_tool_locally():
     process names -- with nothing to signal the mistake. It must be piped to
     the device, or refused when the device is not there.
 
-    Caught in practice: `porthole run tk-sysstate.sh` printed the workstation's
+    Caught in practice: `porthole run ph-sysstate.sh` printed the workstation's
     22GB of RAM and firefox, which reads exactly like a working measurement."""
-    rc, out, err = run("run", "tk-sysstate.sh",
+    rc, out, err = run("run", "ph-sysstate.sh",
                        env={"PORTHOLE_DEVICE": "google-taimen",
                             "PORTHOLE_DEVICE_STATE": "ABSENT"})
     assert rc == 76, f"expected 76 (wrong device state), got {rc}"
@@ -522,10 +522,10 @@ def test_the_resolved_config_beats_the_shell_it_was_launched_from():
     from porthole_cli import child_env
 
     env = child_env({"PORTHOLE_ARCH": "stale", "PATH": "/usr/bin"},
-                    {"PORTHOLE_ARCH": "aarch64", "TK_X": "1",
+                    {"PORTHOLE_ARCH": "aarch64", "PORTHOLE_X": "1",
                      "HOME": "/should/not/cross", "PORTHOLE_N": 5})
     assert env["PORTHOLE_ARCH"] == "aarch64", "the stale shell value won"
-    assert env["TK_X"] == "1"
+    assert env["PORTHOLE_X"] == "1"
     assert env.get("PATH") == "/usr/bin"
     assert env.get("HOME") != "/should/not/cross", "a non-PORTHOLE key crossed"
     assert "PORTHOLE_N" not in env, "a non-string cfg value crossed"
@@ -643,6 +643,30 @@ def test_the_host_only_verbs_stay_under_their_budget():
 
 def main():
     return _runner.run(globals())
+
+
+def test_an_old_tool_name_is_answered_with_its_new_one():
+    """Every brain note and every agent's memory holds the old names. A bare
+    'unknown tool' sends the reader looking for a file that was renamed, which
+    is the most expensive possible answer to the cheapest possible question.
+
+    No compatibility symlink: `collect()` skips symlinks, so a shim would sit
+    in the tree invisible to the catalogue, to docs/TOOLS.md and to
+    `porthole tools audit` -- a second copy of everything that nothing checks.
+    """
+    rc, out, err = run("run", "tk-fps.py")
+    assert rc != 0, "it must not silently run something"
+    assert "ph-fps.py" in (out + err), (out, err)
+
+    rc, out, err = run("tools", "tk-device.sh")
+    assert "ph-device.sh" in (out + err), (out, err)
+
+    # An old name with no new twin is still just unknown -- the answer is only
+    # worth giving when there is one.
+    rc, out, err = run("run", "tk-not-a-real-tool.sh")
+    assert rc != 0, (out, err)
+    assert "ph-not-a-real-tool.sh" not in (out + err), (
+        "it invented a replacement that does not exist")
 
 
 if __name__ == "__main__":

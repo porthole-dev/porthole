@@ -19,7 +19,7 @@
 
    `porthole tools lint` lists any gaps; `make test` fails on them.
 3. Never hardcode an IP, username, slot letter or package name. Shell:
-   `. tools/tk-lib.sh`. Python: `import porthole`.
+   `. tools/ph-lib.sh`. Python: `import porthole`.
 4. If it deliberately induces a reset, put a timeout on every ssh — otherwise it
    wedges the device lock for everyone else.
 5. Non-trivial logic leaves one runnable check behind.
@@ -126,7 +126,7 @@ The floor is declared in three places and a test asserts they agree:
 python3 tests/test_config.py        # config resolution, legacy aliases
 bash    tests/test_shell_lib.sh     # the same, plus shell/python agreement
 python3 tests/test_cli.py           # CLI verbs, JSON, exit codes
-bash    tools/tk-device-test.sh     # the device mutex
+bash    tools/ph-device-test.sh     # the device mutex
 porthole doctor --tools             # every tool has a header
 ```
 

@@ -5,7 +5,7 @@ scope: generic
 subsystem: method
 severity: technique
 confidence: proven
-evidence: porthole tools/tk-device.sh; taimen AGENTS.md §3, 2026-08-19
+evidence: porthole tools/ph-device.sh; taimen AGENTS.md §3, 2026-08-19
 first-learned: 2026-08-19
 ---
 
@@ -14,7 +14,7 @@ There is one phone. There may be several agents, or an agent and a human.
 **Every command that touches it goes through the mutex:**
 
 ```sh
-TK_AGENT=<yourname> tools/tk-device.sh <command>
+TK_AGENT=<yourname> tools/ph-device.sh <command>
 ```
 
 `flock`, not a hand-rolled lockfile: it is race-free across processes and the

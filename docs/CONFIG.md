@@ -93,9 +93,35 @@ command line in older documentation keeps working:
 | `FASTBOOT` | unchanged |
 | `TK_POLL` | beats `PORTHOLE_POLL` |
 | `TK_AGENT` | beats `PORTHOLE_AGENT` |
-| `TK_FORCE` | unchanged |
-| `TK_DEVICE_LOCK`/`_TIMEOUT`/`_MAX`/`_STATE` | unchanged |
-| `tools/tk-lib.sh` | still sourceable — a symlink to `lib/porthole.sh` |
+| `TK_FORCE` | beats `PORTHOLE_FORCE` |
+| `TK_DEVICE_LOCK` | beats `PORTHOLE_DEVICE_LOCK` |
+| `TK_DEVICE_STATE` | beats `PORTHOLE_DEVICE_STATE` |
+| `TK_DEVICE_TIMEOUT`/`_MAX` | unchanged |
+| `TK_PMOS_PASSWORD` | beats `PORTHOLE_PMOS_PASSWORD` |
+| `TK_LOGIN_PASSWORD` | beats `PORTHOLE_LOGIN_PASSWORD` |
+| `TK_RUN_TIMEOUT` | beats `PORTHOLE_RUN_TIMEOUT` |
+| `TK_BOOT_DEADLINE` | beats `PORTHOLE_BOOT_DEADLINE` |
+| `TK_SCROLL_URL` | beats `PORTHOLE_SCROLL_URL` |
+| `TK_WKPHASE_OFFSETS` | beats `PORTHOLE_WKPHASE_OFFSETS` |
+| `TK_SSH_OPTS` | the ssh option array itself, not a knob — see below |
+| `tools/ph-lib.sh` | still sourceable — a symlink to `lib/porthole.sh` |
 
 Every row is asserted in `tests/test_config.py` and `tests/test_shell_lib.sh`,
-so a future refactor cannot quietly break one.
+so a future refactor cannot quietly break one, and
+`tests/test_conventions.py::test_no_new_environment_knob_carries_the_old_prefix`
+holds the list closed: a name that is neither on it nor `PORTHOLE_*` fails.
+
+`TK_SSH_OPTS` is on that list but is not a knob and has no twin. `lib/porthole.sh`
+**builds** it out of `PORTHOLE_CONNECT_TIMEOUT`, `PORTHOLE_SSH_PORT` and
+`PORTHOLE_SSH_KEY`; a `PORTHOLE_SSH_OPTS` input would be a second authority
+over the same array rather than another name for it. Set the three that feed it.
+
+### Everything else moved outright
+
+The other 71 `TK_*` names were each read by a single tool, so an alias for a
+name nothing else says would be dead weight. They are now `PORTHOLE_*` with
+the same suffix — `TK_CAP_PORT` is `PORTHOLE_CAP_PORT`, `TK_DTC_OUT` is
+`PORTHOLE_DTC_OUT` — and each tool's `env:` header names the new one. **These
+have no alias**: a command line that exports one of them by its old name will
+run with the tool's default instead, silently. `porthole tools <name>` prints
+the header if you need to check one.

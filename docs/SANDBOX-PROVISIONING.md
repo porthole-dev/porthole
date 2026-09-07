@@ -99,7 +99,7 @@ Reasoning said it would work (a live devtmpfs bind, plus a host-side `uaccess`
 ACL applied to every new node). Reasoning is not evidence.
 
 Run for real: container started while the phone was booted (node `003`,
-`18d1:d001`), then `tools/tk-to-fastboot.sh` under the device mutex. The old
+`18d1:d001`), then `tools/ph-to-fastboot.sh` under the device mutex. The old
 node vanished, node `004` appeared as `18d1:4ee0`, and the **already-running**
 container ran `fastboot devices` and `fastboot getvar current-slot` against it
 successfully.
@@ -110,7 +110,7 @@ Reproduce:
 podman run -d --name probe --userns=keep-id:uid=0,gid=0 \
   --security-opt label=disable -v /dev/bus/usb:/dev/bus/usb alpine:3.22 sleep 3600
 podman exec probe apk add -q android-tools
-TK_AGENT=you tools/tk-device.sh --need-booted tools/tk-to-fastboot.sh
+TK_AGENT=you tools/ph-device.sh --need-booted tools/ph-to-fastboot.sh
 podman exec probe fastboot devices        # must print the serial
 ```
 
@@ -162,7 +162,7 @@ podman run -d --name porthole-sandbox \
 
 That block is the isolation boundary, so it is written out in full: anything
 not named here is not reachable from inside. `<lock>` is
-`/tmp/porthole-<device>.lock`, the same path `tools/tk-device.sh` computes, and
+`/tmp/porthole-<device>.lock`, the same path `tools/ph-device.sh` computes, and
 the `--label` records it so `up` and `shell` can refuse a container still
 guarding the device that was active when it was created. The `/work` and
 config mounts appear only when they exist; `--mount` appends more under

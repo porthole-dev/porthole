@@ -5,7 +5,7 @@ scope: generic
 subsystem: kernel
 severity: trap
 confidence: proven
-evidence: taimen, 2026-08-19 — tk-modcrc.py reported 86 of 155 shared symbols with mismatched CRCs at a single commit
+evidence: taimen, 2026-08-19 — ph-modcrc.py reported 86 of 155 shared symbols with mismatched CRCs at a single commit
 first-learned: 2026-08-19
 ---
 
@@ -44,7 +44,7 @@ The check is free and runs on the host:
 
 ```sh
 scp "$PHONE":/usr/lib/modules/<kver>/kernel/.../foo.ko /tmp/ref.ko
-tools/tk-modcrc.py /tmp/ref.ko <tree>/.output/.../foo.ko    # exit 0 = it will load
+tools/ph-modcrc.py /tmp/ref.ko <tree>/.output/.../foo.ko    # exit 0 = it will load
 ```
 
 Re-run it after any reflash — the reference module changes with the package.
@@ -53,7 +53,7 @@ Re-run it after any reflash — the reference module changes with the package.
 
 ```sh
 cp <aport>/config-…                <tree>/arch/<arch>/configs/<name>_defconfig
-TK_AGENT=<you> tools/tk-build.sh make <name>_defconfig
+TK_AGENT=<you> tools/ph-build-lock.sh make <name>_defconfig
 ```
 
 `porthole build` does this for you: `_ph_make` re-syncs the tree defconfig from

@@ -61,7 +61,7 @@ only boot-to-boot random quantity in the path.
   good boot (`ACDCR 0x2b5ffd`, `ACDTD 0x9611`, `ACDSSCR 0x501`,
   `EXTINT 0x2cf9afe`, `GFMUX 1`, `AUTOXFER_CFG 0x9406`).
 
-**How it was established** — `tools/tk-regdump.py` for the register state (note
+**How it was established** — `tools/ph-regdump.py` for the register state (note
 its base must be page-aligned: use `0x17814000 0x800 0x100` for gold, not
 `0x17814800`), plus a `/dev/mem` probe that pulses the AUTOXFER trigger (+0x84)
 only, never the CFG mask (+0x80), run under `chrt -f 99 taskset -c 0`. Idle

@@ -255,13 +255,13 @@ resolve one to a street address. Publishing `TEST-SSID`'s three BSSIDs would
 pin a contributor's workplace to a building, a stronger location leak than any
 GPS fix this repo can currently produce. Someone already understood that and
 hand-redacted them to `<ap-ch36>`, `<ap-ch140>` and `<ap-ch1>`;
-the convention was never written down, and `tools/tk-wifi-soak.sh:108` emits
+the convention was never written down, and `tools/ph-wifi-soak.sh:108` emits
 `"bssid":"%s"` into every heartbeat line by construction.
 
 **Two rows kept, with their justification corrected.** The proposal said modem
 and wifi probes "print these freely". They do not:
 `grep -riE "imei|meid|iccid|imsi"` over the whole repo hits exactly one line,
-this table's own earlier draft. `tools/tk-daily-audit.sh` runs `mmcli -L` and
+this table's own earlier draft. `tools/ph-daily-audit.sh` runs `mmcli -L` and
 `mmcli -m any | grep -iE 'state:|lock'`, neither of which prints an equipment
 id. GPS is the same — no NMEA, no coordinates, only `unit geoclue.service`.
 Both stay banned, because the cost is nothing and an IMEI is the strongest
@@ -303,7 +303,7 @@ picked up by `make test`'s glob, so it runs in all three CI matrix jobs with no
 new job and no new Makefile target. `.githooks/commit-msg` scans the message —
 the surface no check in this repo had ever read — and `.githooks/pre-push`
 scans the range being pushed, which is the last cheap moment. `logs/` is in
-`.gitignore`: `tools/tk-capture.sh` writes there by default and brain notes
+`.gitignore`: `tools/ph-capture.sh` writes there by default and brain notes
 cite it as evidence, so it fills up constantly, and it was untracked but not
 ignored — one `git add -A` from publication.
 
@@ -601,7 +601,7 @@ documented table are the same set, in both directions.
 **File hygiene cost one line.** `.editorconfig` has demanded LF, a final
 newline and no trailing whitespace since the beginning and nothing had ever
 checked it; the tree was compliant bar a single trailing space in
-`tools/tk-firstpaint.sh`. The test then immediately caught its own author —
+`tools/ph-firstpaint.sh`. The test then immediately caught its own author —
 the rules generator was emitting markdown's two-space hard break, which is
 trailing whitespace. That is what a check landing while it is green buys you.
 

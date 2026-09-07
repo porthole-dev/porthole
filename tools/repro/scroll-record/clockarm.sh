@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: runs ON THE DEVICE. /tmp/sess.sh and everything tk-scrollarm.sh needs,
+# needs: runs ON THE DEVICE. /tmp/sess.sh and everything ph-scrollarm.sh needs,
 #        staged in /tmp. A page served locally (see TK_SCROLL_URL).
 # env: TK_SCROLL_URL, CLK_MIN (gpu devfreq min_freq, or "-"), CLK_POLL
 #      (polling_interval ms, or "-"), ARMS (default 3)
@@ -26,8 +26,8 @@ echo "[$L] gpu min=$(cat "$D/min_freq") max=$(cat "$D/max_freq") poll=$(cat "$D/
 
 i=1
 while [ "$i" -le "$ARMS" ]; do
-	sh /tmp/tk-scrollarm.sh "$L$i" 2>&1 | grep -E "client wl_surface|client presented|scrollY|arm void|scrollHeight"
-	python3 /tmp/tk-wlgaps.py "/tmp/wl-$L$i.log.drag" 6 2>&1 | tail -12
+	sh /tmp/ph-scrollarm.sh "$L$i" 2>&1 | grep -E "client wl_surface|client presented|scrollY|arm void|scrollHeight"
+	python3 /tmp/ph-wlgaps.py "/tmp/wl-$L$i.log.drag" 6 2>&1 | tail -12
 	i=$((i + 1))
 done
 

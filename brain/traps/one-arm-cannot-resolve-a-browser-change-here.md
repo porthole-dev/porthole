@@ -33,7 +33,7 @@ Two things that make it worse than ordinary noise:
 - **Back-to-back arms heat up.** Even cooling the die to 48 C between runs,
   the third arm in a row reached 79 C where the first reached 74 C: the
   chassis and battery stay warm and the die climbs faster. Cool to a tight
-  floor ([[taimen-thermal-hygiene]] / `tools/tk-thermal.sh cool`) and expect
+  floor ([[taimen-thermal-hygiene]] / `tools/ph-thermal.sh cool`) and expect
   later arms in a series to be slower.
 
 And the standing companion to this: a metric moving is not evidence the code
@@ -43,7 +43,7 @@ indistinguishable from the outside and want opposite responses.
 
 ## The scroll arm has the same problem, and here is its number
 
-Measured 2026-09-05 with `tools/tk-scrollarm.sh` (pure scroll, no video):
+Measured 2026-09-05 with `tools/ph-scrollarm.sh` (pure scroll, no video):
 **eleven control arms across five sweeps** gave jank frames >33 ms of
 32 36 37 38 38 39 41 42 43 43 44 46 -- **mean 40.1, sd 4.1**.
 

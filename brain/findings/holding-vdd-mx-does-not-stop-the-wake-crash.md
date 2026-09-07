@@ -6,7 +6,7 @@ subsystem: gpu
 severity: finding
 confidence: proven
 refutes: "that the display-on arm of the wake crash is immune because the DPU holds VDD_MX at 384; that the fault is an access into a block whose MX has fallen to level 0 while GX is still reachable; that giving the GPU's power domains a single owner fixes it"
-evidence: "taimen, tools/tk-wake-cycle.py, 2026-08-27. Three arms, same instrument, same 2 s spacing, gpu=suspended before every press. r89 baseline: died at cycle 45. r92 (gpucc in VDD_MX, so mx -> gpu_cx -> gpu_gx and MX is never collapsed): died at 22, with the genpd summary reading `mx on 0` while blanked instead of `off-0`. r93 (same, plus required-opps = <&rpmpd_opp_turbo> on gpucc): died at 14, with `mx on 384` VERIFIED while the panel was disabled and the GPU suspended."
+evidence: "taimen, tools/ph-wake-cycle.py, 2026-08-27. Three arms, same instrument, same 2 s spacing, gpu=suspended before every press. r89 baseline: died at cycle 45. r92 (gpucc in VDD_MX, so mx -> gpu_cx -> gpu_gx and MX is never collapsed): died at 22, with the genpd summary reading `mx on 0` while blanked instead of `off-0`. r93 (same, plus required-opps = <&rpmpd_opp_turbo> on gpucc): died at 14, with `mx on 384` VERIFIED while the panel was disabled and the GPU suspended."
 first-learned: 2026-08-27
 ---
 

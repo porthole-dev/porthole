@@ -26,7 +26,7 @@ This lives in its own module rather than inside one verb because CHECKSUM is
 what destroyed the redfin build. A mutex that only the build verb takes is not
 a mutex; every pmbootstrap caller in the tree has to take the same one.
 
-Same idiom as the device mutex (`tools/tk-device.sh`): flock plus a `.holder`
+Same idiom as the device mutex (`tools/ph-device.sh`): flock plus a `.holder`
 sidecar naming who has it, and exit 75 so "busy" is distinguishable from "your
 package is broken". flock and not a hand-rolled lockfile because the kernel
 drops it when the holder dies -- a crashed build must not wedge everyone until

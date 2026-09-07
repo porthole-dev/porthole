@@ -1,12 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: runs ON THE DEVICE as the session user. /tmp/sess.sh, /tmp/tk-webeval.py,
-#        /tmp/tk-webvq.py, /tmp/tk-touch.py, /tmp/tk-ui.py; /tmp/stallcatch2.py
-#        (a copy of tools/tk-stallcatch.py) and eu-stack when TK_STALLCATCH=1.
-# env: /tmp/videnv.sh is sourced if present: TK_VID_URL, TK_VID_LIMIT,
-#      TK_VID_QUALITY, TK_VID_WINDOW, TK_VID_LABEL, TK_VID_ENV, TK_VID_JS,
-#      TK_STALLCATCH
+# needs: runs ON THE DEVICE as the session user. /tmp/sess.sh, /tmp/ph-webeval.py,
+#        /tmp/ph-webvq.py, /tmp/ph-touch.py, /tmp/ph-ui.py; /tmp/stallcatch2.py
+#        (a copy of tools/ph-stallcatch.py) and eu-stack when PORTHOLE_STALLCATCH=1.
+# env: /tmp/videnv.sh is sourced if present: PORTHOLE_VID_URL, PORTHOLE_VID_LIMIT,
+#      PORTHOLE_VID_QUALITY, PORTHOLE_VID_WINDOW, PORTHOLE_VID_LABEL, PORTHOLE_VID_ENV, PORTHOLE_VID_JS,
+#      PORTHOLE_STALLCATCH
 # exits: 0 measured · 1 the video never played (arm void)
 # vidbase.sh -- one steady-state YouTube playback arm, no probes: a 2 s frame
 # series from getVideoPlaybackQuality(), the UI process's own wl_surface.commit
@@ -17,22 +17,22 @@
 set -u
 . /tmp/sess.sh
 [ -f /tmp/videnv.sh ] && . /tmp/videnv.sh
-EV=/tmp/tk-webeval.py
-URL=${TK_VID_URL:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}
-LIMIT=${TK_VID_LIMIT:-2560x1440@60}
-QUAL=${TK_VID_QUALITY:-hd1440}
-WIN=${TK_VID_WINDOW:-60}
-LABEL=${TK_VID_LABEL:-base}
+EV=/tmp/ph-webeval.py
+URL=${PORTHOLE_VID_URL:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}
+LIMIT=${PORTHOLE_VID_LIMIT:-2560x1440@60}
+QUAL=${PORTHOLE_VID_QUALITY:-hd1440}
+WIN=${PORTHOLE_VID_WINDOW:-60}
+LABEL=${PORTHOLE_VID_LABEL:-base}
 stop_browser() { for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do systemctl --user stop "$u" 2>/dev/null; done; pkill -x epiphany 2>/dev/null; }
 stop_browser; sleep 2; pkill -f WebKitWebProc""ess 2>/dev/null; sleep 2
-python3 /tmp/tk-ui.py unblank >/dev/null 2>&1
+python3 /tmp/ph-ui.py unblank >/dev/null 2>&1
 J0=$(date "+%Y-%m-%d %H:%M:%S")
-echo "[$LABEL] start $J0 limit=$LIMIT qual=$QUAL env='${TK_VID_ENV:-}' temp0=$(cat /sys/class/thermal/thermal_zone0/temp)"
+echo "[$LABEL] start $J0 limit=$LIMIT qual=$QUAL env='${PORTHOLE_VID_ENV:-}' temp0=$(cat /sys/class/thermal/thermal_zone0/temp)"
 rm -f /tmp/wl-$LABEL.log
 setsid systemd-run --user --scope --quiet --slice=app.slice -u "app-gnome-org.gnome.Epiphany-$$.scope" \
 	env WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2 WEBKIT_LAYERS_TILE_SIZE=1440x1024 \
 	WEBKIT_GST_VIDEO_DECODING_LIMIT="$LIMIT" WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 WAYLAND_DEBUG=1 \
-	${TK_VID_ENV:-} epiphany "$URL" >/tmp/eph-$LABEL.log 2>/tmp/wl-$LABEL.log </dev/null &
+	${PORTHOLE_VID_ENV:-} epiphany "$URL" >/tmp/eph-$LABEL.log 2>/tmp/wl-$LABEL.log </dev/null &
 st=-1
 for _ in $(seq 1 40); do sleep 2; st=$(python3 $EV 'var v=document.querySelector("video"); v?v.readyState:-1' 2>/dev/null); [ "${st:--1}" -ge 1 ] 2>/dev/null && break; done
 python3 $EV 'var v=document.querySelector("video"); v.muted=true; v.play(); "play"' >/dev/null 2>&1
@@ -43,22 +43,22 @@ advancing() { a=$(python3 $EV 'document.querySelector("video").currentTime' 2>/d
 ADV=$(advancing)
 for _ in 1 2; do
 	[ "$ADV" = advancing ] && break
-	python3 /tmp/tk-ui.py unblank >/dev/null 2>&1
-	sudo -n python3 /tmp/tk-touch.py tap 720 600 >/dev/null 2>&1; sleep 5
+	python3 /tmp/ph-ui.py unblank >/dev/null 2>&1
+	sudo -n python3 /tmp/ph-touch.py tap 720 600 >/dev/null 2>&1; sleep 5
 	python3 $EV 'var v=document.querySelector("video"); v.muted=true; v.play(); "play"' >/dev/null 2>&1; sleep 4
 	ADV=$(advancing)
 done
 echo "[$LABEL] $(python3 $EV 'var v=document.querySelector("video"),p=document.getElementById("movie_player");JSON.stringify({w:v.videoWidth,h:v.videoHeight,q:p&&p.getPlaybackQuality?p.getPlaybackQuality():"?",vis:document.visibilityState})' 2>/dev/null) $ADV"
 [ "$ADV" = advancing ] || { echo "[$LABEL] VIDEO NOT PLAYING -- arm void"; stop_browser; echo VIDBASEDONE; exit 1; }
-if [ -n "${TK_VID_JS:-}" ]; then
-	echo "[$LABEL] js: $(python3 $EV "$TK_VID_JS" 2>&1 | head -c 1500)"
+if [ -n "${PORTHOLE_VID_JS:-}" ]; then
+	echo "[$LABEL] js: $(python3 $EV "$PORTHOLE_VID_JS" 2>&1 | head -c 1500)"
 	sleep 3
 fi
 S0=$(wc -l < /tmp/wl-$LABEL.log)
 rm -f /tmp/gpu-$LABEL.txt
 ( i=0; while [ $i -lt $WIN ]; do echo "$(date +%s) $(cat /sys/class/devfreq/5000000.gpu/cur_freq) $(cat /sys/class/thermal/thermal_zone0/temp) $(cat /sys/class/thermal/thermal_zone4/temp)" >> /tmp/gpu-$LABEL.txt; sleep 1; i=$((i+1)); done ) &
-[ "${TK_STALLCATCH:-0}" = 1 ] && setsid sh -c "sudo -n python3 /tmp/stallcatch2.py $WIN WebKitWebProces Compositor 300 > /tmp/stall-$LABEL.txt 2>&1" </dev/null >/dev/null 2>&1 &
-[ "${TK_STALLCATCH:-0}" = 1 ] && setsid sh -c "sudo -n python3 /tmp/stallcatch2.py $WIN WebKitWebProces dec 400 > /tmp/stall-$LABEL-ui.txt 2>&1" </dev/null >/dev/null 2>&1 &
+[ "${PORTHOLE_STALLCATCH:-0}" = 1 ] && setsid sh -c "sudo -n python3 /tmp/stallcatch2.py $WIN WebKitWebProces Compositor 300 > /tmp/stall-$LABEL.txt 2>&1" </dev/null >/dev/null 2>&1 &
+[ "${PORTHOLE_STALLCATCH:-0}" = 1 ] && setsid sh -c "sudo -n python3 /tmp/stallcatch2.py $WIN WebKitWebProces dec 400 > /tmp/stall-$LABEL-ui.txt 2>&1" </dev/null >/dev/null 2>&1 &
 echo "=== frame series (2 s apart) t h tot drop ready ahead_s paused vis ==="
 i=0
 while [ "$i" -lt $((WIN / 2)) ]; do
@@ -95,7 +95,7 @@ print("gaps >100ms (t_in_hour, ms):", gaps[:30])
 PY
 echo "=== gpu MHz / cpu0 mC / gpu mC (1 Hz) ==="
 awk '{g[int($2/1e6)]++; if($3>mt)mt=$3; if($4>mg)mg=$4} END{for(k in g) printf "%s MHz x%d  ", k, g[k]; printf "\nmax cpu0 %d mC, max gpu %d mC\n", mt, mg}' /tmp/gpu-$LABEL.txt
-[ "${TK_STALLCATCH:-0}" = 1 ] && { echo "=== stall captures ==="; sleep 3; cat /tmp/stall-$LABEL.txt; echo "=== UI process stall captures ==="; cat /tmp/stall-$LABEL-ui.txt; }
+[ "${PORTHOLE_STALLCATCH:-0}" = 1 ] && { echo "=== stall captures ==="; sleep 3; cat /tmp/stall-$LABEL.txt; echo "=== UI process stall captures ==="; cat /tmp/stall-$LABEL-ui.txt; }
 echo "=== journal since start ==="
 sudo -n journalctl --since "$J0" --no-pager -o short-iso 2>/dev/null | grep -i -E "dumped core|abnormally|gpu fault|hangcheck|venus|liftoff|Resource busy|WebKitWebProc|oom|epiphany\[" | grep -v -E "GResources|libinput" | cut -c12-19,40-200 | head -30
 stop_browser

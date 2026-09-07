@@ -68,9 +68,9 @@ def test_nothing_irreversible_is_granted():
     Every one of them must be absent from the granted set."""
     granted, _held = P.build_rules(ROOT, DEVICE)
     hazards = ["porthole flash", "porthole push", "porthole run",
-               "porthole sandbox:", "tools/tk-flash-boot.sh",
-               "tools/tk-reboot.sh", "tools/tk-to-fastboot.sh",
-               "tools/tk-thermal-ramp.sh", "tools/tk-recover.sh"]
+               "porthole sandbox:", "tools/ph-flash-boot.sh",
+               "tools/ph-reboot.sh", "tools/ph-to-fastboot.sh",
+               "tools/ph-thermal-ramp.sh", "tools/ph-recover.sh"]
     leaked = [h for h in hazards
               if any(h in rule for rule in granted)]
     assert not leaked, f"irreversible things reachable from a rule: {leaked}"
@@ -82,8 +82,8 @@ def test_the_risky_tools_are_held_back_with_a_reason():
     An allowlist nobody can audit is worse than no allowlist, and "it is not
     in the list" answers no question a reviewer is actually asking."""
     _granted, held = P.build_rules(ROOT, DEVICE)
-    for tool in ("tools/tk-flash-boot.sh", "tools/tk-reboot.sh",
-                 "tools/tk-to-fastboot.sh"):
+    for tool in ("tools/ph-flash-boot.sh", "tools/ph-reboot.sh",
+                 "tools/ph-to-fastboot.sh"):
         assert tool in held, f"{tool} is neither granted nor explained"
         assert held[tool].startswith("matches "), (
             f"{tool} is held back without naming the word that did it: "
@@ -96,7 +96,7 @@ def test_the_ordinary_reading_tools_are_granted():
 
     These three read: state, frame timings, and a register dump."""
     granted, _held = P.build_rules(ROOT, DEVICE)
-    for tool in ("tools/tk-sysstate.sh", "tools/tk-fps.py", "tools/tk-pins.py"):
+    for tool in ("tools/ph-sysstate.sh", "tools/ph-fps.py", "tools/ph-pins.py"):
         assert P.rule(tool) in granted, f"{tool} should be granted"
     assert P.rule("porthole brief") in granted
     assert P.rule("git diff") in granted
@@ -119,13 +119,13 @@ def test_the_device_shell_is_granted_loudly_and_can_be_declined():
     from off -- and it goes through the mutex wrapper, never a bare ssh,
     because `Bash(ssh:*)` would grant every host on the network."""
     granted, _held = P.build_rules(ROOT, DEVICE, device_shell=True)
-    assert P.rule("tools/tk-device.sh") in granted
+    assert P.rule("tools/ph-device.sh") in granted
     assert not any("Bash(ssh" in r or "Bash(scp" in r for r in granted), (
         "a bare ssh rule grants every host reachable from this laptop")
 
     off, held = P.build_rules(ROOT, DEVICE, device_shell=False)
-    assert P.rule("tools/tk-device.sh") not in off
-    assert "tools/tk-device.sh" in held
+    assert P.rule("tools/ph-device.sh") not in off
+    assert "tools/ph-device.sh" in held
 
 
 def test_installing_keeps_the_permissions_already_there():
@@ -178,6 +178,37 @@ def test_a_settings_file_that_is_not_json_is_a_refusal_not_a_rewrite():
             assert target.read_text() == "{ not json", "it wrote anyway"
             return
     raise AssertionError("a broken settings file was not refused")
+
+
+def test_a_rule_from_before_the_rename_is_reported_not_ignored():
+    """`_merge` unions and never removes, correctly -- a settings file is the
+    reader's own. So a re-run after the tk- to ph- rename grants the new path
+    and leaves `Bash(tools/tk-device.sh:*)` sitting there, matching nothing.
+
+    An ineffective allow rule looks exactly like an effective one, and the
+    symptom is a permission prompt rather than an error, so it has to be said
+    out loud."""
+    import json
+    import tempfile
+
+    from porthole_cmd_permissions import stale_rules
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = pathlib.Path(tmp) / "settings.local.json"
+        assert stale_rules(target) == [], "a missing file has no stale rules"
+
+        target.write_text(json.dumps({"permissions": {"allow": [
+            "Bash(tools/tk-device.sh:*)",
+            "Bash(tools/ph-device.sh:*)",
+            "Bash(make test:*)",
+        ]}}))
+        assert stale_rules(target) == ["Bash(tools/tk-device.sh:*)"], (
+            stale_rules(target))
+
+        # Not valid JSON, and not this function's job to say so: _merge
+        # reports that, with the reason.
+        target.write_text("{not json")
+        assert stale_rules(target) == []
 
 
 if __name__ == "__main__":

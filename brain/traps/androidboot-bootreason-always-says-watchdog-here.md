@@ -32,5 +32,5 @@ describes *how* the SoC was reset, not *why*.
 `uptime` on the far side, whether the previous boot's journal ends with a
 shutdown sequence or stops mid-line
 (`journalctl -b -1 -n 40`), and host-side liveness during the event the way
-`tools/tk-hang-matrix.sh` does it. For a hang you intend to catch, arm a
+`tools/ph-hang-matrix.sh` does it. For a hang you intend to catch, arm a
 witness before it happens; there is no post-hoc one here.

@@ -1,9 +1,9 @@
 #!/bin/bash
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-source "$HERE/../../tk-lib.sh"
-# Same default tk-wkoffsets.sh uses for the sandbox's apk output dir.
-P=${TK_MESA_APK_DIR:-$HOME/.local/var/porthole-sandbox/packages/edge/aarch64}
+source "$HERE/../../ph-lib.sh"
+# Same default ph-wkoffsets.sh uses for the sandbox's apk output dir.
+P=${PORTHOLE_MESA_APK_DIR:-$HOME/.local/var/porthole-sandbox/packages/edge/aarch64}
 V=${1:?mesa version, e.g. 26.1.6-r8}
 PKGS="mesa mesa-dbg mesa-dri-gallium mesa-egl mesa-gbm mesa-gl mesa-gles mesa-vulkan-freedreno"
 tk_run "mkdir -p /tmp/mesa-apk && rm -f /tmp/mesa-apk/*.apk"
