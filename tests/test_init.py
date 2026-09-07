@@ -429,5 +429,49 @@ def test_a_headless_run_with_no_codename_refuses_rather_than_picking_one():
     assert not (pathlib.Path(xdg) / "porthole" / "config.env").exists()
 
 
+def test_a_headless_rerun_that_would_change_nothing_succeeds():
+    """init's own banner promises `running it again changes nothing you keep`.
+    True for humans, false for agents: any headless re-run hit `already
+    exists` and exit 1, whose only escape was --force -- a real overwrite --
+    so the safe answer was unavailable to the caller most likely to re-run
+    setup.
+
+    Three outcomes, not two: nothing to change (ok), something to change
+    (refuse, and say what), --force (take them)."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-rerun-")
+    argv = ("init", DEV, "--user", "u", "--host", "10.0.0.1")
+    rc, out, err = cli(*argv, "--yes", "--json", xdg=xdg)
+    assert rc == 0, err
+
+    rc, out, err = cli(*argv, "--yes", "--json", xdg=xdg)
+    assert rc == 0, "an idempotent re-run must succeed: {}{}".format(out, err)
+    payload = json.loads(out)
+    assert all(k["verdict"] == "kept" for k in payload["keys"].values()), payload
+
+
+def test_a_headless_rerun_that_would_change_something_still_refuses():
+    """The refusal is right and stays: with no human present nobody sees the
+    defaults, so taking flags over an existing identity IS a silent overwrite.
+    It must name what would change, so the caller can decide."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-differs-")
+    rc, out, err = cli("init", DEV, "--user", "u", "--host", "10.0.0.1",
+                       "--yes", "--json", xdg=xdg)
+    assert rc == 0, err
+
+    rc, out, err = cli("init", DEV, "--user", "SOMEONE", "--host", "10.0.0.1",
+                       "--yes", "--json", xdg=xdg)
+    assert rc == 1, "a changed identity must not be taken silently: {}{}".format(
+        out, err)
+    assert "PORTHOLE_USER" in (out + err), (out, err)
+    assert "--force" in (out + err), "the refusal must name the way through"
+    # ...and it refuses BEFORE writing. The refusal used to fire before a
+    # single value was resolved; moved after the resolve so it can name the
+    # keys, it now sits between the verdicts and the first set_key, and this
+    # is what pins it there.
+    text = (pathlib.Path(xdg) / "porthole" / "config.env").read_text()
+    assert "PORTHOLE_USER=u" in text, text
+    assert "SOMEONE" not in text, "the refused value reached the file"
+
+
 if __name__ == "__main__":
     sys.exit(run_tests(globals()))

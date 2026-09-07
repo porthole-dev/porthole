@@ -683,15 +683,6 @@ def cmd_init(args, ctx) -> int:
     except OSError:
         before = {}
 
-    if before and not args.force and not interactive:
-        # Unchanged, and deliberately: with no human present nobody sees the
-        # defaults, so taking flags over an existing identity WOULD be the
-        # silent overwrite this has always refused. With a tty, the prompts
-        # show the current value and Enter keeps it, which is not that.
-        raise Bail(f"{target} already exists", EX_FAIL,
-                   "re-run with --force to take these values, or run it "
-                   "interactively to be asked key by key")
-
     if interactive:
         ctx.out.blank()
         ctx.out.heading("who you are on the device")
@@ -752,23 +743,43 @@ def cmd_init(args, ctx) -> int:
     #
     # The interactive path needs no --yes. Six answered questions ARE the
     # confirmation, and asking for a flag after them would be hostile.
-    write = interactive or args.yes
-    if write:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            target.write_text(HEADER)
-    # set_key rewrites one line and leaves the rest of the file -- comments,
-    # hand-added keys, another device's overrides -- exactly where they were.
     verdicts = {}
     for key, value in resolved.items():
         if not value:
             continue
         verdicts[key] = ("kept" if before.get(key) == value
                          else "changed" if key in before else "added")
-        if write and verdicts[key] != "kept":
-            use.set_key(target, key, value)
+    changed = {k: v for k, v in verdicts.items() if v != "kept"}
 
+    if before and changed and not args.force and not interactive:
+        # Narrowed, not removed. The original refusal was right about the
+        # danger -- headless, nobody sees the defaults, so taking flags over an
+        # existing identity is a silent overwrite -- but it fired on EVERY
+        # re-run, including the one that would change nothing, and it fired
+        # before a single value was resolved so it could not say what differed.
+        # That made the safe answer unavailable to agents, who re-run setup as
+        # a matter of course, and left --force -- a real overwrite -- as the
+        # only way past.
+        #
+        # Here, after the resolve and before any set_key, it can name the keys
+        # and nothing has been written on the path that refuses.
+        raise Bail(
+            "{} already has different values for: {}".format(
+                target, ", ".join(sorted(changed))),
+            EX_FAIL,
+            "porthole init {} --force --yes   to take these, or drop the "
+            "flags that differ".format(device))
+
+    write = interactive or args.yes
     if write:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_text(HEADER)
+        # set_key rewrites one line and leaves the rest of the file --
+        # comments, hand-added keys, another device's overrides -- exactly
+        # where they were.
+        for key in changed:
+            use.set_key(target, key, resolved[key])
         # Everything below reads the host as it NOW is, not as it was when this
         # process started -- see Ctx.reload.
         ctx.reload()
