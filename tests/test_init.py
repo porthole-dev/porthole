@@ -411,5 +411,23 @@ def test_a_headless_run_previews_before_it_writes():
     assert config.exists(), "--yes must write it"
 
 
+def test_a_headless_run_with_no_codename_refuses_rather_than_picking_one():
+    """It picked `devices[0]` -- the first profile alphabetically -- and
+    reported success. On a host with two profiles that is a coin toss the
+    caller is never told about, and the whole point of this command is that
+    everything after it reads the device it wrote.
+
+    A device is not a default. Every other unknowable here has a real default
+    (port 22, the gadget address, the workspace tier); which phone you are
+    porting is the one thing porthole cannot infer."""
+    xdg = tempfile.mkdtemp(prefix="porthole-init-nodev-")
+    rc, out, err = cli("init", "--json", xdg=xdg)
+    assert rc == 64, "expected EX_USAGE, got {}: {}{}".format(rc, out, err)
+    assert "codename" in (out + err).lower(), (out, err)
+    # It must name the choices rather than just refusing.
+    assert DEV in (out + err), (out, err)
+    assert not (pathlib.Path(xdg) / "porthole" / "config.env").exists()
+
+
 if __name__ == "__main__":
     sys.exit(run_tests(globals()))
