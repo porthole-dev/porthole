@@ -306,6 +306,7 @@ def show(tool: Tool, ctx) -> int:
 SPEC = {
     "verb": "tools",
     "order": 25,
+    "group": "knowledge",
     "help": "search the toolbox and read a tool's contract",
     "description": (
         "Ninety-odd tools is more than anyone can hold in their head. Filter by\n"

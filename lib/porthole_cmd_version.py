@@ -175,6 +175,7 @@ def _git(root) -> str:
 SPEC = {
     "verb": "version",
     "order": 95,
+    "group": "meta",
     "help": "version, environment and host tool versions",
     "description": "What to paste into a bug report.",
     "args": [(["--json"], {"action": "store_true", "help": "machine-readable"})],

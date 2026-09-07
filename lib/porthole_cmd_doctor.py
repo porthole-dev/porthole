@@ -1393,6 +1393,7 @@ def _fix(ch: Checks, ctx, args) -> int:
 SPEC = {
     "verb": "doctor",
     "order": 20,
+    "group": "start",
     "help": "check the host, the profile and the device; name every fix",
     "description": (
         "The first thing to run on a new host, and the first thing to run when\n"

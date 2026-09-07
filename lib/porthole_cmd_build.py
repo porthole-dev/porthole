@@ -1993,6 +1993,7 @@ def cmd_build(args, ctx) -> int:
 SPEC = {
     "verb": "build",
     "order": 36,
+    "group": "build",
     "help": "build the kernel and package it, through envkernel",
     "description": (
         "The envkernel loop, as a verb. It was only ever a shell file you had\n"

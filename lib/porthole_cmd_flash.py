@@ -78,6 +78,7 @@ def cmd_flash(args, ctx) -> int:
 SPEC = {
     "verb": "flash",
     "order": 37,
+    "group": "build",
     "help": "flash the built boot image, honouring the slot policy",
     "description": (
         "Refuses to arm a slot the profile lists as forbidden: recovery from\n"

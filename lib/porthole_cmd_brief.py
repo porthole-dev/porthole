@@ -514,6 +514,7 @@ def _next_steps(cfg, device: str, state: str, gaps: list[str]) -> list[str]:
 SPEC = {
     "verb": "brief",
     "order": 15,
+    "group": "knowledge",
     "help": "everything an agent needs to start a session, in one call",
     "description": (
         "Which device, is it reachable, what tools exist, what rules apply,\n"

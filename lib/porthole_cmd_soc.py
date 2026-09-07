@@ -274,6 +274,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "soc",
     "order": 26,
+    "group": "sources",
     "help": "find devices sharing your SoC and inherit their working values",
     "description": (
         "The highest-leverage question when starting a port: has someone\n"

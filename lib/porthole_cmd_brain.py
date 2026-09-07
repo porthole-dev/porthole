@@ -661,6 +661,7 @@ class _LintArgs:
 SPEC = {
     "verb": "brain",
     "order": 50,
+    "group": "knowledge",
     "help": "search the second brain",
     "description": (
         "Scoped notes: laws, traps, playbooks, workflow. --scope filters to\n"
