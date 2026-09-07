@@ -11,6 +11,8 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 from porthole_cmd_kconfig import NOISE, parse_config  # noqa: E402
@@ -85,20 +87,7 @@ def test_a_missing_file_is_reported_not_crashed():
 
 
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except AssertionError as exc:
-            failed += 1
-            print(f"FAIL {name}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"ERROR {name}: {type(exc).__name__}: {exc}")
-    print(f"{len(tests) - failed}/{len(tests)} passed")
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 if __name__ == "__main__":
