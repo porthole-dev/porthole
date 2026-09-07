@@ -891,6 +891,10 @@ def _container_state(root: pathlib.Path, cfg=None, probe_device: bool = True) ->
     # and no reader has to change. See _device_key_authorized.
     out["device_key_authorized"] = (
         _device_key_authorized(cfg or {}, key) if probe_device else None)
+    # So a reader of `device_key_authorized is None` can tell "asked, and
+    # could not tell" from "deliberately not asked" -- see
+    # porthole_cmd_doctor._device_key_row.
+    out["device_key_probed"] = probe_device
     if not out["podman"]:
         out["issues"].append("podman not installed -- the workspace is "
                              "unavailable. `porthole doctor` has install hints")
