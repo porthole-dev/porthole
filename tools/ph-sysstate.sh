@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (run it on the device, e.g. piped over ssh)
-# env: TK_PUSH
+# env: PORTHOLE_PUSH
 # exits: 0 ok · non-zero on failure
 # Print one compact line of system state per second, forever.
 #
@@ -17,7 +17,7 @@
 # in particular NOT /sys/kernel/debug/dri/0/gpu, which wedges the GPU.
 #
 # Usage (from the host):
-#   TK_PUSH=tools/ph-sysstate.sh ph-stream.sh OUT sh /tmp/ph-sysstate.sh
+#   PORTHOLE_PUSH=tools/ph-sysstate.sh ph-stream.sh OUT sh /tmp/ph-sysstate.sh
 while :; do
     up=$(cut -d. -f1 /proc/uptime)
     load=$(cut -d' ' -f1 /proc/loadavg)

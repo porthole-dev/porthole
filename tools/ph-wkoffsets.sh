@@ -3,7 +3,7 @@
 # scope: generic
 # needs: BOOTED -- to name the build under test; falls back to the newest apk,
 #        loudly, when the device does not answer. nm and readelf on the host.
-# env: TK_WK_APK_DIR (default the porthole sandbox package dir), TK_WK_VERSION
+# env: PORTHOLE_WK_APK_DIR (default the porthole sandbox package dir), PORTHOLE_WK_VERSION
 #      (default: the version apk reports INSTALLED on the device)
 # exits: 0 printed · 1 packages not found · 64 usage
 # ph-wkoffsets.sh [SYMBOL...] -- uprobe offsets for WebKit phase entry points,
@@ -22,8 +22,8 @@
 set -u
 # shellcheck source=ph-lib.sh
 source "$(dirname "$0")/ph-lib.sh"
-DIR=${TK_WK_APK_DIR:-$HOME/.local/var/porthole-sandbox/packages/edge/aarch64}
-VER=${TK_WK_VERSION:-}
+DIR=${PORTHOLE_WK_APK_DIR:-$HOME/.local/var/porthole-sandbox/packages/edge/aarch64}
+VER=${PORTHOLE_WK_VERSION:-}
 # ASK THE DEVICE, do not guess from the directory. The old default was the
 # newest -dbg apk by `sort -V`, which is the build under test only by luck: on
 # 2026-09-06 a --src build (2.52.6_p20260906130803-r63) sorted ABOVE the aport

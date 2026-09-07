@@ -15,8 +15,8 @@
 # there is one idiom to learn, not two.
 #
 # Usage:  tools/ph-build-lock.sh <command> [args...]
-#   env:  TK_BUILD_LOCK     lock path (default /tmp/taimen-build.lock)
-#         TK_BUILD_TIMEOUT  seconds to wait (default 5400 -- kernel builds are slow)
+#   env:  PORTHOLE_BUILD_LOCK     lock path (default /tmp/taimen-build.lock)
+#         PORTHOLE_BUILD_TIMEOUT  seconds to wait (default 5400 -- kernel builds are slow)
 #         TK_AGENT          holder label, for the "who has it" file
 #
 # Exit 75 (EX_TEMPFAIL) on timeout, distinct from the wrapped command failing.
@@ -25,8 +25,8 @@
 # host, that is the upgrade path -- flock is per-machine only.
 set -euo pipefail
 
-LOCK=${TK_BUILD_LOCK:-/tmp/taimen-build.lock}
-TIMEOUT=${TK_BUILD_TIMEOUT:-5400}
+LOCK=${PORTHOLE_BUILD_LOCK:-/tmp/taimen-build.lock}
+TIMEOUT=${PORTHOLE_BUILD_TIMEOUT:-5400}
 AGENT=${TK_AGENT:-unknown}
 
 [ $# -gt 0 ] || { echo "usage: $0 <command> [args...]" >&2; exit 64; }

@@ -342,5 +342,54 @@ def test_no_file_names_a_tool_that_no_longer_exists():
         "these name a tool file that does not exist:\n  " + "\n  ".join(bad))
 
 
+def test_no_new_tool_carries_the_old_prefix():
+    """The rename is finished. `tk_*` shell FUNCTIONS are still frozen and
+    still fine -- see test_the_tk_helper_surface_is_frozen, which forbids the
+    opposite thing. This is about files."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_tools
+
+    bad = [t.name for t in porthole_cmd_tools.collect(ROOT)
+           if t.name.startswith("tk-")]
+    assert not bad, (
+        "tools are ph-, not tk-:\n  " + "\n  ".join(sorted(bad)))
+
+
+# The knobs that keep the old name, each of which also answers to a
+# PORTHOLE_* twin with the OLD name winning -- lib/porthole.py::legacy is the
+# contract and lib/porthole.sh line ~180 is its shell half. A fourteenth entry
+# is a regression, and this list is where the exception has to be argued for.
+#
+# `TK_SSH_OPTS` is kept and is NOT a knob: lib/porthole.sh builds it from
+# PORTHOLE_CONNECT_TIMEOUT, PORTHOLE_SSH_PORT and PORTHOLE_SSH_KEY, so an
+# input of that name would be a second authority over the array.
+# `TK_DEVICE_` is not a name at all -- it is the brace-expansion fragment in
+# `TK_DEVICE_{LOCK,TIMEOUT,MAX,STATE}`, which documents four kept names.
+KEPT_LEGACY_KNOBS = {
+    "TK_HOST", "TK_AGENT", "TK_POLL", "TK_DEVICE_STATE", "TK_FORCE",
+    "TK_SSH_OPTS", "TK_PMOS_PASSWORD", "TK_DEVICE_LOCK", "TK_RUN_TIMEOUT",
+    "TK_WKPHASE_OFFSETS", "TK_SCROLL_URL", "TK_LOGIN_PASSWORD",
+    "TK_BOOT_DEADLINE", "TK_DEVICE_TIMEOUT", "TK_DEVICE_MAX",
+    "TK_DEVICE_",
+}
+
+
+def test_no_new_environment_knob_carries_the_old_prefix():
+    """Everything else moved to PORTHOLE_* outright, because each was read by
+    one tool and an alias for a name nothing else says is dead weight."""
+    found = set()
+    for path in _tracked():
+        if path.suffix not in (".py", ".sh") or not path.exists():
+            continue
+        if path.relative_to(ROOT).parts[0] == "brain":
+            continue
+        found |= set(re.findall(r"\bTK_[A-Z0-9_]+\b",
+                                path.read_text(errors="replace")))
+    extra = sorted(found - KEPT_LEGACY_KNOBS)
+    assert not extra, (
+        "new knobs are PORTHOLE_*; these are neither that nor on the kept "
+        "list:\n  " + "\n  ".join(extra))
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

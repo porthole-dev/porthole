@@ -3,7 +3,7 @@
 # scope: generic
 # needs: the device BOOTED; the webkit apks for the INSTALLED build in the
 #        sandbox package dir (ph-wkoffsets.sh reads them)
-# env: PORTHOLE_* (ph-lib.sh), TK_WK_VERSION (default: the newest -dbg apk)
+# env: PORTHOLE_* (ph-lib.sh), PORTHOLE_WK_VERSION (default: the newest -dbg apk)
 # exits: 0 the arm finished · 1 it never finished
 # arm.sh -- stage and run one settled-scroll arm with the tile-record path
 # probed. Prints both windows and leaves the raw traces in /tmp on the device.

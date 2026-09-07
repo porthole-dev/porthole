@@ -254,7 +254,7 @@ touch.
 after the compile rather than before it. Worse, the instruction is not
 followable as written from an agent's position: the build runs **in the
 workspace container**, which does not mount the host's `/tmp`, so seeding the
-named path on the host changes nothing. Pointing `TK_BASEIMG` at a scratchpad
+named path on the host changes nothing. Pointing `PORTHOLE_BASEIMG` at a scratchpad
 path fails the same way, for the same reason.
 
 The obvious source is the device itself -- the active slot's boot partition is

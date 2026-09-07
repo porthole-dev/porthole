@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: the device BOOTED; the webkit apks for the INSTALLED build in the
-#        sandbox package dir. Pin TK_WK_VERSION while a newer build exists but
+#        sandbox package dir. Pin PORTHOLE_WK_VERSION while a newer build exists but
 #        is not installed yet -- ph-wkoffsets.sh picks the NEWEST -dbg apk, and
 #        offsets from a build the device is not running measure random
 #        instructions.
-# env: PORTHOLE_* (ph-lib.sh), TK_PROBES, TK_VID_* (see vidrec.sh)
+# env: PORTHOLE_* (ph-lib.sh), PORTHOLE_PROBES, PORTHOLE_VID_* (see vidrec.sh)
 # exits: 0 the arm finished · 1 it never finished
 # arm.sh -- one steady-state YouTube playback arm with the flush path probed.
 set -uo pipefail
@@ -14,7 +14,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$HERE/../../.." || exit 1
 source tools/ph-lib.sh
 
-case "${TK_PROBES:-flush}" in
+case "${PORTHOLE_PROBES:-flush}" in
 flush) SYMS='
 flushBuf=WebCore::MediaPlayerPrivateGStreamer::flushCurrentBuffer()
 copyBuf=WebCore::CoordinatedPlatformLayerBufferVideo::copyBuffer() const
@@ -29,7 +29,7 @@ layout=WebCore::LocalFrameViewLayoutContext::performLayout(bool)
 triggerRepaint=WebCore::MediaPlayerPrivateGStreamer::triggerRepaint(WTF::GRefPtr<_GstSample, WTF::GRefPtrDefaultRefDerefTraits<_GstSample> >&&)
 flushBuf=WebCore::MediaPlayerPrivateGStreamer::flushCurrentBuffer()
 record=WebCore::CoordinatedPlatformLayer::record(WebCore::IntRect const&)' ;;
-*) SYMS=$TK_PROBES ;;
+*) SYMS=$PORTHOLE_PROBES ;;
 esac
 
 OLDIFS=$IFS; IFS=$'\n'
@@ -45,7 +45,7 @@ scp "${TK_SSH_OPTS[@]}" \
 	tools/repro/a5xx-gmem/sess.sh tools/ph-webeval.py tools/ph-webvq.py tools/ph-touch.py tools/ph-ui.py \
 	tools/threadcpu.py tools/ph-wkphase.sh "$HERE/vidrec.sh" "$PHONE:/tmp/" >/dev/null || exit 1
 tk_run "printf 'export TK_WKPHASE_OFFSETS=%s\n' \"'$TK_WKPHASE_OFFSETS'\" > /tmp/wkoff.sh" >/dev/null
-for v in TK_VID_URL TK_VID_LIMIT TK_VID_QUALITY TK_VID_WINDOW TK_VID_ENV; do
+for v in PORTHOLE_VID_URL PORTHOLE_VID_LIMIT PORTHOLE_VID_QUALITY PORTHOLE_VID_WINDOW PORTHOLE_VID_ENV; do
 	eval "val=\${$v:-}"
 	[ -n "$val" ] && tk_run "printf 'export %s=%s\n' '$v' \"'$val'\" >> /tmp/wkoff.sh" >/dev/null
 done

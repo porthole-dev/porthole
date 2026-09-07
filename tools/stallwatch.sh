@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
-# env: HOST, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_RESCUE_PORT
+# env: HOST, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, PORTHOLE_RESCUE_PORT
 # exits: 0 ok · non-zero on failure
 # lib-exempt: detecting the PAM stall REQUIRES a raw ssh with a fixed timeout; tk_boot_id retries, which is exactly what would mask the signature
 # stallwatch.sh -- detect the taimen PID-1 freeze from the HOST.
@@ -27,7 +27,7 @@
 set -u
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
-RESCUE_PORT=${TK_RESCUE_PORT:-2323}
+RESCUE_PORT=${PORTHOLE_RESCUE_PORT:-2323}
 INTERVAL=${1:-10}
 LOG=${2:-stallwatch-$(date +%Y%m%d-%H%M%S).log}
 

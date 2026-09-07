@@ -96,7 +96,7 @@ Every tool opens with a block an agent can read with `head -20`:
 #!/bin/bash
 # scope: generic          | soc:<soc> | device:<codename>
 # needs: BOOTED           | FASTBOOT | FROZEN | INITRAMFS | on-device | any | -
-# env:   TK_CYCLES (default 20), PHONE, TK_AGENT
+# env:   PORTHOLE_CYCLES (default 20), PHONE, TK_AGENT
 # exits: 0 all clean · 1 a cycle failed · 75 lock · 76 wrong state
 # N suspend/resume cycles with per-cycle evidence.
 ```

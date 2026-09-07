@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (run it on the device as root, under systemd-run)
-# env: TK_WIFI_SOAK_LOG, TK_WIFI_SOAK_INTERVAL, TK_WIFI_SOAK_PROBE_EVERY, TK_WIFI_SOAK_IF
+# env: PORTHOLE_WIFI_SOAK_LOG, PORTHOLE_WIFI_SOAK_INTERVAL, PORTHOLE_WIFI_SOAK_PROBE_EVERY, PORTHOLE_WIFI_SOAK_IF
 # exits: 0 ok · non-zero on failure
 # ph-wifi-soak.sh -- watch a WiFi link for the two ways it fails quietly.
 #
@@ -42,11 +42,11 @@
 # ICMP the upgrade is a TCP connect to the gateway, not a bigger framework.
 set -u
 
-LOG=${TK_WIFI_SOAK_LOG:-/var/log/tk-wifi-soak.jsonl}
-INTERVAL=${TK_WIFI_SOAK_INTERVAL:-60}
-PROBE_EVERY=${TK_WIFI_SOAK_PROBE_EVERY:-10}
+LOG=${PORTHOLE_WIFI_SOAK_LOG:-/var/log/tk-wifi-soak.jsonl}
+INTERVAL=${PORTHOLE_WIFI_SOAK_INTERVAL:-60}
+PROBE_EVERY=${PORTHOLE_WIFI_SOAK_PROBE_EVERY:-10}
 N=0
-IF=${TK_WIFI_SOAK_IF:-wlan0}
+IF=${PORTHOLE_WIFI_SOAK_IF:-wlan0}
 START=$(date '+%Y-%m-%d %H:%M:%S')
 
 # A boot record first, so a reboot is distinguishable from a truncated log --

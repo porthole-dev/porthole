@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device as root (the greetd socket is owned by the greeter user); greetd with a running greeter
-# env: TK_LOGIN_USER (default: the config layer's PORTHOLE_USER or "user"), TK_LOGIN_PASSWORD (required, never logged)
+# env: PORTHOLE_LOGIN_USER (default: the config layer's PORTHOLE_USER or "user"), TK_LOGIN_PASSWORD (required, never logged)
 # exits: 0 session started · 1 greetd refused · 2 bad usage
 """Log a user into the graphical session through greetd's IPC, from ssh.
 
@@ -18,7 +18,7 @@ import json, os, socket, struct, sys, time
 import glob
 # greetd names its socket after its own pid (/run/greetd-<pid>.sock); only the greeter gets it in $GREETD_SOCK
 sock = os.environ.get("GREETD_SOCK") or (sorted(glob.glob("/run/greetd-*.sock"), key=os.path.getmtime) or ["/run/greetd.sock"])[-1]
-user = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TK_LOGIN_USER", "user")
+user = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("PORTHOLE_LOGIN_USER", "user")
 cmd = sys.argv[2:] or ["phosh-session"]
 pw = os.environ.get("TK_LOGIN_PASSWORD")
 if not pw:

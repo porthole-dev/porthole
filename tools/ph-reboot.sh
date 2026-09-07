@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: any (probes state; handles BOOTED and FASTBOOT)
-# env: FASTBOOT, TK_FORCE, TK_TIMEOUT
+# env: FASTBOOT, TK_FORCE, PORTHOLE_TIMEOUT
 # exits: 0 ok · 1 failed · 64 bad argument
 # Reboot the phone and return the INSTANT ssh answers again.
 #
@@ -53,7 +53,7 @@
 # granularity -- the win is on the bootloader-recovery path, where the old code
 # burned two fixed 30s sleeps, and from TK_FORCE=1.
 #
-# Usage: ph-reboot.sh [timeout_seconds]      (default 180, or $TK_TIMEOUT)
+# Usage: ph-reboot.sh [timeout_seconds]      (default 180, or $PORTHOLE_TIMEOUT)
 #   env: TK_FORCE=1  skip OpenRC shutdown (~15s faster, syncs first)
 # Exit:  0 back up, 1 timed out.
 set -u
@@ -61,14 +61,14 @@ set -u
 cd "$(dirname "$0")" || exit 1
 . ./ph-lib.sh
 
-TIMEOUT=${1:-${TK_TIMEOUT:-180}}
+TIMEOUT=${1:-${PORTHOLE_TIMEOUT:-180}}
 # Checked BEFORE anything is asked of the device. `ph-reboot.sh --help` took
 # "--help" as the timeout, issued a real reboot, and then waited against an
 # empty deadline -- so the phone went down and nothing was left waiting for it
 # to come back. An argument this script does not understand must cost nothing.
 case $TIMEOUT in
     ''|*[!0-9]*)
-        echo ">> usage: ph-reboot.sh [timeout_seconds]  (default 180, or \$TK_TIMEOUT)" >&2
+        echo ">> usage: ph-reboot.sh [timeout_seconds]  (default 180, or \$PORTHOLE_TIMEOUT)" >&2
         echo ">>   env: TK_FORCE=1  skip service shutdown (~15s faster, syncs first)" >&2
         exit 64 ;;
 esac

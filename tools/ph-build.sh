@@ -5,7 +5,7 @@
 # scope:  generic
 # needs: - (host; the device only for tkflash, which takes the mutex itself)
 # env:    PORTHOLE_WORKDIR (required), PORTHOLE_KERNEL_PKG, PORTHOLE_DEVICE_PKG
-#         PORTHOLE_FW_PKG, PORTHOLE_DTB, PORTHOLE_DEFCONFIG, TK_KPKG
+#         PORTHOLE_FW_PKG, PORTHOLE_DTB, PORTHOLE_DEFCONFIG, PORTHOLE_KPKG
 # gives:  tkbuild tkflash tkclean tkpurge-devpkgs
 # exits:  0 built and verified - 1 anything else
 #
@@ -71,8 +71,8 @@ _PH_APORTS=$_PH_REPO/pmaports
 # building the 6.18 tree. `pmbootstrap build` then rebuilt a package nothing
 # here had touched, left the 6.18 apk at whatever the last real build produced,
 # and every later step -- apk add, export, flash -- quietly carried that stale
-# kernel. Override with TK_KPKG when working a different series.
-_PH_KPKG=${TK_KPKG:-${PORTHOLE_KERNEL_PKG:?profile does not set PORTHOLE_KERNEL_PKG}}
+# kernel. Override with PORTHOLE_KPKG when working a different series.
+_PH_KPKG=${PORTHOLE_KPKG:-${PORTHOLE_KERNEL_PKG:?profile does not set PORTHOLE_KERNEL_PKG}}
 _PH_DEVPKG=${PORTHOLE_DEVICE_PKG:?profile does not set PORTHOLE_DEVICE_PKG}
 _PH_FWPKG=${PORTHOLE_FW_PKG:?profile does not set PORTHOLE_FW_PKG}
 _PH_DTB=${PORTHOLE_DTB_FILE:?profile does not set PORTHOLE_DTB_FILE}
@@ -882,7 +882,7 @@ _ph_assert_must_ship() {
 _ph_can_make_image() { [ -e /dev/loop-control ]; }
 
 _ph_install_rootfs() {
-	local attempt=0 max=${TK_INSTALL_ATTEMPTS:-25} log="$_PH_PMB/log.txt" pkg
+	local attempt=0 max=${PORTHOLE_INSTALL_ATTEMPTS:-25} log="$_PH_PMB/log.txt" pkg
 	local extra=()
 	if ! _ph_can_make_image; then
 		# --no-image, not a refusal. Everything else install does -- and above
@@ -1197,9 +1197,9 @@ _ph_dtb_from_apk() {
 }
 
 _ph_ref_dtb() {
-	if [ -n "${TK_REF_DTB:-}" ]; then
-		echo ">> reference dtb: TK_REF_DTB (explicit)" >&2
-		printf '%s\n' "$TK_REF_DTB"; return 0
+	if [ -n "${PORTHOLE_REF_DTB:-}" ]; then
+		echo ">> reference dtb: PORTHOLE_REF_DTB (explicit)" >&2
+		printf '%s\n' "$PORTHOLE_REF_DTB"; return 0
 	fi
 	# An aport build answers for itself. When a kernel package has just been
 	# installed, the .dtb it carries is the reference -- the build stamp below
@@ -1232,7 +1232,7 @@ _ph_ref_dtb() {
 	fi
 	echo ">> no build stamp -- deriving the reference dtb from the current tree." >&2
 	echo ">>   If this image was built elsewhere the comparison is meaningless;" >&2
-	echo ">>   rebuild, or set TK_REF_DTB to the .dtb inside the kernel apk." >&2
+	echo ">>   rebuild, or set PORTHOLE_REF_DTB to the .dtb inside the kernel apk." >&2
 	printf '%s\n' "$_PH_DTB_BUILT"
 }
 
@@ -1330,7 +1330,7 @@ tkflash-boot() {
 	# installed -- that is a non-circular reference, unlike the chroot the image
 	# was packed from, which would always agree with itself:
 	#
-	#   TK_REF_DTB=/path/to/unpacked-apk/boot/dtbs/qcom/msm8998-google-taimen.dtb
+	#   PORTHOLE_REF_DTB=/path/to/unpacked-apk/boot/dtbs/qcom/msm8998-google-taimen.dtb
 	local dtb; dtb=$(_ph_ref_dtb) || return 1
 
 	# The exported boot.img carries the UUIDs of whatever rootfs the CHROOT was
@@ -2112,7 +2112,7 @@ tkmod() {
 		# Only uncompressed siblings are comparable -- a raw .ko against an
 		# installed .ko.xz says nothing about either. Skipped rather than
 		# guessed at.
-		ratio=\${TK_MOD_SIZE_RATIO:-4}
+		ratio=\${PORTHOLE_MOD_SIZE_RATIO:-4}
 		new_sz=\$(stat -c %s /tmp/$name.ko 2>/dev/null || echo 0)
 		for f in \$inst; do
 			case \"\$f\" in *.ko) ;; *) continue ;; esac
@@ -2129,7 +2129,7 @@ tkmod() {
 				echo \">> this combination bootloops the device with no console, no\"
 				echo \">> pstore and no remote way back (issue #20).\"
 				echo \">> Use 'porthole build fast --yes', which installs the whole\"
-				echo \">> set from one package. TK_MOD_SIZE_RATIO raises the bound.\"
+				echo \">> set from one package. PORTHOLE_MOD_SIZE_RATIO raises the bound.\"
 				exit 6
 			fi
 		done
@@ -2294,22 +2294,22 @@ tkmod() {
 # known-good UUID-patched boot.img" printed when it was absent. That
 # instruction cannot be followed from where the build runs: the workspace
 # container does not mount the host's /tmp, so seeding the named path on the
-# host changed nothing, and pointing TK_BASEIMG at a scratch path failed the
+# host changed nothing, and pointing PORTHOLE_BASEIMG at a scratch path failed the
 # same way for the same reason.
 #
 # Left EMPTY by default and resolved inside tkboot against the device's own
-# kernel release. TK_BASEIMG still overrides, for a base image you have and the
+# kernel release. PORTHOLE_BASEIMG still overrides, for a base image you have and the
 # device cannot supply.
-_PH_BASEIMG=${TK_BASEIMG:-}
+_PH_BASEIMG=${PORTHOLE_BASEIMG:-}
 
 # Which partition holds a known-good boot image.
 #
 # Derived, never hardcoded: this file is `scope: generic`, and a device without
-# A/B slots has a plain `boot`. TK_BOOT_PARTLABEL is the escape hatch for a
+# A/B slots has a plain `boot`. PORTHOLE_BOOT_PARTLABEL is the escape hatch for a
 # bootloader that names it something else.
 _ph_boot_partlabel() {
-	if [ -n "${TK_BOOT_PARTLABEL:-}" ]; then
-		printf '%s\n' "$TK_BOOT_PARTLABEL"
+	if [ -n "${PORTHOLE_BOOT_PARTLABEL:-}" ]; then
+		printf '%s\n' "$PORTHOLE_BOOT_PARTLABEL"
 	elif [ "${PORTHOLE_HAS_AB_SLOTS:-0}" = "1" ] && [ -n "${PORTHOLE_ACTIVE_SLOT:-}" ]; then
 		printf 'boot_%s\n' "$PORTHOLE_ACTIVE_SLOT"
 	else
@@ -2342,8 +2342,8 @@ _ph_seed_baseimg() {
 	tmp="$_PH_BASEIMG.partial"
 	if ! TK_RUN_TIMEOUT=15 tk_run "test -e /dev/disk/by-partlabel/$part" >/dev/null 2>&1; then
 		echo ">> the device has no /dev/disk/by-partlabel/$part" >&2
-		echo ">> set TK_BOOT_PARTLABEL to the partition holding a good boot image," >&2
-		echo ">> or TK_BASEIMG to a known-good UUID-patched boot.img you already have" >&2
+		echo ">> set PORTHOLE_BOOT_PARTLABEL to the partition holding a good boot image," >&2
+		echo ">> or PORTHOLE_BASEIMG to a known-good UUID-patched boot.img you already have" >&2
 		return 1
 	fi
 	# `cat`, not `dd`: dd's count/bs would have to be guessed per device, and
@@ -2404,7 +2404,7 @@ tkboot() {
 		_rel=$(TK_RUN_TIMEOUT=8 tk_run 'uname -r' 2>/dev/null | tr -d '\r\n')
 		[ -n "$_rel" ] || {
 			echo ">> cannot reach the device, so no base image can be seeded" >&2
-			echo ">> boot the phone, or set TK_BASEIMG to a known-good" >&2
+			echo ">> boot the phone, or set PORTHOLE_BASEIMG to a known-good" >&2
 			echo ">> UUID-patched boot.img" >&2
 			return 1; }
 		_PH_BASEIMG="$_rundir/base-boot-$_rel.img"

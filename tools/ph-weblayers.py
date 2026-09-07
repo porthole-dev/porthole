@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device; ph-webvq.py beside it; browser launched with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222
-# env: TK_INSPECTOR
+# env: PORTHOLE_INSPECTOR
 # exits: 0 ok
 """Dump the composited layer tree of the current page through the remote inspector.
 

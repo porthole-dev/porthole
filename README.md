@@ -186,7 +186,7 @@ Every tool documents itself in its first lines, so `head -20 <tool>` works too:
 ```
 # scope: generic
 # needs: BOOTED
-# env:   PHONE, TK_ALARM, TK_HOST
+# env:   PHONE, PORTHOLE_ALARM, TK_HOST
 # exits: 0 ok · non-zero on failure
 ```
 

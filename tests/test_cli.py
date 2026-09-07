@@ -292,7 +292,7 @@ def test_init_converges_instead_of_rewriting_the_file():
                        "--yes", env={"XDG_CONFIG_HOME": xdg})
     assert rc == 0, f"rc={rc} err={err}"
     after = cfg.read_text()
-    assert "TK_MY_OWN_KEY=keepme" in after, "init dropped a hand-added key"
+    assert "MY_OWN_KEY=keepme" in after, "init dropped a hand-added key"
     assert "# a note I wrote myself" in after, "init dropped a comment"
     assert "/opt/mine/" in after, (
         "init overwrote a tool path the developer set deliberately")
@@ -522,10 +522,10 @@ def test_the_resolved_config_beats_the_shell_it_was_launched_from():
     from porthole_cli import child_env
 
     env = child_env({"PORTHOLE_ARCH": "stale", "PATH": "/usr/bin"},
-                    {"PORTHOLE_ARCH": "aarch64", "TK_X": "1",
+                    {"PORTHOLE_ARCH": "aarch64", "PORTHOLE_X": "1",
                      "HOME": "/should/not/cross", "PORTHOLE_N": 5})
     assert env["PORTHOLE_ARCH"] == "aarch64", "the stale shell value won"
-    assert env["TK_X"] == "1"
+    assert env["PORTHOLE_X"] == "1"
     assert env.get("PATH") == "/usr/bin"
     assert env.get("HOME") != "/should/not/cross", "a non-PORTHOLE key crossed"
     assert "PORTHOLE_N" not in env, "a non-string cfg value crossed"

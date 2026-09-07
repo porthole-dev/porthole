@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
-# env: HOST, PHONE, TK_CAP_PORT, TK_CAP_WLAN
+# env: HOST, PHONE, PORTHOLE_CAP_PORT, PORTHOLE_CAP_WLAN
 # exits: 0 ok · 1 failed
 # ph-capture.sh -- arm every log channel this device has, from the HOST, and
 # say at the end whether anything died.
@@ -44,7 +44,7 @@
 #   It is WARN_ON_ONCE so it fires once per boot and does not amplify anything,
 #   but it taints the kernel and pollutes exactly the trace you came for. The
 #   u_ether (usb0) target was armed in the same capture, is flushed by the same
-#   printk, and does not warn. Hence TK_CAP_WLAN defaults to 0.
+#   printk, and does not warn. Hence PORTHOLE_CAP_WLAN defaults to 0.
 #
 # TRAP 2 -- never `pkill -f <pattern>` over ssh with a pattern that appears in
 #   your own command line. `pkill -f xdg-permission-store` killed the ssh
@@ -75,11 +75,11 @@ SINK_DUR=$DUR; [ "$DUR" = 0 ] && SINK_DUR=315360000
 # 2026-08-26 a watchdog reset on display wake produced NOTHING over usb0: no
 # pretimeout panic, no hard-lockup report, and an empty pstore afterwards. When
 # the failure can take the USB path down with it, one transport is one point of
-# failure. Set TK_CAP_WLAN=0 to go back to usb0 alone.
-[ "$DUR" = 0 ] && TK_CAP_WLAN=${TK_CAP_WLAN:-1}
-TK_CAP_WLAN=${TK_CAP_WLAN:-0}
-TK_CAP_PORT=${TK_CAP_PORT:-6666}
-TK_RESCUE_PORT=${TK_RESCUE_PORT:-2323}
+# failure. Set PORTHOLE_CAP_WLAN=0 to go back to usb0 alone.
+[ "$DUR" = 0 ] && PORTHOLE_CAP_WLAN=${PORTHOLE_CAP_WLAN:-1}
+PORTHOLE_CAP_WLAN=${PORTHOLE_CAP_WLAN:-0}
+PORTHOLE_CAP_PORT=${PORTHOLE_CAP_PORT:-6666}
+PORTHOLE_RESCUE_PORT=${PORTHOLE_RESCUE_PORT:-2323}
 
 mkdir -p "$OUT" || exit 1
 
@@ -107,7 +107,7 @@ dev_run() {
 		printf '%s\n' "$out"
 		return "$rc"
 	fi
-	out=$(printf '%s\nexit\n' "$1" | timeout 25 nc "$HOST" "$TK_RESCUE_PORT" 2>/dev/null | tail -n +2)
+	out=$(printf '%s\nexit\n' "$1" | timeout 25 nc "$HOST" "$PORTHOLE_RESCUE_PORT" 2>/dev/null | tail -n +2)
 	[ -n "$out" ] || return 1
 	printf '%s\n' "$out"
 }
@@ -193,7 +193,7 @@ arm_wlan() {
 	local wip
 	wip=$(dev_run "ip -4 -br addr show wlan0 2>/dev/null | awk '{print \$3}' | cut -d/ -f1" | tr -d '\r')
 	[ -n "$wip" ] || return 1
-	[ "$(arm_target wifi wlan0 "$wip" "$HOST_WLAN_IP" "$HOST_WLAN_MAC" $((TK_CAP_PORT+1)))" = 1 ] || return 1
+	[ "$(arm_target wifi wlan0 "$wip" "$HOST_WLAN_IP" "$HOST_WLAN_MAC" $((PORTHOLE_CAP_PORT+1)))" = 1 ] || return 1
 	WLAN_ARMED=1
 }
 
@@ -202,8 +202,8 @@ host_ifaces
 {
 	echo "--- armed $(date -Iseconds) boot=$(cap_boot_id) host_mac=$HOST_USB_MAC"
 	dev_run 'sudo -n modprobe netconsole 2>/dev/null; true' >/dev/null
-	echo "usb0  enabled=$(arm_target usb usb0 "$HOST" 172.16.42.2 "$HOST_USB_MAC" "$TK_CAP_PORT")"
-	if [ "$TK_CAP_WLAN" = 1 ]; then
+	echo "usb0  enabled=$(arm_target usb usb0 "$HOST" 172.16.42.2 "$HOST_USB_MAC" "$PORTHOLE_CAP_PORT")"
+	if [ "$PORTHOLE_CAP_WLAN" = 1 ]; then
 		arm_wlan && echo "wlan0 enabled=1" \
 		         || echo "wlan0 not up yet -- retrying every poll until it is"
 	fi
@@ -293,7 +293,7 @@ while time.time() < end:
             seen.add(t)
             if len(seen) > 20000: seen.clear()
             print(f"{datetime.datetime.now():%H:%M:%S.%f} [nc:{p}] {t}", flush=True)
-' "$TK_CAP_PORT" "$TK_CAP_WLAN" "$SINK_DUR" > "$OUT/netconsole.log" 2>&1 &
+' "$PORTHOLE_CAP_PORT" "$PORTHOLE_CAP_WLAN" "$SINK_DUR" > "$OUT/netconsole.log" 2>&1 &
 NC_PID=$!
 sleep 0.5
 
@@ -324,7 +324,7 @@ verify_channel() {
 			echo ">> netconsole VERIFIED end to end, transports live:$(
 				grep -o '\[nc:[0-9]*\] \*\*\* transport live' "$OUT/netconsole.log" 2>/dev/null |
 				grep -o '[0-9]\+' | sort -u | tr '\n' ' ' | sed 's/^/ /')" | tee -a "$OUT/arm.log"
-			[ "$TK_CAP_WLAN" = 1 ] && [ "$WLAN_ARMED" = 0 ] && \
+			[ "$PORTHOLE_CAP_WLAN" = 1 ] && [ "$WLAN_ARMED" = 0 ] && \
 				echo ">> (wlan0 still to come -- usb0 only for now)" | tee -a "$OUT/arm.log"
 			return 0
 		fi
@@ -420,7 +420,7 @@ watch_forever() {
 			# wlan0 associates long after usb0 answers, so the second
 			# transport is normally still missing at re-arm time. Keep
 			# trying until it lands.
-			if [ "$TK_CAP_WLAN" = 1 ] && [ "$WLAN_ARMED" = 0 ] && arm_wlan; then
+			if [ "$PORTHOLE_CAP_WLAN" = 1 ] && [ "$WLAN_ARMED" = 0 ] && arm_wlan; then
 				echo ">> wlan0 armed (second transport up)" | tee -a "$OUT/arm.log"
 			fi
 			continue

@@ -80,8 +80,8 @@ scanning `/proc/*/fd`; fault census by `dmesg`.
 
 **Two instrument traps paid for here.** `sudo -E` is refused by this busybox
 sudo ("preserving the entire environment is not supported"), so
-`TK_INTERVAL=... sudo sh ph-mempressure.sh` silently samples at 1 Hz -- pass
-`sudo env TK_INTERVAL=...` instead. And a detached sampler started over ssh
+`PORTHOLE_INTERVAL=... sudo sh ph-mempressure.sh` silently samples at 1 Hz -- pass
+`sudo env PORTHOLE_INTERVAL=...` instead. And a detached sampler started over ssh
 died exactly when the scope hit its bound, losing the window it existed to
 capture; write to a file on the device and expect to lose the tail.
 

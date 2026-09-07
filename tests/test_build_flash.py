@@ -456,7 +456,7 @@ def test_host_paths_are_not_resent_into_the_container():
     what made a real session refuse with 'this profile cannot build yet'."""
     import porthole_cmd_build as build
     argv = build._container_cmd("tkbuild", None,
-                                {"TK_X": "1", "PORTHOLE_WORKDIR": "/host/tree"})
+                                {"PORTHOLE_X": "1", "PORTHOLE_WORKDIR": "/host/tree"})
     assert "PORTHOLE_WORKDIR" not in argv, argv
 
 

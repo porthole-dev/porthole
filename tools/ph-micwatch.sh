@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
-# env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_UID
+# env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, PORTHOLE_UID
 # exits: 0 ok · non-zero on failure
 # ph-micwatch.sh -- sample whether anything is holding the microphone open.
 #
@@ -35,7 +35,7 @@ set -u
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 LOG=/tmp/tk-micwatch.log
-UID_ON_PHONE=${TK_UID:-10000}
+UID_ON_PHONE=${PORTHOLE_UID:-10000}
 
 # One sampler body, used both by the daemon unit and the one-shot poll.
 read -r -d '' PROBE <<PROBE_EOF

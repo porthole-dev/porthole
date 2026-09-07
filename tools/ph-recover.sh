@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: any (probes state; handles BOOTED and FASTBOOT)
-# env: FASTBOOT, HOST, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_IMG
+# env: FASTBOOT, HOST, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, PORTHOLE_IMG
 # exits: 0 ok · 1 failed · 2 usage · 3 see source · 4 see source · 5 see source · 6 see source · 7 see source
 # ph-recover.sh -- one command to get taimen back after the 2026-08-01 incident,
 # and after any hang that leaves it off the bus.
@@ -24,7 +24,7 @@ set -u
 
 cd "$(dirname "$0")" || exit 1
 HOST=${TK_HOST:-$PORTHOLE_HOST}
-IMG=${TK_IMG:-/tmp/postmarketOS-export/boot.img}
+IMG=${PORTHOLE_IMG:-/tmp/postmarketOS-export/boot.img}
 BLACKLIST=/etc/modprobe.d/tkdiag-ladder-no-ipa.conf
 LADDER_LOG=/var/log/tk-ladder.log
 DO_FLASH=0

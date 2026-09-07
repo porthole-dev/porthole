@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: any (probes state; handles BOOTED and FASTBOOT)
-# env: FASTBOOT, HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_RESCUE_PORT
+# env: FASTBOOT, HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, PORTHOLE_RESCUE_PORT
 # exits: 0 ok · 1 failed
 # ph-supervise.sh -- keep the phone alive during unattended work.
 #
@@ -30,7 +30,7 @@ set -u
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
-PORT=${TK_RESCUE_PORT:-2323}
+PORT=${PORTHOLE_RESCUE_PORT:-2323}
 INTERVAL=${1:-30}
 LOG=${2:-/tmp/tk-supervise.log}
 FAILS=0

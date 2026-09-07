@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: runs ON THE DEVICE. /tmp/sess.sh, /tmp/ph-wkphase.sh, /tmp/ph-webeval.py.
-# env: TK_WKPHASE_OFFSETS (required), TK_VID_URL, TK_VID_LIMIT, TK_VID_QUALITY
+# env: TK_WKPHASE_OFFSETS (required), PORTHOLE_VID_URL, PORTHOLE_VID_LIMIT, PORTHOLE_VID_QUALITY
 # exits: 0 measured · 1 the arm is void
 # vidrec.sh -- one steady-state YouTube playback arm, probed, with a control.
 #
@@ -25,10 +25,10 @@ set -u
 export TK_WKPHASE_OFFSETS
 . /tmp/sess.sh
 EV=/tmp/ph-webeval.py
-URL=${TK_VID_URL:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}
-LIMIT=${TK_VID_LIMIT:-2560x1440@60}
-QUAL=${TK_VID_QUALITY:-hd1440}
-WIN=${TK_VID_WINDOW:-30}
+URL=${PORTHOLE_VID_URL:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}
+LIMIT=${PORTHOLE_VID_LIMIT:-2560x1440@60}
+QUAL=${PORTHOLE_VID_QUALITY:-hd1440}
+WIN=${PORTHOLE_VID_WINDOW:-30}
 
 for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do
 	systemctl --user stop "$u" 2>/dev/null
@@ -45,7 +45,7 @@ setsid systemd-run --user --scope --quiet --slice=app.slice \
 	env WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2 \
 	WEBKIT_LAYERS_TILE_SIZE=1440x1024 WEBKIT_GST_VIDEO_DECODING_LIMIT="$LIMIT" \
 	WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 WAYLAND_DEBUG=1 \
-	${TK_VID_ENV:-} epiphany "$URL" >/tmp/eph-vid.log 2>/tmp/wl-vid.log </dev/null &
+	${PORTHOLE_VID_ENV:-} epiphany "$URL" >/tmp/eph-vid.log 2>/tmp/wl-vid.log </dev/null &
 
 st=-1
 for _ in $(seq 1 40); do

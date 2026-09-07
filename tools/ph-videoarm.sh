@@ -4,7 +4,7 @@
 # needs: on-device as the session user (ph-webeval.py, ph-gesture-bench.py,
 #        ph-touch.py, ph-ui.py in /tmp; /tmp/sess.sh); Epiphany; grim, lswt;
 #        a local clip.
-# env: TK_VIDEO_FILE (default ~/vp9_1440p60.webm), TK_VIDEO_SECONDS
+# env: PORTHOLE_VIDEO_FILE (default ~/vp9_1440p60.webm), PORTHOLE_VIDEO_SECONDS
 # exits: 0 measured · 1 the arm is void -- the video never advanced
 # ph-videoarm.sh LABEL [ENV...] -- one PLAYBACK arm on a LOCAL clip.
 #
@@ -23,13 +23,13 @@
 #   ph-videoarm.sh pipe2 "WEBKIT_COMPOSITOR_MAX_FRAMES_IN_FLIGHT=2"
 set -u
 L=${1:?usage: ph-videoarm.sh LABEL [ENV...]}; X=${2:-}
-CLIP=${TK_VIDEO_FILE:-$HOME/Videos/vtest/v1440.mp4}
+CLIP=${PORTHOLE_VIDEO_FILE:-$HOME/Videos/vtest/v1440.mp4}
 # An existing page next to the clip wins over the one generated below: this
 # device already has ~/Videos/vtest/*.html, made when these clips were,
-# and they are known to play. TK_VIDEO_URL overrides everything.
-URL=${TK_VIDEO_URL:-}
+# and they are known to play. PORTHOLE_VIDEO_URL overrides everything.
+URL=${PORTHOLE_VIDEO_URL:-}
 [ -n "$URL" ] || { alt="${CLIP%.*}.html"; [ -f "$alt" ] && URL="file://$alt"; }
-SECS=${TK_VIDEO_SECONDS:-12}
+SECS=${PORTHOLE_VIDEO_SECONDS:-12}
 [ -f "$CLIP" ] || { echo "[$L] no clip at $CLIP -- arm void"; exit 1; }
 
 # The clip has to sit BESIDE the page: a file:// document may not reach another
@@ -63,7 +63,7 @@ setsid systemd-run --user --scope --quiet --slice=app.slice \
 # refused play() and a clip that has not loaded look identical from outside.
 t1=""; for i in $(seq 1 30); do
 	sleep 2
-	[ "$i" = 4 ] && TK_GESTURE=1 python3 /tmp/ph-webeval.py 'var v=document.querySelector("video"); v.muted=true; v.play(); 1' >/dev/null 2>&1
+	[ "$i" = 4 ] && PORTHOLE_GESTURE=1 python3 /tmp/ph-webeval.py 'var v=document.querySelector("video"); v.muted=true; v.play(); 1' >/dev/null 2>&1
 	t1=$(python3 /tmp/ph-webeval.py 'var v=document.querySelector("video"); v?v.currentTime:-1' 2>/dev/null | tail -1)
 	case "$t1" in ''|-1|*[!0-9.]*) ;; *) [ "${t1%%.*}" -ge 1 ] 2>/dev/null && break ;; esac
 done

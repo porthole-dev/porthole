@@ -87,6 +87,27 @@ is "TK_AGENT beats PORTHOLE_AGENT" \
    "$(phsh 'TK_AGENT=claude PORTHOLE_AGENT=agentname' 'echo $TK_AGENT')" "claude"
 is "TK_AGENT falls back to PORTHOLE_AGENT" \
    "$(phsh 'PORTHOLE_AGENT=agentname' 'echo $TK_AGENT')" "agentname"
+# The knobs that gained a porthole-namespaced twin in the rename. Same rule as
+# TK_POLL and TK_AGENT above: the twin is honoured, and the old name still
+# wins, because a porter has these exported in a shell they have had open for
+# a week and a build must not stop dead because this repo renamed something.
+is "PORTHOLE_RUN_TIMEOUT is honoured" \
+   "$(phsh 'PORTHOLE_RUN_TIMEOUT=99' 'echo $TK_RUN_TIMEOUT')" "99"
+is "TK_RUN_TIMEOUT still wins" \
+   "$(phsh 'TK_RUN_TIMEOUT=7 PORTHOLE_RUN_TIMEOUT=99' 'echo $TK_RUN_TIMEOUT')" "7"
+is "PORTHOLE_DEVICE_LOCK is honoured" \
+   "$(phsh 'PORTHOLE_DEVICE_LOCK=/tmp/new.lock' 'echo $TK_DEVICE_LOCK')" "/tmp/new.lock"
+is "TK_DEVICE_LOCK still wins" \
+   "$(phsh 'TK_DEVICE_LOCK=/tmp/old.lock PORTHOLE_DEVICE_LOCK=/tmp/new.lock' \
+           'echo $TK_DEVICE_LOCK')" "/tmp/old.lock"
+# `<pw-new>` and not a word: tests/test_secrets.py reads any
+# `<word>password = <value>` as a literal credential and is right to be that
+# blunt, and an angle-bracket pseudonym is the convention it already accepts.
+is "PORTHOLE_PMOS_PASSWORD is honoured" \
+   "$(phsh 'PORTHOLE_PMOS_PASSWORD=<pw-new>' 'echo $TK_PMOS_PASSWORD')" "<pw-new>"
+is "TK_PMOS_PASSWORD still wins" \
+   "$(phsh 'TK_PMOS_PASSWORD=<pw-old> PORTHOLE_PMOS_PASSWORD=<pw-new>' \
+           'echo $TK_PMOS_PASSWORD')" "<pw-old>"
 is "FASTBOOT passes through" \
    "$(phsh 'FASTBOOT=/opt/fb' 'echo $FASTBOOT')" "/opt/fb"
 is "the frozen tk_* surface is defined" \
@@ -153,7 +174,7 @@ has "each escalation names what the last attempt returned" "$esc" "exited"
 # The request itself must be able to REPORT. Detaching it threw the exit status
 # and the message away, which is why #38 had no record of the first failure.
 body=$(phsh '' 'declare -f ph_reboot_try')
-has "the reboot request keeps the far side's stderr" "$body" "TK_REBOOT_ERR"
+has "the reboot request keeps the far side's stderr" "$body" "PORTHOLE_REBOOT_ERR"
 hasnt "the reboot request is not detached into /dev/null" "$body" "&); exit 0"
 
 # --------------------------------------------- the forbidden-slot guard ----

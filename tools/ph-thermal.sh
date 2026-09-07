@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
-# env: HOST, PHONE, PORTHOLE_USER, TK_THERMAL_CEILING (mC, default 82000),
-#      TK_THERMAL_FLOOR (mC, default 55000), TK_THERMAL_BRIGHTNESS (default 4)
+# env: HOST, PHONE, PORTHOLE_USER, PORTHOLE_THERMAL_CEILING (mC, default 82000),
+#      PORTHOLE_THERMAL_FLOOR (mC, default 55000), PORTHOLE_THERMAL_BRIGHTNESS (default 4)
 # exits: 0 ok · 64 usage · 1 the die never reached the floor
 #
 # Keep a phone from being cooked by back-to-back measurement arms.
@@ -29,9 +29,9 @@ set -uo pipefail
 # shellcheck source=ph-lib.sh
 . "$(dirname "$0")/ph-lib.sh"
 
-CEIL=${TK_THERMAL_CEILING:-82000}
-FLOOR=${TK_THERMAL_FLOOR:-55000}
-BRIGHT=${TK_THERMAL_BRIGHTNESS:-4}
+CEIL=${PORTHOLE_THERMAL_CEILING:-82000}
+FLOOR=${PORTHOLE_THERMAL_FLOOR:-55000}
+BRIGHT=${PORTHOLE_THERMAL_BRIGHTNESS:-4}
 
 # The hottest zone, because which one leads depends on the workload: a GPU arm
 # leads on gpu-*-thermal, a CPU arm on cpu*-thermal.

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: FASTBOOT
-# env: FASTBOOT, TK_SLOT, TK_TIMEOUT
+# env: FASTBOOT, PORTHOLE_SLOT, PORTHOLE_TIMEOUT
 # exits: 0 ok · 1 failed · 2 usage
 # Flash a boot image to slot b and come back up in pmOS, end to end, unattended.
 #
@@ -34,8 +34,8 @@
 #   - getting into the bootloader is unreliable enough to need its own retry
 #     logic; that lives in ph-to-fastboot.sh and is reused here.
 #
-# Usage: ph-flash-boot.sh IMAGE [timeout_seconds]   (default 180, or $TK_TIMEOUT)
-#   env: TK_SLOT       partition to flash (default boot_b)
+# Usage: ph-flash-boot.sh IMAGE [timeout_seconds]   (default 180, or $PORTHOLE_TIMEOUT)
+#   env: PORTHOLE_SLOT       partition to flash (default boot_b)
 # Exit:  0 flashed and back up, 2 bad arguments/image, non-zero otherwise.
 set -u
 
@@ -43,8 +43,8 @@ cd "$(dirname "$0")" || exit 1
 . ./ph-lib.sh
 
 IMG=${1:-}
-TIMEOUT=${2:-${TK_TIMEOUT:-180}}
-SLOT=${TK_SLOT:-boot_b}
+TIMEOUT=${2:-${PORTHOLE_TIMEOUT:-180}}
+SLOT=${PORTHOLE_SLOT:-boot_b}
 
 [ -n "$IMG" ] || { echo "usage: ph-flash-boot.sh IMAGE [timeout_seconds]" >&2; exit 2; }
 

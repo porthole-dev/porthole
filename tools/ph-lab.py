@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: BOOTED
-# env: FASTBOOT, PHONE, TK_LAB_ALLOW_VOL
+# env: FASTBOOT, PHONE, PORTHOLE_LAB_ALLOW_VOL
 # exits: 0 ok
 """tk-lab -- unattended audio experiment harness for taimen.
 
@@ -676,9 +676,9 @@ def set_mixer(pairs):
     for p in pairs:
         ctl, _, val = p.partition("=")
         ctl, val = ctl.strip(), val.strip()
-        if re.fullmatch(r"(DEC|ADC)\d+ Volume", ctl) and not os.environ.get("TK_LAB_ALLOW_VOL"):
+        if re.fullmatch(r"(DEC|ADC)\d+ Volume", ctl) and not os.environ.get("PORTHOLE_LAB_ALLOW_VOL"):
             sys.exit(f"refusing to write '{ctl}': kcontrol max 40 < register default 84, so "
-                     "this is an unrecoverable gain cut. Set TK_LAB_ALLOW_VOL=1 to override.")
+                     "this is an unrecoverable gain cut. Set PORTHOLE_LAB_ALLOW_VOL=1 to override.")
         cmds.append(f"amixer -c0 -q cset name='{ctl}' '{val}' >/dev/null 2>&1 || echo 'FAIL {ctl}'")
     r = sh("; ".join(cmds))
     bad = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]

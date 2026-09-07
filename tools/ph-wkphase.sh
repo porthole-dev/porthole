@@ -4,7 +4,7 @@
 # needs: on-device with passwordless sudo; CONFIG_UPROBE_EVENTS. Offsets come
 #        from TK_WKPHASE_OFFSETS, which tools/ph-wkoffsets.sh computes on the
 #        HOST from the -dbg package for the build that is installed.
-# env: TK_WKPHASE_OFFSETS (required for `arm`), TK_WKPHASE_LIB
+# env: TK_WKPHASE_OFFSETS (required for `arm`), PORTHOLE_WKPHASE_LIB
 # exits: 0 ok · 64 usage or no offsets
 # ph-wkphase.sh arm|measure [SECONDS]|off -- where the WebKit MAIN THREAD's
 # per-frame time goes: style, layout, compositing, intersection observers.
@@ -32,7 +32,7 @@
 # ftrace filled its buffer while `perf record -a -e wk:<name>` on the very same
 # probes captured nothing on this kernel.
 set -u
-L=${TK_WKPHASE_LIB:-/usr/lib/libwebkitgtk-6.0.so.4.16.10}
+L=${PORTHOLE_WKPHASE_LIB:-/usr/lib/libwebkitgtk-6.0.so.4.16.10}
 T=/sys/kernel/tracing
 CMD=${1:-}
 

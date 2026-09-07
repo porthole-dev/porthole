@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device; ph-webvq.py beside it; browser launched with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222
-# env: TK_INSPECTOR
+# env: PORTHOLE_INSPECTOR
 # exits: 0 ok · 1 error
 """Evaluate JavaScript in the current page through WebKit's remote inspector.
 
@@ -31,9 +31,9 @@ if not sockets:
 # the page is in fact playing perfectly in the OTHER target. Several arms were
 # voided this way on 2026-09-05 before the URL was printed.
 #
-# So evaluate in the target that is actually showing something. TK_TARGET_URL
+# So evaluate in the target that is actually showing something. PORTHOLE_TARGET_URL
 # overrides the default "anything that is not about:blank".
-WANT = os.environ.get("TK_TARGET_URL", "")
+WANT = os.environ.get("PORTHOLE_TARGET_URL", "")
 
 def open_target(sock):
     cid, tid, typ = sock
@@ -47,10 +47,10 @@ def open_target(sock):
 
 # Anything gated on a user gesture -- requestFullscreen(), unmuted play() --
 # is refused from a plain inspector eval, and the refusal looks exactly like the
-# call not working. TK_GESTURE=1 marks the evaluation as user-initiated, which
+# call not working. PORTHOLE_GESTURE=1 marks the evaluation as user-initiated, which
 # is how the fullscreen video path can be measured without synthesising a tap on
 # a button whose position depends on the page.
-GESTURE = os.environ.get("TK_GESTURE", "") not in ("", "0")
+GESTURE = os.environ.get("PORTHOLE_GESTURE", "") not in ("", "0")
 
 def run(s, page, expression, msg_id):
     inner = json.dumps({"id": msg_id, "method": "Runtime.evaluate", "params": {"expression": expression, "returnByValue": True, "emulateUserGesture": GESTURE}})
@@ -80,7 +80,7 @@ if chosen is None:
     s, page = open_target(sockets[-1])
 else:
     s, page, href = chosen
-    if os.environ.get("TK_TARGET_VERBOSE"): print("target: %s" % href[:70], file=sys.stderr)
+    if os.environ.get("PORTHOLE_TARGET_VERBOSE"): print("target: %s" % href[:70], file=sys.stderr)
 
 m = run(s, page, expr, 1)
 if "error" in m: print("error:", m["error"], file=sys.stderr); sys.exit(1)
