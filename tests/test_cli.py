@@ -547,7 +547,10 @@ def test_the_host_only_verbs_stay_under_their_budget():
       tool versions and git metadata; 0.09–0.14 s is typical. A 4 s budget is
       ~30× the real cost (leaving headroom for scheduling jitter on a loaded
       runner) while sitting well below ~5.5 s a single ssh connect timeout costs.
-      If the control ever started dialling, this budget trips it.
+      This budget catches a dial of the magnitude this test was written for
+      (~5.5 s, one ConnectTimeout=5 ssh). A partial dial smaller than ~3.9 s
+      would pass all tiers: the control baseline shifts with it, so every delta
+      stays flat and the relative check stays blind.
     - Host-only verbs (--help, devices, doctor --no-device):
       3 s relative to the control AND 8 s absolute. The relative check catches
       regressions even on a loaded runner because both verbs and control share
