@@ -180,5 +180,36 @@ def test_a_settings_file_that_is_not_json_is_a_refusal_not_a_rewrite():
     raise AssertionError("a broken settings file was not refused")
 
 
+def test_a_rule_from_before_the_rename_is_reported_not_ignored():
+    """`_merge` unions and never removes, correctly -- a settings file is the
+    reader's own. So a re-run after the tk- to ph- rename grants the new path
+    and leaves `Bash(tools/tk-device.sh:*)` sitting there, matching nothing.
+
+    An ineffective allow rule looks exactly like an effective one, and the
+    symptom is a permission prompt rather than an error, so it has to be said
+    out loud."""
+    import json
+    import tempfile
+
+    from porthole_cmd_permissions import stale_rules
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = pathlib.Path(tmp) / "settings.local.json"
+        assert stale_rules(target) == [], "a missing file has no stale rules"
+
+        target.write_text(json.dumps({"permissions": {"allow": [
+            "Bash(tools/tk-device.sh:*)",
+            "Bash(tools/ph-device.sh:*)",
+            "Bash(make test:*)",
+        ]}}))
+        assert stale_rules(target) == ["Bash(tools/tk-device.sh:*)"], (
+            stale_rules(target))
+
+        # Not valid JSON, and not this function's job to say so: _merge
+        # reports that, with the reason.
+        target.write_text("{not json")
+        assert stale_rules(target) == []
+
+
 if __name__ == "__main__":
     sys.exit(run(globals()))
