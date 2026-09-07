@@ -1647,6 +1647,13 @@ def _maybe_autoselect_tree(ctx, action: str = "") -> None:
     # one of the two is how the host and the container end up building
     # different trees.
     os.environ["PORTHOLE_KERNEL_TREE"] = chosen
+    # Gated on --json for the same reason as the `auto` line in cmd_build:
+    # this fires before ctx.emit ever runs, so nothing arbitrates it out of a
+    # --json stream, and it is prose for a human, not part of the reported
+    # document. The autoselected tree itself is already in every payload that
+    # reads it (`_tree(ctx.cfg)`), so an agent loses no information here.
+    if getattr(ctx.args, "json", False):
+        return
     _, pkgrel = aport_version(ctx)
     release = f"r{pkgrel}" if pkgrel else ""
     ctx.out(ctx.out.paint(
@@ -1843,11 +1850,19 @@ def cmd_build(args, ctx) -> int:
     # `status` and `auto` are actions, not flags. A store_true `--status` would
     # be a MODE encoded as a boolean, which permits nonsense combinations and
     # is what tests/test_cli_rules.py forbids repo-wide.
-    if not args.action:
+    if not args.action and not getattr(args, "json", False):
         # `auto` is not a synonym for "build": it measures an incremental
         # make and then routes on what that rebuilt, which can be anything
         # from a module push to a full kernel. A reader who did not type it
         # is owed the name before the work starts, not in the summary after.
+        #
+        # Gated on --json: this is chrome for a human deciding what to type
+        # next, not part of the reported document, and `ctx.emit` has not run
+        # yet to arbitrate between the two. Printing it to stderr instead was
+        # the other option; skipping it under --json was chosen because an
+        # agent asking for --json already knows which rung it asked for (or
+        # didn't) from the JSON's own "action" field, so the line has nothing
+        # to tell it.
         ctx.out(ctx.out.paint(
             "  auto  no rung given -- measuring, then routing on what "
             "rebuilds  (porthole build --help for the rungs)", "grey"))

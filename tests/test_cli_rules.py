@@ -247,7 +247,8 @@ def test_json_output_actually_parses():
     needs_pmaports()
     for argv in (["devices", "--json"], ["soc", "list", "--json"],
                  ["brain", "search", "--severity", "law", "--json"],
-                 ["tools", "--json"], ["tools", "audit", "--json"]):
+                 ["tools", "--json"], ["tools", "audit", "--json"],
+                 ["build", "--json"]):
         rc, out, err = run(*argv)
         assert rc == 0, f"{argv} -> rc={rc} {err}"
         json.loads(out)
