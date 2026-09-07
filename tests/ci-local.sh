@@ -138,7 +138,7 @@ for c in "" "--help" "version" "devices"; do
 	# shellcheck disable=SC2086
 	./bin/porthole $c >/dev/null 2>&1 && say ok "porthole $c" || { say FAIL "porthole $c"; fail=1; }
 done
-./bin/porthole init google-taimen --user ci --host 172.16.42.1 >/dev/null 2>&1 \
+./bin/porthole init google-taimen --user ci --host 172.16.42.1 --yes >/dev/null 2>&1 \
 	&& ./bin/porthole config PHONE | grep -q '^ci@172.16.42.1$' \
 	&& say ok "headless bootstrap" || { say FAIL "headless bootstrap"; fail=1; }
 for c in "brief --no-device --json" "tools --json" "brain --json" "next --json"; do
