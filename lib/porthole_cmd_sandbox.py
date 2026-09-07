@@ -860,7 +860,7 @@ def _device_key_authorized(cfg, key):
     return False if "Permission denied" in proc.stderr else None
 
 
-def _container_state(root: pathlib.Path, cfg=None) -> dict:
+def _container_state(root: pathlib.Path, cfg=None, probe_device: bool = True) -> dict:
     out = {"podman": shutil.which("podman"), "image": _image_tag(root),
            "image_built": False, "container_running": False,
            "device_key": "", "issues": []}
@@ -886,7 +886,11 @@ def _container_state(root: pathlib.Path, cfg=None) -> dict:
     # push failed with `scp: Connection closed`. Same class of error as
     # trusting an exit code over content: the file being present is a PROXY for
     # the thing that matters, and the proxy held while the thing did not.
-    out["device_key_authorized"] = _device_key_authorized(cfg or {}, key)
+    # `None` is already this field's "could not tell" -- an unreachable device
+    # is not evidence the key is bad -- so a skipped probe needs no new state
+    # and no reader has to change. See _device_key_authorized.
+    out["device_key_authorized"] = (
+        _device_key_authorized(cfg or {}, key) if probe_device else None)
     if not out["podman"]:
         out["issues"].append("podman not installed -- the workspace is "
                              "unavailable. `porthole doctor` has install hints")
