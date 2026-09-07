@@ -45,6 +45,7 @@ def _suggest(word, options):
 SPEC = {
     "verb": "config",
     "order": 30,
+    "group": "start",
     "help": "print the resolved config and where each value came from",
     "description": (
         "Every knob, its value, and which of the five layers supplied it.\n"

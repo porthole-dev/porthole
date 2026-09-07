@@ -14,8 +14,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 CLI = ROOT / "bin" / "porthole"
 
 
@@ -528,21 +531,118 @@ def test_the_resolved_config_beats_the_shell_it_was_launched_from():
     assert "PORTHOLE_N" not in env, "a non-string cfg value crossed"
 
 
+# 192.0.2.0/24 is TEST-NET-1 (RFC 5737): guaranteed unrouteable, so a verb
+# that dials the device hangs for its full connect timeout instead of failing
+# fast against a real address that happens to refuse.
+BLACKHOLE = "192.0.2.1"
+
+
+def test_the_host_only_verbs_stay_under_their_budget():
+    """These verbs touch nothing and must not wait on the network. The test
+    measures a control verb (version, ~interpreter startup only) and uses it
+    as a reference point for a relative budget on the host-only verbs.
+
+    Budget strategy:
+    - Control (porthole version): 4.0 s absolute. Version touches only local
+      tool versions and git metadata; 0.09–0.14 s is typical. A 4 s budget is
+      ~30× the real cost (leaving headroom for scheduling jitter on a loaded
+      runner) while sitting well below ~5.5 s a single ssh connect timeout costs.
+      This budget catches a dial of the magnitude this test was written for
+      (~5.5 s, one ConnectTimeout=5 ssh). A partial dial smaller than ~3.9 s
+      would pass all tiers: the control baseline shifts with it, so every delta
+      stays flat and the relative check stays blind.
+    - Host-only verbs (--help, devices, doctor --no-device):
+      3 s relative to the control AND 8 s absolute. The relative check catches
+      regressions even on a loaded runner because both verbs and control share
+      scheduling jitter equally. A network dial adds fixed ~5 s that load does
+      not, so a 3 s delta cleanly separates normal (~0.6–0.8 s) from broken
+      (~5.5 s). The 8 s absolute backstop is a safety ceiling.
+
+    The unrouteable device address (192.0.2.0/24 is RFC 5737 TEST-NET-1) forces
+    a dial to cost a full connect timeout, not a fast refusal -- signal is
+    seconds, not milliseconds.
+
+    Retry on budget exceedance: When a verb exceeds budget, re-measure both the
+    control and that verb. Only report failure if it exceeds again on the second
+    reading. This filters transient scheduling jitter in a shared test runner
+    (where a contention burst can land on one verb while the pool is quiet) from
+    real regressions like a network dial, which repeat consistently.
+
+    Same HOME dependency as test_no_device_does_not_open_a_connection_to_the_
+    device (tests/test_doctor.py): `doctor --no-device`'s workspace check only
+    reaches ssh through `_device_key_authorized`, which returns early with no
+    device key file to read. run()'s HOME defaults to the real one, so on a
+    clean HOME (any CI runner) this budget measured nothing but "the CLI
+    starts" -- the entire three-tier design was inert on the only surfaces
+    that run it. A temp HOME with a fake key makes the budget cover the case
+    that actually costs seconds when the guard regresses.
+    """
+    fake_home = tempfile.mkdtemp(prefix="porthole-cli-budget-home-")
+    key_dir = pathlib.Path(fake_home) / ".porthole"
+    key_dir.mkdir()
+    (key_dir / "device_key").write_text("fake key, never read\n")
+
+    env = {"PORTHOLE_DEVICE_STATE": "absent",
+           "PORTHOLE_HOST": BLACKHOLE, "PHONE": "pmos@" + BLACKHOLE,
+           "HOME": fake_home}
+    # Time the control first: version touches nothing, so its time is pure
+    # interpreter startup plus scheduling jitter.
+    started = time.monotonic()
+    run("version", env=env)
+    control = time.monotonic() - started
+
+    control_budget_s = 4.0
+    relative_budget_s = 3.0
+    absolute_budget_s = 8.0
+    slow = []
+
+    # Check the control itself. Same retry as every other tier below: `make
+    # test` deliberately oversubscribes the runner, so a lone jitter spike
+    # here must not fail the whole run -- only a repeat on a second reading
+    # is a real regression. Left without this retry, the control was the one
+    # tier a jitter spike could take down outright, which is the exact flake
+    # the retry exists to prevent, just left open on this one tier.
+    if control > control_budget_s:
+        started = time.monotonic()
+        run("version", env=env)
+        control_retry = time.monotonic() - started
+        if control_retry > control_budget_s:
+            slow.append(
+                f"porthole version (control): {control_retry:.2f}s (second "
+                f"reading) exceeds the control budget of {control_budget_s}s "
+                "-- the control itself is waiting on something, so the "
+                "relative budget below it is blind")
+        control = control_retry
+
+    # Check the host-only verbs.
+    for argv in (["--help"], ["devices"], ["doctor", "--no-device"]):
+        started = time.monotonic()
+        run(*argv, env=env)
+        took = time.monotonic() - started
+        if took > control + relative_budget_s or took > absolute_budget_s:
+            # Budget exceeded; retry both control and verb to filter transient jitter.
+            started = time.monotonic()
+            run("version", env=env)
+            control_retry = time.monotonic() - started
+            started = time.monotonic()
+            run(*argv, env=env)
+            took_retry = time.monotonic() - started
+            # Only fail if it repeats on the second reading.
+            if took_retry > control_retry + relative_budget_s or took_retry > absolute_budget_s:
+                slow.append(
+                    f"porthole {' '.join(argv)}: {took_retry:.2f}s (second reading) "
+                    f"(control {control_retry:.2f}s, delta {took_retry - control_retry:.2f}s)")
+    assert not slow, (
+        "these run with no device attached and must not wait on the network:\n  "
+        + "\n  ".join(slow)
+        + f"\n(control budget: {control_budget_s}s; "
+        + f"relative budget: +{relative_budget_s}s; "
+        + f"absolute budget: {absolute_budget_s}s; "
+        + "docs/PERFORMANCE.md, 'The verbs')")
+
+
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except AssertionError as exc:
-            failed += 1
-            print(f"FAIL {name}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"ERROR {name}: {type(exc).__name__}: {exc}")
-    print(f"{len(tests) - failed}/{len(tests)} passed")
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 if __name__ == "__main__":

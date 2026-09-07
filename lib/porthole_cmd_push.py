@@ -160,6 +160,7 @@ def cmd_push(args, ctx) -> int:
 SPEC = {
     "verb": "push",
     "order": 46,
+    "group": "device",
     "help": "install a helper on the device where it survives a reboot",
     "description": (
         "Everything scp'd to /tmp dies on reboot, and a bring-up session\n"

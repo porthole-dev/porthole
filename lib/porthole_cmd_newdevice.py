@@ -385,6 +385,7 @@ def cmd_new_device(args, ctx) -> int:
 SPEC = {
     "verb": "new-device",
     "order": 70,
+    "group": "start",
     "help": "scaffold a profile for a device nobody has ported yet",
     "description": (
         "Copies the documented template, seeds what can honestly be known from\n"

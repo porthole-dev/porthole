@@ -15,12 +15,15 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "porthole"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 import porthole_cli  # noqa: E402
@@ -244,7 +247,17 @@ def test_json_output_actually_parses():
     needs_pmaports()
     for argv in (["devices", "--json"], ["soc", "list", "--json"],
                  ["brain", "search", "--severity", "law", "--json"],
-                 ["tools", "--json"], ["tools", "audit", "--json"]):
+                 ["tools", "--json"], ["tools", "audit", "--json"],
+                 # NOT bare ["build", "--json"]: with no rung named, `auto`
+                 # runs a real incremental make and streams a progress bar to
+                 # stdout whenever a kernel tree is present -- that is not a
+                 # document, and never was on this branch or before it. This
+                 # harness's isolated env has no tree, so bare `build --json`
+                 # would pass here and fail on any host with one configured.
+                 # `status` and `ccache` are the reporting actions -- the
+                 # `--json` contract this test enforces is about them, not
+                 # about `auto`'s streamed build output.
+                 ["build", "status", "--json"], ["build", "ccache", "--json"]):
         rc, out, err = run(*argv)
         assert rc == 0, f"{argv} -> rc={rc} {err}"
         json.loads(out)
@@ -367,26 +380,122 @@ def test_completion_covers_every_verb():
             assert spec["verb"] in out, f"{spec['verb']} missing from {shell}"
 
 
+def test_grouped_flags_keep_their_context_off_help():
+    """`porthole aports --help` restores a grouped flag's action via an
+    argparse heading ("diff:") once the redundant "diff: " prefix was dropped
+    from the help STRING. zsh, fish, and the docs table draw no heading of
+    their own, so a user completing `porthole aports --mine` -- or reading
+    the published CLI reference -- lost that context entirely. `grouped_help`
+    in porthole_cli.py puts it back for exactly those three consumers."""
+    rc, out, err = run("completion", "zsh")
+    assert rc == 0, err
+    assert "'--mine[diff: only your device's packages]'" in out, out
+
+    rc, out, err = run("completion", "fish")
+    assert rc == 0, err
+    # fish's own quoting (_q) strips apostrophes from the help text -- not
+    # this fix's concern, so the assertion matches what fish actually emits.
+    assert "-l mine -d 'diff: only your devices packages'" in out, out
+
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_docs
+    page = porthole_cmd_docs.page_cli(ROOT)
+    assert "| `--mine` | diff: only your device's packages |" in page, page
+
+
+def test_every_verb_declares_a_group():
+    """35 verbs in one flat list is a wall, and `order` -- a bare integer --
+    cannot say why `slots` sits between `brief` and `statusline`. The group is
+    what the reader scans; the order is what sorts within it."""
+    specs = porthole_cli.discover(ROOT)
+    bad = [s["verb"] for s in specs
+           if s.get("group") not in porthole_cli.GROUPS]
+    assert not bad, (
+        "these verbs declare no group, or one that is not in "
+        f"{porthole_cli.GROUPS}:\n  " + "\n  ".join(sorted(bad)))
+
+
+def test_the_help_lists_each_verb_once():
+    """argparse's own positional dump and the hand-built epilog were both
+    printed, so every verb appeared twice and the page ran to 111 lines."""
+    rc, out, err = run("--help")
+    assert rc == 0, err
+    for verb in ("doctor", "build", "brain"):
+        assert out.count("\n  " + verb + " ") + out.count("\n    " + verb + " ") == 1, (
+            f"{verb} appears more than once in `porthole --help`:\n{out}")
+
+
+def test_an_arg_group_never_reaches_add_argument():
+    """`group` is porthole's key, not argparse's. If it is forwarded,
+    add_argument raises TypeError and the verb disappears from the CLI --
+    build() catches that and prints `skipping verb`, so the failure is a
+    missing command rather than a crash."""
+    specs = porthole_cli.discover(ROOT)
+    parser, table = porthole_cli.build(ROOT, specs)
+    missing = [s["verb"] for s in specs if s["verb"] not in table]
+    assert not missing, f"these verbs failed to build: {missing}"
+
+
+def test_a_grouped_flag_is_rendered_under_its_action():
+    rc, out, err = run("aports", "--help")
+    assert rc == 0, err
+    # The test checks for actual argument group headings (a line that is only
+    # the heading text), not substring matches. Substring matching would pass
+    # on the old flat output where --soc's help text read "new: seed from...".
+    lines = out.split("\n")
+    headings_found = {line.strip() for line in lines if line.strip() in ("new:", "patches:")}
+    assert headings_found == {"new:", "patches:"}, (
+        "aports has 23 flags and 15 of them name their action in prose; "
+        "they must be grouped in the parser too:\n" + out)
+
+
+def test_a_hint_does_not_pad_its_own_column():
+    """52 call sites hand-padded a command against an explanation and picked
+    21 different widths between them, so the same `porthole doctor` hint lands
+    in two different columns depending which verb printed it. The layout
+    belongs to Out.hint, which is the only thing that can be consistent about
+    it."""
+    import io
+    import porthole_cli
+
+    # A run of two or more spaces INSIDE a hint string is a hand-built column.
+    padded = []
+    for path in sorted((ROOT / "lib").glob("porthole*.py")):
+        for match in re.finditer(r"""\.hint\(\s*f?["']([^"']*)["']""",
+                                 path.read_text()):
+            if re.search(r"\S  +\S", match.group(1)):
+                padded.append(f"{path.name}: {match.group(1)[:60]}")
+    assert not padded, (
+        "pass the explanation as hint()'s second argument instead:\n  "
+        + "\n  ".join(padded))
+
+    # ...and the second argument actually lines up.
+    buf = io.StringIO()
+    out = porthole_cli.Out(stream=buf, force_colour=False)
+    out.hint("porthole doctor", "check the host and device")
+    out.hint("porthole build ccache --max 25G", "raise it")
+    lines = buf.getvalue().splitlines()
+    at = [lines[0].index("check the host"), lines[1].index("raise it")]
+    assert at[0] == at[1], f"two hints, two columns: {at}\n" + "\n".join(lines)
+
+    # `{:<N}` pads UP TO N -- a command already >= N chars gets no separator
+    # at all, and a note glued straight onto it (`google-taimenthe values...`)
+    # is one unreadable token, worse than the ragged columns this fixes.
+    # `porthole soc inherit google-taimen` is a real hint this repo prints,
+    # and is exactly HINT_COLUMN (34) characters -- the boundary itself.
+    buf2 = io.StringIO()
+    out2 = porthole_cli.Out(stream=buf2, force_colour=False)
+    command = "porthole soc inherit google-taimen"
+    out2.hint(command, "the values worth copying")
+    line = buf2.getvalue().splitlines()[0]
+    command_end = line.index(command) + len(command)
+    note_start = line.index("the values worth copying")
+    assert note_start - command_end >= 1, (
+        f"command and note need at least one space between them: {line!r}")
+
+
 def main():
-    tests = [(name, fn) for name, fn in sorted(globals().items())
-             if name.startswith("test_") and callable(fn)]
-    failed = skipped = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"  ok   {name}")
-        except Skip as exc:
-            skipped += 1
-            print(f"  skip {name}: {exc}")
-        except AssertionError as exc:
-            failed += 1
-            print(f"  FAIL {name}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"  ERR  {name}: {type(exc).__name__}: {exc}")
-    tail = f", {skipped} skipped" if skipped else ""
-    print(f"\n{len(tests) - failed - skipped}/{len(tests)} passed{tail}")
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 if __name__ == "__main__":

@@ -153,6 +153,7 @@ def summarise(rows) -> dict:
 SPEC = {
     "verb": "matrix",
     "order": 18,
+    "group": "device",
     "help": "what works on this device, tested separately from what exists",
     "description": (
         "Availability and function are different questions and this asks\n"

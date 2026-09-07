@@ -60,6 +60,40 @@ So every reboot path calls `ph_ssh_mux_reset` (`ssh -O exit`) first —
 machine never share a socket. `PORTHOLE_NO_MUX=1` disables the lot, and is the
 first thing to try when diagnosing a strange hang.
 
+## The verbs
+
+A verb that needs no device and no container must not wait on the network.
+The test `tests/test_cli.py::test_the_host_only_verbs_stay_under_their_budget`
+verifies `--help`, `version`, `devices` and `doctor --no-device` against an
+unrouteable device address using a three-tier budget:
+
+- **Control (porthole version): 4.0 s absolute.** Version touches only local
+  tool versions and git metadata; 0.09–0.14 s is typical. A 4 s budget is ~30×
+  the real cost, leaving headroom for scheduling jitter on a loaded runner, while
+  sitting well below ~5.5 s a single ssh connect timeout costs. This budget
+  catches a dial of the magnitude the test was written for (~5.5 s, one
+  ConnectTimeout=5 ssh). A partial dial under ~3.9 s would pass all tiers because
+  the control baseline shifts with it, leaving the deltas flat and the relative
+  check blind.
+- **Host-only verbs (--help, devices, doctor --no-device): 3 s relative to the
+  control, AND 8 s absolute.** The relative check catches regressions even on a
+  loaded runner because both verbs and control share scheduling jitter equally.
+  A network dial adds a fixed ~5 s that load does not, so a 3 s delta cleanly
+  separates normal operation (~0.6–0.8 s) from a broken dial (~5.5 s). The 8 s
+  absolute ceiling is a safety backstop.
+
+Measured 2026-09-07 on the reference host, before and after the fix:
+
+| | before | after |
+|---|---|---|
+| `porthole doctor --no-device` | 5.5 s | 0.72–0.91 s |
+| `porthole doctor` (with `PORTHOLE_DEVICE_STATE=absent`) | 7.57 s | 2.5 s |
+
+Both figures were one call: `_container_state` asked the phone whether it
+accepts the device key, over ssh, with `ConnectTimeout=5`, on a host whose
+device was unplugged — including under `--no-device`, whose help says it
+skips anything that touches the device.
+
 ## Budgets
 
 | operation | budget |

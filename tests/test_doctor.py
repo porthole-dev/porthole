@@ -10,13 +10,33 @@ against four real distros; these are the fast checks that do not need podman.
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 import porthole_cmd_doctor as doctor  # noqa: E402
+
+CLI = ROOT / "bin" / "porthole"
+TMPXDG = tempfile.mkdtemp(prefix="porthole-doctor-test-")
+
+
+def run(*args, env=None, stdin=""):
+    """Invoke the CLI in a clean environment. env -i semantics matter: the
+    developer running the tests usually has PHONE exported."""
+    base = {
+        "PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
+        "PORTHOLE_ROOT": str(ROOT), "XDG_CONFIG_HOME": TMPXDG,
+        "NO_COLOR": "1",
+    }
+    base.update(env or {})
+    proc = subprocess.run([sys.executable, str(CLI), *args],
+                          capture_output=True, text=True, env=base, input=stdin)
+    return proc.returncode, proc.stdout, proc.stderr
 
 
 def test_an_atomic_family_falls_back_to_its_base():
@@ -170,21 +190,130 @@ def test_nothing_still_ships_or_names_the_privilege_broker():
         assert "sandbox install" not in text, f"{name} still offers the broker"
 
 
+def test_an_absent_device_is_probed_once_not_twice():
+    """Two independent checks each opened their own connection to the same
+    phone, and neither knew the other had just failed. On an unplugged device
+    that is 2 s for the state row plus 5 s for the key row, for one answer.
+
+    PORTHOLE_DEVICE_STATE is how the repo already short-circuits the state
+    probe in tests; the point of this test is that the KEY probe honours it
+    too.
+
+    The key row FILE must exist for its wording to be testable at all -- with
+    no key, `_device_key_row` takes the earlier "not created" branch and says
+    nothing about whether a probe happened. run()'s HOME defaults to the real
+    one, so this passed by accident on a machine with a workspace already set
+    up (a real ~/.porthole/device_key) and silently took the "not created"
+    branch, asserting nothing about PORTHOLE_DEVICE_STATE, on a clean HOME
+    (any CI runner). A temp HOME with a fake key makes the assertion mean the
+    same thing everywhere.
+
+    The assertion used to be `"could not be asked" in key[0]` -- the wording
+    `_device_key_row` gives an ACTUAL failed dial (asked, and could not tell),
+    which a re-dialled probe ALSO produced before doctor could tell the two
+    cases apart, rendering the exact same words either way.
+
+    A timing assertion looked like the fix, but this test never sets
+    PORTHOLE_HOST, so PHONE derives to the USB gadget default
+    (user@172.16.42.1). On a bring-up host with the phone attached --
+    this toolkit's entire audience -- a re-dialled probe against a real,
+    listening address that refuses the fake key gets `Permission denied` in
+    milliseconds, not a 5 s ConnectTimeout: green on a fast host for exactly
+    the wrong reason, the failure mode the neighbouring test's own docstring
+    warns against.
+
+    `_device_key_row` can now tell the two cases apart on its own: this
+    branch's `skip_reason` change (see `_container_state`'s
+    `device_key_probed`) renders `skip ... not asked (...)` for a
+    deliberately-skipped probe and keeps `warn ... could not be asked` only
+    for one that genuinely ran. That wording is the honest signal -- it is
+    deterministic, costs nothing, and holds on every host regardless of what
+    PHONE resolves to or how fast a refusal comes back."""
+    fake_home = tempfile.mkdtemp(prefix="porthole-doctor-home-")
+    key_dir = pathlib.Path(fake_home) / ".porthole"
+    key_dir.mkdir()
+    (key_dir / "device_key").write_text("fake key, never read\n")
+    rc, out, err = run("doctor",
+                       env={"PORTHOLE_DEVICE_STATE": "absent", "HOME": fake_home})
+    assert "device: state" in out, out
+    assert "device key" in out, out
+    key = [l for l in out.splitlines() if "device key" in l]
+    assert key, out
+    assert "skip" in key[0] and "not asked" in key[0], key
+    assert "could not be asked" not in key[0], key
+
+
+def test_device_packages_skips_the_apk_query_when_the_device_is_not_booted():
+    """`cmd_doctor` already probed and knows the device is not BOOTED --
+    `check_device_packages` dialling apk over ssh anyway rediscovers the exact
+    same ABSENT and reports it in different words, 25s ssh timeout and all.
+
+    Asserted by refusing to let the device be dialled at all, the same
+    technique as test_no_device_does_not_open_a_connection_to_the_device
+    above: a timing assertion is flaky on a loaded box and green on a fast
+    one for the wrong reason."""
+    workdir = tempfile.mkdtemp(prefix="porthole-doctor-deps-")
+    pkg_dir = (pathlib.Path(workdir) / "pmaports" / "device" /
+              "testsoc-test" / "device-test-testboard")
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "APKBUILD").write_text('depends="mkbootimg linux-testboard"\n')
+    cfg = {"PORTHOLE_DEVICE_PKG": "device-test-testboard",
+          "PORTHOLE_WORKDIR": workdir}
+
+    class _NoDial:
+        def run_full(self, *a, **kw):
+            raise AssertionError(
+                "check_device_packages dialled the device after cmd_doctor "
+                "already knew it was not BOOTED")
+
+    class _Ctx:
+        root = pathlib.Path(workdir)
+
+        def device(self):
+            return _NoDial()
+
+    ch = doctor.Checks()
+    doctor.check_device_packages(ch, _Ctx(), cfg, "ABSENT")
+    row = _row(ch, "device: packages")
+    assert row["status"] == "skip", row
+    assert "ABSENT" in row["detail"], row
+    # Must not be confusable with the "asked, and apk could not answer" row
+    # below -- same widget could render either, so only the wording tells
+    # them apart.
+    assert "could not query apk" not in row["detail"], row
+
+
+def test_device_packages_still_asks_when_the_device_is_booted_and_fails():
+    """The `warn` for "asked, and apk could not answer" must stay reachable
+    when the device genuinely is BOOTED and the query itself fails -- the
+    skip above must not swallow this case too."""
+    workdir = tempfile.mkdtemp(prefix="porthole-doctor-deps-")
+    pkg_dir = (pathlib.Path(workdir) / "pmaports" / "device" /
+              "testsoc-test" / "device-test-testboard")
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "APKBUILD").write_text('depends="mkbootimg linux-testboard"\n')
+    cfg = {"PORTHOLE_DEVICE_PKG": "device-test-testboard",
+          "PORTHOLE_WORKDIR": workdir}
+
+    class _Fails:
+        def run_full(self, *a, **kw):
+            return 1, "", "connection reset"
+
+    class _Ctx:
+        root = pathlib.Path(workdir)
+
+        def device(self):
+            return _Fails()
+
+    ch = doctor.Checks()
+    doctor.check_device_packages(ch, _Ctx(), cfg, "BOOTED")
+    row = _row(ch, "device: packages")
+    assert row["status"] == "warn", row
+    assert "could not query apk on the device" in row["detail"], row
+
+
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except AssertionError as exc:
-            failed += 1
-            print(f"FAIL {name}: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"ERROR {name}: {type(exc).__name__}: {exc}")
-    print(f"{len(tests) - failed}/{len(tests)} passed")
-    return 1 if failed else 0
+    return _runner.run(globals())
 
 
 
@@ -361,6 +490,23 @@ def test_the_device_key_row_reports_three_states():
                                     "device_key_authorized": value})
         seen[value] = ch.rows[-1]["status"]
     assert seen == {True: "ok", False: "fail", None: "warn"}, seen
+
+
+def test_a_skipped_probe_is_not_reported_as_a_failed_one():
+    """`None` now means two different things: asked and could not tell, or
+    deliberately not asked (--no-device, or a device known to be something
+    other than BOOTED). `check_device_packages` drew this line as `skip ...
+    the device is ABSENT` rather than `warn`, precisely so the two cannot be
+    confused; the device-key row must draw it the same way."""
+    ch = doctor.Checks()
+    doctor._device_key_row(ch, {"device_key": "/k", "device_key_authorized": None,
+                                "device_key_probed": False},
+                           skip_reason="the device is ABSENT")
+    row = ch.rows[-1]
+    assert row["status"] == "skip", row
+    assert "ABSENT" in row["detail"], row
+    # Must not be confusable with the "asked, and could not tell" warn above.
+    assert "could not be asked" not in row["detail"], row
 
 
 def test_a_missing_key_is_not_reported_as_refused():
@@ -546,6 +692,55 @@ def test_a_missing_host_work_dir_is_not_a_warning():
     assert row["status"] == "ok", row
     assert "host builds only" in row["detail"], row
 
+
+def test_no_device_does_not_open_a_connection_to_the_device():
+    """`--no-device` says it skips anything that touches the device, and the
+    row it was not skipping cost 5.09 s of a 5.5 s run: the workspace check
+    asks the phone whether it accepts the device key, over ssh, with a five
+    second connect timeout, on a host whose device is unplugged.
+
+    Asserted by refusing to let ssh exist rather than by timing: a timing
+    assertion is flaky on a loaded box and green on a fast one for the wrong
+    reason.
+
+    `_container_state` reaches ssh only through `_device_key_authorized`,
+    which returns early -- before ever looking at `probe_device` -- when
+    `~/.porthole/device_key` does not exist. This is called IN-PROCESS, so
+    `pathlib.Path.home()` is the real HOME: on a clean HOME (any CI runner,
+    `make smoke`'s bare-PATH empty-HOME clone, `make floor`'s container) the
+    early return already guarantees zero ssh calls with probe_device=True,
+    so this test could not have caught a regression on the only surfaces
+    that run it. A temp HOME with a fake key makes probe_device=False the
+    only thing standing between here and an ssh call -- same technique as
+    test_an_absent_device_is_probed_once_not_twice above."""
+    import porthole_cmd_sandbox as sandbox
+
+    fake_home = tempfile.mkdtemp(prefix="porthole-doctor-home-")
+    key_dir = pathlib.Path(fake_home) / ".porthole"
+    key_dir.mkdir()
+    (key_dir / "device_key").write_text("fake key, never read\n")
+
+    calls = []
+    real = sandbox.subprocess.run
+
+    def spy(argv, *a, **kw):
+        if argv and str(argv[0]).endswith("ssh"):
+            calls.append(argv)
+        return real(argv, *a, **kw)
+
+    sandbox.subprocess.run = spy
+    real_home = os.environ.get("HOME")
+    os.environ["HOME"] = fake_home
+    try:
+        sandbox._container_state(ROOT, {"PHONE": "user@172.16.42.1"},
+                                 probe_device=False)
+    finally:
+        sandbox.subprocess.run = real
+        if real_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = real_home
+    assert not calls, f"--no-device still opened ssh: {calls}"
 
 
 if __name__ == "__main__":

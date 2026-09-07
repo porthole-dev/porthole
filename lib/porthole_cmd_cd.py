@@ -18,6 +18,7 @@ from porthole_cmd_use import TARGETS, cmd_cd
 SPEC = {
     "verb": "cd",
     "order": 13,
+    "group": "start",
     "help": "print a path to cd into: workdir, kernel, pmaports, profile",
     "description": (
         "Prints one bare path and nothing else, for command substitution:\n\n"

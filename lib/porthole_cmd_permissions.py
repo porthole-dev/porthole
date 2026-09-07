@@ -331,6 +331,7 @@ def cmd_permissions(args, ctx) -> int:
 SPEC = {
     "verb": "permissions",
     "order": 18,
+    "group": "start",
     "help": "grant an agent the commands a bring-up runs all day",
     "description": (
         "The harness refuses commands it has not been told about, and on a\n"

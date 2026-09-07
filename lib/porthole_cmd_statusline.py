@@ -594,6 +594,7 @@ def cmd_statusline(args, ctx) -> int:
 SPEC = {
     "verb": "statusline",
     "order": 17,
+    "group": "knowledge",
     "help": "render the build bar for an agent's status line, or install it",
     "description": (
         "A live build bar in the agent's own UI, so nobody has to watch a\n"

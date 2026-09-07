@@ -809,12 +809,11 @@ def cmd_init(args, ctx) -> int:
         else:
             o.kv("tree", str(tree), 9)
         if tier == "workspace":
-            o.hint("porthole sandbox up      build the image and start it")
+            o.hint("porthole sandbox up", "build the image and start it")
         if has_tree:
-            o.hint("porthole build           the rung ladder, cheapest first")
+            o.hint("porthole build", "the rung ladder, cheapest first")
         else:
-            o.hint("porthole build image     the whole system image, from "
-                   "pmaports")
+            o.hint("porthole build image", "the whole system image, from pmaports")
 
         emit_sudo_snippet(ctx, user)
 
@@ -836,7 +835,7 @@ def cmd_init(args, ctx) -> int:
             # heading with nothing under it, which reads as "there is nothing
             # to do" -- the opposite of true on a host that was just set up.
             o.warn(f"could not work out the next step: {exc}")
-        o.hint("porthole doctor          check host and device")
+        o.hint("porthole doctor", "check host and device")
 
     return ctx.emit(payload, render)
 
@@ -844,6 +843,7 @@ def cmd_init(args, ctx) -> int:
 SPEC = {
     "verb": "init",
     "order": 10,
+    "group": "start",
     "help": "set this host up: identity, address, build tier, pmaports, repo",
     "description": (
         "Sets this host up, and is safe to re-run on a half-configured one:\n"

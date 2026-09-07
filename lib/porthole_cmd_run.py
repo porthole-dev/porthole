@@ -112,6 +112,7 @@ def _run_on_device(tool, args, ctx, cfg) -> int:
 SPEC = {
     "verb": "run",
     "order": 60,
+    "group": "knowledge",
     "help": "run a tool with the config applied",
     "description": (
         "Optional. Tools resolve config themselves, so `tools/tk-fps.py` works\n"

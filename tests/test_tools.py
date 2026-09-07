@@ -17,6 +17,8 @@ import tempfile
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 REQUIRED_FIELDS = ("scope", "needs", "env", "exits")
@@ -405,20 +407,11 @@ def _is_shell(path):
 # ------------------------------------------------------------------- runner --
 
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except AssertionError as exc:
-            failed += 1
-            print(f"FAIL {name}:\n  {exc}")
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            print(f"ERROR {name}: {type(exc).__name__}: {exc}")
-    print(f"{len(tests) - failed}/{len(tests)} passed  ({len(tools())} tools checked)")
-    return 1 if failed else 0
+    # The count is what makes a green run meaningful: "18/18 passed" says
+    # nothing about whether the walk found any tools at all. Folded onto the
+    # runner's summary line, not printed separately -- `make floor` and
+    # `make smoke` only look at a suite's LAST line.
+    return _runner.run(globals(), "({} tools checked)".format(len(tools())))
 
 
 def test_the_build_path_never_invokes_ssh_without_the_shared_options():

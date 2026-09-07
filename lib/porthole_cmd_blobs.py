@@ -169,7 +169,7 @@ def cmd_unsparse(args, ctx) -> int:
         ctx.out.kv("size", f"{info['bytes'] / 2**20:.1f} MiB", 12)
         ctx.out.kv("chunks", str(info["chunks"]), 12)
         ctx.out.blank()
-        ctx.out.hint(f"porthole blobs ls {dst}    # without mounting it")
+        ctx.out.hint(f"porthole blobs ls {dst}", "without mounting it")
 
     return ctx.emit({"source": str(src), "output": str(dst), **info}, render)
 
@@ -293,7 +293,7 @@ def cmd_ls(args, ctx) -> int:
         o = ctx.out
         if not entries:
             o(f"nothing under {directory} in {image.name}")
-            o.hint("try --dir /  to see what is at the root")
+            o.hint("try --dir /", "to see what is at the root")
             return
         o.heading(f"{image.name}:{directory} — {len(entries)} entries")
         o.blank()
@@ -445,6 +445,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "blobs",
     "order": 30,
+    "group": "device",
     "help": "get at vendor firmware during bring-up, without root",
     "description": (
         "pmOS packages firmware by fetching it in the aport. Before you can\n"

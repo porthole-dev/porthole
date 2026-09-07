@@ -21,7 +21,8 @@ import shutil
 import subprocess
 import sys
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE, discover, version
+from porthole_cli import (Bail, EX_FAIL, EX_OK, EX_USAGE, discover,
+                          grouped_help, version)
 
 SITE_SRC = "site-src"
 
@@ -146,7 +147,7 @@ def page_cli(root: pathlib.Path) -> str:
             out += ["| argument | description |", "|---|---|"]
             for flags, kwargs in spec["args"]:
                 names = ", ".join(f"`{f}`" for f in flags)
-                help_text = (kwargs.get("help") or "").replace("|", "\\|")
+                help_text = grouped_help(kwargs).replace("|", "\\|")
                 choices = kwargs.get("choices")
                 if choices:
                     help_text += f" *(one of: {', '.join(map(str, choices))})*"
@@ -441,9 +442,9 @@ def cmd_build(args, ctx) -> int:
                   "knowledge base from brain/.", "grey"))
         o.blank()
         if shutil.which("mkdocs"):
-            o.hint("porthole docs serve    preview at http://127.0.0.1:8000")
+            o.hint("porthole docs serve", "preview at http://127.0.0.1:8000")
         else:
-            o.hint("pipx install mkdocs-material    then `porthole docs serve`")
+            o.hint("pipx install mkdocs-material", "then `porthole docs serve`")
         o.hint("git push — CI builds and publishes it to GitHub Pages")
 
     return ctx.emit({"pages": pages, "src": str(src)}, render)
@@ -701,7 +702,7 @@ def cmd_lint(args, ctx) -> int:
             o(f"  {o.paint(kind, 'yellow'):<24s} {where}")
             o(f"      {detail}")
         o.blank()
-        o.hint("porthole docs new handoff <topic>   scaffolds it correctly")
+        o.hint("porthole docs new handoff <topic>", "scaffolds it correctly")
 
     ctx.emit({"findings": [{"kind": k, "path": p, "detail": d}
                            for k, p, d in findings],
@@ -770,6 +771,7 @@ def dispatch(args, ctx) -> int:
 SPEC = {
     "verb": "docs",
     "order": 92,
+    "group": "meta",
     "help": "generate the documentation site",
     "description": (
         "The site is generated, never hand-maintained: the CLI reference from\n"
