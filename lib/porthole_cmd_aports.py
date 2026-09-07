@@ -16,6 +16,7 @@ import pathlib
 import re
 import shlex
 import subprocess
+import sys
 
 from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE, EX_USAGE
 import porthole_pmaports as pmap
@@ -455,6 +456,21 @@ def _lint(pmaports, base, ctx) -> list[tuple[str, str]]:
 MUTATES_BUILDROOT = ("build", "checksum", "pkgrel_bump", "install", "zap")
 
 
+def _say(ctx, text: str, colour: str = "grey") -> None:
+    """Progress prose, and nothing at all when --json was asked for.
+
+    Every one of these lines goes to STDOUT, which is exactly where a --json
+    caller reads its document from: `porthole aports lint --json` printed two
+    progress lines and then a JSON error, so the stream did not parse as
+    anything. Suppressed rather than deleted -- for a human, WHERE a command
+    ran is the first thing you need when it fails in a way that makes no
+    sense.
+    """
+    if getattr(ctx.args, "json", False):
+        return
+    ctx.out(ctx.out.paint(text, colour))
+
+
 def pmb(ctx, *args, timeout=1800, capture=False):
     """Run pmbootstrap, streaming its output by default.
 
@@ -469,7 +485,7 @@ def pmb(ctx, *args, timeout=1800, capture=False):
     import porthole_buildroot as buildroot
 
     cmd = ["pmbootstrap", "-y", *args]
-    ctx.out(ctx.out.paint(f"  $ {' '.join(cmd)}", "grey"))
+    _say(ctx, f"  $ {' '.join(cmd)}")
     verb = next((a for a in args if not a.startswith("-")), "")
     if verb in MUTATES_BUILDROOT:
         # The workdir the command will ACTUALLY run against, not the host's.
@@ -543,16 +559,18 @@ def _pmb_run(ctx, cmd, timeout, capture):
     # WHERE it ran is the first thing you need when it fails in a way that
     # makes no sense -- the same reason the build verb says it in cyan.
     if routed:
-        ctx.out(ctx.out.paint("  in the workspace (container)", "cyan"))
+        _say(ctx, "  in the workspace (container)", "cyan")
     elif usable:
-        ctx.out(ctx.out.paint(
-            f"  on the host: the workspace sees {mounted}, "
-            f"not {host_tree}", "yellow"))
+        _say(ctx, f"  on the host: the workspace sees {mounted}, "
+                  f"not {host_tree}", "yellow")
     else:
-        ctx.out(ctx.out.paint(f"  on the host ({why_not})", "grey"))
+        _say(ctx, f"  on the host ({why_not})", "grey")
     argv = _pmb_argv(cmd, usable, same_tree)
     try:
-        if capture:
+        # ...and pmbootstrap's OWN output is captured under --json for the
+        # same reason the lines above are suppressed: streaming it lands it on
+        # stdout beside the document. A --json caller is not watching a stream.
+        if capture or getattr(ctx.args, "json", False):
             proc = subprocess.run(argv, capture_output=True, text=True,
                                   timeout=timeout)
             return proc.returncode, proc.stdout, proc.stderr
@@ -949,7 +967,9 @@ def _lint_unavailable_hint(problems) -> str:
     measurement that AGENTS.md section 6 forbids.
     """
     state = "found only non-fatal issues" if problems else "ran and was clean"
-    return f"the series check above {state}; pmaports CI lints the merge request"
+    # Not "above": this hint is also the `hint` field of the JSON document a
+    # --json caller gets, where there is nothing above it.
+    return f"the series check {state}; pmaports CI lints the merge request"
 
 
 def cmd_lint(args, ctx, pmaports) -> int:
@@ -971,31 +991,55 @@ def cmd_lint(args, ctx, pmaports) -> int:
         for kind, message in _series_problems(directory):
             problems.append((kind, "{}: {}".format(name, message)))
 
-    for kind, message in problems:
-        colour = "yellow" if kind in ("duplicate", "stripped") else "red"
-        ctx.out(ctx.out.paint("  {:<9} {}".format(kind, message), colour))
-    if not problems:
-        ctx.out(ctx.out.paint("  series clean", "green"))
-
     gone = pmb_api.missing("subcommands", "lint")
     rc = None
-    if gone:
-        ctx.out(ctx.out.paint("  " + _lint_unavailable(gone), "grey"))
-    else:
+    if not gone:
         rc, _, _ = pmb(ctx, "lint", *names, timeout=900)
-        ctx.out(ctx.out.paint(
-            "  apkbuild-lint clean" if rc == 0 else "  apkbuild-lint found problems",
-            "green" if rc == 0 else "red"))
 
     verdict = lint_verdict(problems, rc)
+    payload = {
+        "packages": names,
+        "problems": [{"kind": kind, "message": message}
+                     for kind, message in problems],
+        "series_clean": not problems,
+        "apkbuild_lint": ("unavailable" if gone
+                          else "clean" if rc == 0 else "problems"),
+        "verdict": verdict,
+    }
+
+    def render():
+        for kind, message in problems:
+            colour = "yellow" if kind in ("duplicate", "stripped") else "red"
+            ctx.out(ctx.out.paint("  {:<9} {}".format(kind, message), colour))
+        if not problems:
+            ctx.out(ctx.out.paint("  series clean", "green"))
+        if gone:
+            ctx.out(ctx.out.paint("  " + _lint_unavailable(gone), "grey"))
+        else:
+            ctx.out(ctx.out.paint(
+                "  apkbuild-lint clean" if rc == 0
+                else "  apkbuild-lint found problems",
+                "green" if rc == 0 else "red"))
+
+    if verdict == EX_OK:
+        return ctx.emit(payload, render)
+
+    # A failure still owes a human the lines -- which package, which rule --
+    # and owes a machine ONE document. `Bail` renders as JSON on stdout when
+    # --json was asked for, so rendering here as well would put prose in front
+    # of it, which is the defect this whole function was restructured for.
+    if not getattr(args, "json", False):
+        render()
+        # Bail's message goes to stderr, which is unbuffered; these lines went
+        # to stdout, which is block-buffered the moment anything pipes it. The
+        # error arrived before its own evidence under `| head`.
+        sys.stdout.flush()
     if verdict == EX_UNAVAILABLE:
         raise Bail(_lint_unavailable(gone), EX_UNAVAILABLE,
                    _lint_unavailable_hint(problems))
-    if verdict != EX_OK:
-        raise Bail("lint found problems", EX_FAIL,
-                   "fix them before opening a merge request — pmaports CI "
-                   "runs this too")
-    return EX_OK
+    raise Bail("lint found problems", EX_FAIL,
+               "fix them before opening a merge request — pmaports CI "
+               "runs this too")
 
 
 def cmd_ci(args, ctx, pmaports) -> int:

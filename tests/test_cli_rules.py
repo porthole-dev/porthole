@@ -515,5 +515,66 @@ def test_a_failure_is_machine_readable_when_json_was_asked_for():
     assert payload["code"] == rc, payload
 
 
+def test_a_verb_that_reports_progress_still_emits_one_document():
+    """`--json` promises a document, and a verb that narrates on its way to
+    the answer breaks it without failing anything.
+
+    `porthole aports lint --json` printed `series clean` and a note about
+    apkbuild-lint to STDOUT and then the JSON error, so the stream parsed as
+    nothing. Not caught by test_json_output_actually_parses, which asserts
+    rc == 0 and so cannot cover a verb whose honest answer is 69.
+
+    The progress lines are suppressed rather than deleted -- for a human,
+    where a command ran is the first thing you want when it fails strangely --
+    and pmbootstrap's own output is captured under --json for the same
+    reason."""
+    needs_pmaports()
+    rc, out, err = run("aports", "lint", "no-such-package-anywhere", "--json")
+    payload = json.loads(out)     # the whole of stdout, not a suffix of it
+    assert payload.get("error") or payload.get("verdict") is not None, payload
+    if rc != 0:
+        assert payload["code"] == rc, payload
+
+
+def test_progress_prose_is_suppressed_when_json_was_asked_for():
+    """The suppressor itself, because the end-to-end test above cannot reach
+    it: on a pmbootstrap with no `lint` subcommand -- which is every one since
+    3.11.1 -- `aports lint` never shells out at all, so the lines `_say`
+    guards are never emitted and defeating it changes nothing visible.
+
+    Every `aports` verb that shells pmbootstrap routes its progress through
+    this one function, so this is where the rule lives or does not."""
+    import argparse
+
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cmd_aports as aports
+
+    class FakeOut:
+        def __init__(self):
+            self.lines = []
+
+        def __call__(self, text):
+            self.lines.append(text)
+
+        @staticmethod
+        def paint(text, _colour=""):
+            return text
+
+    class FakeCtx:
+        def __init__(self, as_json):
+            self.args = argparse.Namespace(json=as_json)
+            self.out = FakeOut()
+
+    human = FakeCtx(as_json=False)
+    aports._say(human, "  in the workspace (container)", "cyan")
+    assert human.out.lines == ["  in the workspace (container)"], human.out.lines
+
+    machine = FakeCtx(as_json=True)
+    aports._say(machine, "  in the workspace (container)", "cyan")
+    assert machine.out.lines == [], (
+        "progress prose reached stdout beside the document: {}".format(
+            machine.out.lines))
+
+
 if __name__ == "__main__":
     sys.exit(main())

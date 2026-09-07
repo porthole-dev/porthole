@@ -1008,6 +1008,35 @@ def watch_lines(snap, width=None, now=None, style=None, footer=""):
     return rows
 
 
+def block_painter(out):
+    """`(paint, clear)` for repainting a fixed-height block in place.
+
+    `watch` has carried this arithmetic inline since it existed; the build's
+    own painter carried a one-line version of it and so drew a one-line bar,
+    while `porthole pkg watch` drew the four-row block from the same tracker.
+    Same numbers, two different pictures, and the build -- the thing somebody
+    actually sits and watches -- had the poorer one.
+
+    `paint` walks the cursor back up over the rows it painted last time, so
+    the caller must not print anything else between calls. In the build's case
+    nothing does: the raw stream goes to stdout only under --verbose, which
+    turns the bar off precisely because the two would fight.
+    """
+    painted = [0]
+
+    def paint(lines):
+        up = "\033[{}A".format(painted[0] - 1) if painted[0] > 1 else ""
+        painted[0] = len(lines)
+        out(up + "\n".join("\r\033[2K" + text for text in lines))
+
+    def clear():
+        if painted[0]:
+            out("\r\033[2K" + "\033[1A\r\033[2K" * max(0, painted[0] - 1))
+            painted[0] = 0
+
+    return paint, clear
+
+
 def _paint_header(snap, width, colour, style) -> str:
     """Tint per segment. Emphasis budget: the name and the step count are what
     the reader came for, the namespace is context, the state carries the one
@@ -1824,12 +1853,7 @@ def reattach(log_path, name: str, probe, interval: float, out,
     The build it found belongs to whoever started it, and a watcher that
     started writing on their behalf would be inventing an owner.
     """
-    painted = [0]
-
-    def paint(lines):
-        up = "\033[{}A".format(painted[0] - 1) if painted[0] > 1 else ""
-        painted[0] = len(lines)
-        out(up + "\n".join("\r\033[2K" + text for text in lines))
+    paint, clear_block = block_painter(out)
 
     # On a terminal the explanation belongs in the block's footer, dim and
     # out of the way, where it is repainted with everything else and cannot
@@ -1896,8 +1920,10 @@ def reattach(log_path, name: str, probe, interval: float, out,
         paced(interval, bool(tty), ndjson,
               lambda: paint(watch_lines(snap, now=now() if now else None,
                                         footer=foot)))
-    if tty and not ndjson and painted[0]:
-        out("\r\033[2K" + "\033[1A\r\033[2K" * max(0, painted[0] - 1))
+    # `clear_block` is a no-op when nothing was painted, so the count it
+    # used to be guarded on lives inside it now.
+    if tty and not ndjson:
+        clear_block()
     return snap
 
 
@@ -1983,16 +2009,10 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     # so a redraw has to walk back up to the top of it. A bare `\r` would
     # rewrite only the bottom row and leave the one above it frozen on screen,
     # which is the very appearance of staleness this change exists to remove.
-    painted = [0]
-
-    def paint(lines):
-        up = "\033[{}A".format(painted[0] - 1) if painted[0] > 1 else ""
-        painted[0] = len(lines)
-        out(up + "\n".join("\r\033[2K" + text for text in lines))
+    paint, clear_block = block_painter(out)
 
     def unpaint():
-        out("\r\033[2K" + "\033[1A\r\033[2K" * max(0, painted[0] - 1))
-        painted[0] = 0
+        clear_block()
 
     foot = footer_of("", bool(tty) and not ndjson, term_width())
     started_watching = time.time()
