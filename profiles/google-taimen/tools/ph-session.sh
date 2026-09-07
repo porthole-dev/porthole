@@ -44,7 +44,7 @@ swipe_up() { tk_run 'sudo -n python3 /tmp/ph-touch.py swipe 720 2600 720 1000 35
 # It is a heuristic and it knows it: a bright app filling the screen would read
 # as "locked". Callers should treat a positive as "swipe and carry on" rather
 # than as ground truth, and arms should still assert their own page state.
-LOCK_LUMA=${TK_SESSION_LOCK_LUMA:-150}
+LOCK_LUMA=${PORTHOLE_SESSION_LOCK_LUMA:-150}
 is_locked() {
     tk_run ". /tmp/sess.sh; grim -g '0,300 480x100' $PROBE" >/dev/null 2>&1 || return 1
     scp "${TK_SSH_OPTS[@]}" "$PHONE:$PROBE" /tmp/tk-session-probe.png >/dev/null 2>&1 || return 1

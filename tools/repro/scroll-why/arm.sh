@@ -3,7 +3,7 @@
 # scope: generic
 # needs: the device BOOTED; the webkit apks for the INSTALLED build in the
 #        sandbox package dir (ph-wkoffsets.sh reads them)
-# env: PORTHOLE_* (ph-lib.sh), TK_SCROLL_URL, TK_SCROLL_DRAG
+# env: PORTHOLE_* (ph-lib.sh), TK_SCROLL_URL, PORTHOLE_SCROLL_DRAG
 # exits: 0 the arm finished · 1 it never finished
 # arm.sh -- WHY is layout dirty during a settled scroll? Same harness as
 # repro/scroll-record, different probe set: instead of measuring the six
@@ -18,7 +18,7 @@ source tools/ph-lib.sh
 # The probe set is a knob: the first arm asks WHICH phase costs, the next asks
 # WHO dirtied it. Same harness, different symbols -- so a follow-up question
 # costs an env var, not a new script.
-case "${TK_PROBES:-why}" in
+case "${PORTHOLE_PROBES:-why}" in
 why)  SYMS='
 layout=WebCore::LocalFrameViewLayoutContext::performLayout(bool)
 style=WebCore::Document::resolveStyle(WebCore::Document::ResolveStyleType)
@@ -55,7 +55,7 @@ updLayoutVp=WebCore::LocalFrameView::updateLayoutViewport()
 reconcile=WebCore::AsyncScrollingCoordinator::reconcileScrollingState(WebCore::LocalFrameView&, WebCore::FloatPoint const&, mpark::variant<std::optional<WebCore::FloatPoint>, std::optional<WebCore::FloatRect> > const&, WebCore::ScrollType, WebCore::ViewportRectStability, WebCore::ScrollingLayerPositionAction)
 compositing=WebCore::RenderLayerCompositor::updateCompositingLayers(WebCore::CompositingUpdateType, WebCore::RenderLayer*)
 fastPath=WebCore::LocalFrameView::scrollContentsFastPath(WebCore::IntSize const&, WebCore::IntRect const&, WebCore::IntRect const&)' ;;
-*) SYMS=$TK_PROBES ;;
+*) SYMS=$PORTHOLE_PROBES ;;
 esac
 
 OLDIFS=$IFS; IFS=$'\n'
@@ -72,7 +72,7 @@ scp "${TK_SSH_OPTS[@]}" \
 	tools/ph-gesture-bench.py tools/threadcpu.py tools/ph-scrollarm.sh tools/ph-wkphase.sh \
 	tools/repro/scroll-record/wkrec.sh "$PHONE:/tmp/" >/dev/null || exit 1
 tk_run "printf 'export TK_WKPHASE_OFFSETS=%s\n' \"'$TK_WKPHASE_OFFSETS'\" > /tmp/wkoff.sh" >/dev/null
-for v in TK_SCROLL_URL TK_SCROLL_DRAG TK_SETTLE TK_EPHY_ARGS; do
+for v in TK_SCROLL_URL PORTHOLE_SCROLL_DRAG PORTHOLE_SETTLE PORTHOLE_EPHY_ARGS; do
 	eval "val=\${$v:-}"
 	[ -n "$val" ] && tk_run "printf 'export %s=%s\n' '$v' \"'$val'\" >> /tmp/wkoff.sh" >/dev/null
 done

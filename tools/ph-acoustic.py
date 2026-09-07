@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
-# env: PHONE, TK_AMP
+# env: PHONE, PORTHOLE_AMP
 # exits: 0 ok · non-zero on failure
 """tk-acoustic -- decide "does audio actually come out / go in" with no human.
 
@@ -46,7 +46,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OUT = os.path.join(ROOT, "logs", "acoustic")
 RATE = 48000
-AMP = float(os.environ.get("TK_AMP", 0.1))   # phone-side playback amplitude.
+AMP = float(os.environ.get("PORTHOLE_AMP", 0.1))   # phone-side playback amplitude.
 # Full scale on both amps browns the phone out and it silently REBOOTS
 # mid-test, which reads as an intermittent speaker. 0.1 is still ~50 dB above
 # the phone mic's own floor.

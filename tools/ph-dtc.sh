@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: - (host only, no device)
-# env: HOST, TK_DTC_OUT
+# env: HOST, PORTHOLE_DTC_OUT
 # exits: 0 ok · 1 failed
 # ph-dtc.sh [board.dts] -- compile a board DTS on the HOST, before asking for a
 # kernel build.
@@ -25,7 +25,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LINUX=$ROOT/linux
-OUT=${TK_DTC_OUT:-/tmp/tk-dtc}
+OUT=${PORTHOLE_DTC_OUT:-/tmp/tk-dtc}
 DTS=${1:-$LINUX/arch/arm64/boot/dts/qcom/msm8998-google-taimen.dts}
 
 mkdir -p "$OUT"

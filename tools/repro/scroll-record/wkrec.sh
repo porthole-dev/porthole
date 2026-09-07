@@ -37,7 +37,7 @@ sh /tmp/ph-wkphase.sh arm
 # The hook runs after the page is up and before the drag: settle, then start the
 # measurement detached so it spans the drag scrollarm is about to run.
 rm -f /tmp/wk-drag.out
-TK_SCROLL_HOOK="sleep ${TK_SETTLE:-20}; setsid sh -c \"sh /tmp/ph-wkphase.sh measure 16 > /tmp/wk-drag.out 2>&1; cp /tmp/wk.trace /tmp/wk-drag.trace; echo DRAGWINDOWDONE >> /tmp/wk-drag.out\" </dev/null >/dev/null 2>&1 &" \
+PORTHOLE_SCROLL_HOOK="sleep ${PORTHOLE_SETTLE:-20}; setsid sh -c \"sh /tmp/ph-wkphase.sh measure 16 > /tmp/wk-drag.out 2>&1; cp /tmp/wk.trace /tmp/wk-drag.trace; echo DRAGWINDOWDONE >> /tmp/wk-drag.out\" </dev/null >/dev/null 2>&1 &" \
 	sh /tmp/ph-scrollarm.sh rec
 RC=$?
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (run as root; scp it over, or pipe with `ssh ... sh -s`)
-# env: TK_SCOPE_GLOB, TK_INTERVAL
+# env: PORTHOLE_SCOPE_GLOB, PORTHOLE_INTERVAL
 # exits: 0 ok · non-zero on failure
 # ph-mempressure.sh -- one line per second of the memory-ceiling vital signs.
 #
@@ -41,14 +41,14 @@ set -u
 # The scope name carries the launching PID, so it changes every time the
 # browser restarts -- glob it EVERY iteration rather than resolving once, or a
 # restart mid-measurement silently turns every scope field into a dash.
-GLOB=${TK_SCOPE_GLOB:-'/sys/fs/cgroup/user.slice/user-*.slice/user@*.service/app.slice/app-*Epiphany*.scope'}
-INTERVAL=${TK_INTERVAL:-1}
+GLOB=${PORTHOLE_SCOPE_GLOB:-'/sys/fs/cgroup/user.slice/user-*.slice/user@*.service/app.slice/app-*Epiphany*.scope'}
+INTERVAL=${PORTHOLE_INTERVAL:-1}
 COUNT=${1:-0}          # 0 = forever
 
 DECSUB=$(ls -d /sys/devices/platform/soc@*/*video-codec*/*video-decoder \
 	/sys/devices/platform/*video-codec*/*video-decoder 2>/dev/null | head -1)
 
-# ponytail: fixed at the Epiphany scope by default. TK_SCOPE_GLOB retargets it
+# ponytail: fixed at the Epiphany scope by default. PORTHOLE_SCOPE_GLOB retargets it
 # at any app scope; a second browser would just be a different glob.
 field() { [ -r "$1" ] && cat "$1" 2>/dev/null || echo -; }
 

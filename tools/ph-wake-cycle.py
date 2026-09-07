@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (run it on the device as root, e.g. pushed by ph-stream.sh)
-# env: TK_GAP_MS
+# env: PORTHOLE_GAP_MS
 # exits: 0 ran to the end · 2 could not open /dev/uinput
 """Press the power key on a loop and count the blank/unblank transitions that
 really happened. THE oracle for the display-wake GPU crash.
@@ -29,7 +29,7 @@ gpu= never reads "suspended" has not exercised the bug at all and its clean
 score means nothing. The verdict line reports how many cycles had it.
 
 Usage (on the device):  sudo python3 -u ph-wake-cycle.py [cycles]
-Usage (from the host):  TK_PUSH=tools/ph-wake-cycle.py \
+Usage (from the host):  PORTHOLE_PUSH=tools/ph-wake-cycle.py \
                           tools/ph-stream.sh logs/cycle.log \
                           sudo python3 -u /tmp/ph-wake-cycle.py 100
 """
@@ -58,7 +58,7 @@ CYCLES = int(sys.argv[1]) if len(sys.argv) > 1 else 100
 # 2 s, because the GPU's autosuspend is 200 ms: any shorter and presses start
 # landing on a GPU that never power-collapsed, which is a different experiment
 # (a mash) and does not reproduce this bug the same way.
-GAP = int(os.environ.get("TK_GAP_MS", "2000")) / 1000
+GAP = int(os.environ.get("PORTHOLE_GAP_MS", "2000")) / 1000
 SETTLE = 4.0            # give-up point for one transition
 
 

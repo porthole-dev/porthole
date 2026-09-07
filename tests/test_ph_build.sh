@@ -267,7 +267,7 @@ is "no slots gives a plain partlabel" \
 is "slots without a probed active slot does not guess a suffix" \
    "$(partlabel '' google-cheetah)" "boot"
 is "the override wins over both" \
-   "$(partlabel 'TK_BOOT_PARTLABEL=weird PORTHOLE_HAS_AB_SLOTS=1 PORTHOLE_ACTIVE_SLOT=b')" \
+   "$(partlabel 'PORTHOLE_BOOT_PARTLABEL=weird PORTHOLE_HAS_AB_SLOTS=1 PORTHOLE_ACTIVE_SLOT=b')" \
    "weird"
 
 # The seed must refuse a truncated or garbage read rather than caching it: a
@@ -285,7 +285,7 @@ seedcheck=$(env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
 is "a non-boot-image read is refused, not cached" "$seedcheck" "1:absent"
 
 # No /tmp anywhere in the base-image path: that was the whole defect.
-if grep -q 'TK_BASEIMG:-/tmp' "$ROOT/tools/ph-build.sh"; then
+if grep -q 'PORTHOLE_BASEIMG:-/tmp' "$ROOT/tools/ph-build.sh"; then
     bad "the base image no longer defaults into /tmp" \
         "the container does not mount the host's /tmp"
 else ok; fi
@@ -563,8 +563,8 @@ out=$(guard 3431808 315448 .ko.xz)
 is "a compressed sibling is not compared" "$(saw "$out" REFUSING)" "no"
 is "and the install still runs"           "$(saw "$out" REACHED-THE-INSTALL)" "yes"
 
-out=$(TK_MOD_SIZE_RATIO=99 guard 3431808 315448)
-is "TK_MOD_SIZE_RATIO raises the bound" "$(saw "$out" REFUSING)" "no"
+out=$(PORTHOLE_MOD_SIZE_RATIO=99 guard 3431808 315448)
+is "PORTHOLE_MOD_SIZE_RATIO raises the bound" "$(saw "$out" REFUSING)" "no"
 
 # --- a failed compile must not read as "nothing to do" -------------------
 #
@@ -681,7 +681,7 @@ install_loop() { # install_loop <fail-count> <log-text> -> "rc attempts"
     env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
         PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" \
         PORTHOLE_PMB_DIR="$TMP/inst/pmb" TK_PMOS_PASSWORD="$PW" \
-        TK_INSTALL_ATTEMPTS=6 FAILS="$1" LOGTEXT="$2" \
+        PORTHOLE_INSTALL_ATTEMPTS=6 FAILS="$1" LOGTEXT="$2" \
         bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
                  tries=0
                  pmbootstrap() {

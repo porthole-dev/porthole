@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: BOOTED
-# env: PHONE, TK_ALARM, TK_HOST, TK_SUSPEND_CMD
+# env: PHONE, PORTHOLE_ALARM, TK_HOST, PORTHOLE_SUSPEND_CMD
 # exits: 0 ok · non-zero on failure
 # One real s2idle cycle, driven from the host, with evidence that survives the
 # reset that a failed one ends in.
@@ -55,13 +55,13 @@ DEV=$(mktemp); trap 'rm -f "$DEV"' EXIT
 cat > "$DEV" <<'DEVEOF'
 #!/bin/sh
 LOG=/var/log/tk-suspend-try.log
-ALARM=${TK_ALARM:-20}
+ALARM=${PORTHOLE_ALARM:-20}
 # Path A (default) is the raw sysfs write: it never starts
 # systemd-suspend.service, so it runs NEITHER the suspend guard NOR any
 # /usr/lib/systemd/system-sleep hook. Path B is what a user's phone actually
 # does, and it is the only one that exercises the shipped cpuidle hook -- set
-# TK_SUSPEND_CMD='systemctl start systemd-suspend.service' for it.
-SUSPEND_CMD=${TK_SUSPEND_CMD:-"echo freeze > /sys/power/state"}
+# PORTHOLE_SUSPEND_CMD='systemctl start systemd-suspend.service' for it.
+SUSPEND_CMD=${PORTHOLE_SUSPEND_CMD:-"echo freeze > /sys/power/state"}
 log() { echo "$*" >> $LOG; sync; }
 log "=== TRY $(date +%FT%T) alarm=+${ALARM}s btime=$(awk '/btime/{print $2}' /proc/stat) uptime=$(cut -d. -f1 /proc/uptime)s ==="
 log "boot_id_before=$(cat /proc/sys/kernel/random/boot_id) cmd=[$SUSPEND_CMD]"
@@ -89,7 +89,7 @@ echo ">> suspending (alarm=+${A}s, prep=${PREP:-none})"
 # The trailing sleep matters: without it ssh closes the channel before sudo has
 # even exec'd, and the run silently never happens.
 timeout 20 ssh -o ConnectTimeout=6 "${TK_SSH_OPTS[@]}" "$H" \
-	"sudo TK_ALARM=$A TK_SUSPEND_CMD=\"${TK_SUSPEND_CMD:-}\" setsid /usr/local/bin/ph-suspend-try.sh </dev/null >/dev/null 2>&1 & sleep 4" >/dev/null 2>&1
+	"sudo PORTHOLE_ALARM=$A PORTHOLE_SUSPEND_CMD=\"${PORTHOLE_SUSPEND_CMD:-}\" setsid /usr/local/bin/ph-suspend-try.sh </dev/null >/dev/null 2>&1 & sleep 4" >/dev/null 2>&1
 
 for _ in $(seq 1 60); do
 	[ "$(S "grep -q 'TRY DONE' $LOG && echo READY" 12)" = READY ] && break

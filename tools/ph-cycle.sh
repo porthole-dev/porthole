@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: any (probes state; handles BOOTED and FASTBOOT)
-# env: HOST, PHONE, PORTHOLE_USER, PORTHOLE_WORKDIR, TK_IMG
+# env: HOST, PHONE, PORTHOLE_USER, PORTHOLE_WORKDIR, PORTHOLE_IMG
 # exits: 0 ok · 1 failed
 # One display bring-up experiment: bootloader -> RAM boot -> modprobe -> capture.
 #
@@ -35,12 +35,12 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 REPO=$PORTHOLE_WORKDIR
-IMG=${TK_IMG:-$REPO/boot-headless.img}
+IMG=${PORTHOLE_IMG:-$REPO/boot-headless.img}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 LOG="${1:?usage: ph-cycle.sh LOGFILE [modprobe args ...]}"; shift
 ARGS="$*"
 
-[ -f "$IMG" ] || { echo "no boot image at $IMG (set TK_IMG)"; exit 1; }
+[ -f "$IMG" ] || { echo "no boot image at $IMG (set PORTHOLE_IMG)"; exit 1; }
 
 # If the last experiment survived, the phone is still up: send it back to the
 # bootloader rather than power cycling by hand.

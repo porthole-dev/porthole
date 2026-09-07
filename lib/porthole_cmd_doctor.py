@@ -920,8 +920,17 @@ def _check_pmos_password(ch: Checks, env) -> None:
     The VALUE is never printed. It is a rootfs password; see
     tests/test_secrets.py.
     """
-    if (env.get("TK_PMOS_PASSWORD") or "").strip():
-        ch.add("host: TK_PMOS_PASSWORD", "ok", "set")
+    # The same reader `porthole build` uses, so the two cannot disagree about
+    # whether this host has it -- including about which of the two names it
+    # was set under.
+    try:
+        from porthole_cmd_build import rootfs_password
+    except Exception:  # noqa: BLE001 -- doctor must run when build cannot
+        def rootfs_password(cfg):
+            return (cfg.get("TK_PMOS_PASSWORD")
+                    or cfg.get("PORTHOLE_PMOS_PASSWORD") or "").strip()
+    if rootfs_password(env):
+        ch.add("host: PORTHOLE_PMOS_PASSWORD", "ok", "set")
         return
     # The rungs come from build's own table, so the two cannot drift. This row
     # named `upgrade`, which does not run `pmbootstrap install` at all and has
@@ -932,9 +941,9 @@ def _check_pmos_password(ch: Checks, env) -> None:
     except Exception:  # noqa: BLE001 -- doctor must run when build cannot
         rungs = ("kernel", "image")
     named = " and ".join(f"`porthole build {r}`" for r in rungs)
-    ch.add("host: TK_PMOS_PASSWORD", "warn",
+    ch.add("host: PORTHOLE_PMOS_PASSWORD", "warn",
            f"unset -- {named} need it and stop dead without it",
-           fix="export TK_PMOS_PASSWORD=<the rootfs user password>"
+           fix="export PORTHOLE_PMOS_PASSWORD=<the rootfs user password>"
                "    # an environment variable on purpose: a flag would show "
                "it in ps")
 

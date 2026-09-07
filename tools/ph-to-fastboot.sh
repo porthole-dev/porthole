@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: any (probes state; handles BOOTED and FASTBOOT)
-# env: FASTBOOT, PORTHOLE_USB_FASTBOOT_ID, PORTHOLE_USB_GADGET_ID, TK_ATTEMPT,
-#      TK_NO_SYSCALL, TK_POLL, TK_SWALLOWED_MAX, TK_TIMEOUT, TK_TRIES
+# env: FASTBOOT, PORTHOLE_USB_FASTBOOT_ID, PORTHOLE_USB_GADGET_ID, PORTHOLE_ATTEMPT,
+#      PORTHOLE_NO_SYSCALL, TK_POLL, PORTHOLE_SWALLOWED_MAX, PORTHOLE_TIMEOUT, PORTHOLE_TRIES
 # exits: 0 ok · 1 failed · 3 see source
 # Get the phone INTO the bootloader, and return the instant it lands (~9s).
 #
@@ -34,7 +34,7 @@
 # slot b with exactly 3 retries; nothing in pmOS ever reports a successful boot,
 # so the bootloader scores every boot as FAILED and decrements; at 0 it stops
 # handing off. From a freshly armed slot that is up to FOUR reboots at ~40s
-# each, hence TK_TRIES=4. This countdown is also exactly why the phone drops to
+# each, hence PORTHOLE_TRIES=4. This countdown is also exactly why the phone drops to
 # the bootloader on its own every ~3rd boot during ordinary work -- it is a
 # countdown, not a glitch.
 #
@@ -61,20 +61,20 @@
 #     USB did not come up on this host until the cable was replugged, 26
 #     minutes of which were spent following advice for a different fault.
 #
-# Usage: ph-to-fastboot.sh [timeout_seconds]   (default 180, or $TK_TIMEOUT)
-#   env: TK_ATTEMPT   seconds to wait per reboot        (default 60)
-#        TK_TRIES     fallback reboots before giving up (default 4)
-#        TK_NO_SYSCALL=1  skip the fast path, force the retry-burn fallback
+# Usage: ph-to-fastboot.sh [timeout_seconds]   (default 180, or $PORTHOLE_TIMEOUT)
+#   env: PORTHOLE_ATTEMPT   seconds to wait per reboot        (default 60)
+#        PORTHOLE_TRIES     fallback reboots before giving up (default 4)
+#        PORTHOLE_NO_SYSCALL=1  skip the fast path, force the retry-burn fallback
 # Exit:  0 in the bootloader, 1 overall deadline hit, 3 gave up.
 set -u
 
 cd "$(dirname "$0")" || exit 1
 . ./ph-lib.sh
 
-TIMEOUT=${1:-${TK_TIMEOUT:-180}}
-ATTEMPT_S=${TK_ATTEMPT:-60}
-TRIES=${TK_TRIES:-4}
-SWALLOWED_MAX=${TK_SWALLOWED_MAX:-3}
+TIMEOUT=${1:-${PORTHOLE_TIMEOUT:-180}}
+ATTEMPT_S=${PORTHOLE_ATTEMPT:-60}
+TRIES=${PORTHOLE_TRIES:-4}
+SWALLOWED_MAX=${PORTHOLE_SWALLOWED_MAX:-3}
 
 START=$(tk_now_ms)
 DEADLINE=$(tk_deadline_ms "$TIMEOUT")
@@ -90,7 +90,7 @@ fi
 OLD_ID=$(tk_boot_id) || OLD_ID=""
 
 # ----------------------------------------------- fast path: RESTART2 syscall --
-if [ "${TK_NO_SYSCALL:-0}" != "1" ] && [ -n "$OLD_ID" ] && tk_have_python; then
+if [ "${PORTHOLE_NO_SYSCALL:-0}" != "1" ] && [ -n "$OLD_ID" ] && tk_have_python; then
     echo ">> reboot(RESTART2, \"bootloader\") via the PMIC reboot-mode register"
     tk_request_bootloader
 
@@ -111,7 +111,7 @@ if [ "${TK_NO_SYSCALL:-0}" != "1" ] && [ -n "$OLD_ID" ] && tk_have_python; then
         sleep "$TK_POLL"
     done
 else
-    echo ">> fast path unavailable (no python3 or TK_NO_SYSCALL=1) -- burning boot retries"
+    echo ">> fast path unavailable (no python3 or PORTHOLE_NO_SYSCALL=1) -- burning boot retries"
 fi
 
 tk_in_fastboot && { done_msg; exit 0; }

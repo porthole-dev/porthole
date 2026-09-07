@@ -171,7 +171,25 @@ PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 FASTBOOT=${FASTBOOT:-${PORTHOLE_FASTBOOT:-fastboot}}
 TK_POLL=${TK_POLL:-$PORTHOLE_POLL}
 TK_AGENT=${TK_AGENT:-${PORTHOLE_AGENT:-unknown}}
+# The knobs that gained a porthole-namespaced twin in the tk- to ph- rename.
+# Same shape, same rule: the OLD name wins, so a porter with these exported in
+# a shell they have had open for a week keeps working. See
+# lib/porthole.py::legacy, which is the Python half of the same contract.
+#
+# TK_SSH_OPTS is deliberately not among them: it is BUILT below out of
+# PORTHOLE_CONNECT_TIMEOUT, PORTHOLE_SSH_PORT and PORTHOLE_SSH_KEY, so an
+# input of that name would be a second authority over the array rather than a
+# twin of it.
+TK_RUN_TIMEOUT=${TK_RUN_TIMEOUT:-${PORTHOLE_RUN_TIMEOUT:-}}
+TK_DEVICE_LOCK=${TK_DEVICE_LOCK:-${PORTHOLE_DEVICE_LOCK:-}}
+TK_PMOS_PASSWORD=${TK_PMOS_PASSWORD:-${PORTHOLE_PMOS_PASSWORD:-}}
+TK_LOGIN_PASSWORD=${TK_LOGIN_PASSWORD:-${PORTHOLE_LOGIN_PASSWORD:-}}
+TK_BOOT_DEADLINE=${TK_BOOT_DEADLINE:-${PORTHOLE_BOOT_DEADLINE:-}}
+TK_SCROLL_URL=${TK_SCROLL_URL:-${PORTHOLE_SCROLL_URL:-}}
+TK_WKPHASE_OFFSETS=${TK_WKPHASE_OFFSETS:-${PORTHOLE_WKPHASE_OFFSETS:-}}
 export PHONE HOST FASTBOOT TK_POLL TK_AGENT
+export TK_RUN_TIMEOUT TK_DEVICE_LOCK TK_PMOS_PASSWORD TK_LOGIN_PASSWORD
+export TK_BOOT_DEADLINE TK_SCROLL_URL TK_WKPHASE_OFFSETS
 
 # ConnectTimeout keeps a probe against a vanished USB interface from stalling
 # the poll loop; when the device is down the connect fails instantly anyway.
@@ -508,7 +526,7 @@ tk_device_state() {
 # --------------------------------------------------------------- actions ----
 
 # Run ONE reboot request and keep what it said. The result lands in
-# TK_REBOOT_WHAT / TK_REBOOT_RC / TK_REBOOT_ERR for the escalation path to name.
+# PORTHOLE_REBOOT_WHAT / PORTHOLE_REBOOT_RC / PORTHOLE_REBOOT_ERR for the escalation path to name.
 #
 # FOREGROUND, and the far side's stderr is kept. This used to detach the request
 # (`(reboot &); exit 0`) and send both the exit status and the message to
@@ -522,18 +540,18 @@ tk_device_state() {
 # message exists, and a reboot that IS taken kills the connection -- that death
 # is the success signal. `timeout` caps the case where neither happens.
 ph_reboot_try() {
-    TK_REBOOT_WHAT=$1
+    PORTHOLE_REBOOT_WHAT=$1
     ph_ssh_mux_reset          # the socket must not outlive the sshd
-    TK_REBOOT_ERR=$(timeout 12 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
+    PORTHOLE_REBOOT_ERR=$(timeout 12 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
         "sudo -n sync; sudo -n $1" 2>&1 >/dev/null </dev/null)
-    TK_REBOOT_RC=$?
+    PORTHOLE_REBOOT_RC=$?
     ph_ssh_mux_reset
     # ssh announces its own hang-up on every reboot that WORKED. Printing that
     # would bury the one line that is not noise.
-    TK_REBOOT_ERR=$(printf '%s\n' "$TK_REBOOT_ERR" |
+    PORTHOLE_REBOOT_ERR=$(printf '%s\n' "$PORTHOLE_REBOOT_ERR" |
                     grep -v -e 'closed by remote host' \
                             -e '^Shared connection to' -e '^Connection to ')
-    [ -z "$TK_REBOOT_ERR" ] || echo ">> the device answered: $TK_REBOOT_ERR" >&2
+    [ -z "$PORTHOLE_REBOOT_ERR" ] || echo ">> the device answered: $PORTHOLE_REBOOT_ERR" >&2
     return 0
 }
 
@@ -546,9 +564,9 @@ ph_reboot_try() {
 # the polite way. Force is deliberately NOT applied to the bootloader path:
 # reaching the bootloader needs the reboot(2) command string to survive, and
 # that is exactly what the force path is least trustworthy about.
-TK_REBOOT_WHAT=""
-TK_REBOOT_RC=0
-TK_REBOOT_ERR=""
+PORTHOLE_REBOOT_WHAT=""
+PORTHOLE_REBOOT_RC=0
+PORTHOLE_REBOOT_ERR=""
 tk_request_reboot() {
     local target=${1:-}
     if [ "${TK_FORCE:-0}" = "1" ] && [ -z "$target" ]; then
@@ -608,13 +626,13 @@ ph_report_inhibitors() {
 #
 # Pass this to tk_wait_ssh as the reissue function; it is called with the number
 # of seconds that just went by without a new boot_id.
-TK_REBOOT_LEVEL=0
+PORTHOLE_REBOOT_LEVEL=0
 tk_reboot_escalate() {
     local waited=${1:-?}
-    TK_REBOOT_LEVEL=$((TK_REBOOT_LEVEL + 1))
-    echo ">> ${TK_REBOOT_WHAT:-reboot} exited $TK_REBOOT_RC and the device is" \
+    PORTHOLE_REBOOT_LEVEL=$((PORTHOLE_REBOOT_LEVEL + 1))
+    echo ">> ${PORTHOLE_REBOOT_WHAT:-reboot} exited $PORTHOLE_REBOOT_RC and the device is" \
          "still on the same boot_id ${waited}s later" >&2
-    case $TK_REBOOT_LEVEL in
+    case $PORTHOLE_REBOOT_LEVEL in
         1)  ph_report_inhibitors
             echo ">> escalating to systemctl reboot -i (overrides an inhibitor)" >&2
             ph_reboot_try "systemctl reboot -i" ;;

@@ -262,11 +262,14 @@ def _ensure_device_key(home: pathlib.Path) -> pathlib.Path:
 def _lock_path(device: str) -> str:
     """Must match tools/ph-device.sh:32 exactly, or the mutex is not shared.
 
-    TK_DEVICE_LOCK overrides the default there, same as here -- an operator
-    who sets it on the host and not for the container would otherwise get two
-    different locks guarding the one physical phone.
+    TK_DEVICE_LOCK -- or its twin PORTHOLE_DEVICE_LOCK, with the old name
+    winning -- overrides the default there, same as here: an operator who sets
+    it on the host and not for the container would otherwise get two different
+    locks guarding the one physical phone.
     """
-    return os.environ.get("TK_DEVICE_LOCK") or f"/tmp/porthole-{device or 'device'}.lock"
+    return (os.environ.get("TK_DEVICE_LOCK")
+            or os.environ.get("PORTHOLE_DEVICE_LOCK")
+            or f"/tmp/porthole-{device or 'device'}.lock")
 
 
 def _mounts(root, pmb_dir, workdir, key, device, extra, aports=None):

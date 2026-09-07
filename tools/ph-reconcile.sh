@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: soc:msm8998
 # needs: - (host only, no device)
-# env: TK_BASE_TAG
+# env: PORTHOLE_BASE_TAG
 # exits: 0 ok · 1 failed
 # ph-reconcile.sh -- does the aport series and the linux/ tree contain the same code?
 #
@@ -28,7 +28,7 @@
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APORT="$REPO/pmaports/device/testing/linux-postmarketos-qcom-msm8998-6.18"
-BASE="${TK_BASE_TAG:-v6.18}"
+BASE="${PORTHOLE_BASE_TAG:-v6.18}"
 S=$(mktemp -d)
 trap 'rm -rf "$S"' EXIT
 

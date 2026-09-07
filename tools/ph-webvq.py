@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device; Epiphany launched with WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222
-# env: TK_INSPECTOR (host:port, default 127.0.0.1:9222)
+# env: PORTHOLE_INSPECTOR (host:port, default 127.0.0.1:9222)
 # exits: 0 ok · 1 no target / no video
 """Poll a <video>'s getVideoPlaybackQuality() through WebKit's remote inspector.
 
@@ -18,7 +18,7 @@ currentTime, readyState, paused.
 """
 import base64, json, os, re, socket, struct, sys, time, urllib.request
 
-HOST = os.environ.get("TK_INSPECTOR", "127.0.0.1:9222")
+HOST = os.environ.get("PORTHOLE_INSPECTOR", "127.0.0.1:9222")
 
 def ws_connect(host, path):
     h, p = host.split(":"); s = socket.create_connection((h, int(p)), timeout=10)

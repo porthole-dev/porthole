@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: on-device (run it on the device, e.g. piped over ssh)
-# env: TK_SOAK_LOG
+# env: PORTHOLE_SOAK_LOG
 # exits: 0 ok · non-zero on failure
 # ph-soak.sh -- the on-device half of the D2 / 72 h stability soak.
 # Run ON THE DEVICE as root, under systemd-run so it survives the ssh session.
@@ -27,7 +27,7 @@
 # Add rotation when a soak actually runs long enough to care.
 set -u
 
-LOG=${TK_SOAK_LOG:-/var/log/tk-soak.jsonl}
+LOG=${PORTHOLE_SOAK_LOG:-/var/log/tk-soak.jsonl}
 INTERVAL=${1:-30}
 
 # The boot record. bootreason distinguishes a watchdog reset from a clean

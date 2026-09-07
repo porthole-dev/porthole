@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
-# env: HOST, PHONE, PORTHOLE_USER, TK_PUSH
+# env: HOST, PHONE, PORTHOLE_USER, PORTHOLE_PUSH
 # exits: 0 ok · 1 failed
 # Stream a command's output from the phone to a host file, across reboots.
 #
@@ -19,14 +19,14 @@
 # here deliberately -- this is a debug channel on a USB-local link, and having
 # the stream die on a changed key defeats the point.
 #
-# Set TK_PUSH to a local script to copy it to /tmp on the phone before each
+# Set PORTHOLE_PUSH to a local script to copy it to /tmp on the phone before each
 # run. The phone's /tmp is a tmpfs, so anything pushed there is gone after a
 # reboot -- which is precisely when a reconnect happens.
 #
 # Usage: ph-stream.sh OUTFILE REMOTE_COMMAND...
 #   eg:  ph-stream.sh /tmp/dmesg.log dmesg -w
 #        ph-stream.sh /tmp/syslog.log logread -f
-#        TK_PUSH=tools/ph-display-watch.py \
+#        PORTHOLE_PUSH=tools/ph-display-watch.py \
 #          ph-stream.sh /tmp/display.log sudo python3 -u /tmp/ph-display-watch.py
 set -u
 
@@ -51,8 +51,8 @@ echo "=== stream started $(date -Is): $* ===" >> "$OUT"
 
 while true; do
     if ping -c1 -W2 "$HOST" >/dev/null 2>&1; then
-        if [ -n "${TK_PUSH:-}" ]; then
-            scp "${SSH_OPTS[@]}" "$TK_PUSH" "$PHONE:/tmp/" >/dev/null 2>&1
+        if [ -n "${PORTHOLE_PUSH:-}" ]; then
+            scp "${SSH_OPTS[@]}" "$PORTHOLE_PUSH" "$PHONE:/tmp/" >/dev/null 2>&1
         fi
         echo "=== connected $(date -Is) ===" >> "$OUT"
         ssh "${SSH_OPTS[@]}" "$PHONE" "$@" >> "$OUT" 2>/dev/null
