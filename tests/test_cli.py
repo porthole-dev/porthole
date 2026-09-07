@@ -219,7 +219,7 @@ def test_init_is_non_interactive_without_a_tty():
     """An agent must be able to bootstrap. stdin is a pipe here, so init must
     take its values from flags and never block on input()."""
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    rc, out, err = run("init", "google-taimen",
+    rc, out, err = run("init", "google-taimen", "--yes",
                        "--user", "alice", "--host", "10.0.0.9",
                        env={"XDG_CONFIG_HOME": xdg})
     assert rc == 0, f"rc={rc} err={err}"
@@ -253,7 +253,7 @@ def test_init_refuses_an_unknown_device():
 
 def test_init_does_not_clobber_an_existing_config_without_force():
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    run("init", "google-taimen", "--user", "alice",
+    run("init", "google-taimen", "--user", "alice", "--yes",
         env={"XDG_CONFIG_HOME": xdg})
     rc, _, err = run("init", "google-taimen", "--user", "bob",
                      env={"XDG_CONFIG_HOME": xdg})
@@ -273,7 +273,7 @@ def test_init_converges_instead_of_rewriting_the_file():
     `porthole use` has always used.
     """
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    run("init", "google-taimen", "--user", "alice",
+    run("init", "google-taimen", "--user", "alice", "--yes",
         env={"XDG_CONFIG_HOME": xdg})
     cfg = pathlib.Path(xdg) / "porthole" / "config.env"
     # A hand-added key, a comment, and a deliberate override of something init
@@ -289,7 +289,7 @@ def test_init_converges_instead_of_rewriting_the_file():
                      "FASTBOOT=/opt/mine/fastboot\n")
 
     rc, out, err = run("init", "google-taimen", "--user", "bob", "--force",
-                       env={"XDG_CONFIG_HOME": xdg})
+                       "--yes", env={"XDG_CONFIG_HOME": xdg})
     assert rc == 0, f"rc={rc} err={err}"
     after = cfg.read_text()
     assert "TK_MY_OWN_KEY=keepme" in after, "init dropped a hand-added key"
@@ -307,10 +307,10 @@ def test_init_says_what_it_kept_and_what_it_changed():
     up. The verdict per key is the difference.
     """
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    run("init", "google-taimen", "--user", "alice",
+    run("init", "google-taimen", "--user", "alice", "--yes",
         env={"XDG_CONFIG_HOME": xdg})
     rc, out, _ = run("init", "google-taimen", "--user", "alice", "--force",
-                     env={"XDG_CONFIG_HOME": xdg})
+                     "--yes", env={"XDG_CONFIG_HOME": xdg})
     assert rc == 0
     assert "kept" in out, "a converging run must report what it kept"
     assert "nothing to change" in out, (
@@ -326,7 +326,7 @@ def test_init_on_the_workspace_tier_writes_no_pmbootstrap_keys():
     is exactly what happened on the reference host.
     """
     xdg = tempfile.mkdtemp(prefix="porthole-init-")
-    rc, out, err = run("init", "google-taimen", "--user", "alice",
+    rc, out, err = run("init", "google-taimen", "--user", "alice", "--yes",
                        "--tier", "workspace", env={"XDG_CONFIG_HOME": xdg})
     assert rc == 0, f"rc={rc} err={err}"
     text = (pathlib.Path(xdg) / "porthole" / "config.env").read_text()
