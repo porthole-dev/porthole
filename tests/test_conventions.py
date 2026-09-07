@@ -293,5 +293,25 @@ def test_the_runner_reports_a_skip_as_a_skip():
         "greps for it -- a per-test skip must not wear that word:\n" + out)
 
 
+def test_no_suite_hand_rolls_its_own_test_loop():
+    """The concurrency has to be INSIDE the file.
+
+    `make test` parallelises across files, so its wall clock floors at the
+    slowest single file -- which was `tests/test_cli.py` at 70s. `make smoke`
+    and `make floor` do not parallelise at all: both iterate the same files in
+    a plain shell `for` loop. One serial `for name, fn in tests` inside a suite
+    therefore costs all three passes, which is why this is a rule and not a
+    preference. tests/_runner.py is the one runner.
+    """
+    loop = re.compile(r"^\s*for (?:name, fn|n, f) in tests:", re.M)
+    bad = []
+    for path in sorted((ROOT / "tests").glob("test_*.py")):
+        if loop.search(path.read_text()):
+            bad.append(path.name)
+    assert not bad, (
+        "these suites run their tests serially in their own loop; call "
+        "`_runner.run(globals())` instead:\n  " + "\n  ".join(bad))
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
