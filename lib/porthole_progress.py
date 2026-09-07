@@ -1558,6 +1558,53 @@ def log_invocation_ended(text: str) -> bool:
     return False
 
 
+# What only a build writes. Three shapes, because a build is only ever quiet
+# in ways one of them still covers: ninja counts steps while compiling,
+# abuild's `>>> <pkg>:` banners bracket the phases where ninja says nothing
+# (fakeroot, strip, compress, index), and kbuild's prefixes are the kernel
+# path's equivalent of both.
+#
+# All three are anchored at the start of the line, and that is not an
+# accident: pmbootstrap prefixes its OWN trace lines with `(pid) [HH:MM:SS] `
+# and relays a command's output unprefixed, so the anchor is itself half the
+# discrimination. Checked against the reference host's 37 MB log.txt.
+_ABUILD_BANNER = re.compile(r"^>>> \S+?\*?: \S")
+# ...but tolerate pmbootstrap's own `(pid) [HH:MM:SS] ` prefix in front of one.
+# On the reference host's 37 MB log.txt every one of 188276 ninja lines and
+# 7942 abuild banners is bare -- pmbootstrap stamps the lines it writes itself
+# and relays a command's output untouched. Stripping it anyway is the cheap
+# side of the trade: a shape that stops being recognised blanks a real build,
+# and that is the failure this file has already been through once.
+_LOG_PREFIX = re.compile(r"^\(\d+\)\s+\[[\d:]+\]\s*")
+
+
+def names_a_build(text: str) -> bool:
+    """Does this log tail carry a line only a BUILD produces? PURE.
+
+    The missing third fact. `staged_build_name` says WHICH package was staged
+    and `log.txt`'s mtime says something wrote it just now -- and neither is
+    evidence that the writer is a build. The log is shared by the whole
+    workspace: `pmbootstrap status`, `pmbootstrap log`, a `chroot -- ccache -s`
+    and an agent sitting in an open `pmbootstrap chroot` all touch it. On
+    2026-09-07 that combination reported a `webkit2gtk-6.0` build at 2h30m,
+    with a name from a staging directory the day before and a freshness from a
+    chroot session with nothing to do with it.
+
+    ANY line in the tail, not the last: packaging is legitimately silent for
+    minutes, and the tail still holds what the build said before it went
+    quiet. Requiring the newest line to be build-shaped would call a healthy
+    build a phantom, which is the failure this repo has already paid for in
+    the other direction.
+    """
+    for line in (text or "").splitlines():
+        line = _LOG_PREFIX.sub("", line)
+        if ninja_progress(line) or is_compile_line(line):
+            return True
+        if _ABUILD_BANNER.match(line):
+            return True
+    return False
+
+
 def live_build_from_log(log_path, name, started=None, now=None, samples=None):
     """A snapshot for a build NOTHING ever published a status file for, or None.
 
@@ -1598,6 +1645,20 @@ def live_build_from_log(log_path, name, started=None, now=None, samples=None):
     # APKBUILD that outlives its build -- so on a mismatch it finds no ending
     # and the row invents one.
     if log_invocation_ended(text):
+        return None
+    # ...and the same is true when the log tail was not written by a build at
+    # all. The two facts this function has -- a staged package name and a
+    # fresh mtime -- are each true of things that are not builds: the staged
+    # APKBUILD outlives the build that put it there, and `log.txt` is shared
+    # by every pmbootstrap invocation in the workspace, including an agent
+    # sitting in an open `pmbootstrap chroot`. Together they reported a
+    # webkit2gtk-6.0 build at 2h30m with nothing running.
+    #
+    # Declining here costs the first moments of a genuinely untracked build,
+    # before ninja or abuild has said anything. That is the right way round:
+    # a row that appears a few seconds late is a delay, and a row that names a
+    # build nobody started is a lie somebody acts on.
+    if not names_a_build(text):
         return None
     snap = snapshot_from_log(text, name, mtime, now=now, samples=samples)
     if started:
