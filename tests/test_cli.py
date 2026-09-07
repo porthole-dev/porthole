@@ -645,5 +645,29 @@ def main():
     return _runner.run(globals())
 
 
+def test_an_old_tool_name_is_answered_with_its_new_one():
+    """Every brain note and every agent's memory holds the old names. A bare
+    'unknown tool' sends the reader looking for a file that was renamed, which
+    is the most expensive possible answer to the cheapest possible question.
+
+    No compatibility symlink: `collect()` skips symlinks, so a shim would sit
+    in the tree invisible to the catalogue, to docs/TOOLS.md and to
+    `porthole tools audit` -- a second copy of everything that nothing checks.
+    """
+    rc, out, err = run("run", "tk-fps.py")
+    assert rc != 0, "it must not silently run something"
+    assert "ph-fps.py" in (out + err), (out, err)
+
+    rc, out, err = run("tools", "tk-device.sh")
+    assert "ph-device.sh" in (out + err), (out, err)
+
+    # An old name with no new twin is still just unknown -- the answer is only
+    # worth giving when there is one.
+    rc, out, err = run("run", "tk-not-a-real-tool.sh")
+    assert rc != 0, (out, err)
+    assert "ph-not-a-real-tool.sh" not in (out + err), (
+        "it invented a replacement that does not exist")
+
+
 if __name__ == "__main__":
     sys.exit(main())

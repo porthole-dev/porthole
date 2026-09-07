@@ -313,6 +313,16 @@ def test_no_suite_hand_rolls_its_own_test_loop():
         "`_runner.run(globals())` instead:\n  " + "\n  ".join(bad))
 
 
+# The two files whose SUBJECT is an old name, which is the one honest reason
+# to write one. Same shape as ENV_COPIES_THAT_SPAWN_NOTHING above: an explicit
+# pair with its reason, rather than a rule loose enough to miss a real one.
+NAMES_AN_OLD_NAME_ON_PURPOSE = {
+    "lib/porthole_cmd_tools.py": "renamed() is what answers a request for an "
+                                 "old name, and its docstring shows one",
+    "tests/test_cli.py": "the test that asks for one and checks the answer",
+}
+
+
 def test_no_file_names_a_tool_that_no_longer_exists():
     """The rename is only finished when nothing points at the old names.
 
@@ -332,8 +342,11 @@ def test_no_file_names_a_tool_that_no_longer_exists():
     for path in _tracked():
         if path.suffix not in TEXT_SUFFIXES or not path.exists():
             continue
-        if path.relative_to(ROOT).parts[0] == "brain":
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.split("/")[0] == "brain":
             continue            # notes quote the sessions they came from
+        if rel in NAMES_AN_OLD_NAME_ON_PURPOSE:
+            continue
         for name in sorted(set(named.findall(path.read_text(errors="replace")))):
             if not ((ROOT / "tools" / name).exists()
                     or list(ROOT.glob("profiles/*/tools/" + name))):
