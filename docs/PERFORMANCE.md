@@ -63,10 +63,17 @@ first thing to try when diagnosing a strange hang.
 ## The verbs
 
 A verb that needs no device and no container must not wait on the network.
-The budget is **8 s** on a loaded runner, measured against an
-unrouteable device address so a dial costs a full connect timeout, asserted by
-`tests/test_cli.py::test_the_host_only_verbs_stay_under_their_budget` for
-`--help`, `version`, `devices` and `doctor --no-device`.
+The test `tests/test_cli.py::test_the_host_only_verbs_stay_under_their_budget`
+verifies `--help`, `version`, `devices` and `doctor --no-device` using a
+**relative budget** measured against an unrouteable device address:
+
+- **Relative:** each verb must complete within **3 s of a control** (`porthole version`),
+  which touches nothing and measures pure interpreter startup plus scheduling jitter.
+  A network dial adds a fixed ~5 s that load does not, so a relative delta immune
+  to runner load cleanly separates normal operation (~0.6–0.8 s) from a hung probe (~5.5 s).
+- **Absolute:** each verb must complete within **8 s** regardless. This covers the
+  one case the relative budget misses: if the control itself ever dials the device,
+  both rise together and the delta would hide it.
 
 Measured 2026-09-07 on the reference host, before and after the fix:
 
