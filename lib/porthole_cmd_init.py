@@ -925,7 +925,8 @@ SPEC = {
     "examples": [
         "porthole init",
         "porthole init google-taimen --user user --host 172.16.42.1",
-        "porthole init google-taimen --non-interactive",
+        "porthole init google-taimen --non-interactive          # preview",
+        "porthole init google-taimen --non-interactive --yes    # write it",
         "porthole init google-taimen --workdir ~/ws/pmos/taimen",
         "porthole init google-taimen --tier host --pmaports ~/src/pmaports",
     ],
