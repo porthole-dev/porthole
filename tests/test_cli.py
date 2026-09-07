@@ -538,22 +538,26 @@ BLACKHOLE = "192.0.2.1"
 
 
 def test_the_host_only_verbs_stay_under_their_budget():
-    """These verbs touch nothing and must not wait on the network. The budget
-    is relative, not absolute: measure a control verb (version, ~interpreter
-    startup only) in the same run, then verify each host-only verb completes
-    within 3 s of that control AND within 8 s absolute.
+    """These verbs touch nothing and must not wait on the network. The test
+    measures a control verb (version, ~interpreter startup only) and uses it
+    as a reference point for a relative budget on the host-only verbs.
 
-    Relative beats absolute here because both verbs share scheduling jitter:
-    if the runner is loaded, both slow down together, and the delta is immune
-    to load. A network dial, by contrast, adds a fixed ~5 s that load does not.
-    So a 3 s delta separates normal operation (~0.6–0.8 s) from a hung probe
-    (~5.5 s) even on a loaded runner.
+    Budget strategy:
+    - Control (porthole version): 4.0 s absolute. Version touches only local
+      tool versions and git metadata; 0.09–0.14 s is typical. A 4 s budget is
+      ~30× the real cost (leaving headroom for scheduling jitter on a loaded
+      runner) while sitting well below ~5.5 s a single ssh connect timeout costs.
+      If the control ever started dialling, this budget trips it.
+    - Host-only verbs (--help, devices, doctor --no-device):
+      3 s relative to the control AND 8 s absolute. The relative check catches
+      regressions even on a loaded runner because both verbs and control share
+      scheduling jitter equally. A network dial adds fixed ~5 s that load does
+      not, so a 3 s delta cleanly separates normal (~0.6–0.8 s) from broken
+      (~5.5 s). The 8 s absolute backstop is a safety ceiling.
 
     The unrouteable device address (192.0.2.0/24 is RFC 5737 TEST-NET-1) forces
-    a dial to cost a full connect timeout, not a fast refusal -- the signal is
-    seconds, not milliseconds. The 8 s absolute ceiling covers the one blind
-    spot: if the control itself ever started dialling, both would rise and the
-    delta would hide it.
+    a dial to cost a full connect timeout, not a fast refusal -- signal is
+    seconds, not milliseconds.
     """
     env = {"PORTHOLE_DEVICE_STATE": "absent",
            "PORTHOLE_HOST": BLACKHOLE, "PHONE": "pmos@" + BLACKHOLE}
@@ -563,9 +567,19 @@ def test_the_host_only_verbs_stay_under_their_budget():
     run("version", env=env)
     control = time.monotonic() - started
 
+    control_budget_s = 4.0
     relative_budget_s = 3.0
     absolute_budget_s = 8.0
     slow = []
+
+    # Check the control itself.
+    if control > control_budget_s:
+        slow.append(
+            f"porthole version (control): {control:.2f}s exceeds the control "
+            f"budget of {control_budget_s}s -- the control itself is waiting on "
+            "something, so the relative budget below it is blind")
+
+    # Check the host-only verbs.
     for argv in (["--help"], ["devices"], ["doctor", "--no-device"]):
         started = time.monotonic()
         run(*argv, env=env)
@@ -577,7 +591,7 @@ def test_the_host_only_verbs_stay_under_their_budget():
     assert not slow, (
         "these run with no device attached and must not wait on the network:\n  "
         + "\n  ".join(slow)
-        + f"\n(control: porthole version {control:.2f}s; "
+        + f"\n(control budget: {control_budget_s}s; "
         + f"relative budget: +{relative_budget_s}s; "
         + f"absolute budget: {absolute_budget_s}s; "
         + "docs/PERFORMANCE.md, 'The verbs')")

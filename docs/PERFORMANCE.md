@@ -64,16 +64,20 @@ first thing to try when diagnosing a strange hang.
 
 A verb that needs no device and no container must not wait on the network.
 The test `tests/test_cli.py::test_the_host_only_verbs_stay_under_their_budget`
-verifies `--help`, `version`, `devices` and `doctor --no-device` using a
-**relative budget** measured against an unrouteable device address:
+verifies `--help`, `version`, `devices` and `doctor --no-device` against an
+unrouteable device address using a three-tier budget:
 
-- **Relative:** each verb must complete within **3 s of a control** (`porthole version`),
-  which touches nothing and measures pure interpreter startup plus scheduling jitter.
-  A network dial adds a fixed ~5 s that load does not, so a relative delta immune
-  to runner load cleanly separates normal operation (~0.6–0.8 s) from a hung probe (~5.5 s).
-- **Absolute:** each verb must complete within **8 s** regardless. This covers the
-  one case the relative budget misses: if the control itself ever dials the device,
-  both rise together and the delta would hide it.
+- **Control (porthole version): 4.0 s absolute.** Version touches only local
+  tool versions and git metadata; 0.09–0.14 s is typical. A 4 s budget is ~30×
+  the real cost, leaving headroom for scheduling jitter on a loaded runner, while
+  sitting well below ~5.5 s a single ssh connect timeout costs. This budget
+  exists to catch a regression if a dial ever leaked into the control itself.
+- **Host-only verbs (--help, devices, doctor --no-device): 3 s relative to the
+  control, AND 8 s absolute.** The relative check catches regressions even on a
+  loaded runner because both verbs and control share scheduling jitter equally.
+  A network dial adds a fixed ~5 s that load does not, so a 3 s delta cleanly
+  separates normal operation (~0.6–0.8 s) from a broken dial (~5.5 s). The 8 s
+  absolute ceiling is a safety backstop.
 
 Measured 2026-09-07 on the reference host, before and after the fix:
 
