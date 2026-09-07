@@ -89,7 +89,7 @@ the shape `tests/test_cli_rules.py` already enforces for every verb.
    lands in journald. The device's PIN is currently disabled, which makes the
    swipe the whole unlock; the secrets path exists so that setting a PIN does
    not silently break unattended work.
-2. **Suspend masked**, using `ph-afk.sh` (today `ph-afk.sh`) **armed with the
+2. **Suspend masked**, using `ph-afk.sh` **armed with the
    lease's TTL**. Never indefinite: an indefinite mask is a phone that never
    sleeps and a battery that explains itself badly a week later.
 3. **The thermal guard armed**, `ph-thermal.sh guard`, ceiling from the
@@ -129,7 +129,7 @@ advance, on the device.
 
 ### What the lease deliberately does not own
 
-- **Not the device mutex.** `ph-device.sh` (today `ph-device.sh`; renamed in
+- **Not the device mutex.** `ph-device.sh` (renamed in
   phase 2 with everything else, behaviour untouched) keeps its `flock`. The lease owns device
   *state*; the mutex owns device *access*. Two agents may hold leases at once
   because the state each wants is identical and idempotent, so there is
@@ -256,11 +256,22 @@ be falsifying the record.
 | `TK_*` env vars | ~75 | 561 |
 | `tk_*` functions | 23 | ~290 |
 | device-side paths | ~30 | -- |
-| units installed on the phone | `ph-lifeline.service`, `ph-lifeline.timer` | -- |
+| units installed on the phone | `ph-lifeline.service`, `ph-lifeline.timer` (a phone set up before the rename has `tk-lifeline.*`) | -- |
 | transient unit names | `tk-load`, `tk-load-gpu`, `tk-micwatch` | -- |
 | references in the taimen repo | -- | 866 |
 
 ### Migration mechanics
+
+> **Executed.** The files, the references and the knobs moved in the tk- to ph-
+> rename. Two things went differently from the plan below: `tools/ph-lib.sh`
+> was **kept** as a symlink rather than deleted (36 tools source it, and
+> `tests/test_tools.py::test_ph_lib_is_a_symlink_to_the_shared_lib` still
+> guards it against being materialised into a fork), and identifiers moved by
+> one whole-tree replacement per name -- which cannot half-rename a knob the
+> way a per-file pass can -- with
+> `tests/test_conventions.py::test_no_new_environment_knob_carries_the_old_prefix`
+> holding the kept list closed instead of per-identifier count assertions.
+
 
 1. **Files:** `git mv`, so history survives.
 2. **`tools/ph-lib.sh` is deleted, not renamed.** It is a symlink to
@@ -279,8 +290,14 @@ be falsifying the record.
 4. **Both repos in one change.** taimen's `tools/` *is* porthole's `tools/`;
    a rename landing in one and not the other breaks 866 references the same
    afternoon.
-5. **Device-side state cannot be sed'd.** A phone with `ph-lifeline.service`
-   enabled keeps running the old unit after the host is clean. `porthole
+5. **Device-side state cannot be sed'd.** A phone with `tk-lifeline.service`
+   enabled keeps running it after the host is clean -- the repo renaming a unit
+   does not touch one already installed. Disable it on the phone before
+   installing the new pair:
+
+       ssh "$PHONE" 'sudo systemctl disable --now tk-lifeline.timer'
+       ssh "$PHONE" 'sudo rm -f /etc/systemd/system/tk-lifeline.* /usr/local/sbin/tk-lifeline'
+ `porthole
    doctor` grows one **read-only** check reporting stale `tk-*` units, paths
    and files found on the device, and names the fix. It reports; it does not
    migrate. Inducing nothing is the doctrine.
