@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 import porthole
-from porthole_cli import Bail, EX_FAIL, EX_OK
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_USAGE
 
 HEADER = """\
 # porthole identity -- written by `porthole init`.
@@ -654,7 +654,17 @@ def cmd_init(args, ctx) -> int:
         device = _choose_device(ctx, prompt, devices)
         devices = porthole.list_profiles(root)
     elif not device:
-        device = prompt.ask("device codename", devices[0] if devices else "")
+        # NOT `devices[0]`. A device is not a default: port 22 and the gadget
+        # address are things porthole can reasonably assume, and which phone
+        # you are porting is not. Headless, the old default picked the first
+        # profile alphabetically and reported success -- so an agent that
+        # forgot the positional configured the wrong device and was told it
+        # went fine.
+        raise Bail(
+            "no device codename, and one cannot be guessed", EX_USAGE,
+            "porthole init <codename>   known: {}".format(
+                ", ".join(devices)
+                or "(none -- porthole new-device <codename>)"))
 
     if device and device not in devices:
         raise Bail(
@@ -672,15 +682,6 @@ def cmd_init(args, ctx) -> int:
         before = porthole.parse_env(target.read_text())
     except OSError:
         before = {}
-
-    if before and not args.force and not interactive:
-        # Unchanged, and deliberately: with no human present nobody sees the
-        # defaults, so taking flags over an existing identity WOULD be the
-        # silent overwrite this has always refused. With a tty, the prompts
-        # show the current value and Enter keeps it, which is not that.
-        raise Bail(f"{target} already exists", EX_FAIL,
-                   "re-run with --force to take these values, or run it "
-                   "interactively to be asked key by key")
 
     if interactive:
         ctx.out.blank()
@@ -734,28 +735,59 @@ def cmd_init(args, ctx) -> int:
     workdir = (cfg_now.get(f"PORTHOLE_WORKDIR_{device.upper().replace('-', '_')}")
                or cfg_now.get("PORTHOLE_WORKDIR") or "")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        target.write_text(HEADER)
-    # set_key rewrites one line and leaves the rest of the file -- comments,
-    # hand-added keys, another device's overrides -- exactly where they were.
+    # Deciding is separated from writing, so the headless path can preview the
+    # way every other verb that writes outside its own profile already does --
+    # `porthole pkg fork` prints what it would do and acts on --yes. Everything
+    # above ran either way: a preview that does not resolve is not a preview of
+    # anything.
+    #
+    # The interactive path needs no --yes. Six answered questions ARE the
+    # confirmation, and asking for a flag after them would be hostile.
     verdicts = {}
     for key, value in resolved.items():
         if not value:
             continue
         verdicts[key] = ("kept" if before.get(key) == value
                          else "changed" if key in before else "added")
-        if verdicts[key] != "kept":
-            use.set_key(target, key, value)
+    changed = {k: v for k, v in verdicts.items() if v != "kept"}
 
-    # Everything below reads the host as it NOW is, not as it was when this
-    # process started -- see Ctx.reload.
-    ctx.reload()
+    if before and changed and not args.force and not interactive:
+        # Narrowed, not removed. The original refusal was right about the
+        # danger -- headless, nobody sees the defaults, so taking flags over an
+        # existing identity is a silent overwrite -- but it fired on EVERY
+        # re-run, including the one that would change nothing, and it fired
+        # before a single value was resolved so it could not say what differed.
+        # That made the safe answer unavailable to agents, who re-run setup as
+        # a matter of course, and left --force -- a real overwrite -- as the
+        # only way past.
+        #
+        # Here, after the resolve and before any set_key, it can name the keys
+        # and nothing has been written on the path that refuses.
+        raise Bail(
+            "{} already has different values for: {}".format(
+                target, ", ".join(sorted(changed))),
+            EX_FAIL,
+            "porthole init {} --force --yes   to take these, or drop the "
+            "flags that differ".format(device))
+
+    write = interactive or args.yes
+    if write:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_text(HEADER)
+        # set_key rewrites one line and leaves the rest of the file --
+        # comments, hand-added keys, another device's overrides -- exactly
+        # where they were.
+        for key in changed:
+            use.set_key(target, key, resolved[key])
+        # Everything below reads the host as it NOW is, not as it was when this
+        # process started -- see Ctx.reload.
+        ctx.reload()
 
     payload = {
         "config": str(target), "device": device, "user": user,
         "host": host, "port": port, "agent": agent, "tier": tier,
-        "workdir": workdir,
+        "workdir": workdir, "would_write": not write,
         "keys": {k: {"value": resolved[k], "verdict": v}
                  for k, v in verdicts.items()},
     }
@@ -837,6 +869,11 @@ def cmd_init(args, ctx) -> int:
             o.warn(f"could not work out the next step: {exc}")
         o.hint("porthole doctor", "check host and device")
 
+        if not write:
+            o.blank()
+            o.hint("porthole init {} --yes".format(device),
+                   "write these values")
+
     return ctx.emit(payload, render)
 
 
@@ -859,6 +896,8 @@ SPEC = {
     # The positional IS the device. `device_pos` used to exist only because the
     # injected --device selector collided with it; both go away together.
     "device_flag": False,
+    # It writes ~/.config/porthole/config.env, which is outside any profile.
+    "escapes_scope": True,
     "args": [
         (["codename"], {"nargs": "?", "metavar": "CODENAME",
                         "help": "device profile to use"}),
@@ -875,6 +914,9 @@ SPEC = {
         (["--pmaports"], {"metavar": "PATH",
                           "help": "adopt this pmaports checkout"}),
         (["--force"], {"action": "store_true", "help": "overwrite an existing config"}),
+        (["--yes"], {"action": "store_true",
+                     "help": "headless: actually write the config "
+                             "(interactive runs never need it)"}),
         (["--non-interactive"], {"action": "store_true",
                                  "help": "never prompt, even at a terminal"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
@@ -883,7 +925,8 @@ SPEC = {
     "examples": [
         "porthole init",
         "porthole init google-taimen --user user --host 172.16.42.1",
-        "porthole init google-taimen --non-interactive",
+        "porthole init google-taimen --non-interactive          # preview",
+        "porthole init google-taimen --non-interactive --yes    # write it",
         "porthole init google-taimen --workdir ~/ws/pmos/taimen",
         "porthole init google-taimen --tier host --pmaports ~/src/pmaports",
     ],
