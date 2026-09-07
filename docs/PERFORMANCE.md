@@ -60,6 +60,26 @@ So every reboot path calls `ph_ssh_mux_reset` (`ssh -O exit`) first —
 machine never share a socket. `PORTHOLE_NO_MUX=1` disables the lot, and is the
 first thing to try when diagnosing a strange hang.
 
+## The verbs
+
+A verb that needs no device and no container must not wait on the network.
+The budget is **8 s** on a loaded runner, measured against an
+unrouteable device address so a dial costs a full connect timeout, asserted by
+`tests/test_cli.py::test_the_host_only_verbs_stay_under_their_budget` for
+`--help`, `version`, `devices` and `doctor --no-device`.
+
+Measured 2026-09-07 on the reference host, before and after the fix:
+
+| | before | after |
+|---|---|---|
+| `porthole doctor --no-device` | 5.5 s | 0.72–0.91 s |
+| `porthole doctor` (with `PORTHOLE_DEVICE_STATE=absent`) | 7.57 s | 2.5 s |
+
+Both figures were one call: `_container_state` asked the phone whether it
+accepts the device key, over ssh, with `ConnectTimeout=5`, on a host whose
+device was unplugged — including under `--no-device`, whose help says it
+skips anything that touches the device.
+
 ## Budgets
 
 | operation | budget |
