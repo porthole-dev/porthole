@@ -37,13 +37,59 @@ import subprocess
 # Listing a guarded call here would fail the guard below on every pmbootstrap
 # that dropped it, which is every one today. Only unconditional calls belong
 # here.
+#
+# Membership is CHECKED against the tree, not kept by hand: this named seven
+# while porthole invoked twelve, and `export` -- what `porthole build image`
+# ends with -- was one of the five missing, so a rename upstream would have
+# left the suite green and broken the build in the field.
+# tests/test_pmb_api.py::test_the_guard_names_every_subcommand_porthole_invokes
+# compares it against `invoked_subcommands`.
 PORTHOLE_USES = {
     "subcommands": frozenset({
-        "aportgen", "build", "checksum", "ci", "config", "kconfig",
-        "pkgrel_bump",
+        "aportgen", "build", "checksum", "chroot", "ci", "config", "export",
+        "flasher", "index", "install", "kconfig", "pkgrel_bump",
     }),
     "config_keys": frozenset({"ui"}),
 }
+
+# Calls deliberately NOT in PORTHOLE_USES because each one asks `missing()`
+# first and degrades into "this pmbootstrap has no X" rather than into a
+# finding about the user's packages. See this module's docstring.
+GUARDED_AT_CALL_SITE = frozenset({"lint"})
+
+# An argv list whose first element is pmbootstrap, or a shell line starting
+# with the word. Anchored to the invocation so prose that merely mentions
+# pmbootstrap -- of which there is a great deal in this repo's comments --
+# cannot be mistaken for a call.
+_CALL_PY = re.compile(r'"pmbootstrap"(?:,\s*"-[^"]*")*,\s*"([a-z_]+)"')
+_CALL_SH = re.compile(r'^\s*pmbootstrap(?:\s+-\S+)*\s+([a-z_]+)\b', re.M)
+# porthole_cmd_aports.pmb() builds the argv itself, so its callers name the
+# subcommand and pmbootstrap never appears beside it. Without this the scan is
+# blind to checksum, lint and pkgrel_bump -- which happen to be hand-listed
+# today, so the omission would not have shown up as a failure. It would have
+# shown up as the NEXT one being missed.
+_CALL_HELPER = re.compile(r'\bpmb\(\s*ctx\s*,\s*"([a-z_]+)"')
+
+
+def invoked_subcommands(root) -> set:
+    """Every pmbootstrap subcommand this tree actually invokes.
+
+    Reads the source rather than taking a hand-kept list, because a hand-kept
+    list is exactly what went stale: the guard named seven while the tree
+    called eighteen, and nothing could tell.
+    """
+    import pathlib
+
+    root = pathlib.Path(root)
+    found = set()
+    for path in sorted((root / "lib").glob("*.py")):
+        text = path.read_text(errors="replace")
+        found.update(_CALL_PY.findall(text))
+        found.update(_CALL_HELPER.findall(text))
+    for path in sorted((root / "tools").glob("*.sh")):
+        found.update(_CALL_SH.findall(path.read_text(errors="replace")))
+    return found
+
 
 _CHOICES = re.compile(r"\{([a-z0-9_,]+)\}")
 _CHOOSE_FROM = re.compile(r"choose from ([^)]+)")
