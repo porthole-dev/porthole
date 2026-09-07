@@ -1613,5 +1613,77 @@ def test_one_build_line_anywhere_in_the_tail_is_enough():
             + "(1234) [01:00:01] (native) % busybox su pmos -c sh ;\n" * 50)
     assert progress.names_a_build(text)
 
+
+def test_an_open_chroot_session_does_not_become_a_running_build():
+    """The reproduction, verbatim. Every field of the snapshot this used to
+    return was invented: the name came from a staging directory a build had
+    left the day before, the freshness from an unrelated pmbootstrap, and the
+    2h30m elapsed from subtracting one from the other."""
+    d = pathlib.Path(tempfile.mkdtemp())
+    log = d / "log.txt"
+    log.write_text(
+        "(1234) [01:00:00] % sh -c echo hi\n"
+        "(1234) [01:00:01] (native) % busybox su pmos -c HOME=/home/pmos sh ;\n")
+    now = time.time()
+    os.utime(log, (now, now))
+    snap = progress.live_build_from_log(log, "webkit2gtk-6.0",
+                                        started=now - 9000, now=now)
+    assert snap is None, "invented a build: {}".format(snap)
+
+
+def test_a_real_untracked_build_is_still_reported():
+    """The case this fallback exists for, and the one the guard must not eat.
+
+    A build started through `sandbox shell --command`, or one that began after
+    the last tracked build wrote `done`, publishes no status file and never
+    will. Reported 2026-09-06 as `the status line shows nothing while pkg
+    watch shows a two-hour webkit build`."""
+    d = pathlib.Path(tempfile.mkdtemp())
+    log = d / "log.txt"
+    log.write_text(
+        "[4210/9429] Building CXX object Source/WebCore/foo.o\n"
+        "[4211/9429] Building CXX object Source/WebCore/bar.o\n")
+    now = time.time()
+    os.utime(log, (now, now))
+    snap = progress.live_build_from_log(log, "webkit2gtk-6.0",
+                                        started=now - 9000, now=now)
+    assert snap is not None, "a real untracked build must still be reported"
+    assert snap["rung"] == "pkg:webkit2gtk-6.0", snap
+    assert snap["state"] == "running", snap
+    assert snap["elapsed"] == 9000.0, snap
+
+
+def test_a_quiet_packaging_phase_is_still_a_build():
+    """abuild is the only thing talking during fakeroot, strip and compress,
+    and that is minutes on a package with many subpackages. A guard that only
+    accepted ninja lines would blank the row exactly when somebody is watching
+    hardest."""
+    d = pathlib.Path(tempfile.mkdtemp())
+    log = d / "log.txt"
+    log.write_text(
+        "[9429/9429] Generating WebKit-6.0.typelib\n"
+        ">>> webkit2gtk-6.0: Entering fakeroot...\n")
+    now = time.time()
+    os.utime(log, (now, now))
+    assert progress.live_build_from_log(log, "webkit2gtk-6.0",
+                                        started=now - 9000, now=now) is not None
+
+
+def test_pmbootstraps_own_prefix_does_not_hide_a_build_line():
+    """Every build line in the reference host's log.txt is bare -- pmbootstrap
+    stamps what it writes itself and relays a command's output untouched. The
+    predicate strips the stamp anyway, because a shape that stops being
+    recognised blanks a real build, and `tests/test_statusline.py` already
+    pins the stamped form as the positive control for this whole class."""
+    assert progress.names_a_build("(1) [18:45]   CC      drivers/gpu/msm.o\n")
+    assert progress.names_a_build(
+        "(318875) [12:50:06] [4210/9429] Building CXX object foo.o\n")
+    assert progress.names_a_build(
+        "(318875) [12:50:06] >>> webkit2gtk-6.0: Entering fakeroot...\n")
+    # ...and the stripping must not turn a chroot session into a build.
+    assert not progress.names_a_build(
+        "(318875) [12:50:06] (buildroot_aarch64) % su pmos -c 'ccache -s'\n"
+        "(318875) [12:50:06] *** output passed to pmbootstrap stdout ***\n")
+
 if __name__ == "__main__":
     sys.exit(main())
