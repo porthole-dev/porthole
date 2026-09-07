@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -199,22 +200,41 @@ def test_an_absent_device_is_probed_once_not_twice():
     probe in tests; the point of this test is that the KEY probe honours it
     too.
 
-    The "could not be asked" branch only fires when a device key FILE exists
-    -- run()'s HOME defaults to the real one, so this passed by accident on a
-    machine with a workspace already set up (a real ~/.porthole/device_key)
-    and silently took the "not created" branch, asserting nothing about
-    PORTHOLE_DEVICE_STATE, on a clean HOME (any CI runner). A temp HOME with
-    a fake key makes the assertion mean the same thing everywhere."""
+    The key row FILE must exist for its wording to be testable at all -- with
+    no key, `_device_key_row` takes the earlier "not created" branch and says
+    nothing about whether a probe happened. run()'s HOME defaults to the real
+    one, so this passed by accident on a machine with a workspace already set
+    up (a real ~/.porthole/device_key) and silently took the "not created"
+    branch, asserting nothing about PORTHOLE_DEVICE_STATE, on a clean HOME
+    (any CI runner). A temp HOME with a fake key makes the assertion mean the
+    same thing everywhere.
+
+    The assertion used to be `"could not be asked" in key[0]` -- the wording
+    `_device_key_row` gives an ACTUAL failed dial (asked, and could not tell).
+    In this test's environment PHONE resolves to a real-looking address, so a
+    reverted short-circuit does not skip the key probe silently -- it opens a
+    real ssh connection that also, eventually, cannot tell, and renders the
+    exact same words. The row text could not see the difference; only the
+    5-second ssh ConnectTimeout the real dial pays and the short-circuit does
+    not can. Elapsed time is the honest signal here, not the row's wording."""
     fake_home = tempfile.mkdtemp(prefix="porthole-doctor-home-")
     key_dir = pathlib.Path(fake_home) / ".porthole"
     key_dir.mkdir()
     (key_dir / "device_key").write_text("fake key, never read\n")
+    start = time.monotonic()
     rc, out, err = run("doctor",
                        env={"PORTHOLE_DEVICE_STATE": "absent", "HOME": fake_home})
+    elapsed = time.monotonic() - start
     assert "device: state" in out, out
     assert "device key" in out, out
     key = [l for l in out.splitlines() if "device key" in l]
-    assert key and "could not be asked" in key[0], key
+    assert key, out
+    # A re-dialled key probe pays ssh's 5 s ConnectTimeout; honouring the
+    # short-circuit costs nothing. 3 s leaves headroom above ordinary CLI
+    # startup (imports, config load) while staying well under a real dial.
+    assert elapsed < 3, (
+        f"doctor took {elapsed:.2f}s -- the key probe re-dialled the device "
+        f"instead of honouring PORTHOLE_DEVICE_STATE (row: {key})")
 
 
 def test_device_packages_skips_the_apk_query_when_the_device_is_not_booted():
