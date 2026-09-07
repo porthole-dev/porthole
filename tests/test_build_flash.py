@@ -1763,5 +1763,67 @@ def test_a_cache_near_its_ceiling_is_a_warning_before_it_is_a_loss():
     assert ccache_pressure({"used": 1.0 * GB, "max": 0})[0] == "skip"
 
 
+def test_a_running_build_draws_the_same_block_the_watchers_do():
+    """Reported from a real session: the progress inside `porthole build`
+    looked nothing like `porthole pkg watch`.
+
+    It was one bare line -- `line_of(snapshot, 18)` -- while both watchers drew
+    the four-row block from the SAME tracker: header, bar, spinner, activity.
+    Same numbers, poorer picture, on the command somebody actually sits and
+    watches.
+
+    Asserted on the rows rather than on the escape codes: what was wrong was
+    the shape, and the cursor arithmetic is pinned separately in
+    tests/test_progress.py."""
+    import porthole_cmd_build as build
+    import porthole_progress as progress
+
+    class FakeOut:
+        lines = []
+
+        def __call__(self, *a, **k):
+            pass
+
+        def paint(self, text, _colour):
+            return text
+
+    class Term:
+        """A tty that keeps every frame, not just a count of them."""
+
+        def __init__(self):
+            self.frames = []
+
+        def isatty(self):
+            return True
+
+        def write(self, text):
+            self.frames.append(text)
+
+        def flush(self):
+            pass
+
+    tmp = tempfile.mkdtemp(prefix="porthole-block-")
+
+    class FakeCtx:
+        root = ROOT
+        cfg = {"PORTHOLE_RUNDIR": tmp}
+        out = FakeOut()
+
+    term, real, beat = Term(), sys.stdout, build.BEAT
+    build.BEAT = 0.05
+    sys.stdout = term
+    try:
+        rc = build._stream(FakeCtx(), ["sh", "-c", "sleep 0.6"], None, 60,
+                           "pkg:block")
+    finally:
+        sys.stdout, build.BEAT = real, beat
+    assert rc == 0, rc
+
+    rows = max(f.count("\033[2K") for f in term.frames)
+    assert rows >= len(progress.watch_lines({})), (
+        "the build painted {} row(s); the watchers draw {}".format(
+            rows, len(progress.watch_lines({}))))
+
+
 if __name__ == "__main__":
     sys.exit(main())

@@ -1685,5 +1685,48 @@ def test_pmbootstraps_own_prefix_does_not_hide_a_build_line():
         "(318875) [12:50:06] (buildroot_aarch64) % su pmos -c 'ccache -s'\n"
         "(318875) [12:50:06] *** output passed to pmbootstrap stdout ***\n")
 
+def test_a_repainted_block_walks_back_over_exactly_what_it_drew():
+    """`porthole build` painted a one-line bar while `pkg watch` painted the
+    four-row block from the same tracker -- same numbers, poorer picture, on
+    the one command somebody actually sits and watches.
+
+    Sharing the block means sharing this arithmetic, and it is the half that
+    cannot be eyeballed: walk up too few rows and the block marches down the
+    screen, too many and it eats the line above it. The FIRST paint must not
+    walk up at all, because there is nothing above it yet."""
+    seen = []
+    paint, clear = progress.block_painter(seen.append)
+
+    paint(["a", "b", "c"])
+    assert "\033[" not in seen[0].split("\r")[0], (
+        "the first paint walked up over something it never drew: " + repr(seen[0]))
+    assert seen[0].count("\r\033[2K") == 3, repr(seen[0])
+
+    paint(["a", "b", "c"])
+    assert seen[1].startswith("\033[2A"), repr(seen[1])
+
+    # A block that changes height must walk back over the height it LAST
+    # drew, not the one it is about to draw.
+    paint(["a", "b", "c", "d", "e"])
+    assert seen[2].startswith("\033[2A"), repr(seen[2])
+    paint(["a"])
+    assert seen[3].startswith("\033[4A"), repr(seen[3])
+
+    clear()
+    assert seen[4] == "\r\033[2K", repr(seen[4])
+    # ...and clearing twice must not walk up over the caller's own output.
+    clear()
+    assert len(seen) == 5, seen[5:]
+
+
+def test_the_build_and_the_watcher_draw_the_same_block():
+    """The report was that they looked different. They are the same rows from
+    the same renderer now, so this pins the thing that was actually wrong
+    rather than the escape codes around it."""
+    snap = _snap(phase="make", last_at=NOW - 5)
+    assert progress.watch_lines(snap) == progress.watch_lines(snap)
+    assert len(progress.watch_lines(snap)) >= 3, progress.watch_lines(snap)
+
+
 if __name__ == "__main__":
     sys.exit(main())
