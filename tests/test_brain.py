@@ -32,16 +32,17 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 TMPXDG = tempfile.mkdtemp(prefix="porthole-brain-test-")
 
-# `porthole brain` always resolves its ROOT from bin/porthole's own location
-# (see bin/porthole), so it has no way to point it at a scratch copy -- the
-# three tests below therefore write real, transient files into THIS repo's
-# own brain/findings/ and read the live brain/ tree back. Under the parallel
-# runner that made two of them race: two concurrent `_lint_a_finding` calls
-# sharing one filename, and `test_the_index_is_current` reading load_notes()
-# while a probe note briefly existed. Built as a Lock() here, before the pool
-# forks, so every worker inherits the same OS semaphore -- only these three
-# tests ever wait on each other; the rest of the suite still runs in parallel.
-_BRAIN_LOCK = multiprocessing.Lock()
+# `brain new` and the index comparison both have no choice but to touch the
+# live brain/ tree -- `porthole brain new` writes wherever bin/porthole's own
+# ROOT resolves to, and "is the index current" is a question about THIS
+# repo's committed brain/, not a copy of it. Under the parallel runner those
+# two raced with each other. Built as a Lock() here, before the pool forks
+# under the "fork" context tests/_runner.py pins (a lock built off the
+# multiprocessing default context takes a different SemLock path once
+# forkserver is the platform default), so every worker inherits the same OS
+# semaphore -- only these two tests wait on each other; the rest of the suite
+# still runs in parallel.
+_BRAIN_LOCK = multiprocessing.get_context("fork").Lock()
 
 
 def run(*args, env=None):
@@ -164,34 +165,33 @@ def test_brain_new_finding_lands_in_findings_with_its_own_template():
 
 
 def _lint_a_finding(body_extra, evidence):
-    """Write one finding into the repo, lint it, remove it. Returns the
+    """Lint one synthetic finding in a tempdir -- `_lint_note` takes `root`
+    as a parameter, same as the other lint tests above, so this needs no
+    subprocess and never touches this repo's own brain/. Returns the
     complaint about instruments, or "" if there was none."""
-    note = ROOT / "brain" / "findings" / "zz-instrument-probe.md"
-    with _BRAIN_LOCK:
-        note.write_text(
-            "---\n"
-            "id: zz-instrument-probe\n"
-            "title: A probe for the instrument rule\n"
-            "scope: generic\n"
-            "subsystem: build\n"
-            "severity: finding\n"
-            "confidence: proven\n"
-            f"evidence: \"{evidence}\"\n"
-            "refutes: \"nothing; this is a lint probe\"\n"
-            "first-learned: 2026-08-29\n"
-            "---\n\n"
-            "**The question** — does the instrument rule fire?\n\n"
-            f"**The answer** — {body_extra}\n")
-        try:
-            out = subprocess.run(
-                [sys.executable, str(ROOT / "bin" / "porthole"), "brain", "lint"],
-                capture_output=True, text=True).stdout
-            for line in out.splitlines():
-                if "commit the instrument" in line:
-                    return line.strip()
-            return ""
-        finally:
-            note.unlink(missing_ok=True)
+    import porthole_cmd_brain as B
+    d = pathlib.Path(tempfile.mkdtemp(prefix="brain-lint-instrument-"))
+    (d / "brain" / "findings").mkdir(parents=True)
+    note = d / "brain" / "findings" / "zz-instrument-probe.md"
+    note.write_text(
+        "---\n"
+        "id: zz-instrument-probe\n"
+        "title: A probe for the instrument rule\n"
+        "scope: generic\n"
+        "subsystem: build\n"
+        "severity: finding\n"
+        "confidence: proven\n"
+        f"evidence: \"{evidence}\"\n"
+        "refutes: \"nothing; this is a lint probe\"\n"
+        "first-learned: 2026-08-29\n"
+        "---\n\n"
+        "**The question** — does the instrument rule fire?\n\n"
+        f"**The answer** — {body_extra}\n")
+    problems = B._lint_note(B.parse_note(note), {}, d)
+    for p in problems:
+        if "commit the instrument" in p:
+            return p.strip()
+    return ""
 
 
 def test_a_bare_instrument_name_is_still_refused():
