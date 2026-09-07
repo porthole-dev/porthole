@@ -693,6 +693,27 @@ def main(argv: list[str], root: pathlib.Path) -> int:
     return _run(args, out, root)
 
 
+def _json_failure(args, message: str, hint: str, code: int) -> bool:
+    """Render a failure as JSON on stdout when --json was asked for.
+
+    `--json` means "I am not a human reading this", and only half of that was
+    kept: every verb emitted JSON when it succeeded and prose on stderr when it
+    failed, so the one path a caller MUST handle was the one it could not
+    parse. Found against `porthole init`; this handler is shared, so every verb
+    had it.
+
+    stdout, and the human rendering is skipped entirely -- a caller that asked
+    for JSON gets one document and nothing else, or it is parsing prose again.
+    A caller that redirected stderr to a log, the normal thing to do with a
+    chatty tool, would otherwise parse an empty string and see success.
+    """
+    if not getattr(args, "json", False):
+        return False
+    print(json.dumps({"error": message, "hint": hint or "", "code": code,
+                      "verb": getattr(args, "verb", "")}, indent=2))
+    return True
+
+
 def _run(args, out: Out, root: pathlib.Path) -> int:
     """Invoke a verb and render its failures consistently."""
     ctx = Ctx(root, args, out)
@@ -701,6 +722,11 @@ def _run(args, out: Out, root: pathlib.Path) -> int:
     except porthole.FastbootUnavailable as exc:
         # 69, not 1: no verb should have to restate this. A tool that could
         # not run is not a measurement that came back negative.
+        if _json_failure(args, str(exc),
+                         "point FASTBOOT at a fastboot that exists here, or "
+                         "install one -- `porthole doctor` names how.",
+                         EX_UNAVAILABLE):
+            return EX_UNAVAILABLE
         out.error(str(exc))
         print(out.paint(
             f"  {out.sym('→', '->')} point FASTBOOT at a fastboot that exists "
@@ -708,6 +734,8 @@ def _run(args, out: Out, root: pathlib.Path) -> int:
             file=sys.stderr)
         return EX_UNAVAILABLE
     except Bail as exc:
+        if _json_failure(args, exc.message, exc.hint, exc.code):
+            return exc.code
         out.error(exc.message)
         if exc.hint:
             # stderr, not stdout: an error and its remedy must not be split
