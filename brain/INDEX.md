@@ -133,6 +133,7 @@ generic notes as well.
 | [a-stale-inherited-env-outbuilds-the-profile](traps/a-stale-inherited-env-outbuilds-the-profile.md) | `generic` | A stale inherited env outbuilds the profile |
 | [a-stall-catcher-must-pick-the-busiest-webkitwebprocess](traps/a-stall-catcher-must-pick-the-busiest-webkitwebprocess.md) | `generic` | A stall catcher on the browser must pick the WebKitWebProcess with the most threads, and thread names are truncated from the front |
 | [a-systemd-dropin-cannot-remove-an-ordering-dependency](traps/a-systemd-dropin-cannot-remove-an-ordering-dependency.md) | `generic` | A systemd drop-in cannot remove an ordering dependency |
+| [a-test-that-passes-either-way-is-not-a-guard](traps/a-test-that-passes-either-way-is-not-a-guard.md) | `generic` | A green suite hides tests that pass whether or not the defect is present |
 | [a-tree-built-module-carries-btf-the-running-kernel-rejects](traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md) | `generic` | A tree-built module carries BTF the running kernel rejects, and modprobe blames a symlink loop |
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
@@ -223,7 +224,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 109
+- `generic` — 110
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
