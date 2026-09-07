@@ -69,8 +69,18 @@ def _invoke(name: str):
     return name, "pass", None
 
 
-def run(namespace) -> int:
-    """The repo's standard runner. Pass `globals()`."""
+def run(namespace, suffix: str = "") -> int:
+    """The repo's standard runner. Pass `globals()`.
+
+    `suffix`, if given, is folded onto the summary line rather than printed
+    separately -- two `tail -1` consumers (`Makefile`'s `floor` target and
+    `tests/ci-local.sh`'s smoke check) read only the LAST line a suite prints,
+    and before this runner existed that line already carried both the tally
+    and a suite-specific count (e.g. "18/18 passed (150 tools checked)"). A
+    suffix printed on its own line would still be true, but invisible to
+    those two callers -- so it goes on this line instead, byte-compatible
+    with what those suites printed before.
+    """
     tests = [n for n, f in sorted(namespace.items())
              if n.startswith("test_") and callable(f)]
 
@@ -101,6 +111,10 @@ def run(namespace) -> int:
     for msg in skips:
         print(msg)
     tail = ", {} skipped".format(len(skips)) if skips else ""
-    print("{}/{} passed{}".format(
-        len(tests) - len(failures) - len(skips), len(tests), tail))
+    # Skip count first, suffix last: the tally and the skip count are both
+    # about which tests ran, the suffix is a different axis (what the suite
+    # found), so it reads as the trailing annotation on the line.
+    head = "{}/{} passed{}".format(
+        len(tests) - len(failures) - len(skips), len(tests), tail)
+    print("{} {}".format(head, suffix) if suffix else head)
     return 1 if failures else 0

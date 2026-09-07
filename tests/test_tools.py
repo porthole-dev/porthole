@@ -408,9 +408,10 @@ def _is_shell(path):
 
 def main():
     # The count is what makes a green run meaningful: "18/18 passed" says
-    # nothing about whether the walk found any tools at all.
-    print("({} tools checked)".format(len(tools())))
-    return _runner.run(globals())
+    # nothing about whether the walk found any tools at all. Folded onto the
+    # runner's summary line, not printed separately -- `make floor` and
+    # `make smoke` only look at a suite's LAST line.
+    return _runner.run(globals(), "({} tools checked)".format(len(tools())))
 
 
 def test_the_build_path_never_invokes_ssh_without_the_shared_options():
