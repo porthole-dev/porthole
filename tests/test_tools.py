@@ -238,11 +238,11 @@ def test_tools_with_a_shebang_are_executable():
                      + "\n\nchmod +x them, and commit the mode change.")
 
 
-def test_tk_lib_is_a_symlink_to_the_shared_lib():
+def test_ph_lib_is_a_symlink_to_the_shared_lib():
     """It has been materialised into a real file by a stray `sed -i` before.
     That silently forks the shared library: edits to lib/porthole.sh stop
     reaching every shell tool, and nothing errors."""
-    link = ROOT / "tools" / "tk-lib.sh"
+    link = ROOT / "tools" / "ph-lib.sh"
     assert link.is_symlink(), (
         f"{link} must be a symlink to ../lib/porthole.sh, not a copy "
         f"(a `sed -i` over tools/*.sh will do this -- use `sed --follow-symlinks` "
@@ -262,8 +262,8 @@ def test_tools_that_need_a_device_mention_the_mutex_or_use_the_lib():
         text = path.read_text(errors="replace")
         if field(path, "lib-exempt"):
             continue      # declared and justified in the tool's own header
-        ok = ("tk-lib.sh" in text or "import porthole" in text
-              or "tk-device.sh" in text or "porthole.Device" in text
+        ok = ("ph-lib.sh" in text or "import porthole" in text
+              or "ph-device.sh" in text or "porthole.Device" in text
               or "TK_SSH_OPTS" in text or "tk_device_state" in text)
         if not ok:
             bad.append(f"{path.name} (needs {needs})")
@@ -286,7 +286,7 @@ def test_no_bashisms_in_posix_sh_scripts():
     not degrade -- it is a syntax error at the point of use.
 
     This exists because a bulk edit added `${BASH_SOURCE[0]:-$0}` to eight
-    `#!/bin/sh` tools. Every one of them silently failed to find tk-lib.sh, and
+    `#!/bin/sh` tools. Every one of them silently failed to find ph-lib.sh, and
     only shellcheck in CI noticed."""
     bad = []
     for path in tools():
