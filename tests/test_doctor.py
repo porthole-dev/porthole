@@ -743,5 +743,41 @@ def test_no_device_does_not_open_a_connection_to_the_device():
     assert not calls, f"--no-device still opened ssh: {calls}"
 
 
+def test_the_cache_ceiling_is_reported_where_people_actually_look():
+    """`porthole build ccache` has always known when a cache was about to
+    evict -- and nobody runs it before a build. The row belongs where the
+    reader already is.
+
+    Behind --all because reading it is one podman exec per arch: 1.9s against
+    doctor's own 0.7s. The everyday run must still SAY the check exists, or
+    a skipped row is indistinguishable from a check that was never written."""
+    import porthole_cmd_build as build
+
+    GB = 2 ** 30
+    fake = [("aarch64", {"used": 4.6 * GB, "max": 4.7 * GB}),
+            ("x86_64", {"used": 0.5 * GB, "max": 25 * GB}),
+            ("riscv64", {"used": None, "max": None})]
+    real = build.ccache_stats_by_arch
+    build.ccache_stats_by_arch = lambda _ctx: fake
+    try:
+        shallow = doctor.Checks()
+        doctor._ccache_rows(shallow, None, deep=False)
+        assert [r["status"] for r in shallow.rows] == ["skip"], shallow.rows
+        assert "--all" in shallow.rows[0]["doc"], shallow.rows[0]
+
+        deep = doctor.Checks()
+        doctor._ccache_rows(deep, None, deep=True)
+    finally:
+        build.ccache_stats_by_arch = real
+
+    by_name = {r["name"]: r for r in deep.rows}
+    # An arch with no numbers is not a row: an empty cache and a full one are
+    # different states, and reporting the first reads as a fault.
+    assert "workspace: ccache riscv64" not in by_name, by_name
+    assert by_name["workspace: ccache aarch64"]["status"] == "fail", by_name
+    assert "--max" in by_name["workspace: ccache aarch64"]["fix"], by_name
+    assert by_name["workspace: ccache x86_64"]["status"] == "ok", by_name
+
+
 if __name__ == "__main__":
     sys.exit(main())

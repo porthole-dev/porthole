@@ -1740,5 +1740,28 @@ def test_json_suppresses_the_tree_autoselect_banner():
     assert not ctx.out.lines, f"printed under --json: {ctx.out.lines}"
 
 
+def test_a_cache_near_its_ceiling_is_a_warning_before_it_is_a_loss():
+    """Past the ceiling ccache evicts, and an evicted entry turns the next
+    rebuild into a full one with no error anywhere. The ceiling is 5 GB
+    because that is ccache's default, not because anyone chose it -- and on
+    the reference host aarch64 was at 60% of it before a webkit build had
+    run."""
+    from porthole_cmd_build import ccache_pressure
+
+    GB = 2 ** 30
+    assert ccache_pressure({"used": 0.5 * GB, "max": 25 * GB})[0] == "ok"
+    lvl, why = ccache_pressure({"used": 4.0 * GB, "max": 4.7 * GB})
+    assert lvl == "warn", (lvl, why)
+    assert "evict" in why.lower(), why
+    lvl, why = ccache_pressure({"used": 4.6 * GB, "max": 4.7 * GB})
+    assert lvl == "fail", (lvl, why)
+    assert "--max" in why, "the row must carry the command that fixes it"
+    # Nothing known is not a problem: a cache nobody has compiled against has
+    # no pressure, and reporting one reads as a fault about the one state that
+    # proves nothing either way.
+    assert ccache_pressure({"used": None, "max": None})[0] == "skip"
+    assert ccache_pressure({"used": 1.0 * GB, "max": 0})[0] == "skip"
+
+
 if __name__ == "__main__":
     sys.exit(main())
