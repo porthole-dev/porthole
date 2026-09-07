@@ -163,8 +163,15 @@ class Out:
         toward `{:<N}`'s width and toward nothing the terminal shows, so
         painting first makes every column a different width by exactly the
         length of a colour code.
+
+        `{:<N}` pads UP TO N -- it does not guarantee a separator once the
+        command is already >= N chars, and a note glued straight onto a
+        command with zero gap (`google-taimenthe values worth copying`) is
+        worse than the ragged columns this method exists to fix. Padding to
+        N-1 and appending a literal space keeps the same column for anything
+        that fits and guarantees one space when it does not.
         """
-        command = text if not note else "{:<{}}".format(text, self.HINT_COLUMN)
+        command = text if not note else "{:<{}} ".format(text, self.HINT_COLUMN - 1)
         body = self.paint(command, "cyan")
         if note:
             body += self.paint(note, "grey")
