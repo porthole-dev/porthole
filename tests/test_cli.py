@@ -538,32 +538,49 @@ BLACKHOLE = "192.0.2.1"
 
 
 def test_the_host_only_verbs_stay_under_their_budget():
-    """A budget, not a benchmark. These four run with no device and no
-    container, so a wait on the network is the only way to be slow -- which is
-    exactly how `doctor --no-device` came to spend 5.1 s of a 5.5 s run inside
-    one ssh with ConnectTimeout=5.
+    """These verbs touch nothing and must not wait on the network. The budget
+    is relative, not absolute: measure a control verb (version, ~interpreter
+    startup only) in the same run, then verify each host-only verb completes
+    within 3 s of that control AND within 8 s absolute.
 
-    Two things make it survive a loaded runner rather than being deleted for
-    flapping. The device address is unrouteable, so any dial costs a full
-    timeout and not a fast refusal -- the signal is seconds, not milliseconds.
-    And the budget is 8 s: this suite runs its tests in parallel and each of
-    these spawns a CLI subprocess, so several seconds of pure scheduling delay
-    is normal and must not be a failure.
+    Relative beats absolute here because both verbs share scheduling jitter:
+    if the runner is loaded, both slow down together, and the delta is immune
+    to load. A network dial, by contrast, adds a fixed ~5 s that load does not.
+    So a 3 s delta separates normal operation (~0.6–0.8 s) from a hung probe
+    (~5.5 s) even on a loaded runner.
+
+    The unrouteable device address (192.0.2.0/24 is RFC 5737 TEST-NET-1) forces
+    a dial to cost a full connect timeout, not a fast refusal -- the signal is
+    seconds, not milliseconds. The 8 s absolute ceiling covers the one blind
+    spot: if the control itself ever started dialling, both would rise and the
+    delta would hide it.
     """
-    budget_s = 8.0
     env = {"PORTHOLE_DEVICE_STATE": "absent",
            "PORTHOLE_HOST": BLACKHOLE, "PHONE": "pmos@" + BLACKHOLE}
+    # Time the control first: version touches nothing, so its time is pure
+    # interpreter startup plus scheduling jitter.
+    started = time.monotonic()
+    run("version", env=env)
+    control = time.monotonic() - started
+
+    relative_budget_s = 3.0
+    absolute_budget_s = 8.0
     slow = []
-    for argv in (["--help"], ["version"], ["devices"],
-                 ["doctor", "--no-device"]):
+    for argv in (["--help"], ["devices"], ["doctor", "--no-device"]):
         started = time.monotonic()
         run(*argv, env=env)
         took = time.monotonic() - started
-        if took > budget_s:
-            slow.append(f"porthole {' '.join(argv)}: {took:.1f}s")
+        if took > control + relative_budget_s or took > absolute_budget_s:
+            slow.append(
+                f"porthole {' '.join(argv)}: {took:.2f}s "
+                f"(control {control:.2f}s, delta {took - control:.2f}s)")
     assert not slow, (
         "these run with no device attached and must not wait on the network:\n  "
-        + "\n  ".join(slow) + "\n(docs/PERFORMANCE.md, 'The verbs')")
+        + "\n  ".join(slow)
+        + f"\n(control: porthole version {control:.2f}s; "
+        + f"relative budget: +{relative_budget_s}s; "
+        + f"absolute budget: {absolute_budget_s}s; "
+        + "docs/PERFORMANCE.md, 'The verbs')")
 
 
 def main():
