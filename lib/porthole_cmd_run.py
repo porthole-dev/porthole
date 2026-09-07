@@ -12,8 +12,8 @@ import os
 import shlex
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, child_env
-from porthole_cmd_tools import collect
+from porthole_cli import Bail, EX_FAIL, EX_USAGE, child_env
+from porthole_cmd_tools import collect, renamed
 
 
 def cmd_run(args, ctx) -> int:
@@ -30,6 +30,10 @@ def cmd_run(args, ctx) -> int:
     want = os.path.basename(args.tool)
     tool = tools.get(want)
     if tool is None:
+        moved = renamed(want, tools)
+        if moved:
+            raise Bail(f"{want} is now {moved}", EX_USAGE,
+                       f"porthole run {moved}")
         near = [n for n in tools if want in n]
         raise Bail(f"no tool named {want!r}", EX_FAIL,
                    f"did you mean: {', '.join(sorted(near)[:5])}?" if near
