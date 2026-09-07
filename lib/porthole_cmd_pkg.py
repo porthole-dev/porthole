@@ -1479,8 +1479,8 @@ def _search(ctx, args) -> int:
 
         first = shown[0]
         if first["tree"] == "alpine":
-            o.hint(f"porthole pkg fork {first['name']} --yes   "
-                   f"copy it into pmaports, where a build can see it")
+            o.hint(f"porthole pkg fork {first['name']} --yes",
+                   "copy it into pmaports, where a build can see it")
         else:
             o.hint(f"porthole pkg build {first['name']}")
 
@@ -1535,7 +1535,7 @@ def _fork(ctx, args) -> int:
     ctx.out.kv("into", f"{pmaports}/temp/", 9)
     if not args.yes:
         ctx.out.blank()
-        ctx.out.hint(f"porthole pkg fork {name} --yes   to actually do it")
+        ctx.out.hint(f"porthole pkg fork {name} --yes", "to actually do it")
         return EX_OK
 
     usable, why_not = build_module()._workspace_usable(ctx)

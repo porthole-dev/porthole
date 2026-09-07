@@ -85,7 +85,7 @@ def cmd_ui(args, ctx) -> int:
                 o(f"  {len(uis) - len(shown)} more (desktop/appliance): "
                   f"`porthole ui --all`")
             o.blank()
-            o.hint("porthole ui <name>   switch")
+            o.hint("porthole ui <name>", "switch")
         return ctx.emit(uis if args.json else shown, render)
 
     match = next((u for u in uis if u["name"] == args.name), None)
@@ -109,14 +109,14 @@ def cmd_ui(args, ctx) -> int:
         "  old one until you reinstall or reflash.", "yellow"))
     ctx.out.blank()
     if not args.yes:
-        ctx.out.hint(f"porthole ui {args.name} --yes    to go ahead")
+        ctx.out.hint(f"porthole ui {args.name} --yes", "to go ahead")
         return EX_OK
 
     rc = subprocess.run(["pmbootstrap", "config", "ui", args.name]).returncode
     if rc != 0:
         raise Bail("pmbootstrap refused the UI change", EX_FAIL)
     ctx.out(ctx.out.paint(f"  ui is now {args.name}", "green"))
-    ctx.out.hint("pmbootstrap install   # rebuild the rootfs with it")
+    ctx.out.hint("pmbootstrap install", "rebuild the rootfs with it")
     return EX_OK
 
 

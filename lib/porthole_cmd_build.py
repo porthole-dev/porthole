@@ -1833,7 +1833,7 @@ def _ccache(ctx, args) -> int:
                   "ccache evicts, and", "grey"))
         o(o.paint("  an evicted entry turns the next rebuild back into a "
                   "full one, silently.", "grey"))
-        o.hint("porthole build ccache --max 25G    raise it")
+        o.hint("porthole build ccache --max 25G", "raise it")
 
     return ctx.emit(payload, render)
 

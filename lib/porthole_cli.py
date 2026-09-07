@@ -146,9 +146,29 @@ class Out:
             line += self.paint(f"   {note}", "grey")
         print(line, file=self.stream)
 
-    def hint(self, text: str):
-        print("  {} {}".format(self.mark("note"), self.paint(text, "cyan")),
-              file=self.stream)
+    # Wide enough for the longest hint command in the tree
+    # (`porthole build ccache --max 25G`, 31), and a hint longer than that
+    # simply pushes its own note along rather than truncating: a command that
+    # does not fit is still a command somebody has to type.
+    HINT_COLUMN = 34
+
+    def hint(self, text: str, note: str = ""):
+        """A command worth running, and optionally what it is for.
+
+        The COLUMN is here rather than at the call site. 52 call sites padded
+        their own and picked 21 different widths, so `porthole doctor` landed
+        in a different column depending which verb printed it.
+
+        Padded BEFORE it is painted, never after: an escape sequence counts
+        toward `{:<N}`'s width and toward nothing the terminal shows, so
+        painting first makes every column a different width by exactly the
+        length of a colour code.
+        """
+        command = text if not note else "{:<{}}".format(text, self.HINT_COLUMN)
+        body = self.paint(command, "cyan")
+        if note:
+            body += self.paint(note, "grey")
+        print("  {} {}".format(self.mark("note"), body), file=self.stream)
 
     def warn(self, text: str):
         print(self.paint(f"warning: {text}", "yellow"), file=sys.stderr)
@@ -579,13 +599,13 @@ def overview(root: pathlib.Path, out: Out) -> int:
     out.blank()
 
     if not device or not configured:
-        out.hint("porthole init <codename>   set this host up")
+        out.hint("porthole init <codename>", "set this host up")
         if not profiles:
-            out.hint("porthole new-device <codename>      port something new")
+            out.hint("porthole new-device <codename>", "port something new")
     else:
-        out.hint("porthole next                       where am I, what is next?")
-        out.hint("porthole doctor                     check the host and device")
-        out.hint("porthole tools                      what can I run?")
+        out.hint("porthole next", "where am I, what is next?")
+        out.hint("porthole doctor", "check the host and device")
+        out.hint("porthole tools", "what can I run?")
     out.blank()
     out("`porthole --help` for all verbs.")
     return EX_OK

@@ -441,9 +441,9 @@ def cmd_build(args, ctx) -> int:
                   "knowledge base from brain/.", "grey"))
         o.blank()
         if shutil.which("mkdocs"):
-            o.hint("porthole docs serve    preview at http://127.0.0.1:8000")
+            o.hint("porthole docs serve", "preview at http://127.0.0.1:8000")
         else:
-            o.hint("pipx install mkdocs-material    then `porthole docs serve`")
+            o.hint("pipx install mkdocs-material", "then `porthole docs serve`")
         o.hint("git push — CI builds and publishes it to GitHub Pages")
 
     return ctx.emit({"pages": pages, "src": str(src)}, render)
@@ -701,7 +701,7 @@ def cmd_lint(args, ctx) -> int:
             o(f"  {o.paint(kind, 'yellow'):<24s} {where}")
             o(f"      {detail}")
         o.blank()
-        o.hint("porthole docs new handoff <topic>   scaffolds it correctly")
+        o.hint("porthole docs new handoff <topic>", "scaffolds it correctly")
 
     ctx.emit({"findings": [{"kind": k, "path": p, "detail": d}
                            for k, p, d in findings],

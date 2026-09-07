@@ -242,10 +242,10 @@ def cmd_new(args, ctx) -> int:
                 f"about to write.")
     ctx.out.blank()
     ctx.out.heading("next")
-    ctx.out.hint("porthole dts sources     where the real values come from")
-    ctx.out.hint("porthole dts labels      what the SoC dtsi already defines")
-    ctx.out.hint("porthole dts compare <sibling>   what they define that you do not")
-    ctx.out.hint("porthole dts check       does it compile")
+    ctx.out.hint("porthole dts sources", "where the real values come from")
+    ctx.out.hint("porthole dts labels", "what the SoC dtsi already defines")
+    ctx.out.hint("porthole dts compare <sibling>", "what they define that you do not")
+    ctx.out.hint("porthole dts check", "does it compile")
     ctx.out.blank()
     ctx.out("Also add it to the Makefile in that directory, or it is never built.")
     return EX_OK
@@ -496,7 +496,7 @@ def cmd_port(args, ctx) -> int:
             if args.out:
                 o(f"  wrote {args.out}")
             else:
-                o.hint("--out delta.toml   to check the audit trail in")
+                o.hint("--out delta.toml", "to check the audit trail in")
 
         return ctx.emit(doc, render)
 

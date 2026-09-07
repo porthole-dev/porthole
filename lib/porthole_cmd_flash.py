@@ -40,7 +40,7 @@ def cmd_flash(args, ctx) -> int:
     if has_slots and not cfg.get("PORTHOLE_SLOTS_PROBED"):
         ctx.out.warn("slots were never probed on this device — "
                      "HAS_AB_SLOTS may be the shipped default")
-        ctx.out.hint("porthole slots probe   reads it from the bootloader")
+        ctx.out.hint("porthole slots probe", "reads it from the bootloader")
 
     state = ctx.device().state()
     if state != "FASTBOOT" and not args.force:
