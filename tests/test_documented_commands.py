@@ -26,6 +26,8 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 import porthole_cli  # noqa: E402
@@ -321,19 +323,8 @@ def test_the_session_contract_exists_and_names_the_first_command():
 
 
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items())
-             if n.startswith("test_") and callable(f)]
-    failed = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"  ok   {name}")
-        except AssertionError as exc:
-            failed += 1
-            print(f"  FAIL {name}: {exc}")
-    print(f"\n{len(tests) - failed}/{len(tests)} passed "
-          f"({len(documented())} invocations scanned)")
-    return 1 if failed else 0
+    print("({} invocations scanned)".format(len(documented())))
+    return _runner.run(globals())
 
 
 if __name__ == "__main__":
