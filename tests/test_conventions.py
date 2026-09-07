@@ -406,5 +406,34 @@ def test_no_new_environment_knob_carries_the_old_prefix():
         "list:\n  " + "\n  ".join(extra))
 
 
+def test_no_suite_defines_a_test_below_its_main_block():
+    """A `def test_*` under `if __name__ == "__main__": sys.exit(main())` is
+    never bound when the runner sweeps `globals()`, because the sweep runs
+    while that line is executing and the function below it does not exist yet.
+
+    tests/test_buildroot.py carried one for the repo's entire history. It
+    reported `19/19 passed` and held twenty tests, and no amount of running
+    the suite could have said so -- the file was green, and green is exactly
+    what it looks like. Found by reading, and named in
+    brain/traps/a-test-that-passes-either-way-is-not-a-guard.md as shape one.
+
+    Six lines, and the class is closed permanently.
+    """
+    bad = []
+    for path in sorted((ROOT / "tests").glob("test_*.py")):
+        lines = path.read_text(errors="replace").splitlines()
+        guard = next((i for i, line in enumerate(lines)
+                      if line.startswith('if __name__ ==')), None)
+        if guard is None:
+            continue
+        for i, line in enumerate(lines[guard + 1:], start=guard + 2):
+            if line.startswith("def test_"):
+                bad.append("{}:{}: {}".format(
+                    path.relative_to(ROOT), i, line.split("(")[0]))
+    assert not bad, (
+        "defined below the __main__ block, so the runner never binds "
+        "them:\n  " + "\n  ".join(bad))
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
