@@ -128,6 +128,7 @@ generic notes as well.
 | [a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist](traps/a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist.md) | `generic` | A noarch or all dependency makes pmbootstrap ask for gcc-<native>, and every fresh workspace dies on its first packaging rung |
 | [a-partial-chroot-umount-leaves-placeholder-device-nodes](traps/a-partial-chroot-umount-leaves-placeholder-device-nodes.md) | `generic` | A partial chroot umount in the workspace leaves /dev/urandom, /dev/zero and /dev/tty as empty root-only files -- and a 5.5 h build dies on the last step |
 | [a-ram-booted-kernel-cannot-survive-a-long-sleep](traps/a-ram-booted-kernel-cannot-survive-a-long-sleep.md) | `generic` | A RAM-booted kernel cannot survive a long sleep — suspend work needs a flashed slot |
+| [a-shared-log-and-a-staged-apkbuild-are-not-a-build](traps/a-shared-log-and-a-staged-apkbuild-are-not-a-build.md) | `generic` | A staged package name and a touched log invent a build that is not running |
 | [a-shipped-default-is-not-an-answer](traps/a-shipped-default-is-not-an-answer.md) | `generic` | A shipped default is indistinguishable from a real answer, and safety checks complete themselves on it |
 | [a-sideloaded-device-apk-can-eat-the-radio-stack](traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md) | `generic` | A sideloaded device apk can eat the radio stack |
 | [a-stale-inherited-env-outbuilds-the-profile](traps/a-stale-inherited-env-outbuilds-the-profile.md) | `generic` | A stale inherited env outbuilds the profile |
@@ -224,7 +225,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 110
+- `generic` — 111
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
