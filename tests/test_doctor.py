@@ -197,8 +197,20 @@ def test_an_absent_device_is_probed_once_not_twice():
 
     PORTHOLE_DEVICE_STATE is how the repo already short-circuits the state
     probe in tests; the point of this test is that the KEY probe honours it
-    too."""
-    rc, out, err = run("doctor", env={"PORTHOLE_DEVICE_STATE": "absent"})
+    too.
+
+    The "could not be asked" branch only fires when a device key FILE exists
+    -- run()'s HOME defaults to the real one, so this passed by accident on a
+    machine with a workspace already set up (a real ~/.porthole/device_key)
+    and silently took the "not created" branch, asserting nothing about
+    PORTHOLE_DEVICE_STATE, on a clean HOME (any CI runner). A temp HOME with
+    a fake key makes the assertion mean the same thing everywhere."""
+    fake_home = tempfile.mkdtemp(prefix="porthole-doctor-home-")
+    key_dir = pathlib.Path(fake_home) / ".porthole"
+    key_dir.mkdir()
+    (key_dir / "device_key").write_text("fake key, never read\n")
+    rc, out, err = run("doctor",
+                       env={"PORTHOLE_DEVICE_STATE": "absent", "HOME": fake_home})
     assert "device: state" in out, out
     assert "device key" in out, out
     key = [l for l in out.splitlines() if "device key" in l]
