@@ -68,9 +68,9 @@ def _sibling(stem):
     raise SystemExit(f"{stem}.py must sit beside this tool, or in /tmp")
 
 
-_touch = _sibling("tk-touch")
+_touch = _sibling("ph-touch")
 Touch, drag = _touch.Touch, _touch.drag
-_ui = _sibling("tk-ui")
+_ui = _sibling("ph-ui")
 screen_hash, settle, toplevels = _ui.screen_hash, _ui.settle, _ui.toplevels
 unblank = _ui.unblank
 
