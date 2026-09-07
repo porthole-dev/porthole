@@ -6,7 +6,7 @@
 # exits: 0 ok · 64 usage · 75 lock unavailable · 76 wrong device state · 124 timed out at the hold ceiling
 # Serialise access to the ONE physical phone across parallel agents.
 #
-# Usage:  tools/tk-device.sh [--need-booted|--need-fastboot] <command> [args...]
+# Usage:  tools/ph-device.sh [--need-booted|--need-fastboot] <command> [args...]
 #
 # The flags are OPT-IN and the no-flag behaviour is unchanged. They exist
 # because the lock serialises the USB device and knows nothing about what the
@@ -37,8 +37,8 @@ TIMEOUT=${TK_DEVICE_TIMEOUT:-900}
 MAXHOLD=${TK_DEVICE_MAX:-1800}
 AGENT=${TK_AGENT:-unknown}
 
-# shellcheck source=tk-lib.sh
-. "$(dirname "$0")/tk-lib.sh"
+# shellcheck source=ph-lib.sh
+. "$(dirname "$0")/ph-lib.sh"
 
 NEED=
 while [ $# -gt 0 ]; do
@@ -68,7 +68,7 @@ wrong_state() {
 CMD=$*
 
 # </dev/null on every probe: ssh forwards stdin to the remote command, and
-# callers legitimately pipe a script in (`tk-device.sh 'sh -s' < foo.sh`).
+# callers legitimately pipe a script in (`ph-device.sh 'sh -s' < foo.sh`).
 # Without this the probe eats their script and they run an empty one.
 #
 # Before the queue, so a wrong-state caller does not burn TK_DEVICE_TIMEOUT.
@@ -122,7 +122,7 @@ trap 'rm -f "$LOCK.holder"' EXIT
 #
 # What it is really for: a tool that deliberately induces a reset -- suspend
 # and pm_test work -- must treat "the phone stopped answering" as the EXPECTED
-# outcome, and so must put a timeout on every ssh. tk-suspend-cycle.sh does
+# outcome, and so must put a timeout on every ssh. ph-suspend-cycle.sh does
 # this correctly via its S() helper, which is why its suspend arms never wedged
 # the lock. An ad-hoc `ssh ... ; ssh ...` one-liner does not, and one held the
 # lock for ten minutes against every other agent that day. This is the backstop

@@ -18,7 +18,7 @@ compositors use the device/surfaceless paths, allocators use GBM -- and for
 each prints the dma_buf_import_modifiers extension presence and the modifier
 list for NV12, XR24 and AR24.
 
-  tk-egl-dmabuf-probe.py [/dev/dri/renderD128]
+  ph-egl-dmabuf-probe.py [/dev/dri/renderD128]
 """
 import ctypes
 import os

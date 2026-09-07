@@ -8,7 +8,7 @@
 TAG=${1:-base}
 N=${2:-40}
 rm -rf $HOME/strip-$TAG; mkdir -p $HOME/strip-$TAG
-(cd $HOME && setsid python3 /tmp/tk-rangehttp.py 8080 $HOME >/tmp/http.log 2>&1 &) 2>/dev/null
+(cd $HOME && setsid python3 /tmp/ph-rangehttp.py 8080 $HOME >/tmp/http.log 2>&1 &) 2>/dev/null
 sleep 2
 for u in $(systemctl --user list-units 'app-*.scope' --no-legend | awk '{print $1}' | grep -i eph); do
     systemctl --user stop "$u" 2>/dev/null; done

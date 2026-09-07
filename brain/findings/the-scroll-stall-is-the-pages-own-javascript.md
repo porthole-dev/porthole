@@ -70,7 +70,7 @@ next campaign should chase -- and `plain.html` is a far better instrument for it
 than a live site, because nothing in it can dirty layout.
 
 **How it was established** — `tools/repro/scroll-record/arm.sh` (offsets are
-recomputed per build by `tools/tk-wkoffsets.sh`; the arm refuses if a browser is
+recomputed per build by `tools/ph-wkoffsets.sh`; the arm refuses if a browser is
 already running, because a uprobe does not attach to an already-mapped library).
 Two live-article arms agree to within 7 % on every number above. It would be
 overturned by a scripts-stripped arm that still relayouts, or by finding that

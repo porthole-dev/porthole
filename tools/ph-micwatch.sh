@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_UID
 # exits: 0 ok · non-zero on failure
-# tk-micwatch.sh -- sample whether anything is holding the microphone open.
+# ph-micwatch.sh -- sample whether anything is holding the microphone open.
 #
 # WHAT THIS SETTLES
 #   The plan carried an "always-open idle microphone capture stream" as a
@@ -25,12 +25,12 @@
 #     empty, entirely truthful picture of a server nobody is using. So we pin
 #     XDG_RUNTIME_DIR and assert exactly one pulseaudio is running.
 #
-# Usage: tk-micwatch.sh [seconds]      (default: sample for 10 min, then report)
-#        tk-micwatch.sh daemon         (run on the device until stopped)
+# Usage: ph-micwatch.sh [seconds]      (default: sample for 10 min, then report)
+#        ph-micwatch.sh daemon         (run on the device until stopped)
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}

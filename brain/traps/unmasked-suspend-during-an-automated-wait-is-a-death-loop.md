@@ -39,11 +39,11 @@ Two rules that make this safe:
   It costs nothing and it is the difference between "one lost arm" and "the
   device is dark until someone walks over to it".
 
-`tools/tk-afk.sh on [duration]` is that mask, and it needs no watcher: it masks
+`tools/ph-afk.sh on [duration]` is that mask, and it needs no watcher: it masks
 `sleep.target`, `suspend.target` and `systemd-suspend.service`, which are
 symlinks in `/etc` and therefore survive the reboot in the middle of your run.
 Give it a duration and a transient systemd timer takes the mask off again, so
-the phone does not silently stop sleeping for a week. `tools/tk-afk.sh` with no
+the phone does not silently stop sleeping for a week. `tools/ph-afk.sh` with no
 argument says which state it is in; `off` puts it back.
 
 An inhibitor is the wrong tool here for the same reason: `systemd-inhibit` dies

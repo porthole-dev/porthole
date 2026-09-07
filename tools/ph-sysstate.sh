@@ -6,7 +6,7 @@
 # exits: 0 ok · non-zero on failure
 # Print one compact line of system state per second, forever.
 #
-# Run ON THE DEVICE, streamed to the host with tk-stream.sh. This exists for
+# Run ON THE DEVICE, streamed to the host with ph-stream.sh. This exists for
 # failures that produce NO kernel output at all -- the taimen hard-hangs on
 # phosh session start with no oops, no panic and no RCU stall, so `dmesg -w`
 # captures nothing and the only evidence left is whatever state reached the host
@@ -17,7 +17,7 @@
 # in particular NOT /sys/kernel/debug/dri/0/gpu, which wedges the GPU.
 #
 # Usage (from the host):
-#   TK_PUSH=tools/tk-sysstate.sh tk-stream.sh OUT sh /tmp/tk-sysstate.sh
+#   TK_PUSH=tools/ph-sysstate.sh ph-stream.sh OUT sh /tmp/ph-sysstate.sh
 while :; do
     up=$(cut -d. -f1 /proc/uptime)
     load=$(cut -d' ' -f1 /proc/loadavg)

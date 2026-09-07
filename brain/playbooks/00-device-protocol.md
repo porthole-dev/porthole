@@ -25,7 +25,7 @@ changes exactly once per boot and cannot be faked by a lingering connection.
 ## Into the bootloader
 
 ```sh
-TK_AGENT=<you> tools/tk-device.sh tools/tk-to-fastboot.sh
+TK_AGENT=<you> tools/ph-device.sh tools/ph-to-fastboot.sh
 ```
 
 ~9 s, first try, and it does not burn a boot retry. Why the obvious command does
@@ -44,7 +44,7 @@ Why a bare `fastboot reboot` drops you straight back:
 ## Waiting
 
 ```sh
-. tools/tk-lib.sh                 # SOURCE it, never execute it
+. tools/ph-lib.sh                 # SOURCE it, never execute it
 OLD=$(tk_boot_id)
 ... do the thing ...
 tk_wait_ssh "$OLD" "$(tk_deadline_ms 300)" && echo up

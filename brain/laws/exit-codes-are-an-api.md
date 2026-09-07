@@ -5,7 +5,7 @@ scope: generic
 subsystem: method
 severity: law
 confidence: proven
-evidence: porthole tools/tk-device.sh; bin/porthole docstring
+evidence: porthole tools/ph-device.sh; bin/porthole docstring
 first-learned: 2026-08-19
 ---
 

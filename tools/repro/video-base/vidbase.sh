@@ -1,9 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: runs ON THE DEVICE as the session user. /tmp/sess.sh, /tmp/tk-webeval.py,
-#        /tmp/tk-webvq.py, /tmp/tk-touch.py, /tmp/tk-ui.py; /tmp/stallcatch2.py
-#        (a copy of tools/tk-stallcatch.py) and eu-stack when TK_STALLCATCH=1.
+# needs: runs ON THE DEVICE as the session user. /tmp/sess.sh, /tmp/ph-webeval.py,
+#        /tmp/ph-webvq.py, /tmp/ph-touch.py, /tmp/ph-ui.py; /tmp/stallcatch2.py
+#        (a copy of tools/ph-stallcatch.py) and eu-stack when TK_STALLCATCH=1.
 # env: /tmp/videnv.sh is sourced if present: TK_VID_URL, TK_VID_LIMIT,
 #      TK_VID_QUALITY, TK_VID_WINDOW, TK_VID_LABEL, TK_VID_ENV, TK_VID_JS,
 #      TK_STALLCATCH
@@ -17,7 +17,7 @@
 set -u
 . /tmp/sess.sh
 [ -f /tmp/videnv.sh ] && . /tmp/videnv.sh
-EV=/tmp/tk-webeval.py
+EV=/tmp/ph-webeval.py
 URL=${TK_VID_URL:-https://www.youtube.com/watch?v=aqz-KE-bpKQ}
 LIMIT=${TK_VID_LIMIT:-2560x1440@60}
 QUAL=${TK_VID_QUALITY:-hd1440}
@@ -25,7 +25,7 @@ WIN=${TK_VID_WINDOW:-60}
 LABEL=${TK_VID_LABEL:-base}
 stop_browser() { for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do systemctl --user stop "$u" 2>/dev/null; done; pkill -x epiphany 2>/dev/null; }
 stop_browser; sleep 2; pkill -f WebKitWebProc""ess 2>/dev/null; sleep 2
-python3 /tmp/tk-ui.py unblank >/dev/null 2>&1
+python3 /tmp/ph-ui.py unblank >/dev/null 2>&1
 J0=$(date "+%Y-%m-%d %H:%M:%S")
 echo "[$LABEL] start $J0 limit=$LIMIT qual=$QUAL env='${TK_VID_ENV:-}' temp0=$(cat /sys/class/thermal/thermal_zone0/temp)"
 rm -f /tmp/wl-$LABEL.log
@@ -43,8 +43,8 @@ advancing() { a=$(python3 $EV 'document.querySelector("video").currentTime' 2>/d
 ADV=$(advancing)
 for _ in 1 2; do
 	[ "$ADV" = advancing ] && break
-	python3 /tmp/tk-ui.py unblank >/dev/null 2>&1
-	sudo -n python3 /tmp/tk-touch.py tap 720 600 >/dev/null 2>&1; sleep 5
+	python3 /tmp/ph-ui.py unblank >/dev/null 2>&1
+	sudo -n python3 /tmp/ph-touch.py tap 720 600 >/dev/null 2>&1; sleep 5
 	python3 $EV 'var v=document.querySelector("video"); v.muted=true; v.play(); "play"' >/dev/null 2>&1; sleep 4
 	ADV=$(advancing)
 done

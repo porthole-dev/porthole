@@ -22,13 +22,13 @@
 # only module sources changed. Rebuild+reflash boot.img if you touched the
 # kernel proper or the DTS (for the DTS see bootimg-repack-dtb.py).
 #
-# Usage: tk-push-module.sh path/to/foo.ko [more.ko ...]
+# Usage: ph-push-module.sh path/to/foo.ko [more.ko ...]
 set -eu
 
-# shellcheck source=tk-lib.sh
-. "$(dirname "$0")/tk-lib.sh"
+# shellcheck source=ph-lib.sh
+. "$(dirname "$0")/ph-lib.sh"
 
-[ $# -ge 1 ] || { echo "usage: tk-push-module.sh FOO.ko [BAR.ko ...]"; exit 1; }
+[ $# -ge 1 ] || { echo "usage: ph-push-module.sh FOO.ko [BAR.ko ...]"; exit 1; }
 
 ping -c1 -W2 "$HOST" >/dev/null 2>&1 || {
     echo "phone is not on the USB network -- boot it first"; exit 1; }
@@ -82,7 +82,7 @@ fi
 # A module built from the tree carries .BTF that references the *aport*
 # kernel's BTF by type id. The ids do not line up, the module notifier fails
 # the load with -40, and modprobe says "Symbolic link loop". Neuter .BTF before
-# it ever reaches the phone -- see tools/tk-strip-btf.py for the whole story.
+# it ever reaches the phone -- see tools/ph-strip-btf.py for the whole story.
 #
 # Stage into a temp dir rather than editing in place: build output under
 # .output belongs to the workspace container's uid, is not writable by us, and
@@ -96,7 +96,7 @@ for ko in "$@"; do
     cp -p "$ko" "$_stage/$(basename "$ko")"
     _staged+=("$_stage/$(basename "$ko")")
 done
-"$(dirname "$0")/tk-strip-btf.py" "${_staged[@]}"
+"$(dirname "$0")/ph-strip-btf.py" "${_staged[@]}"
 set -- "${_staged[@]}"
 
 for ko in "$@"; do

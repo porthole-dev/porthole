@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: on-device (run it on the device as root, e.g. pushed by tk-stream.sh)
+# needs: on-device (run it on the device as root, e.g. pushed by ph-stream.sh)
 # env: TK_GAP_MS
 # exits: 0 ran to the end · 2 could not open /dev/uinput
 """Press the power key on a loop and count the blank/unblank transitions that
@@ -28,10 +28,10 @@ the press. The crash needs the GPU to have power-collapsed first, so a run whose
 gpu= never reads "suspended" has not exercised the bug at all and its clean
 score means nothing. The verdict line reports how many cycles had it.
 
-Usage (on the device):  sudo python3 -u tk-wake-cycle.py [cycles]
-Usage (from the host):  TK_PUSH=tools/tk-wake-cycle.py \
-                          tools/tk-stream.sh logs/cycle.log \
-                          sudo python3 -u /tmp/tk-wake-cycle.py 100
+Usage (on the device):  sudo python3 -u ph-wake-cycle.py [cycles]
+Usage (from the host):  TK_PUSH=tools/ph-wake-cycle.py \
+                          tools/ph-stream.sh logs/cycle.log \
+                          sudo python3 -u /tmp/ph-wake-cycle.py 100
 """
 import fcntl, glob, os, struct, sys, time
 

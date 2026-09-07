@@ -28,7 +28,7 @@ compositor that is awake and burning cycles but drawing nothing looks very
 different from one blocked in an atomic commit waiting on a page flip, and
 wchan tells those apart without touching the GPU at all.
 
-  tk-display-watch.py [SECONDS]        default 3600
+  ph-display-watch.py [SECONDS]        default 3600
 """
 import os
 import sys

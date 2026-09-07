@@ -11,7 +11,7 @@ Nothing can work until it is powered. Its PMIC only responds on i2c once PON
 (tlmm 25) is driven high and the chip releases RESETB (tlmm 91, an input we
 read back) -- see bcm15602-regulator.c:1327-1366.
 
-TLMM is APPS-owned and tiled; the tile table is copied from tk-pins.py, which
+TLMM is APPS-owned and tiled; the tile table is copied from ph-pins.py, which
 established that plain base+pin*0x1000 addressing reads a hole and lies.
 
 Run ON the phone, as root.

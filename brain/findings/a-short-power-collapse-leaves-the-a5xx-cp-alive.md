@@ -86,8 +86,8 @@ someone else does not have to spend:
 - **"The GPU is powered down when the offending access happens."** The opposite:
   it is powered *up* and still executing.
 
-**How it was established** — `tools/tk-wake-cycle.py` for the wakes,
-`tools/tk-capture.sh` for netconsole, and `MSM_CRUMB()` in `msm_gpu.h` --
+**How it was established** — `tools/ph-wake-cycle.py` for the wakes,
+`tools/ph-capture.sh` for netconsole, and `MSM_CRUMB()` in `msm_gpu.h` --
 crumbs at every stage of `a5xx_hw_init()`, at each step of
 `msm_gpu_pm_suspend/resume`, and around `dev_pm_opp_set_rate()`, each carrying
 `raw_smp_processor_id()` so concurrent work on another CPU would be visible.

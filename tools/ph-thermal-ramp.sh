@@ -4,7 +4,7 @@
 # needs: - (host only, no device)
 # env: -
 # exits: 0 ok · 1 failed · 130 see source
-# tk-thermal-ramp.sh -- the six-phase thermal ramp, with an abort that works.
+# ph-thermal-ramp.sh -- the six-phase thermal ramp, with an abort that works.
 # Run ON THE DEVICE as root, WITH A HUMAN PRESENT.
 #
 # WHY THIS HAS TO RUN BEFORE THE DT FIX, NOT AFTER
@@ -31,7 +31,7 @@
 #   The only thermal datum this project has ever taken is 48.3 C after a
 #   20-second CPU-only burn. Everything past that is unexplored.
 #
-# Usage: tk-thermal-ramp.sh [seconds_per_phase]     (default 300 = 30 min total)
+# Usage: ph-thermal-ramp.sh [seconds_per_phase]     (default 300 = 30 min total)
 set -u
 
 SECS=${1:-300}

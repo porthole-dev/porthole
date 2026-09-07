@@ -5,7 +5,7 @@ scope: device:google-taimen
 subsystem: graphics
 severity: finding
 confidence: proven
-evidence: tk-webframe.sh uprobes on webkit2gtk 2.52.6-r52 (build-id 4735460...), 316 frames of 1440p YouTube playback, 2026-09-04; corroborated by a 240 fps camera capture and by wl_surface.commit intervals. NOTE the first run was accidentally on Skia-GPU rasterisation -- see the caveat at the end
+evidence: ph-webframe.sh uprobes on webkit2gtk 2.52.6-r52 (build-id 4735460...), 316 frames of 1440p YouTube playback, 2026-09-04; corroborated by a 240 fps camera capture and by wl_surface.commit intervals. NOTE the first run was accidentally on Skia-GPU rasterisation -- see the caveat at the end
 refutes: the compositor is waiting on vsync; the compositor is idle between frames; damage clipping is the big win; frame-done-at-fence already releases the compositor thread
 first-learned: 2026-09-04
 ---
@@ -76,7 +76,7 @@ Any arm here must still set `WEBKIT_SKIA_ENABLE_CPU_RENDERING=1` and
 faulted the a540 twice and aborted phosh twice
 ([[phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it]]).
 
-**How it was established** — `tools/tk-webframe.sh`, whose uprobe offsets are
+**How it was established** — `tools/ph-webframe.sh`, whose uprobe offsets are
 valid only for one build; the installed library's build-id was checked against
 the one in the script header **before** the run, and matched. The page was
 proven to be playing (2560x1440, hd1440) before any number was recorded. Die

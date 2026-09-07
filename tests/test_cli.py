@@ -389,9 +389,9 @@ def test_run_refuses_to_execute_an_on_device_tool_locally():
     process names -- with nothing to signal the mistake. It must be piped to
     the device, or refused when the device is not there.
 
-    Caught in practice: `porthole run tk-sysstate.sh` printed the workstation's
+    Caught in practice: `porthole run ph-sysstate.sh` printed the workstation's
     22GB of RAM and firefox, which reads exactly like a working measurement."""
-    rc, out, err = run("run", "tk-sysstate.sh",
+    rc, out, err = run("run", "ph-sysstate.sh",
                        env={"PORTHOLE_DEVICE": "google-taimen",
                             "PORTHOLE_DEVICE_STATE": "ABSENT"})
     assert rc == 76, f"expected 76 (wrong device state), got {rc}"

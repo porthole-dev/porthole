@@ -14,9 +14,9 @@ bit can be swept live against the CSIPHY status without touching the kernel.
 
 Run ON the phone, as root.
 
-  tk-sensor-poke.py r 0x0100            read one register
-  tk-sensor-poke.py w 0x0100 0x01       write one register
-  tk-sensor-poke.py dump 0x0300 0x10    dump a range
+  ph-sensor-poke.py r 0x0100            read one register
+  ph-sensor-poke.py w 0x0100 0x01       write one register
+  ph-sensor-poke.py dump 0x0300 0x10    dump a range
 """
 import fcntl, struct, sys, ctypes
 

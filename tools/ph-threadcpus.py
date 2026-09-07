@@ -17,7 +17,7 @@ sampled rather than exact: a thread that migrates between samples is counted
 where it was seen. That is fine for "does this thread live on the big
 cluster", which is the question.
 
-  tk-threadcpus.py PID [SECONDS] [INTERVAL_MS]
+  ph-threadcpus.py PID [SECONDS] [INTERVAL_MS]
 """
 import collections
 import glob

@@ -4,7 +4,7 @@
 # needs: on-device as root (ptrace); elfutils (eu-stack)
 # env: -
 # exits: 0 measured · 1 no such process or thread
-# tk-stallcatch.py SECONDS COMM THREAD_SUBSTR [IDLE_MS] -- when THREAD of the
+# ph-stallcatch.py SECONDS COMM THREAD_SUBSTR [IDLE_MS] -- when THREAD of the
 # busiest process named COMM makes no CPU progress for IDLE_MS, dump the WHOLE
 # process (eu-stack, every thread of interest) plus the kernel stacks.
 #
@@ -18,8 +18,8 @@
 # .debug file (llvm-symbolizer, vaddr = file offset + the RX segment delta,
 # 0x10000 on webkitgtk 2.52.6).
 #
-#   tk-stallcatch.py 60 WebKitWebProces Compositor 300   # the compositor idles
-#   tk-stallcatch.py 60 WebKitWebProces dec 400          # the decoder starves
+#   ph-stallcatch.py 60 WebKitWebProces Compositor 300   # the compositor idles
+#   ph-stallcatch.py 60 WebKitWebProces dec 400          # the decoder starves
 # See brain/traps/a-stall-catcher-must-pick-the-busiest-webkitwebprocess.md.
 import os, sys, time, glob, subprocess
 secs = float(sys.argv[1]); comm = sys.argv[2]; tsub = sys.argv[3]

@@ -1,15 +1,15 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: on-device as the session user (tk-webeval.py, tk-touch.py, tk-ui.py,
-#        tk-gesture-bench.py, threadcpu.py in /tmp; /tmp/sess.sh); Epiphany;
+# needs: on-device as the session user (ph-webeval.py, ph-touch.py, ph-ui.py,
+#        ph-gesture-bench.py, threadcpu.py in /tmp; /tmp/sess.sh); Epiphany;
 #        grim and lswt. Network reach to the page.
 # env: TK_SCROLL_URL (default: a long Wikipedia article)
 # exits: 0 measured · 1 the arm is void -- the page never loaded, or the drag
 #        moved nothing and the numbers describe a still screen
-# tk-scrollarm.sh LABEL [ENV...] -- one PURE-SCROLL arm, with no video playing.
+# ph-scrollarm.sh LABEL [ENV...] -- one PURE-SCROLL arm, with no video playing.
 #
-# WHY THIS EXISTS, separately from tk-webarm.sh: that tool's "drag" phase runs
+# WHY THIS EXISTS, separately from ph-webarm.sh: that tool's "drag" phase runs
 # while a 1440p YouTube video is decoding and compositing, so every scroll
 # number this project has recorded is a scroll *plus playback* number. The
 # 19 ms paint that the 2026-09-04 handoff calls the ceiling was measured under
@@ -21,25 +21,25 @@
 #
 # THE TRAP THIS TOOL EXISTS TO CLOSE: a drag against a page that is already at
 # the end of its scroll range animates nothing, and every frame statistic then
-# describes a still screen. tk-gesture-bench.py catches it ("the gesture hit
+# describes a still screen. ph-gesture-bench.py catches it ("the gesture hit
 # nothing that animates") but only after the fact. This arm proves the page can
 # scroll BEFORE it measures -- scrollTo(0,0), then read scrollY back after the
 # drag and refuse to report if it did not move.
 #
-#   tk-scrollarm.sh base
-#   tk-scrollarm.sh uclamp "WEBKIT_SKIA_CPU_PAINTING_THREADS=6"
+#   ph-scrollarm.sh base
+#   ph-scrollarm.sh uclamp "WEBKIT_SKIA_CPU_PAINTING_THREADS=6"
 #
 # TK_EPHY_ARGS passes flags to epiphany itself. `--kiosk-mode` is the one that
 # matters: it removes the chrome that otherwise auto-hides mid-drag, and a
 # chrome hide RESIZES the web view, which re-evaluates the page's dynamic media
 # queries and can reconstruct the whole style resolver.
 set -u
-L=${1:?usage: tk-scrollarm.sh LABEL [ENV...]}; X=${2:-}
+L=${1:?usage: ph-scrollarm.sh LABEL [ENV...]}; X=${2:-}
 # useformat=desktop matters: mobile Wikipedia collapses every section, so the
 # same article is 3363px tall there and 74085px here. A page with no room to
 # scroll is the void arm this tool exists to refuse.
 URL=${TK_SCROLL_URL:-'https://en.wikipedia.org/wiki/Linux_kernel?useformat=desktop'}
-EV=/tmp/tk-webeval.py
+EV=/tmp/ph-webeval.py
 
 for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do
 	systemctl --user stop "$u"
@@ -100,7 +100,7 @@ TC=$!
 # `--pause 0` scrolls continuously and is the one to use when a gap in the
 # frame record is supposed to mean a stall.
 # shellcheck disable=SC2086
-sudo -n python3 /tmp/tk-gesture-bench.py drag ${TK_SCROLL_DRAG:-720 2400 720 900 500 8} \
+sudo -n python3 /tmp/ph-gesture-bench.py drag ${TK_SCROLL_DRAG:-720 2400 720 900 500 8} \
 	--client "/tmp/wl-$L.log" 2>&1 | tail -8
 # ONLY the sampler. A bare `wait` also waits on the browser started above, which
 # never exits, and the whole arm hangs with its output stuck in the pipeline.

@@ -46,13 +46,13 @@ verdict() { # verdict TREE_VERSION TREE_PATCHLEVEL APORT_PKGVER -> "rc tree apor
 # #37: MODVERSIONS only speaks at insmod, and tkmod installs BEFORE it loads --
 # so on a PORTHOLE_MOD_NO_RELOAD module the refusal arrived at the next boot,
 # with the shipped module already overwritten and no copy left. The check runs
-# before the first write now. tk-modcrc.py is stubbed to its three answers; the
+# before the first write now. ph-modcrc.py is stubbed to its three answers; the
 # branch table is what this tests, not CRC arithmetic.
 abi() { # abi MODCRC_RC [SSH_RC] -> _ph_mod_abi_check's return code
     mkdir -p "$TMP/fake/tools"
     printf '#!/bin/sh\necho "CRC mismatches: 3"\nexit %s\n' "$1" \
-        > "$TMP/fake/tools/tk-modcrc.py"
-    chmod +x "$TMP/fake/tools/tk-modcrc.py"
+        > "$TMP/fake/tools/ph-modcrc.py"
+    chmod +x "$TMP/fake/tools/ph-modcrc.py"
     # PORTHOLE_WORKDIR is `${...:?}` at the top of ph-build.sh, so a host with
     # no ~/.config/porthole kills the shell before a line of this runs -- which
     # is every CI runner, and is why this passed on a developer laptop and
@@ -299,7 +299,7 @@ else ok; fi
 # unbinding a directory that does not exist unbinds nothing. Measured on
 # taimen 2026-08-31: 78 of 286 loaded modules have holders.
 #
-# tools/tk-modstack.sh is a FILE so that this can run it. The alternative is
+# tools/ph-modstack.sh is a FILE so that this can run it. The alternative is
 # finding out whether the script that unloads a wifi driver is correct by
 # unloading a wifi driver.
 
@@ -312,7 +312,7 @@ mkdir -p "$TMP/sys/module"/{ath,ath10k_snoc,ath10k_core,mac80211,cfg80211,imx179
 for h in ath ath10k_core mac80211; do : > "$TMP/sys/module/cfg80211/holders/$h"; done
 rmdir "$TMP/sys/module/imx179/holders"   # a module with no holders at all
 
-ms() { SYS="$TMP/sys" bash -c '. tools/tk-modstack.sh; "$@"' _ "$@"; }
+ms() { SYS="$TMP/sys" bash -c '. tools/ph-modstack.sh; "$@"' _ "$@"; }
 
 is "a module nothing stacks on has an empty stack" "$(ms ms_stack imx179)" ""
 is "the one-level case is the module that holds it" \
@@ -354,7 +354,7 @@ chmod +x "$TMP/bin/ip"
 
 conflict() { # conflict IFACE MODULE -> what it refuses to unload, if anything
     IFACE=$1 SYS="$TMP/sys" PATH="$TMP/bin:$PATH" SSH_CONNECTION="172.16.42.2 1 172.16.42.1 22" \
-        bash -c '. tools/tk-modstack.sh; ms_conflict "$1"' _ "$2"
+        bash -c '. tools/ph-modstack.sh; ms_conflict "$1"' _ "$2"
 }
 is "reloading over wifi refuses, and names what carries the session" \
    "$(conflict wlan0 ath10k_core)" "ath10k_snoc"
@@ -365,7 +365,7 @@ is "an unrelated module over wifi is allowed" "$(conflict wlan0 imx179)" ""
 # Refusing because the transport could not be identified would block the rung
 # far more often than the hazard it guards.
 is "no ssh session to reason about fails open" \
-   "$(SYS="$TMP/sys" bash -c '. tools/tk-modstack.sh; ms_conflict ath10k_core')" ""
+   "$(SYS="$TMP/sys" bash -c '. tools/ph-modstack.sh; ms_conflict ath10k_core')" ""
 
 # --- unbind, on whatever bus the module actually sits on -------------------
 d="$TMP/sys/bus/platform/drivers/ath10k_snoc"
@@ -374,7 +374,7 @@ ln -sf "$TMP/sys/module/ath10k_snoc" "$d/module"   # a real link, not a device
 ln -sf "$d" "$d/18800000.wifi/driver"              # what a bound device has
 : > "$d/unbind"; : > "$d/bind"; : > "$d/uevent"
 printf '#!/bin/sh\nexec "$@"\n' > "$TMP/bin/sudo"; chmod +x "$TMP/bin/sudo"
-SYS="$TMP/sys" PATH="$TMP/bin:$PATH" bash -c '. tools/tk-modstack.sh; ms_unbind ath10k_snoc'
+SYS="$TMP/sys" PATH="$TMP/bin:$PATH" bash -c '. tools/ph-modstack.sh; ms_unbind ath10k_snoc'
 is "the bound device is unbound" "$(cat "$d/unbind")" "18800000.wifi"
 
 # --- and tkmod actually uses all of it -------------------------------------
@@ -400,7 +400,7 @@ is "the stack is restored before the failure is reported" \
 # that it is sh at all. It unloads a wifi driver; finding out on the phone is
 # not a plan.
 { printf 'ssh() { printf "%%s\\n" "${@: -1}"; }\nTK_SSH_OPTS=(-q)\nphone=fake\n'
-  printf 'name=ath10k_core\n_PH_REPO_ROOT=%s\nmodstack=$_PH_REPO_ROOT/tools/tk-modstack.sh\n' "$ROOT"
+  printf 'name=ath10k_core\n_PH_REPO_ROOT=%s\nmodstack=$_PH_REPO_ROOT/tools/ph-modstack.sh\n' "$ROOT"
   printf '%s\n' "$reload" | tr -d '\t'; } > "$TMP/emit.sh"
 bash "$TMP/emit.sh" > "$TMP/payload.sh" 2>/dev/null
 if sh -n "$TMP/payload.sh" 2>/dev/null; then ok; else
@@ -444,7 +444,7 @@ noreload() { # noreload LIST -> "rc | output | calls"
 
     # The script tkmod would send, rendered exactly as the phone gets it.
     { printf 'ssh() { printf "%%s\\n" "${@: -1}"; }\nTK_SSH_OPTS=(-q)\nphone=fake\n'
-      printf 'name=venus_core\n_PH_REPO_ROOT=%s\nmodstack=$_PH_REPO_ROOT/tools/tk-modstack.sh\n' "$ROOT"
+      printf 'name=venus_core\n_PH_REPO_ROOT=%s\nmodstack=$_PH_REPO_ROOT/tools/ph-modstack.sh\n' "$ROOT"
       printf '%s\n' "$reload" | tr -d '\t'; } > "$dir/emit.sh"
     PORTHOLE_MOD_NO_RELOAD="$1" bash "$dir/emit.sh" > "$dir/payload.sh" 2>/dev/null
 

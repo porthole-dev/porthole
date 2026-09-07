@@ -49,7 +49,7 @@ compiler bug.
 persistent container, one pmbootstrap work dir -- and agents run long builds in
 the background and then go do something else. Two agents working the same port
 at once is the normal case, not the exotic one. The phone already has a mutex
-(`tools/tk-device.sh`, exit 75 for "lock unavailable") precisely because one
+(`tools/ph-device.sh`, exit 75 for "lock unavailable") precisely because one
 physical device cannot serve two callers. The buildroot has exactly the same
 property and no such guard.
 

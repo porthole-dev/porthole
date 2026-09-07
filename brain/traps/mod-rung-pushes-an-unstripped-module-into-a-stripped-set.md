@@ -19,7 +19,7 @@ The two push paths do not produce the same artefact:
 - `porthole build fast` runs `tkpush-modules`, which extracts modules from the
   **built apk** -- so they are stripped, exactly as the aport ships them.
 - `porthole build mod` builds from your **tree** and pushes the raw `.ko`. It
-  drops `.BTF` (`tools/tk-strip-btf.py`, see
+  drops `.BTF` (`tools/ph-strip-btf.py`, see
   [[a-tree-built-module-carries-btf-the-running-kernel-rejects]]) but it does
   **not** strip debug info.
 

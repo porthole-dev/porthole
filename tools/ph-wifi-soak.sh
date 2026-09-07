@@ -4,9 +4,9 @@
 # needs: on-device (run it on the device as root, under systemd-run)
 # env: TK_WIFI_SOAK_LOG, TK_WIFI_SOAK_INTERVAL, TK_WIFI_SOAK_PROBE_EVERY, TK_WIFI_SOAK_IF
 # exits: 0 ok · non-zero on failure
-# tk-wifi-soak.sh -- watch a WiFi link for the two ways it fails quietly.
+# ph-wifi-soak.sh -- watch a WiFi link for the two ways it fails quietly.
 #
-# tools/tk-soak.sh is the general stability soak: uptime, load, memory, thermal.
+# tools/ph-soak.sh is the general stability soak: uptime, load, memory, thermal.
 # It says nothing about the radio, and the two WiFi defects on this port are
 # both invisible to it:
 #
@@ -50,7 +50,7 @@ IF=${TK_WIFI_SOAK_IF:-wlan0}
 START=$(date '+%Y-%m-%d %H:%M:%S')
 
 # A boot record first, so a reboot is distinguishable from a truncated log --
-# same reasoning as tk-soak.sh.
+# same reasoning as ph-soak.sh.
 printf '{"ev":"start","boot_id":"%s","if":"%s","interval":%s,"t":"%s"}\n' \
     "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" \
     "$IF" "$INTERVAL" "$START" >> "$LOG"

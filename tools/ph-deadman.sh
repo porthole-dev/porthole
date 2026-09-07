@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST
 # exits: 0 ok · 2 usage
-# tk-deadman.sh -- arm/disarm a self-reboot on the PHONE before a risky test.
+# ph-deadman.sh -- arm/disarm a self-reboot on the PHONE before a risky test.
 #
 # THE PROBLEM THIS SOLVES
 #   Autonomous testing on this device keeps producing states where the phone is
@@ -40,13 +40,13 @@
 # wedged-userspace case, not the dead-silicon case.
 #
 # Usage:
-#   tk-deadman.sh arm 300     # reboot in 300 s unless disarmed
-#   tk-deadman.sh disarm      # call this the moment the test survives
-#   tk-deadman.sh status
+#   ph-deadman.sh arm 300     # reboot in 300 s unless disarmed
+#   ph-deadman.sh disarm      # call this the moment the test survives
+#   ph-deadman.sh status
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 UNIT=tk-deadman

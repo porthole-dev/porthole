@@ -9,9 +9,9 @@
 There is no evtest in the rootfs and no python-evdev, so this decodes
 struct input_event straight off /dev/input/eventN with the stdlib.
 
-  tk-evtest.py                 auto-pick the ftm4 touchscreen, run until Ctrl-C
-  tk-evtest.py 15              run for 15 s and print a per-slot summary
-  tk-evtest.py 15 /dev/input/event3
+  ph-evtest.py                 auto-pick the ftm4 touchscreen, run until Ctrl-C
+  ph-evtest.py 15              run for 15 s and print a per-slot summary
+  ph-evtest.py 15 /dev/input/event3
 
 The summary is what makes this useful for bring-up: it reports how many
 distinct slots were seen, so a two-finger test proves the touch-id decoding

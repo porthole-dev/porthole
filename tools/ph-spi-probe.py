@@ -13,8 +13,8 @@ the GPIO numbers and the reset timing, both taken from factory dtbo entry 12.
 Stdlib only: there is no py3-spidev, no libgpiod and no /sys/class/gpio on this
 device (CONFIG_GPIO_SYSFS is off), so both SPI and GPIO go through raw ioctls.
 
-  tk-spi-probe.py [DEV] [SPEED_HZ]
-  tk-spi-probe.py poll [DEV] [SPEED_HZ] [LEN] [COUNT]
+  ph-spi-probe.py [DEV] [SPEED_HZ]
+  ph-spi-probe.py poll [DEV] [SPEED_HZ] [LEN] [COUNT]
 """
 import ctypes
 import fcntl

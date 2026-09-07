@@ -41,7 +41,7 @@
 # below comes from the active profile plus your config.env, and nothing here
 # knows which phone you own.
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/ph-lib.sh"
 
 _PH_REPO=${PORTHOLE_WORKDIR:?set PORTHOLE_WORKDIR to the device working repo (kernel, pmaports, blobs) in ~/.config/porthole/config.env}
 # Honour PORTHOLE_KERNEL_TREE the way dts, kconfig and verify already do. The
@@ -729,7 +729,7 @@ _ph_assert_no_devpkgs() {
 #
 # It must be the aport build, not the tree. This device's /boot/vmlinuz is owned
 # by linux-...-6.18-r89, an aport package, and the tree is allowed to diverge
-# from the series: tools/tk-reconcile.sh reported 43 differing files on
+# from the series: tools/ph-reconcile.sh reported 43 differing files on
 # 2026-08-27. Installing a tree build here would flash a materially different
 # kernel -- see brain/traps/never-flash-a-tree-built-kernel-when-the-device-
 # ships-from-an-aport.md, which cost a session on 2026-08-25.
@@ -784,7 +784,7 @@ _ph_build_kernel_release() {
 	[ -f "$repo/$_PH_KPKG-$_PH_KREL.apk" ] || {
 		echo ">> still no $_PH_KPKG-$_PH_KREL.apk after building." >&2
 		echo ">> The APKBUILD says pkgrel=${_PH_KREL##*-r}; check the series applies" >&2
-		echo ">> (tools/tk-reconcile.sh) and that the build actually succeeded." >&2
+		echo ">> (tools/ph-reconcile.sh) and that the build actually succeeded." >&2
 		return 1; }
 	_PH_INSTALLED_APK="$repo/$_PH_KPKG-$_PH_KREL.apk"
 }
@@ -1058,7 +1058,7 @@ tksysimage() {
 		echo ">>"
 		echo ">>   To flash the boot image, which is what most kernel and DTS"
 		echo ">>   work needs:"
-		echo ">>     porthole run tools/tk-flash-boot.sh"
+		echo ">>     porthole run tools/ph-flash-boot.sh"
 		echo ">>"
 		echo ">>   To get the rootfs image as well, run the build on THIS"
 		echo ">>   MACHINE instead of in the workspace container (needs"
@@ -1088,7 +1088,7 @@ _ph_wait_up() {
 	echo ">> waiting for the phone (deadline ${secs}s, polling -- not sleeping)"
 	if ! new_id=$(tk_wait_ssh "$old_id" "$(tk_deadline_ms "$secs")"); then
 		echo ">> phone did not come back within ${secs}s" >&2
-		echo ">>   tools/tk-recover.sh, or porthole serial console, to see why" >&2
+		echo ">>   tools/ph-recover.sh, or porthole serial console, to see why" >&2
 		return 1
 	fi
 	# Which kernel answered is the one question a boot test must not assume.
@@ -1256,7 +1256,7 @@ _ph_verify_rootfs_pair() {
 	[ -n "$root" ] && [ -s "$root" ] || {
 		echo ">> no rootfs image at /tmp/postmarketOS-export/${PORTHOLE_CODENAME}.img" >&2
 		echo ">>   A workspace build cannot make one (no loop device). Flash boot" >&2
-		echo ">>   only with tools/tk-flash-boot.sh, or build the rung --host." >&2
+		echo ">>   only with tools/ph-flash-boot.sh, or build the rung --host." >&2
 		return 1; }
 	local bt rt
 	bt=$(stat -Lc %Y "$boot" 2>/dev/null) || return 0
@@ -1310,14 +1310,14 @@ tkflash-boot() {
 	# tk_in_fastboot, not a hand-rolled `"$FASTBOOT" devices | grep`: the
 	# hand-rolled copy cannot tell "no device" from "no fastboot binary" -- both
 	# are empty stdout -- and it has no timeout either. See ph_need_fastboot.
-	tk_in_fastboot || "$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
+	tk_in_fastboot || "$_PH_REPO/tools/ph-to-fastboot.sh" || return 1
 
 	local img; img=$(readlink -f /tmp/postmarketOS-export/boot.img)
 	# The DTB to verify boot.img AGAINST. Defaults to the envkernel tree build,
 	# which is right when the kernel came from `_ph_make`.
 	#
 	# It is WRONG when the kernel was built from the aport series, because the
-	# tree and the aport are allowed to diverge (tools/tk-reconcile.sh exists to
+	# tree and the aport are allowed to diverge (tools/ph-reconcile.sh exists to
 	# report exactly that). On 2026-08-21 this refused to flash a CORRECT image:
 	# the aport had dropped the capacity-dmips-mhz=<388> override, but the
 	# reference was a tree build from two days earlier that still had it, so the
@@ -1558,8 +1558,8 @@ tkupgrade-kernel() {
 	# the exact case this rung exists for, with a message telling you to use a
 	# rung that cannot do the job. Measured 2026-08-29.
 	local dev_release target_release
-	# shellcheck source=tk-lib.sh
-	. "$_PH_REPO/tools/tk-lib.sh"
+	# shellcheck source=ph-lib.sh
+	. "$_PH_REPO/tools/ph-lib.sh"
 	target_release=$(tar -xzOf "$repo/$_PH_KPKG-$ver.apk" \
 		"usr/share/kernel/${_PH_KPKG#linux-}/kernel.release" 2>/dev/null | tr -d '\r\n')
 	[ -n "$target_release" ] || {
@@ -1657,10 +1657,10 @@ tkpush-modules() {
 	local phone=${PHONE:-$PORTHOLE_USER@$HOST}
 	# The phone mints a new host key on essentially every boot, so bare ssh
 	# fails "Connection closed" or stops to ask about the key and this returns
-	# a stale-module success. tk-lib.sh already carries the options every other
+	# a stale-module success. ph-lib.sh already carries the options every other
 	# tk-* script uses; source it rather than growing a second set.
-	# shellcheck source=tk-lib.sh
-	. "$_PH_REPO/tools/tk-lib.sh"
+	# shellcheck source=ph-lib.sh
+	. "$_PH_REPO/tools/ph-lib.sh"
 	# The phone has to be UP: this is an scp. A previous failed run may well
 	# have parked it in the bootloader -- tkflash-boot puts it there -- and the
 	# bare failure is `scp: Connection closed`, which reads as a network fault
@@ -1684,7 +1684,7 @@ tkpush-modules() {
 		# minutes, no 18d1:4ee0 and no d001, until the cable was replugged. By
 		# then 271 modules had been pushed. Re-running `fast` refused HERE,
 		# needing BOOTED, for work that was already done; the only way to
-		# finish was tk-flash-boot.sh by hand. Three attempts, each four
+		# finish was ph-flash-boot.sh by hand. Three attempts, each four
 		# minutes of build plus a 181 s bootloader wait.
 		#
 		# Narrow on purpose. It skips only when the module set in the rootfs
@@ -1700,7 +1700,7 @@ tkpush-modules() {
 			return 0
 		fi
 		echo ">> the device is $st, and pushing modules needs it BOOTED." >&2
-		echo ">> tools/tk-reboot.sh will bring it back, then re-run." >&2
+		echo ">> tools/ph-reboot.sh will bring it back, then re-run." >&2
 		return 76
 	fi
 
@@ -1793,7 +1793,7 @@ _ph_modules_id() {
 # kernel's BTF by type id. The ids do not line up, the module notifier fails
 # the load with -40, and modprobe reports "Symbolic link loop" -- see
 # brain/traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md.
-# That trap says the fix is handled, and it was, in tools/tk-push-module.sh.
+# That trap says the fix is handled, and it was, in tools/ph-push-module.sh.
 # `mod` -- the rung the ladder tells you to try FIRST -- never went through
 # that script and pushed the module raw, so on 2026-08-31 a `porthole build
 # mod` on ath10k_core left taimen with no wifi driver at all: the old module
@@ -1802,7 +1802,7 @@ _ph_modules_id() {
 #
 # Staged rather than rewritten in place: build output under .output belongs to
 # the workspace container's uid and is not ours to edit -- the same reason
-# tk-push-module.sh copies first. `chmod u+w` because `cp -p` brings a
+# ph-push-module.sh copies first. `chmod u+w` because `cp -p` brings a
 # read-only mode with it and the strip opens the file "r+b".
 #
 # Split out of tkmod because everything else in that function needs a
@@ -1854,7 +1854,7 @@ _ph_stage_module() {
 	# doing it second could undo a rename that has to survive to the loader.
 	_ph_strip_module "$staged" "$name"
 	# stdout is the staged path; the tool's own report goes to stderr.
-	"$_PH_REPO_ROOT/tools/tk-strip-btf.py" "$staged" >&2 || return 1
+	"$_PH_REPO_ROOT/tools/ph-strip-btf.py" "$staged" >&2 || return 1
 	echo "$staged"
 }
 
@@ -1931,7 +1931,7 @@ _ph_mod_abi_check() {
 	if [ $? -ne 0 ] || [ ! -s "$ref" ]; then
 		rm -f "$ref"; return 0        # nothing installed to compare against
 	fi
-	out=$("$_PH_REPO_ROOT/tools/tk-modcrc.py" "$ref" "$ko" 2>&1); rc=$?
+	out=$("$_PH_REPO_ROOT/tools/ph-modcrc.py" "$ref" "$ko" 2>&1); rc=$?
 	rm -f "$ref"
 	if [ $rc -eq 69 ]; then
 		echo ">> ABI check skipped: $out"
@@ -2036,7 +2036,7 @@ tkmod() {
 	# The reader half of the reload lives in a file so the tests can run it
 	# against a fixture sysfs; it is pasted in here rather than pushed because
 	# it must be in place before anything is torn down.
-	local modstack="$_PH_REPO_ROOT/tools/tk-modstack.sh"
+	local modstack="$_PH_REPO_ROOT/tools/ph-modstack.sh"
 	[ -f "$modstack" ] || { echo ">> missing $modstack"; return 1; }
 	local stack_down=""
 	ssh "${TK_SSH_OPTS[@]}" "$phone" "$(cat "$modstack")
@@ -2218,7 +2218,7 @@ tkmod() {
 		   return 4 ;;
 		7) echo ">> not reloaded: this module is on this device's no-reload list."
 		   echo ">>   the build is fine and installed; nothing was torn down."
-		   echo ">>   Reboot to run it (\`porthole run tools/tk-reboot.sh\`)."
+		   echo ">>   Reboot to run it (\`porthole run tools/ph-reboot.sh\`)."
 		   return 7 ;;
 		# The module IS the new one, so the proof below still runs and still
 		# means something. The stack being down is reported after it.
@@ -2432,7 +2432,7 @@ tkboot() {
 
 	# Baseline before the device moves; see the comment in tkflash-boot.
 	local old_id; old_id=$(tk_boot_id 2>/dev/null || true)
-	"$_PH_REPO/tools/tk-to-fastboot.sh" || return 1
+	"$_PH_REPO/tools/ph-to-fastboot.sh" || return 1
 	"$FASTBOOT" boot "$out" || return 1
 	_ph_wait_up "$old_id" || return 1
 	_ph_pushed_write

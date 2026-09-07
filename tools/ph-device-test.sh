@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: FASTBOOT, TK_AGENT, TK_DEVICE_LOCK, TK_DEVICE_STATE
 # exits: 0 ok · 1 failed · 76 wrong device state · 255 see source
-# One check: two concurrent tk-device.sh callers must not interleave.
+# One check: two concurrent ph-device.sh callers must not interleave.
 # If the lock is broken, the two "start" lines land next to each other.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -12,7 +12,7 @@ out=$(mktemp); lock=$(mktemp -u)
 trap 'rm -f "$out" "$lock" "$lock.holder"' EXIT
 
 run() {
-    TK_DEVICE_LOCK="$lock" TK_AGENT="$1" "$here/tk-device.sh" \
+    TK_DEVICE_LOCK="$lock" TK_AGENT="$1" "$here/ph-device.sh" \
         bash -c "echo start-$1 >>'$out'; sleep 0.3; echo end-$1 >>'$out'"
 }
 run A & run B & wait
@@ -24,13 +24,13 @@ for pair in 0 2; do
     [ "${s%%-*}" = start ] && [ "${e%%-*}" = end ] && [ "${s#*-}" = "${e#*-}" ] || {
         echo "FAIL: interleaved: ${l[*]}"; exit 1; }
 done
-echo "PASS: tk-device.sh serialises concurrent callers"
+echo "PASS: ph-device.sh serialises concurrent callers"
 
 # --- state gate (opt-in flags). TK_DEVICE_STATE stands in for the probe, so
 # --- this runs with no phone attached.
 lock2=$(mktemp -u)
 trap 'rm -f "$out" "$lock" "$lock.holder" "$lock2" "$lock2.holder"' EXIT
-dev() { TK_DEVICE_LOCK="$lock2" TK_AGENT=T "$here/tk-device.sh" "$@"; }
+dev() { TK_DEVICE_LOCK="$lock2" TK_AGENT=T "$here/ph-device.sh" "$@"; }
 
 set +e
 TK_DEVICE_STATE=FASTBOOT dev --need-booted true >/dev/null 2>&1;   a=$?
@@ -47,7 +47,7 @@ set -e
 [ "$e" -eq 1 ]  || { echo "FAIL: command status must propagate, got $e"; exit 1; }
 case $h in *state=FROZEN*agent=T*|*agent=T*state=FROZEN*) ;;
     *) echo "FAIL: holder must record the state: $h"; exit 1 ;; esac
-echo "PASS: tk-device.sh state gate"
+echo "PASS: ph-device.sh state gate"
 
 # --- A caller that names no --need-* is not asking about the device, it wants
 # --- the mutex. state= in the holder file only annotates it, so a $FASTBOOT
@@ -56,12 +56,12 @@ echo "PASS: tk-device.sh state gate"
 # --- this case, and it cost every suite here a red tick.
 set +e
 h2=$(FASTBOOT=/nonexistent/fastboot TK_DEVICE_LOCK="$lock2" TK_AGENT=U \
-     "$here/tk-device.sh" bash -c "cat '$lock2.holder'" 2>/dev/null); rc2=$?
+     "$here/ph-device.sh" bash -c "cat '$lock2.holder'" 2>/dev/null); rc2=$?
 set -e
 [ "$rc2" -eq 0 ] || { echo "FAIL: an unrunnable fastboot blocked the mutex, rc=$rc2"; exit 1; }
 case $h2 in *state=unknown*) ;;
     *) echo "FAIL: an unprobed state must read unknown, got: $h2"; exit 1 ;; esac
-echo "PASS: tk-device.sh takes the mutex when fastboot cannot run"
+echo "PASS: ph-device.sh takes the mutex when fastboot cannot run"
 
 # --- tk_boot_id must treat a transient failure as "unknown", not as a new
 # --- boot_id. A fake ssh that fails once and then succeeds stands in for the
@@ -77,8 +77,8 @@ FAKE
 chmod +x "$bindir/ssh"
 export FAKE_SSH_COUNT="$bindir/count"
 PATH="$bindir:$PATH"
-# shellcheck source=tk-lib.sh
-. "$here/tk-lib.sh"
+# shellcheck source=ph-lib.sh
+. "$here/ph-lib.sh"
 
 : > "$FAKE_SSH_COUNT"; export FAKE_SSH_FAILS=1
 id=$(tk_boot_id) || true

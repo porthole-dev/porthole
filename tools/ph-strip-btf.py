@@ -36,7 +36,7 @@ finds sections by name (any_section_objs(info, ".BTF", ...)), so an unnamed
 section is simply not there; nothing moves, no offset changes, and the file
 stays byte-identical apart from four bytes. It is reversible and idempotent.
 
-Usage: tk-strip-btf.py FOO.ko [BAR.ko ...]
+Usage: ph-strip-btf.py FOO.ko [BAR.ko ...]
 """
 import struct
 import sys
@@ -88,7 +88,7 @@ def neuter_btf(path):
 
 def main(argv):
     if len(argv) < 2:
-        sys.exit("usage: tk-strip-btf.py FOO.ko [BAR.ko ...]")
+        sys.exit("usage: ph-strip-btf.py FOO.ko [BAR.ko ...]")
     for path in argv[1:]:
         if neuter_btf(path):
             print("### %s: .BTF neutered (module BTF would not match this kernel)" % path)

@@ -4,10 +4,10 @@
 # needs: any (probes state; handles BOOTED and FASTBOOT)
 # env: FASTBOOT, HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST, TK_RESCUE_PORT
 # exits: 0 ok · 1 failed
-# tk-supervise.sh -- keep the phone alive during unattended work.
+# ph-supervise.sh -- keep the phone alive during unattended work.
 #
 # Runs on the HOST, in the background, for the whole session. It watches for the
-# four states tk-recover.sh distinguishes and fixes the three that are fixable
+# four states ph-recover.sh distinguishes and fixes the three that are fixable
 # without hands:
 #
 #   BOOTED    ssh answers                    -> nothing to do
@@ -26,7 +26,7 @@
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
@@ -37,7 +37,7 @@ FAILS=0
 
 say() { echo "$(date +%H:%M:%S) $*" | tee -a "$LOG"; }
 
-# See tk-recover.sh: a changed host key must not read as "ssh is dead", or
+# See ph-recover.sh: a changed host key must not read as "ssh is dead", or
 # this supervisor reboots a healthy phone on the FROZEN branch.
 ssh_ok()  { timeout 8 ssh "${TK_SSH_OPTS[@]}" \
 	-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -45,7 +45,7 @@ ssh_ok()  { timeout 8 ssh "${TK_SSH_OPTS[@]}" \
 ping_ok() { timeout 4 ping -c1 -W2 "$HOST" >/dev/null 2>&1; }
 fb_ok()   { [ -n "$(timeout 5 fastboot devices 2>/dev/null)" ]; }
 
-# Write a pidfile rather than relying on pgrep: `pgrep -f tk-supervise.sh`
+# Write a pidfile rather than relying on pgrep: `pgrep -f ph-supervise.sh`
 # matches the very shell that runs the check, so it reports RUNNING when
 # nothing is. That false positive cost real time on 2026-08-02 -- twice.
 #   is it up?   kill -0 "$(cat /run/tk-supervise.pid 2>/dev/null)" 2>/dev/null

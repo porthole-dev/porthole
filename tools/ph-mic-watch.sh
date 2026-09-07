@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: PHONE
 # exits: 0 ok · non-zero on failure
-# tk-mic-watch.sh [seconds] -- runs ON THE PHONE.
+# ph-mic-watch.sh [seconds] -- runs ON THE PHONE.
 #
 # Samples the handful of registers that matter once a second DURING a capture,
 # so a path that powers itself down part way through is visible as a change
@@ -16,7 +16,7 @@
 set -e
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "$0")/tk-lib.sh"
+. "$(dirname "$0")/ph-lib.sh"
 DUR=${1:-20}
 REG=/sys/kernel/debug/regmap/217:250:1:0/registers
 

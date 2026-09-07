@@ -19,7 +19,7 @@ The mismatch itself is ordinary: the aport builds with
 `config-<pkg>.<arch>` in pmaports, the tree's `.output` with whatever
 defconfig it was last configured from, and a config difference is a CRC
 difference. Before a `mod` push of a no-reload module on a device that
-ships from the aport, check `tk-modcrc.py` against the running kernel, or
+ships from the aport, check `ph-modcrc.py` against the running kernel, or
 skip straight to the `fast` rung with the change in the series -- eight
 minutes, and it lands where the phone actually runs kernels.
 

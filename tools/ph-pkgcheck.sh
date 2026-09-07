@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: HOST, PHONE, PORTHOLE_USER
 # exits: 0 ok · non-zero on failure
-# tk-pkgcheck.sh -- is the thing that SHIPS the thing you EDITED?
+# ph-pkgcheck.sh -- is the thing that SHIPS the thing you EDITED?
 #
 # Run before every flash, and after every aport edit.
 #
@@ -41,7 +41,7 @@
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="$REPO/.pkg-content-hashes"
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}

@@ -17,13 +17,13 @@ So: no number without a witness. This wraps lswt (which window exists), wlrctl
 assert its own preconditions and fail loudly instead of quietly measuring
 nothing.
 
-  tk-ui.py list                       toplevels, one "app-id\ttitle" per line
-  tk-ui.py hash                       md5 of the current frame
-  tk-ui.py settle [TIMEOUT]           wait until the screen stops changing
-  tk-ui.py unblank                    undo the screensaver blank (a touch will not)
-  tk-ui.py launch APP_ID CMD...       run CMD, wait for its window, focus it
-  tk-ui.py focus APP_ID               raise an existing window, verify
-  tk-ui.py require APP_ID             exit nonzero unless APP_ID has a window
+  ph-ui.py list                       toplevels, one "app-id\ttitle" per line
+  ph-ui.py hash                       md5 of the current frame
+  ph-ui.py settle [TIMEOUT]           wait until the screen stops changing
+  ph-ui.py unblank                    undo the screensaver blank (a touch will not)
+  ph-ui.py launch APP_ID CMD...       run CMD, wait for its window, focus it
+  ph-ui.py focus APP_ID               raise an existing window, verify
+  ph-ui.py require APP_ID             exit nonzero unless APP_ID has a window
 """
 import hashlib
 import re

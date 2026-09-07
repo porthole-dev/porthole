@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: FASTBOOT, HOST, PHONE, PORTHOLE_USER
 # exits: 0 ok · 1 failed
-# tk-audio-cycle.sh [--dtb] [--kernel] -- one command from "make finished" to
+# ph-audio-cycle.sh [--dtb] [--kernel] -- one command from "make finished" to
 # "here is what the device says".
 #
 # Everything the audio work touches is a MODULE on this device
@@ -16,7 +16,7 @@
 #   --dtb     the QUAT MI2S port/pinctrl/dai-link  -> repack + RAM boot
 #   --kernel  CONFIG_REGMAP_ALLOW_WRITE_DEBUGFS is in regmap-debugfs.c, which
 #             is built in (CONFIG_REGMAP=y) -> needs the kernel image spliced
-#             in as well, otherwise `tk-lab.py poke` stays dead.
+#             in as well, otherwise `ph-lab.py poke` stays dead.
 #
 # THE TRAP THIS EXISTS TO CATCH (docs/HANDOFF-audio.md section 6): a "rebuilt"
 # module can silently predate your edit, and then you spend an evening
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${KBUILD_OUTPUT:-$ROOT/linux/.output}
@@ -81,7 +81,7 @@ done
 [ "$MISSING" -eq 0 ] || { echo "refusing to push a half-built set"; exit 1; }
 
 echo "== pushing $(( ${#PUSH[@]} )) modules"
-"$ROOT/tools/tk-push-module.sh" "${PUSH[@]}"
+"$ROOT/tools/ph-push-module.sh" "${PUSH[@]}"
 
 if [ "$DO_DTB" -eq 1 ]; then
 	DTB=$OUT/arch/arm64/boot/dts/qcom/msm8998-google-taimen.dtb
@@ -100,13 +100,13 @@ if [ "$DO_DTB" -eq 1 ]; then
 	fi
 	python3 "$ROOT/tools/bootimg-repack-dtb.py" "${args[@]}"
 	echo "== to the bootloader"
-	"$ROOT/tools/tk-to-fastboot.sh"
+	"$ROOT/tools/ph-to-fastboot.sh"
 	# RAM boot, never flash: writes nothing, burns no slot retries, and a power
 	# cycle undoes it (docs/HANDOFF-audio.md section 5 rule 1).
 	"${FASTBOOT:-$HOME/Android/Sdk/platform-tools/fastboot}" boot /tmp/boot-audio.img
 else
 	echo "== rebooting"
-	"$ROOT/tools/tk-reboot.sh"
+	"$ROOT/tools/ph-reboot.sh"
 fi
 
 echo "== waiting for ssh"
@@ -137,7 +137,7 @@ ssh "${TK_SSH_OPTS[@]}" \
 
 echo
 echo "== capture"
-python3 "$ROOT/tools/tk-lab.py" cap postfix -d 20 \
+python3 "$ROOT/tools/ph-lab.py" cap postfix -d 20 \
 	-s 'MultiMedia2 Mixer SLIMBUS_0_TX=1' -s 'AIF1_CAP Mixer SLIM TX7=1' \
 	-s 'CDC_IF TX7 MUX=DEC7' -s 'ADC MUX7=DMIC' -s 'DMIC MUX7=DMIC0' \
 	2>&1 | tail -12

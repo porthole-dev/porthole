@@ -185,7 +185,7 @@ def build(verb, fields_, values):
     Flags come FIRST when a positional is argparse.REMAINDER, and that
     ordering is load-bearing rather than cosmetic. `porthole run` declares
     `args` with nargs="...", which hands argparse EVERYTHING after it -- so the
-    old positionals-then-flags order built `porthole run tk-suspend-cycle.sh 20
+    old positionals-then-flags order built `porthole run ph-suspend-cycle.sh 20
     --lock`, argparse swallowed `--lock` into args, and lock came back False.
     The form offering the device mutex was building a command that dropped it.
     Flags first is also how those verbs' own examples are written.

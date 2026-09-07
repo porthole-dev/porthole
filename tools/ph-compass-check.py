@@ -15,7 +15,7 @@ orientations.
 It does not test the C. It tests the algorithm the C transcribes, which is the
 part that cannot be checked by looking at a compass and squinting.
 
-    tk-compass-check.py            # run the checks
+    ph-compass-check.py            # run the checks
 """
 import math
 import random

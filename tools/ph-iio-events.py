@@ -16,8 +16,8 @@ only way to tell those apart.
 Enabling the event is also what starts the subscription, so this has to write
 the _en attribute before anything can arrive.
 
-    tk-iio-events.py qcom-smgr-double-tap [seconds]
-    tk-iio-events.py --list
+    ph-iio-events.py qcom-smgr-double-tap [seconds]
+    ph-iio-events.py --list
 
 Trigger the gesture, walk, or hold still, depending on which one you picked.
 """

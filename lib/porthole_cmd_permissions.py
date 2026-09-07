@@ -143,11 +143,11 @@ HOST_READS = (
 )
 
 # The device's shell, through the mutex wrapper rather than through ssh.
-# tk-device.sh is the tool the repo's own device-mutex rule requires, so
+# ph-device.sh is the tool the repo's own device-mutex rule requires, so
 # granting it grants the sanctioned path and no other; a bare `ssh` rule would
 # grant every host on the network.
 DEVICE_SHELL = {
-    "tools/tk-device.sh":
+    "tools/ph-device.sh":
         "the device mutex wrapper -- this DOES run arbitrary commands on the "
         "phone, which is the point, and it is the only path that takes the lock",
 }
@@ -162,7 +162,7 @@ def tool_rules(root: pathlib.Path, device: str = ""):
     """Every tool worth granting, and every tool held back, with its reason.
 
     Derived rather than listed. `is_risky` reads the tool's NAME and its
-    one-line summary together: a tool called tk-suspend-cycle.sh whose summary
+    one-line summary together: a tool called ph-suspend-cycle.sh whose summary
     says it reboots is caught by the summary even though the name is clean.
     That is the same second opinion the console applies, so the console and
     this verb cannot come to different conclusions about the same tool.
@@ -189,7 +189,7 @@ def _why_risky(subject: str) -> str:
     "framprobe" contains "ramp", and four tools are held back that a reader
     would have granted. That bias is the right way round -- a held-back tool
     costs one approval, a wrongly granted one runs unattended against a phone
-    -- but the reason has to admit it, or an auditor reads `tk-capture.sh:
+    -- but the reason has to admit it, or an auditor reads `ph-capture.sh:
     names rm` and concludes the table is nonsense rather than cautious.
 
     The narrower matcher belongs in safety.py if anywhere, where the console
@@ -213,7 +213,7 @@ def build_rules(root: pathlib.Path, device: str = "", device_shell: bool = True)
     tools_ok, tools_held = tool_rules(root, device)
     # The device shell is granted by DEVICE_SHELL below or not at all. It is
     # an ordinary tool as far as `is_risky` is concerned -- nothing in
-    # tk-device.sh's name or summary names a hazard, because the hazard is
+    # ph-device.sh's name or summary names a hazard, because the hazard is
     # whatever you pass it -- so without this it arrived through the tool loop
     # and `--no-device` did nothing at all. The flag was decorative and the
     # preview's promise to name the grant out loud was false.
@@ -347,7 +347,7 @@ SPEC = {
         "merges into a project's .claude/settings.local.json, keeping what is\n"
         "already there, ignored via .git/info/exclude so it is never a tracked\n"
         "change in somebody's kernel tree.\n\n"
-        "It grants the device's shell through tools/tk-device.sh, the wrapper\n"
+        "It grants the device's shell through tools/ph-device.sh, the wrapper\n"
         "that takes the mutex. That is a judgement about a bring-up device and\n"
         "the preview names it out loud; `--no-device` leaves it out."),
     "reports": True,

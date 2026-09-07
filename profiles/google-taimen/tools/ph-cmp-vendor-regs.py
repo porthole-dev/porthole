@@ -12,7 +12,7 @@ tavil_codec_reg_init_1_1_val).  Mainline's wcd934x has no equivalent, so any
 entry whose bits do not match on the running device is an init write mainline
 never performs.
 
-Usage: tk-cmp-vendor-regs.py <regdump.txt> [table ...]
+Usage: ph-cmp-vendor-regs.py <regdump.txt> [table ...]
   regdump comes from /sys/kernel/debug/regmap/<slim-dev>/registers ("addr: val")
 """
 import re

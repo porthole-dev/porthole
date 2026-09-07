@@ -26,12 +26,12 @@
 #   MDP_VSYNC_SEL   4-bit field per pingpong (PP0 at bit 12); 0-2 GPIO,
 #                15 watchdog timer. Bits 3:0 and 31:29 are hardwired.
 #
-# Usage: tk-dpu-regs.sh [block ...]      (default: the useful summary)
-#        tk-dpu-regs.sh raw              (the whole kms dump)
+# Usage: ph-dpu-regs.sh [block ...]      (default: the useful summary)
+#        ph-dpu-regs.sh raw              (the whole kms dump)
 set -eu
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 

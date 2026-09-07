@@ -5,7 +5,7 @@ scope: generic
 subsystem: kernel
 severity: trap
 confidence: proven
-evidence: taimen 2026-08-25: spliced a linux/ tree-built Image.gz into the device's own boot.img; it burned its 3 boot retries and fell back to the bootloader. tk-reconcile.sh reported 38 files differing between the aport series and linux/ HEAD, including pcie-qcom.c, easel-mipi.c, msm-poweroff.c (64 lines), qcom_smd-regulator.c (136), irq-qcom-mpm.c (129). bootimg-verify.py had already refused an earlier image because the tree's DTB was the stale one carrying the capacity-dmips-mhz bug (1d9e2f63638a28b5) while the flashed DTB was cb6e5754f5d02acd. The tell that a device ships from the aport: uname -v equals pkgrel+1 from the APKBUILD. Fix: add the patch to the aport series, bump pkgrel, checksum, build the aport.
+evidence: taimen 2026-08-25: spliced a linux/ tree-built Image.gz into the device's own boot.img; it burned its 3 boot retries and fell back to the bootloader. ph-reconcile.sh reported 38 files differing between the aport series and linux/ HEAD, including pcie-qcom.c, easel-mipi.c, msm-poweroff.c (64 lines), qcom_smd-regulator.c (136), irq-qcom-mpm.c (129). bootimg-verify.py had already refused an earlier image because the tree's DTB was the stale one carrying the capacity-dmips-mhz bug (1d9e2f63638a28b5) while the flashed DTB was cb6e5754f5d02acd. The tell that a device ships from the aport: uname -v equals pkgrel+1 from the APKBUILD. Fix: add the patch to the aport series, bump pkgrel, checksum, build the aport.
 first-learned: 2026-08-25
 ---
 
@@ -19,7 +19,7 @@ one line you changed broke the boot.
 **Cause** — the kernel that ships on the device was built from the **aport
 series** (pmaports), not from the checked-out source tree. The two are allowed
 to diverge and on a mature port they diverge enormously: on taimen
-`tools/tk-reconcile.sh` reported **38 differing files**, including
+`tools/ph-reconcile.sh` reported **38 differing files**, including
 `pcie-qcom.c`, `easel-mipi.c`, `msm-poweroff.c` (64 lines),
 `qcom_smd-regulator.c` (136) and `irq-qcom-mpm.c` (129). A tree build is missing
 dozens of device-critical patches, so it cannot bring up PCIe, the regulators or
@@ -53,7 +53,7 @@ The source tree stays useful for reading and for envkernel **module** builds
 (vermagic and symbol CRCs still match, so a module built there loads on the
 shipping kernel). It is only the *kernel image* that must come from the aport.
 
-Run `tk-reconcile.sh`, or the equivalent, whenever you are about to assume the
+Run `ph-reconcile.sh`, or the equivalent, whenever you are about to assume the
 two are the same. See [[porthole-blob-tooling]] for the image-surgery tools
 (`bootimg-repack-dtb.py`, `bootimg-verify.py`) that make a boot.img swap
 possible without a full `pmbootstrap install`.

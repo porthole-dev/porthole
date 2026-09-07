@@ -26,18 +26,18 @@
 # bootimg-cmdline.py) so the phone comes up headless and msm can be loaded by
 # hand with the parameters under test.
 #
-# Usage: tk-cycle.sh LOGFILE [modprobe args ...]
-#    eg: tk-cycle.sh notc.log no_tearcheck=1
-#        tk-cycle.sh base.log
+# Usage: ph-cycle.sh LOGFILE [modprobe args ...]
+#    eg: ph-cycle.sh notc.log no_tearcheck=1
+#        ph-cycle.sh base.log
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 REPO=$PORTHOLE_WORKDIR
 IMG=${TK_IMG:-$REPO/boot-headless.img}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
-LOG="${1:?usage: tk-cycle.sh LOGFILE [modprobe args ...]}"; shift
+LOG="${1:?usage: ph-cycle.sh LOGFILE [modprobe args ...]}"; shift
 ARGS="$*"
 
 [ -f "$IMG" ] || { echo "no boot image at $IMG (set TK_IMG)"; exit 1; }

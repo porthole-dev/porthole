@@ -19,7 +19,7 @@ What it looks like: the device boots, hangs before userspace, and resets. No
 oops, no panic string, nothing in `journalctl -b -1` -- the watchdog fires, so
 there is no orderly death to log. `/proc/cmdline` of the next boot carries
 `androidboot.bootreason=watchdog`, and that is the only witness you get for
-free. `pstore` is empty on many devices; netconsole (`tools/tk-capture.sh`)
+free. `pstore` is empty on many devices; netconsole (`tools/ph-capture.sh`)
 is the channel that survives.
 
 Why it is worse than pushing nothing: a stale set is at least self-consistent.
@@ -33,6 +33,6 @@ shipped unaltered once *both* modules were pushed.
 thinking about. `modinfo -F depends <module>` names its siblings, and a header
 under a driver's directory is compiled into every module in that directory.
 
-`tools/tk-push-module.sh` now warns when a module you are pushing has
+`tools/ph-push-module.sh` now warns when a module you are pushing has
 siblings on the device that differ from the ones next to it in the build, so
 this specific mistake announces itself instead of costing a rescue.

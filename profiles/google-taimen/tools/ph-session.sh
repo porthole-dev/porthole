@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # scope: device:google-taimen
-# needs: BOOTED; tk-key.py and tk-touch.py in /tmp on the device; magick on the host
+# needs: BOOTED; ph-key.py and ph-touch.py in /tmp on the device; magick on the host
 # env: HOST, PHONE
 # exits: 0 ok · 64 usage · 1 could not reach the requested state
 #
@@ -15,23 +15,23 @@
 # returns success and changes nothing. So: press the power key to wake, swipe to
 # unlock, and *look at the screen* to decide whether it worked.
 #
-#   tk-session.sh state     panel on/off, locked/unlocked
-#   tk-session.sh wake      power key if the panel is off
-#   tk-session.sh ensure    wake + swipe until unlocked (what arms call)
-#   tk-session.sh blank     power key if the panel is on
+#   ph-session.sh state     panel on/off, locked/unlocked
+#   ph-session.sh wake      power key if the panel is off
+#   ph-session.sh ensure    wake + swipe until unlocked (what arms call)
+#   ph-session.sh blank     power key if the panel is on
 #
 # The PIN is disabled on this device, so the swipe IS the whole unlock and is
-# harmless when nothing was locked. If a PIN is ever set, pipe it to tk-key.py
+# harmless when nothing was locked. If a PIN is ever set, pipe it to ph-key.py
 # type - rather than passing it as an argument (it would land in journald).
 set -uo pipefail
 # shellcheck source=../../../lib/porthole.sh
-. "$(dirname "$0")/../../../tools/tk-lib.sh"
+. "$(dirname "$0")/../../../tools/ph-lib.sh"
 
 PROBE=/tmp/tk-session-lockprobe.png
 
 panel_on() { tk_run '. /tmp/sess.sh; timeout 8 grim -s 0.1 /tmp/panelprobe.png >/dev/null 2>&1'; }
-press_power() { tk_run 'sudo -n python3 /tmp/tk-key.py power' >/dev/null 2>&1; }
-swipe_up() { tk_run 'sudo -n python3 /tmp/tk-touch.py swipe 720 2600 720 1000 350' >/dev/null 2>&1; }
+press_power() { tk_run 'sudo -n python3 /tmp/ph-key.py power' >/dev/null 2>&1; }
+swipe_up() { tk_run 'sudo -n python3 /tmp/ph-touch.py swipe 720 2600 720 1000 350' >/dev/null 2>&1; }
 
 # 0 = locked. NOT a template match: RMSE between a smooth green gradient and
 # green-text-on-green comes in under any useful threshold, so the banner
@@ -54,7 +54,7 @@ is_locked() {
     awk -v m="$mean" -v t="$LOCK_LUMA" 'BEGIN{exit !(m > t)}'
 }
 
-usage() { echo "usage: tk-session.sh state|wake|ensure|blank" >&2; exit 64; }
+usage() { echo "usage: ph-session.sh state|wake|ensure|blank" >&2; exit 64; }
 [ $# -eq 1 ] || usage
 
 case "$1" in

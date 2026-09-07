@@ -13,10 +13,10 @@ move on demand so frame rate can be measured against a known input.
 
 Stdlib only (ctypes-free: plain ioctl + struct).
 
-  tk-touch.py swipe X1 Y1 X2 Y2 [MS]     one finger, MS milliseconds (default 300)
-  tk-touch.py fling  X1 Y1 X2 Y2 [MS]    swipe that lifts while still moving
-  tk-touch.py tap    X Y
-  tk-touch.py hold   SECONDS             keep the device alive, do nothing
+  ph-touch.py swipe X1 Y1 X2 Y2 [MS]     one finger, MS milliseconds (default 300)
+  ph-touch.py fling  X1 Y1 X2 Y2 [MS]    swipe that lifts while still moving
+  ph-touch.py tap    X Y
+  ph-touch.py hold   SECONDS             keep the device alive, do nothing
 
 Coordinates are panel pixels: 1440x2880, origin top-left.
 """

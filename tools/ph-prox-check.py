@@ -31,8 +31,8 @@ is a plateau, and whether the ALS moved at all while far.
 Hovering and touching cannot be told apart after the fact, so the phases are on
 a fixed clock announced before it starts. Do not improvise:
 
-    tk-prox-check.py             # ~40 s, follow the countdown
-    tk-prox-check.py --selftest  # check the verdict logic, no phone needed
+    ph-prox-check.py             # ~40 s, follow the countdown
+    ph-prox-check.py --selftest  # check the verdict logic, no phone needed
 """
 import os
 import statistics

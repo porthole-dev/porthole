@@ -11,7 +11,7 @@ screen then waits for a human thumb. greetd's protocol (u32 length-prefixed
 JSON on $GREETD_SOCK) is what the greeter itself speaks: create_session ->
 answer the password prompt -> start_session with the phosh command. The
 password comes from the environment on purpose and is not echoed anywhere.
-  TK_LOGIN_PASSWORD=... tk-greetd-login.py [USER] [SESSION-CMD...]
+  TK_LOGIN_PASSWORD=... ph-greetd-login.py [USER] [SESSION-CMD...]
 """
 import json, os, socket, struct, sys, time
 

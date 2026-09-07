@@ -22,8 +22,8 @@ without cpu-controller support, so cpu.uclamp.min does not exist and the cgroup
 route is closed. See /usr/libexec/taimen-uclamp-session, whose verified syscall
 recipe this reuses.
 
-  tk-uclamp.py MIN COMM [COMM...]     every thread of every process named COMM
-  tk-uclamp.py MIN --pid PID          every thread of one process
+  ph-uclamp.py MIN COMM [COMM...]     every thread of every process named COMM
+  ph-uclamp.py MIN --pid PID          every thread of one process
 
 MIN is 0-1024, where 1024 is "as big as the biggest CPU". 0 removes the boost.
 Process names come from /proc/<pid>/comm and the kernel truncates them to 15

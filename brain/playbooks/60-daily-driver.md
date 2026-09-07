@@ -34,7 +34,7 @@ In the order they bit on taimen, which is not the order anyone expects:
 noise floor is a story. Two identically-configured boots on taimen differed by
 0.35 s, which is larger than most of the "improvements" anyone proposed.
 
-**Audit rather than assume.** `tools/tk-daily-audit.sh` prints evidence, not
+**Audit rather than assume.** `tools/ph-daily-audit.sh` prints evidence, not
 verdicts — deliberately. A tool that prints a verdict invites you to skip
 reading the evidence.
 

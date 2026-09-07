@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""tk-gesture-bench.py --client: the app's own frame rate, not phoc's.
+"""ph-gesture-bench.py --client: the app's own frame rate, not phoc's.
 
 The bench read the DPU vsync counter and called it the frame rate. That is
 phoc's output rate -- it repaints every vsync while any client animates -- so
@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 import _runner                                              # noqa: E402
 
 _spec = importlib.util.spec_from_file_location(
-    "tk_gesture_bench", ROOT / "tools" / "tk-gesture-bench.py")
+    "tk_gesture_bench", ROOT / "tools" / "ph-gesture-bench.py")
 bench = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bench)
 

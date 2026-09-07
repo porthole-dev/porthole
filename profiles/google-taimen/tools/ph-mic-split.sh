@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: PHONE
 # exits: 0 ok · non-zero on failure
-# tk-mic-split.sh -- runs ON THE PHONE. Three captures, one question each.
+# ph-mic-split.sh -- runs ON THE PHONE. Three captures, one question each.
 #
 #  1+2. DMIC0 twice, mixer untouched between them. If the constant DIFFERS
 #       between two identical runs, it is not a property of the microphone pad
@@ -20,7 +20,7 @@
 set -e
 
 # shellcheck source=../../../lib/porthole.sh
-. "$(dirname "$0")/../../../tools/tk-lib.sh"
+. "$(dirname "$0")/../../../tools/ph-lib.sh"
 DUR=${1:-8}
 REGDIR=/sys/kernel/debug/regmap/217:250:1:0
 

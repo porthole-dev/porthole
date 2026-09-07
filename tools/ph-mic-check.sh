@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: HOST, PHONE, PORTHOLE_USER
 # exits: 0 ok
-# tk-mic-check.sh -- is the microphone producing AUDIO, or just a noise floor?
+# ph-mic-check.sh -- is the microphone producing AUDIO, or just a noise floor?
 #
 # WHY A TOOL AND NOT ONE arecord
 #   Every naive mic test on this device passes. `arecord -D hw:0,1` opens the
@@ -36,7 +36,7 @@
 # A SILENT ROOM MAKES "no signal" MEANINGLESS. For a real verdict play a known
 # tone near the phone and look for it in that specific frequency bin, with a
 # second bin as a control -- see docs/HANDOFF-audio.md 13.4, and note that
-# tools/tk-acoustic.py already automates the host-plays-tone loop.
+# tools/ph-acoustic.py already automates the host-plays-tone loop.
 #
 # TRAP THIS ENCODES: raw arecord does NOT apply UCM, and pulse tears the path
 # down when the source suspends, so a cold `arecord` measures a disabled mixer.
@@ -46,7 +46,7 @@
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 SECS=${SECS:-3}
 

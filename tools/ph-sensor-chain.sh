@@ -4,14 +4,14 @@
 # needs: BOOTED
 # env: -
 # exits: 0 ok · 1 failed
-# tk-sensor-chain.sh -- watch the WHOLE ambient-light / proximity chain at once:
+# ph-sensor-chain.sh -- watch the WHOLE ambient-light / proximity chain at once:
 # the kernel's raw IIO values, what iio-sensor-proxy publishes on D-Bus, and
 # what the backlight actually does about it.
 #
 # Run ON the phone. Needs an operator: none of this moves on its own.
 #
-#     tk-sensor-chain.sh            # 90 s at ~4 Hz
-#     SECS=180 tk-sensor-chain.sh   # longer
+#     ph-sensor-chain.sh            # 90 s at ~4 Hz
+#     SECS=180 ph-sensor-chain.sh   # longer
 #
 # Cover the earpiece window with a fingertip for ~10 s, uncover for ~10 s, and
 # repeat two or three times. Covering is a real light change AND a proximity
@@ -34,7 +34,7 @@
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "$0")/tk-lib.sh"
+. "$(dirname "$0")/ph-lib.sh"
 
 SECS=${SECS:-90}
 BL=$(ls -d /sys/class/backlight/* 2>/dev/null | head -1)

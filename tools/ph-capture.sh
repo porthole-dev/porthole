@@ -4,12 +4,12 @@
 # needs: BOOTED
 # env: HOST, PHONE, TK_CAP_PORT, TK_CAP_WLAN
 # exits: 0 ok · 1 failed
-# tk-capture.sh -- arm every log channel this device has, from the HOST, and
+# ph-capture.sh -- arm every log channel this device has, from the HOST, and
 # say at the end whether anything died.
 #
-#   tools/tk-capture.sh [outdir] [seconds]
-#   tools/tk-capture.sh /tmp/cap 900
-#   tools/tk-capture.sh logs/netconsole 0   # 0 = forever, re-arms across reboots
+#   tools/ph-capture.sh [outdir] [seconds]
+#   tools/ph-capture.sh /tmp/cap 900
+#   tools/ph-capture.sh logs/netconsole 0   # 0 = forever, re-arms across reboots
 #
 # Ctrl-C stops it early and still prints the verdict.
 #
@@ -51,7 +51,7 @@
 #   session that ran it on 2026-08-20. Everything here kills by recorded PID.
 #
 # TRAP 3 -- "ssh answers" is not "it did not reboot". Compare boot_id, which is
-#   what tk-lib.sh's tk_boot_id does and what the verdict below uses.
+#   what ph-lib.sh's tk_boot_id does and what the verdict below uses.
 #
 # TRAP 4 -- host firewall. Fedora's FedoraWorkstation zone already allows
 #   1025-65535/udp, so 6666/6667 work with no change. Port 514 would NOT.
@@ -62,8 +62,8 @@
 set -u
 
 _TK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=tk-lib.sh
-. "$_TK_DIR/tk-lib.sh"
+# shellcheck source=ph-lib.sh
+. "$_TK_DIR/ph-lib.sh"
 
 OUT=${1:-/tmp/tk-capture-$(date +%H%M%S)}
 DUR=${2:-900}                      # 0 = stay up forever, re-arming across reboots
@@ -425,7 +425,7 @@ watch_forever() {
 			fi
 			continue
 		fi
-		# The old master points at a dead sshd (tk-lib.sh).
+		# The old master points at a dead sshd (ph-lib.sh).
 		ph_ssh_mux_reset
 		echo ">> NEW BOOT $now -- re-arming"
 		kill "$DM_PID" "$JR_PID" 2>/dev/null

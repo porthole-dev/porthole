@@ -1,26 +1,26 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: soc:qcom
-# needs: on-device (installed as a systemd timer; see tk-lifeline.{service,timer})
+# needs: on-device (installed as a systemd timer; see ph-lifeline.{service,timer})
 # env: -
 # exits: 0 ok
-# tk-lifeline: if this boot cannot reach the USB host, return to the bootloader.
-# Armed only while /var/lib/tk-lifeline/armed exists -- disarm before handing
+# ph-lifeline: if this boot cannot reach the USB host, return to the bootloader.
+# Armed only while /var/lib/ph-lifeline/armed exists -- disarm before handing
 # the phone back to normal use, or an unplugged phone would bootloader-loop.
-[ -f /var/lib/tk-lifeline/armed ] || exit 0
+[ -f /var/lib/ph-lifeline/armed ] || exit 0
 
 i=0
 while [ "$i" -lt 24 ]; do   # ~6 min: 24 tries, 15 s apart
     if ping -c1 -W3 172.16.42.2 >/dev/null 2>&1; then
-        echo "$(date -Iseconds) host reachable, standing down" >> /var/lib/tk-lifeline/log
+        echo "$(date -Iseconds) host reachable, standing down" >> /var/lib/ph-lifeline/log
         exit 0
     fi
     i=$((i+1))
     sleep 15
 done
 
-echo "$(date -Iseconds) host unreachable -> bootloader" >> /var/lib/tk-lifeline/log
+echo "$(date -Iseconds) host unreachable -> bootloader" >> /var/lib/ph-lifeline/log
 sync
 # reboot(RESTART2, "bootloader"): writes PON_SOFT_RB_SPARE via built-in
-# qcom-pon; verified 9 s to fastboot, does not burn a slot retry (tk-lib.sh).
+# qcom-pon; verified 9 s to fastboot, does not burn a slot retry (ph-lib.sh).
 exec python3 -c 'import ctypes;l=ctypes.CDLL(None);s=l.syscall;s.restype=ctypes.c_long;s.argtypes=[ctypes.c_long,ctypes.c_uint,ctypes.c_uint,ctypes.c_uint,ctypes.c_char_p];s(142,0xfee1dead,0x28121969,0xa1b2c3d4,b"bootloader")'

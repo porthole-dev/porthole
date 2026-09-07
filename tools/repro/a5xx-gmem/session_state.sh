@@ -21,7 +21,7 @@ unlock_swipe() {
     for i in 1 2 3 4; do
         if ! is_locked; then echo "  not on lockscreen"; return 0; fi
         echo "  lockscreen detected, swiping up (attempt $i)"
-        tk_run "sudo -n python3 /tmp/tk-touch.py swipe 720 2600 720 1000 350" >/dev/null 2>&1
+        tk_run "sudo -n python3 /tmp/ph-touch.py swipe 720 2600 720 1000 350" >/dev/null 2>&1
         sleep 5
     done
     is_locked && { echo "  STILL on lockscreen after 4 swipes"; return 1; }
@@ -41,7 +41,7 @@ wait_ready() {
         # The session re-locks on its own (idle/blank) while the browser starts,
         # so swipe whenever we find it locked rather than only once up front.
         if is_locked; then
-            tk_run "sudo -n python3 /tmp/tk-touch.py swipe 720 2600 720 1000 350" >/dev/null 2>&1
+            tk_run "sudo -n python3 /tmp/ph-touch.py swipe 720 2600 720 1000 350" >/dev/null 2>&1
             sleep 4
         fi
         if ! is_locked; then

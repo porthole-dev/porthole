@@ -661,7 +661,7 @@ def check_device(ch: Checks, ctx, cfg, elapsed: float) -> None:
     elif state == "FASTBOOT":
         ch.add("device: state", "warn",
                f"{detail} -- in the bootloader; nothing over ssh will work",
-               doc="tools/tk-reboot.sh, or fastboot set_active + reboot")
+               doc="tools/ph-reboot.sh, or fastboot set_active + reboot")
     elif state == "INITRAMFS":
         ch.add("device: state", "warn",
                f"{detail} -- stopped in the pmOS initramfs debug shell",
@@ -669,7 +669,7 @@ def check_device(ch: Checks, ctx, cfg, elapsed: float) -> None:
     elif state == "FROZEN":
         ch.add("device: state", "warn",
                f"{detail} -- kernel alive, userspace gone",
-               doc="brain/traps/frozen-is-not-hung.md; tools/tk-recover.sh")
+               doc="brain/traps/frozen-is-not-hung.md; tools/ph-recover.sh")
     else:
         ch.add("device: state", "warn",
                f"{detail} -- not reachable. Suspended, powered off, or "
@@ -1277,7 +1277,7 @@ def _check_gadget_steals_default_route(ch: Checks, ctx) -> None:
 def _check_legacy_host_override(ch: Checks, ctx) -> None:
     """HOST and PHONE outrank PORTHOLE_HOST, and nothing says so.
 
-    tk-lib.sh's compatibility surface takes TK_HOST, then PHONE, then
+    ph-lib.sh's compatibility surface takes TK_HOST, then PHONE, then
     PORTHOLE_HOST -- deliberately, so an old setup keeps working. The cost is
     that setting the DOCUMENTED variable does nothing when a legacy one is
     exported, and the tools keep talking to the old address with no message at
@@ -1296,7 +1296,7 @@ def _check_legacy_host_override(ch: Checks, ctx) -> None:
                    f"${name}={got} outranks PORTHOLE_HOST={want}, so the tools "
                    f"talk to {addr}",
                    fix=f"unset {name}    # or set it to the same address."
-                       " tk-lib.sh takes TK_HOST, then PHONE, then"
+                       " ph-lib.sh takes TK_HOST, then PHONE, then"
                        " PORTHOLE_HOST, and says nothing when they disagree")
             return
     ch.add("host: address override", "ok",

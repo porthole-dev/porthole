@@ -37,8 +37,8 @@ def test_dangerous_word_overrides_a_safe_table_entry():
     # The table is a human judgement and a human can edit it in a hurry.
     # If EITHER source says stop, we stop.
     for command in ("porthole flash boot",
-                    "porthole run tk-flash-boot.sh",
-                    "porthole run tk-to-fastboot.sh",
+                    "porthole run ph-flash-boot.sh",
+                    "porthole run ph-to-fastboot.sh",
                     "porthole sandbox set_active b"):
         assert safety.needs_confirmation(command, True), command
 
@@ -117,12 +117,12 @@ def test_the_trailing_space_boundary_is_load_bearing():
     # listing would start demanding a flash confirmation. A boundary people
     # click through is worse than no boundary.
     for harmless in ("porthole blobs ls vendor.raw.img --dir /firmware",
-                     "porthole run tk-addfoo.sh",
+                     "porthole run ph-addfoo.sh",
                      "porthole brain search firmware"):
         assert not safety.needs_confirmation(harmless, True), harmless
     # and the real thing still trips
-    for real in ("porthole run tk-x.sh dd if=/dev/zero of=/dev/block/sda",
-                 "porthole run tk-x.sh rm -rf /data"):
+    for real in ("porthole run ph-x.sh dd if=/dev/zero of=/dev/block/sda",
+                 "porthole run ph-x.sh rm -rf /data"):
         assert safety.needs_confirmation(real, True), real
 
 

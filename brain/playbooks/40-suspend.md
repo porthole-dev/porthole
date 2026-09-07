@@ -32,7 +32,7 @@ run once.
    problems and mixing them wastes both.
 2. **Find what votes against sleep.** Wakeup sources, runtime-PM refcounts held
    by drivers that never idle, clocks nobody released.
-3. **Cycle in bulk, not once.** `tools/tk-suspend-cycle.sh`. A suspend bug that
+3. **Cycle in bulk, not once.** `tools/ph-suspend-cycle.sh`. A suspend bug that
    appears one time in twenty is invisible to a single-cycle test and will
    define your daily-driver experience.
 4. **Long sleeps are a separate test.** A device that survives twenty 10-second
@@ -51,6 +51,6 @@ run once.
 
 A tool that deliberately induces a reset must treat "the device stopped
 answering" as the **expected** outcome, and must therefore put a timeout on
-every ssh. `tk-suspend-cycle.sh` does this; an ad-hoc `ssh ...; ssh ...`
+every ssh. `ph-suspend-cycle.sh` does this; an ad-hoc `ssh ...; ssh ...`
 one-liner does not, and one held the device lock for ten minutes against every
 other agent that day.

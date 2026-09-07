@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: PHONE
 # exits: 0 ok · non-zero on failure
-# tk-mic-test.sh [DMIC0..DMIC5] [seconds] [rate] -- runs ON THE PHONE.
+# ph-mic-test.sh [DMIC0..DMIC5] [seconds] [rate] -- runs ON THE PHONE.
 #
 # Records one clean capture on the requested DMIC following the vendor's
 # taimen path (mictest-taimen-mic1 = dmic1 = DMICn -> DEC7 -> SLIM TX7) and
@@ -17,7 +17,7 @@
 set -e
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "$0")/tk-lib.sh"
+. "$(dirname "$0")/ph-lib.sh"
 DMIC=${1:-DMIC0}
 DUR=${2:-25}
 # Rate must match snd_soc_msm8998's be_rate, or the DSP resamples on top of

@@ -6,10 +6,10 @@
 #   <tag>: right N/40 (mean m) | left N/40
 set -uo pipefail
 cd "$(dirname "$0")/../../.." || exit
-. tools/tk-lib.sh
+. tools/ph-lib.sh
 for val in "$@"; do
   tag=$(printf '%s' "${val:-default}" | tr -c 'A-Za-z0-9' '_' | cut -c1-40)
-  tools/tk-device.sh --need-booted bash -c ". tools/tk-lib.sh; tools/repro/a5xx-gmem/arm.sh $tag '$val' \$A5XX_WORK >/dev/null 2>&1 && tools/repro/a5xx-gmem/runrate.sh $tag >/dev/null 2>&1 && tar xf \$A5XX_WORK/rate-$tag.tar -C \$A5XX_WORK" 2>&1 | grep -v -i password | grep -E 'ABORT|invalid' && { echo "$tag: ARM INVALID"; continue; }
+  tools/ph-device.sh --need-booted bash -c ". tools/ph-lib.sh; tools/repro/a5xx-gmem/arm.sh $tag '$val' \$A5XX_WORK >/dev/null 2>&1 && tools/repro/a5xx-gmem/runrate.sh $tag >/dev/null 2>&1 && tar xf \$A5XX_WORK/rate-$tag.tar -C \$A5XX_WORK" 2>&1 | grep -v -i password | grep -E 'ABORT|invalid' && { echo "$tag: ARM INVALID"; continue; }
   mkdir -p "$A5XX_WORK/rate-$tag-left"
   for f in "$A5XX_WORK/rate-$tag"/q*.png; do cp "$f" "$A5XX_WORK/rate-$tag-left/p${f##*/q}"; done
   r=$(CROP=230x75+0+0 tools/repro/a5xx-gmem/ratecalc.sh "$A5XX_WORK/rate-$tag" | sed 's/.*: \([0-9]*\/[0-9]*\).*/\1/')

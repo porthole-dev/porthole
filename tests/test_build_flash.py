@@ -799,14 +799,14 @@ def test_every_module_staging_path_strips_btf():
         if not re.search(r"\b(scp|rsync|sftp)\b", text):
             continue
         stagers.append(path.name)
-        if "tk-strip-btf.py" not in text:
+        if "ph-strip-btf.py" not in text:
             missing.append(path.name)
 
     assert stagers, "found no module staging path at all -- the probe is wrong"
     assert not missing, (
         "these stage a .ko for the device without stripping BTF: "
         + ", ".join(missing)
-        + " -- see brain/traps and tools/tk-strip-btf.py")
+        + " -- see brain/traps and tools/ph-strip-btf.py")
 
 
 def main():
@@ -921,9 +921,9 @@ def test_pushing_modules_names_the_siblings_left_behind():
     """MODVERSIONS cannot catch a struct-layout split between two modules
     built from one changed header: the struct has no exported symbol, so no
     CRC disagrees. The push is the only place this can be noticed."""
-    text = (ROOT / "tools" / "tk-push-module.sh").read_text()
+    text = (ROOT / "tools" / "ph-push-module.sh").read_text()
     assert "NOT being pushed" in text, (
-        "tk-push-module.sh does not warn about modules built alongside the "
+        "ph-push-module.sh does not warn about modules built alongside the "
         "ones being pushed")
 
 

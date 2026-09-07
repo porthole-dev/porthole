@@ -12,7 +12,7 @@ still saw frames repeat: only the presenter knows which frame it showed.
 present -- the one number that tracks "video not smooth". Stdlib only: a
 40-line RFC 6455 client, because neither end has a websocket library.
 
-  tk-webvq.py [SECONDS] [INTERVAL]      default 20 s at 1 Hz
+  ph-webvq.py [SECONDS] [INTERVAL]      default 20 s at 1 Hz
 Columns: t, total frames, dropped (delta per interval), videoWidth x Height,
 currentTime, readyState, paused.
 """

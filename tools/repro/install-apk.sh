@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: BOOTED
-# env: PORTHOLE_* (tk-lib.sh)
+# env: PORTHOLE_* (ph-lib.sh)
 # exits: 0 installed · 1 a push failed · 64 usage
 # install-apk.sh APK... -- push locally built apks to the device and install
 # them. The generic form of install-mesa.sh, which hardcodes mesa's subpackage
@@ -15,7 +15,7 @@
 # counts, and apk silently keeps a HIGHER version already present.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-source "$HERE/../tk-lib.sh"
+source "$HERE/../ph-lib.sh"
 [ $# -gt 0 ] || { echo "usage: install-apk.sh APK..." >&2; exit 64; }
 for f; do [ -f "$f" ] || { echo "missing $f" >&2; exit 1; }; done
 tk_run "mkdir -p /tmp/apk-in && rm -f /tmp/apk-in/*.apk"

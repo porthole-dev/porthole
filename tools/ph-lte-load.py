@@ -11,7 +11,7 @@ not enough. With wlan0 up, the route still egresses via WiFi, so an "LTE" arm of
 the hang matrix silently becomes a second WiFi arm and the matrix proves
 nothing. SO_BINDTODEVICE is the only thing that pins egress to the interface.
 
-  tk-lte-load.py [SECONDS] [IFACE]     default 900 s on qmapmux0.0
+  ph-lte-load.py [SECONDS] [IFACE]     default 900 s on qmapmux0.0
 """
 import socket, sys, time
 

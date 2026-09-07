@@ -75,7 +75,7 @@ correct on their own terms, neither sufficient:
 **How it was established** — a power-key cycler and a mash script (bursts from
 one uinput device; a device created per press is not what the hardware key looks
 like, and only the burst shape reproduced what a thumb does). NEITHER WAS COMMITTED and
-both are lost; `tools/tk-wake-cycle.py` is the rebuilt cycler and is the
+both are lost; `tools/ph-wake-cycle.py` is the rebuilt cycler and is the
 instrument to use now. It counts only real panel transitions and puts every
 count on /dev/kmsg. Its baseline on r89 was death at cycle 45. netconsole armed
 throughout -- and note that its silence only counts when the listener is

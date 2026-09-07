@@ -1,14 +1,14 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: on-device as the session user (tk-webeval.py, tk-gesture-bench.py,
-#        tk-touch.py, tk-ui.py in /tmp; /tmp/sess.sh); Epiphany; grim, lswt;
+# needs: on-device as the session user (ph-webeval.py, ph-gesture-bench.py,
+#        ph-touch.py, ph-ui.py in /tmp; /tmp/sess.sh); Epiphany; grim, lswt;
 #        a local clip.
 # env: TK_VIDEO_FILE (default ~/vp9_1440p60.webm), TK_VIDEO_SECONDS
 # exits: 0 measured · 1 the arm is void -- the video never advanced
-# tk-videoarm.sh LABEL [ENV...] -- one PLAYBACK arm on a LOCAL clip.
+# ph-videoarm.sh LABEL [ENV...] -- one PLAYBACK arm on a LOCAL clip.
 #
-# tk-webarm.sh measures playback on YouTube, which drags three sources of
+# ph-webarm.sh measures playback on YouTube, which drags three sources of
 # variance into every number: the network, YouTube's ABR picking a different
 # resolution per arm (it served 720p to one arm and 1440p to another on the same
 # night), and a page full of JavaScript. For comparing two builds of the
@@ -19,10 +19,10 @@
 # The clip is VP9 1440p60 -- the panel's own resolution and refresh, and inside
 # WEBKIT_GST_VIDEO_DECODING_LIMIT, so venus decodes it in hardware.
 #
-#   tk-videoarm.sh base
-#   tk-videoarm.sh pipe2 "WEBKIT_COMPOSITOR_MAX_FRAMES_IN_FLIGHT=2"
+#   ph-videoarm.sh base
+#   ph-videoarm.sh pipe2 "WEBKIT_COMPOSITOR_MAX_FRAMES_IN_FLIGHT=2"
 set -u
-L=${1:?usage: tk-videoarm.sh LABEL [ENV...]}; X=${2:-}
+L=${1:?usage: ph-videoarm.sh LABEL [ENV...]}; X=${2:-}
 CLIP=${TK_VIDEO_FILE:-$HOME/Videos/vtest/v1440.mp4}
 # An existing page next to the clip wins over the one generated below: this
 # device already has ~/Videos/vtest/*.html, made when these clips were,
@@ -63,13 +63,13 @@ setsid systemd-run --user --scope --quiet --slice=app.slice \
 # refused play() and a clip that has not loaded look identical from outside.
 t1=""; for i in $(seq 1 30); do
 	sleep 2
-	[ "$i" = 4 ] && TK_GESTURE=1 python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v.muted=true; v.play(); 1' >/dev/null 2>&1
-	t1=$(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v?v.currentTime:-1' 2>/dev/null | tail -1)
+	[ "$i" = 4 ] && TK_GESTURE=1 python3 /tmp/ph-webeval.py 'var v=document.querySelector("video"); v.muted=true; v.play(); 1' >/dev/null 2>&1
+	t1=$(python3 /tmp/ph-webeval.py 'var v=document.querySelector("video"); v?v.currentTime:-1' 2>/dev/null | tail -1)
 	case "$t1" in ''|-1|*[!0-9.]*) ;; *) [ "${t1%%.*}" -ge 1 ] 2>/dev/null && break ;; esac
 done
 sleep 3  # contract: sleep-ok this IS the measurement window, not a wait for an event -- the check below needs currentTime to have had a known ~3s to advance in, and polling away the wait would poll away the thing being measured
-t2=$(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); v?v.currentTime:-1' 2>/dev/null | tail -1)
-echo "[$L] $(python3 /tmp/tk-webeval.py 'var v=document.querySelector("video"); JSON.stringify({w:v.videoWidth,h:v.videoHeight,paused:v.paused})' 2>/dev/null | tail -1)  t $t1 -> $t2"
+t2=$(python3 /tmp/ph-webeval.py 'var v=document.querySelector("video"); v?v.currentTime:-1' 2>/dev/null | tail -1)
+echo "[$L] $(python3 /tmp/ph-webeval.py 'var v=document.querySelector("video"); JSON.stringify({w:v.videoWidth,h:v.videoHeight,paused:v.paused})' 2>/dev/null | tail -1)  t $t1 -> $t2"
 python3 - "${t1:-0}" "${t2:-0}" <<'PY' || exit 1
 import sys
 try:
@@ -79,6 +79,6 @@ except ValueError:
     sys.exit("[arm void] currentTime unreadable")
 PY
 
-sudo -n python3 /tmp/tk-gesture-bench.py watch "$SECS" --client "/tmp/wlv-$L.log" 2>&1 | tail -7
+sudo -n python3 /tmp/ph-gesture-bench.py watch "$SECS" --client "/tmp/wlv-$L.log" 2>&1 | tail -7
 echo "  gpu $(( $(cat /sys/class/devfreq/5000000.gpu/cur_freq) / 1000000 )) MHz   die $(cat /sys/class/thermal/thermal_zone*/temp | sort -n | tail -1) mC"
-echo "  dropped/total: $(python3 /tmp/tk-webeval.py 'var q=document.querySelector("video").getVideoPlaybackQuality(); q.droppedVideoFrames+"/"+q.totalVideoFrames' 2>/dev/null | tail -1)"
+echo "  dropped/total: $(python3 /tmp/ph-webeval.py 'var q=document.querySelector("video").getVideoPlaybackQuality(); q.droppedVideoFrames+"/"+q.totalVideoFrames' 2>/dev/null | tail -1)"

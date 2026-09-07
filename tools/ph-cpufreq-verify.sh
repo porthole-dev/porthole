@@ -4,7 +4,7 @@
 # needs: - (host only, no device)
 # env: -
 # exits: 0 ok · 1 failed
-# tk-cpufreq-verify.sh -- does a requested CPU frequency actually get delivered?
+# ph-cpufreq-verify.sh -- does a requested CPU frequency actually get delivered?
 # Run ON THE DEVICE, as root.
 #
 # WHY THIS EXISTS
@@ -18,7 +18,7 @@
 #   There is no hardware PMU on this kernel: no armv8_pmuv3, and
 #   perf_event_open(PERF_TYPE_HARDWARE) returns ENOENT even at
 #   perf_event_paranoid=2. The OSM's own cycle counter reads 0 -> 0 (see
-#   tk-osm-probe.py). A fixed integer loop, pinned to one CPU and timed, is the
+#   ph-osm-probe.py). A fixed integer loop, pinned to one CPU and timed, is the
 #   only clock readout this device has left.
 #
 # WHY IT IS INTERNALLY CONTROLLED
@@ -29,7 +29,7 @@
 #   delivers" from "the OSM ignored both requests and the bootloader clock never
 #   moved". Equal times ARE the null result, and they are unambiguous.
 #
-# Usage: tk-cpufreq-verify.sh [runs]      (default 3, best-of is reported)
+# Usage: ph-cpufreq-verify.sh [runs]      (default 3, best-of is reported)
 set -u
 
 RUNS=${1:-3}

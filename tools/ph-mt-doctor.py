@@ -13,8 +13,8 @@ the glass forever: every new single-finger drag becomes a two-finger gesture
 Presents as "the touchscreen went crazy after I pinch-zoomed" -- taimen
 2026-09-01, two phantom slots parked mid-screen.
 
-  tk-mt-doctor.py [/dev/input/eventN]            list live slots
-  tk-mt-doctor.py [/dev/input/eventN] --release  inject LEAVEs for stuck slots
+  ph-mt-doctor.py [/dev/input/eventN]            list live slots
+  ph-mt-doctor.py [/dev/input/eventN] --release  inject LEAVEs for stuck slots
 
 Injected releases go through the input core, so libinput/compositor state
 clears too. The underlying loss is a driver gap: the vendor ftm4 driver

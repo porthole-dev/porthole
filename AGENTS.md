@@ -49,7 +49,7 @@ Then, depending on what you are doing:
 ```sh
 porthole tools --grep suspend       # search names and summaries
 porthole tools --needs BOOTED       # what can I run right now
-porthole tools tk-suspend-cycle.sh  # read its contract without opening it
+porthole tools ph-suspend-cycle.sh  # read its contract without opening it
 ```
 
 There are 114. A truncated `ls` has caused exactly the mistake of concluding a
@@ -286,7 +286,7 @@ give-up point, not a poll interval.
 ### Every command that touches the device goes through the mutex
 
 ```sh
-TK_AGENT=<yourname> tools/tk-device.sh --need-booted <command>
+TK_AGENT=<yourname> tools/ph-device.sh --need-booted <command>
 ```
 
 There is one physical device and possibly several of you. Declare the state you
@@ -447,7 +447,7 @@ built-in defaults → profiles/<device>/device.env → ~/.config/porthole/config
                   → $PORTHOLE_ROOT/.env → the process environment
 ```
 
-In shell: `. tools/tk-lib.sh`, then use `$PHONE`, `$HOST`, `"${TK_SSH_OPTS[@]}"`.
+In shell: `. tools/ph-lib.sh`, then use `$PHONE`, `$HOST`, `"${TK_SSH_OPTS[@]}"`.
 In python: `import porthole`, then `porthole.Device()`.
 
 `porthole config` shows every resolved value and which layer it came from, which

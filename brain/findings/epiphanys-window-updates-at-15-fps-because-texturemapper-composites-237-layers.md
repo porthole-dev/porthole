@@ -55,9 +55,9 @@ TextureMapper, batching, and freedreno's per-draw/per-batch CPU cost on
 a5xx. Layer count itself is the page's (146 layers exist only because they
 overlap `will-change` cards).
 
-**Instruments left behind** -- `tools/tk-webvq.py` (presenter counters via
-the remote inspector), `tools/tk-weblayers.py` (composited layer census
-with WebKit's own reasons), `tools/tk-rangehttp.py` (range-capable local
+**Instruments left behind** -- `tools/ph-webvq.py` (presenter counters via
+the remote inspector), `tools/ph-weblayers.py` (composited layer census
+with WebKit's own reasons), `tools/ph-rangehttp.py` (range-capable local
 server for `<video>` benches; WebKit's `<video>` did not load from it
 during this session, unresolved), and the method in
 [[the-dpu-counter-is-phocs-frame-rate-not-the-apps]].

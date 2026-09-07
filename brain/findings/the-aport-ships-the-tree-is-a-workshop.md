@@ -10,7 +10,7 @@ refutes: the tree is frozen and no longer developed; only-tree lines in tk-recon
 first-learned: 2026-08-27
 ---
 
-**The question** — `tk-reconcile.sh` reports dozens of files differing between
+**The question** — `ph-reconcile.sh` reports dozens of files differing between
 the aport series and `linux/`, with hundreds of "only-tree" lines. Are fixes
 being written in the tree and never shipped?
 

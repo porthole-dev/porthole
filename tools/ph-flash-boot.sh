@@ -28,25 +28,25 @@
 #     AFTER the flash.
 #   - because of that retry counter, the first boot after a flash can still
 #     land back in the bootloader on its own. The final wait auto-recovers from
-#     that (see tk-lib.sh) instead of reporting a failure.
+#     that (see ph-lib.sh) instead of reporting a failure.
 #   - lsusb mislabels the running pmOS gadget as "fastboot", so `fastboot
 #     devices` -- not USB IDs -- is what tells bootloader from booted OS.
 #   - getting into the bootloader is unreliable enough to need its own retry
-#     logic; that lives in tk-to-fastboot.sh and is reused here.
+#     logic; that lives in ph-to-fastboot.sh and is reused here.
 #
-# Usage: tk-flash-boot.sh IMAGE [timeout_seconds]   (default 180, or $TK_TIMEOUT)
+# Usage: ph-flash-boot.sh IMAGE [timeout_seconds]   (default 180, or $TK_TIMEOUT)
 #   env: TK_SLOT       partition to flash (default boot_b)
 # Exit:  0 flashed and back up, 2 bad arguments/image, non-zero otherwise.
 set -u
 
 cd "$(dirname "$0")" || exit 1
-. ./tk-lib.sh
+. ./ph-lib.sh
 
 IMG=${1:-}
 TIMEOUT=${2:-${TK_TIMEOUT:-180}}
 SLOT=${TK_SLOT:-boot_b}
 
-[ -n "$IMG" ] || { echo "usage: tk-flash-boot.sh IMAGE [timeout_seconds]" >&2; exit 2; }
+[ -n "$IMG" ] || { echo "usage: ph-flash-boot.sh IMAGE [timeout_seconds]" >&2; exit 2; }
 
 # ------------------------------------------------------- validate the image --
 [ -f "$IMG" ] || { echo "!! no such boot image: $IMG" >&2; exit 2; }
@@ -72,7 +72,7 @@ TOTAL_START=$(tk_now_ms)
 # ------------------------------------------------------ 1: to the bootloader --
 echo ">> [1/4] getting to the bootloader"
 phase=$(tk_now_ms)
-if ! ./tk-to-fastboot.sh "$TIMEOUT"; then
+if ! ./ph-to-fastboot.sh "$TIMEOUT"; then
     echo "!! could not reach the bootloader -- nothing was flashed" >&2
     exit 1
 fi

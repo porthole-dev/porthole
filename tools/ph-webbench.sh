@@ -1,11 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: generic
-# needs: on-device as the session user (tk-gesture-bench.py + tk-touch.py +
-#        tk-ui.py in /tmp; a running phosh session; Epiphany installed)
+# needs: on-device as the session user (ph-gesture-bench.py + ph-touch.py +
+#        ph-ui.py in /tmp; a running phosh session; Epiphany installed)
 # env: -
 # exits: 0 ran · 1 no session
-# tk-webbench.sh -- browser smoothness A/B on a deterministic heavy page.
+# ph-webbench.sh -- browser smoothness A/B on a deterministic heavy page.
 #
 # Generates a raster-expensive local feed (gradients, shadows, sticky
 # blurred header -- the workload that reproduces real-world browser jank
@@ -14,9 +14,9 @@
 # a5xx fault delta and the hottest thermal zone. One line per variant makes
 # an evening of rendering experiments comparable:
 #
-#   tk-webbench.sh "WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=4" cpu4
-#   tk-webbench.sh "WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2" cpu2
-#   tk-webbench.sh "GDK_DEBUG=" gpu     # Skia-GPU: WATCH THE FAULT DELTA
+#   ph-webbench.sh "WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=4" cpu4
+#   ph-webbench.sh "WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2" cpu2
+#   ph-webbench.sh "GDK_DEBUG=" gpu     # Skia-GPU: WATCH THE FAULT DELTA
 #
 # Two instrument warnings paid for on taimen 2026-09-01: synthetic touches
 # ride a new uinput node, so an input-boost daemon watching the real
@@ -60,7 +60,7 @@ PYEOF
 # temperature with no frame stats at all -- a null from a path that never
 # executed, which brain/laws/a-null-from-an-unexecuted-path-is-not-a-refutation
 # exists to stop being read as "this variant janks less".
-for _i in tk-gesture-bench.py tk-touch.py tk-ui.py; do
+for _i in ph-gesture-bench.py ph-touch.py ph-ui.py; do
 	[ -f "/tmp/$_i" ] || { echo "missing /tmp/$_i -- push it first"; exit 1; }
 done
 
@@ -77,9 +77,9 @@ pgrep -x epiphany >/dev/null && { kill $(pgrep -x epiphany); sleep 3; }
 F0=$(sudo -n dmesg | grep -c "a5xx.*fault")
 env $ENVS setsid epiphany --new-window "file://$PAGE" >/dev/null 2>&1 &
 sleep 10
-sudo -n python3 /tmp/tk-gesture-bench.py grid-fling 4 2>/dev/null |
+sudo -n python3 /tmp/ph-gesture-bench.py grid-fling 4 2>/dev/null |
 	grep -E "frame ms|dropped|jank>|NOT" | sed "s/^/[$LABEL fling] /"
-sudo -n python3 /tmp/tk-gesture-bench.py grid-drag 4 2>/dev/null |
+sudo -n python3 /tmp/ph-gesture-bench.py grid-drag 4 2>/dev/null |
 	grep -E "frame ms|dropped|jank>|NOT" | sed "s/^/[$LABEL drag]  /"
 F1=$(sudo -n dmesg | grep -c "a5xx.*fault")
 T=$(for z in /sys/class/thermal/thermal_zone*/temp; do cat "$z" 2>/dev/null; done | sort -rn | head -1)

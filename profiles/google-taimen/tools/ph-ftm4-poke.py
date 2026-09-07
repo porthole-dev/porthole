@@ -20,10 +20,10 @@ because the failure mode under investigation is "the driver is not touching the
 bus at all". Do not run it against a healthy controller and expect the driver
 to keep working -- reading an event POPS it off the FIFO.
 
-  tk-ftm4-poke.py id              read the chip id (non-destructive)
-  tk-ftm4-poke.py gpio            read the irq / reset / switch line levels
-  tk-ftm4-poke.py drain [N]       pop up to N events (default 32)
-  tk-ftm4-poke.py watch [SECS]    poll events + irq level for SECS (default 15)
+  ph-ftm4-poke.py id              read the chip id (non-destructive)
+  ph-ftm4-poke.py gpio            read the irq / reset / switch line levels
+  ph-ftm4-poke.py drain [N]       pop up to N events (default 32)
+  ph-ftm4-poke.py watch [SECS]    poll events + irq level for SECS (default 15)
 """
 import fcntl
 import os
@@ -98,7 +98,7 @@ def read_event(fd):
 def get_line(gpio):
     """Read a line level, or -1 if something else holds the line.
 
-    tk-ftm4-log.py keeps the irq line handle open for its whole run, and the
+    ph-ftm4-log.py keeps the irq line handle open for its whole run, and the
     driver holds reset and switch, so EBUSY here is expected and must not be
     fatal -- the FIFO reads are the point of this tool, not the gpio.
     """

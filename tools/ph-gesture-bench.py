@@ -12,15 +12,15 @@ reads as fine. So this samples the DPU's own vsync counter fast enough to
 recover *individual frame intervals* and reports their distribution: p50 is
 what the session normally does, p95/max is what the user actually notices.
 
-Needs tk-touch.py and tk-ui.py beside it, and `grim` and `lswt` installed
-ON THE DEVICE -- tk-ui.py shells out to both to identify the focused
+Needs ph-touch.py and ph-ui.py beside it, and `grim` and `lswt` installed
+ON THE DEVICE -- ph-ui.py shells out to both to identify the focused
 surface. Neither is in the pmOS image by default, and without them this
 exits with a FileNotFoundError traceback rather than saying what is
 missing: `apk add grim lswt`.
 
-  tk-gesture-bench.py NAME [REPEATS]
-  tk-gesture-bench.py drag X1 Y1 X2 Y2 MS [REPEATS] [--fling] [--pause MS]
-  tk-gesture-bench.py watch SECONDS          measure without touching anything
+  ph-gesture-bench.py NAME [REPEATS]
+  ph-gesture-bench.py drag X1 Y1 X2 Y2 MS [REPEATS] [--fling] [--pause MS]
+  ph-gesture-bench.py watch SECONDS          measure without touching anything
   ... [--client LOG]  add the APP's own frame rate beside the DPU's
 
 The DPU counter is phoc's output rate, not the app's: phoc repaints every
@@ -29,7 +29,7 @@ still reads 60 fps / 0 jank. Launch the app with `WAYLAND_DEBUG=1 app 2>LOG`
 and pass `--client LOG`: the run is bracketed against the log and the app's
 own wl_surface.commit intervals -- and its presentation-feedback vsync
 deltas, which are exact -- are reported next to the compositor's.
-  tk-gesture-bench.py latency X Y [REPEATS] [IDLE_S]
+  ph-gesture-bench.py latency X Y [REPEATS] [IDLE_S]
         Idle until the GPU and DPU have powered down, then touch and time the
         first frame out. This is the number a user calls "laggy": average FPS
         says nothing about how long the screen sits still after a finger lands.
@@ -49,9 +49,9 @@ import time
 
 
 def _sibling(stem):
-    """Load tk-touch.py / tk-ui.py by PATH.
+    """Load ph-touch.py / ph-ui.py by PATH.
 
-    `from tk_touch import ...` cannot work: the file is tk-touch.py and a
+    `from tk_touch import ...` cannot work: the file is ph-touch.py and a
     hyphen is not a module name, so this tool has never once imported. Nothing
     in the tree renames the file either, on the host or when pushing to /tmp.
     Importing by path is the fix that does not depend on how it was deployed.
@@ -341,7 +341,7 @@ def measure(name, desc, repeats, fn, wl_log=None):
     if wl_log:
         lines = _log_slice(wl_log, wl_at)
         # Keep the slice. The client column below is a summary, and a summary
-        # cannot say WHERE a stall was -- tk-wlgaps.py can, but only if it gets
+        # cannot say WHERE a stall was -- ph-wlgaps.py can, but only if it gets
         # the same bytes this saw rather than the whole log with the page load
         # and the settle still in it.
         with open(wl_log + ".drag", "w") as f:

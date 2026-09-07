@@ -203,7 +203,7 @@ def test_HOST_beats_TK_HOST_when_both_set():
 
 
 def test_host_falls_back_to_the_host_part_of_PHONE():
-    """tk-stream.sh does `HOST=${PHONE#*@}`. Someone who sets only PHONE must
+    """ph-stream.sh does `HOST=${PHONE#*@}`. Someone who sets only PHONE must
     still get a usable HOST for the ping probes."""
     tmp, xdg = sandbox()
     cfg = load(tmp, xdg, PORTHOLE_DEVICE="testdev", PHONE="bob@192.168.7.7")

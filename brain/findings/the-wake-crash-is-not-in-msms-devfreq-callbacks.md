@@ -6,7 +6,7 @@ subsystem: gpu
 severity: finding
 confidence: proven
 refutes: "that the offending work is in msm_devfreq_get_dev_status, msm_devfreq_target or msm_devfreq_get_cur_freq; that any periodic kernel wakeup during the display transition would do; that VDD_MX has anything to do with it"
-evidence: "taimen, tools/tk-wake-cycle.py, 2026-08-27, one arm per line, gpu=suspended before every press. r89 aport baseline died at 45. get_dev_status stubbed to constants: 19. plus target stubbed to `return 0` (8 bytes compiled): 48. plus get_cur_freq stubbed: 14. Stub sizes verified with nm on the loaded .ko. With /sys/class/devfreq/5000000.gpu/polling_interval = 0 and NOTHING else changed: survived 100 transitions, 0 presses missed. Throughout that immune run 1da4000.ufshc devfreq was still polling at 60 ms."
+evidence: "taimen, tools/ph-wake-cycle.py, 2026-08-27, one arm per line, gpu=suspended before every press. r89 aport baseline died at 45. get_dev_status stubbed to constants: 19. plus target stubbed to `return 0` (8 bytes compiled): 48. plus get_cur_freq stubbed: 14. Stub sizes verified with nm on the loaded .ko. With /sys/class/devfreq/5000000.gpu/polling_interval = 0 and NOTHING else changed: survived 100 transitions, 0 presses missed. Throughout that immune run 1da4000.ufshc devfreq was still polling at 60 ms."
 first-learned: 2026-08-27
 ---
 

@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: HOST, PHONE, PORTHOLE_HOST, PORTHOLE_USER, TK_HOST
 # exits: 0 ok · 1 failed
-# tk-hang-matrix.sh -- the 2x2 attribution matrix for defect #3.
+# ph-hang-matrix.sh -- the 2x2 attribution matrix for defect #3.
 # Run on the HOST. Drives the phone, watches it from outside, records verdicts.
 #
 # WHAT IT IS FOR
@@ -23,7 +23,7 @@
 # TWO TRAPS, BOTH ENCODED BELOW BECAUSE BOTH INVALIDATE A RESULT SILENTLY
 #   1. The LTE arms must use SO_BINDTODEVICE on qmapmux0.0. Binding only the
 #      SOURCE ADDRESS still egresses via wlan0, so an "LTE" cell that does that
-#      is really a second WiFi cell and the matrix proves nothing. tk-lte-load.py
+#      is really a second WiFi cell and the matrix proves nothing. ph-lte-load.py
 #      sets the socket option properly.
 #   2. GPU arms use glmark2-es2-wayland, NEVER -es2-drm. The DRM variant takes
 #      the display away from the compositor and wedges the a540, which then gets
@@ -34,14 +34,14 @@
 #
 # HANG DETECTION IS HOST-SIDE ON PURPOSE
 #   A hard hang takes the device's own logging with it. The verdict comes from
-#   ping + ssh from here, using the same split tk-supervise.sh uses: ping alive
+#   ping + ssh from here, using the same split ph-supervise.sh uses: ping alive
 #   with ssh dead is a PID-1 freeze, both dead is a SoC hang, and a watchdog
 #   reset looks like a recovery -- so uptime is checked on the far side of every
 #   event to tell a reset from a survival.
 set -u
 
 # shellcheck source=../lib/porthole.sh
-. "$(dirname "${BASH_SOURCE[0]:-$0}")/tk-lib.sh"
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/ph-lib.sh"
 
 HOST=${TK_HOST:-$PORTHOLE_HOST}
 PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
@@ -61,12 +61,12 @@ start_load() {
 	wifi) sshq "systemd-run --unit=tk-load --collect \
 	        iperf3 -c ping.online.net -t $((MINUTES*60+60))" ;;
 	lte)  sshq "systemd-run --unit=tk-load --collect \
-	        python3 /tmp/tk-lte-load.py $((MINUTES*60+60))" ;;
+	        python3 /tmp/ph-lte-load.py $((MINUTES*60+60))" ;;
 	gpu)  sshq "systemd-run --unit=tk-load --collect --setenv=XDG_RUNTIME_DIR=/run/user/10000 \
 	        --setenv=WAYLAND_DISPLAY=wayland-0 --uid=10000 \
 	        glmark2-es2-wayland --run-forever" ;;
 	both) sshq "systemd-run --unit=tk-load --collect \
-	        python3 /tmp/tk-lte-load.py $((MINUTES*60+60))"
+	        python3 /tmp/ph-lte-load.py $((MINUTES*60+60))"
 	      sshq "systemd-run --unit=tk-load-gpu --collect --setenv=XDG_RUNTIME_DIR=/run/user/10000 \
 	        --setenv=WAYLAND_DISPLAY=wayland-0 --uid=10000 \
 	        glmark2-es2-wayland --run-forever" ;;
@@ -114,7 +114,7 @@ for cell in $CELLS; do
 			clean=$((clean + 1))
 		else
 			say ">> $cell: HUNG on run $run -- cell is ATTRIBUTED, stopping this cell"
-			say ">> recover the phone before continuing (tools/tk-recover.sh)"
+			say ">> recover the phone before continuing (tools/ph-recover.sh)"
 			break
 		fi
 	done

@@ -5,7 +5,7 @@ scope: generic
 subsystem: method
 severity: law
 confidence: proven
-evidence: porthole tools/tk-device.sh; taimen AGENTS.md §3.1, 2026-08-19
+evidence: porthole tools/ph-device.sh; taimen AGENTS.md §3.1, 2026-08-19
 first-learned: 2026-08-19
 ---
 
@@ -21,8 +21,8 @@ in the lock knew that. Two agents lost their slots that day.
 Declare the state you need and fail in a second instead:
 
 ```sh
-TK_AGENT=<you> tools/tk-device.sh --need-booted   ssh ...       # exit 76 if not
-TK_AGENT=<you> tools/tk-device.sh --need-fastboot fastboot ...  # exit 76 if not
+TK_AGENT=<you> tools/ph-device.sh --need-booted   ssh ...       # exit 76 if not
+TK_AGENT=<you> tools/ph-device.sh --need-fastboot fastboot ...  # exit 76 if not
 ```
 
 Exit **76** means wrong state. It is deliberately distinct from **75** (could

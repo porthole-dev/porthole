@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: device (taimen)
 # needs: on the host, with the device BOOTED; the apks built in the workspace
-# env: PORTHOLE_* (via tk-lib.sh)
+# env: PORTHOLE_* (via ph-lib.sh)
 # exits: 0 installed and the session is back · 1 push/install failed · 2 no session
 # install-phoc.sh 0.57.0-r55  -- push a locally built phoc and restart the session.
 #
@@ -12,7 +12,7 @@
 # showing the phrog lock screen, which wants a human thumb.
 set -uo pipefail
 cd "$(dirname "$0")/../../.." || exit 1
-source tools/tk-lib.sh
+source tools/ph-lib.sh
 P=$HOME/.local/var/porthole-sandbox/packages/edge/aarch64
 V=${1:?phoc version, e.g. 0.57.0-r55}
 PKGS="phoc phoc-schemas"
@@ -44,8 +44,8 @@ if ! tk_run 'pgrep -x phosh >/dev/null' 2>/dev/null; then
     # Last resort: talk greetd's own IPC, which is what the greeter does. Needs
     # the login password in the environment on purpose -- a flag would put it in ps.
     if [ -n "${TK_LOGIN_PASSWORD:-}" ]; then
-        scp "${TK_SSH_OPTS[@]}" tools/tk-greetd-login.py "$PHONE:/tmp/" >/dev/null 2>&1
-        tk_run "sudo -n env TK_LOGIN_PASSWORD='$TK_LOGIN_PASSWORD' python3 /tmp/tk-greetd-login.py $PORTHOLE_USER phosh-session" >/dev/null 2>&1
+        scp "${TK_SSH_OPTS[@]}" tools/ph-greetd-login.py "$PHONE:/tmp/" >/dev/null 2>&1
+        tk_run "sudo -n env TK_LOGIN_PASSWORD='$TK_LOGIN_PASSWORD' python3 /tmp/ph-greetd-login.py $PORTHOLE_USER phosh-session" >/dev/null 2>&1
         END=$(tk_deadline_ms 75)
         while ! tk_expired "$END"; do
             tk_run 'pgrep -x phosh >/dev/null' 2>/dev/null && break

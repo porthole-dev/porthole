@@ -11,7 +11,7 @@ If the msm8998 CSID's per-lane MISR still reads zero while Easel's TX VPG is
 emitting RAW10 frames, the fault is 100% on the SoC side and Easel is
 exonerated. That is the cheapest decisive experiment available (HANDOFF §15).
 
-  tk-easel-vpg.py <txdev> on|off
+  ph-easel-vpg.py <txdev> on|off
 """
 import mmap, os, struct, sys
 

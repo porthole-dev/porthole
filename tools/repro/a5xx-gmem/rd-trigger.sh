@@ -10,7 +10,7 @@
 # submits -- writing the path does nothing (2026-09-03, cost half an hour).
 # Writing through /proc/<pid>/fd/<n> reaches every open instance.
 set -uo pipefail
-. "$(dirname "$0")/../../tk-lib.sh"
+. "$(dirname "$0")/../../ph-lib.sh"
 NAME=$1; N=${2:-1}
 tk_run "p=\$(pgrep -x $NAME | head -1); [ -n \"\$p\" ] || { echo 'no such process'; exit 1; }; \
   fds=\$(ls -l /proc/\$p/fd 2>/dev/null | awk '/_trigger/{print \$9}'); [ -n \"\$fds\" ] || { echo 'no trigger fd: FD_RD_DUMP=enable,trigger not in its env'; exit 2; }; \

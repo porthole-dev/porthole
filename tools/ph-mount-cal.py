@@ -6,7 +6,7 @@
 # exits: 0 ok · 1 failed
 """Measure the accelerometer mount matrix from four guided poses.
 
-Why this exists: the tool this replaces (tk-orient-check.py, deleted) only scored two candidate matrices, it
+Why this exists: the tool this replaces (ph-orient-check.py, deleted) only scored two candidate matrices, it
 timed the poses instead of asking for them, and its third pose was described as
 "turned 90 degrees clockwise" -- which is ambiguous (clockwise seen from where?)
 and is exactly where a 90 degree rotation error hides. This one names each pose
@@ -36,8 +36,8 @@ determinant +1 matrix that is 180 degrees wrong -- which is what happened.
 Three poses fix the matrix with no freedom left. The fourth is a check on the
 x axis, which is the one in dispute.
 
-    tk-mount-cal.py            # run the calibration
-    tk-mount-cal.py --selftest # check the solver, no phone needed
+    ph-mount-cal.py            # run the calibration
+    ph-mount-cal.py --selftest # check the solver, no phone needed
 
 PHONE=user@host overrides the ssh target.
 """

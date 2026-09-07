@@ -4,9 +4,9 @@
 # needs: - (host only, no device)
 # env: -
 # exits: 0 ok · 1 failed
-# tk-firstpaint.sh -- what the user actually waits for: launch -> first frame.
+# ph-firstpaint.sh -- what the user actually waits for: launch -> first frame.
 #
-# WHY THIS EXISTS ALONGSIDE tk-applaunch-bench.sh
+# WHY THIS EXISTS ALONGSIDE ph-applaunch-bench.sh
 #   That harness times the app's D-Bus name appearing, and says so honestly:
 #   "Not first-paint". Measured 2026-08-20 it reports 170-190 ms cold while the
 #   screen does not light up for ~0.5 s. Both numbers are true; only this one is
@@ -25,7 +25,7 @@
 #   1. Display off. A blank panel transfers no frames, so "wait for the screen
 #      to go quiet" succeeds instantly and nothing ever paints. The
 #      bl_power/enabled precondition below is not optional. Wake the panel with
-#      tools/tk-key.py, and set idle-delay 0 for the duration of the run.
+#      tools/ph-key.py, and set idle-delay 0 for the duration of the run.
 #   2. App never appeared. lswt confirms a window exists before the number is
 #      allowed to count (AGENTS.md 3b: no number without a witness).
 #
@@ -38,10 +38,10 @@
 #   the user is describing. Measured: TextEditor 2.1 s warm; Firefox 5.4-5.7 s
 #   warm, 6.8-7.0 s cold.
 #
-#   tk-firstpaint.sh [ROUNDS] [APP_ID:PROCNAME ...]     default 3 rounds
+#   ph-firstpaint.sh [ROUNDS] [APP_ID:PROCNAME ...]     default 3 rounds
 #
 # ponytail: polls /proc/uptime and one debugfs counter. No new deps beyond grim
-# and lswt, which tk-ui.py already assumes.
+# and lswt, which ph-ui.py already assumes.
 set -u
 export XDG_RUNTIME_DIR=/run/user/10000 WAYLAND_DISPLAY=wayland-0
 ENC=/sys/kernel/debug/dri/0/encoder-0/status

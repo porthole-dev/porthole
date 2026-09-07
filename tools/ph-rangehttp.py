@@ -9,7 +9,7 @@
 WebKit's media loader issues Range requests and sits on "Loading" forever
 against python's stock http.server, which ignores them (2026-09-02). This is
 that server plus the one header it lacks. Stdlib only.
-  tk-rangehttp.py [PORT] [DIR]      default 8080, cwd, binds 127.0.0.1
+  ph-rangehttp.py [PORT] [DIR]      default 8080, cwd, binds 127.0.0.1
 """
 import http.server, os, re, sys
 from http import HTTPStatus
