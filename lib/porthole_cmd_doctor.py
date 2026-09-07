@@ -618,11 +618,18 @@ def check_identity(ch: Checks, cfg) -> None:
         ch.add("identity", "ok", f"{cfg['PHONE']} (via {cfg.source('PHONE')})")
 
 
-def check_device(ch: Checks, ctx, cfg) -> None:
+def check_device(ch: Checks, ctx, cfg, elapsed: float) -> None:
     dev = ctx.device()
-    start = time.monotonic()
-    state = dev.state()
-    elapsed = (time.monotonic() - start) * 1000
+    # 30 s, not 0: cmd_doctor probed seconds ago and this row is a DISPLAY of
+    # that verdict, not something about to act on the device. `state()`'s own
+    # docstring draws exactly this line -- a cached BOOTED handed to something
+    # that then flashes is what the default of 0 exists to prevent.
+    #
+    # `elapsed` is handed in rather than timed here: the cache makes this call
+    # near-instant, and printing THAT duration would claim a round trip that
+    # never happened. `elapsed` is the real one, timed by cmd_doctor around
+    # the probe that actually warmed the cache.
+    state = dev.state(max_age=30.0)
     detail = f"{state} ({elapsed:.0f}ms)"
 
     if state == "BOOTED":
@@ -1238,14 +1245,36 @@ def cmd_doctor(args, ctx) -> int:
     cfg = ctx.cfg
 
     check_host(ch, cfg, family)
-    check_workspace(ch, ctx, family, probe_device=not args.no_device)
+    # ONE probe, before anything that would open its own connection.
+    #
+    # Two independent checks each dialled the same phone and neither knew the
+    # other had just failed: `check_device` costs a probe, and the workspace's
+    # device-key row costs a full ssh with ConnectTimeout=5. On an absent
+    # device that is 7 s for one answer.
+    #
+    # `state()` writes its verdict to the cache under XDG_CACHE_HOME, so the
+    # `max_age` read below is free; and it honours PORTHOLE_DEVICE_STATE, so a
+    # test that declares the device absent no longer pays for the declaration.
+    #
+    # Timed here, not inside check_device: this is the only call that actually
+    # dials the device, so this is the only honest place to measure it. The
+    # later cache read is near-instant and must not be reported as if it were
+    # this round trip.
+    device_state = ""
+    device_state_elapsed = 0.0
+    if not args.no_device:
+        start = time.monotonic()
+        device_state = ctx.device().state()
+        device_state_elapsed = (time.monotonic() - start) * 1000
+    check_workspace(ch, ctx, family,
+                    probe_device=(device_state == "BOOTED"))
     check_drift(ch, cfg)
     check_profile(ch, cfg, ctx.root)
     check_identity(ch, cfg)
     if args.no_device:
         ch.add("device: state", "skip", "--no-device")
     else:
-        check_device(ch, ctx, cfg)
+        check_device(ch, ctx, cfg, elapsed=device_state_elapsed)
         check_device_packages(ch, ctx, cfg)
     if args.tools or args.all:
         check_tools(ch, ctx.root)

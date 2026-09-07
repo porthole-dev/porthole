@@ -10,6 +10,7 @@ against four real distros; these are the fast checks that do not need podman.
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -19,6 +20,23 @@ import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 import porthole_cmd_doctor as doctor  # noqa: E402
+
+CLI = ROOT / "bin" / "porthole"
+TMPXDG = tempfile.mkdtemp(prefix="porthole-doctor-test-")
+
+
+def run(*args, env=None, stdin=""):
+    """Invoke the CLI in a clean environment. env -i semantics matter: the
+    developer running the tests usually has PHONE exported."""
+    base = {
+        "PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
+        "PORTHOLE_ROOT": str(ROOT), "XDG_CONFIG_HOME": TMPXDG,
+        "NO_COLOR": "1",
+    }
+    base.update(env or {})
+    proc = subprocess.run([sys.executable, str(CLI), *args],
+                          capture_output=True, text=True, env=base, input=stdin)
+    return proc.returncode, proc.stdout, proc.stderr
 
 
 def test_an_atomic_family_falls_back_to_its_base():
@@ -170,6 +188,21 @@ def test_nothing_still_ships_or_names_the_privilege_broker():
                  "skills/porthole-bringup/SKILL.md"):
         text = (ROOT / name).read_text()
         assert "sandbox install" not in text, f"{name} still offers the broker"
+
+
+def test_an_absent_device_is_probed_once_not_twice():
+    """Two independent checks each opened their own connection to the same
+    phone, and neither knew the other had just failed. On an unplugged device
+    that is 2 s for the state row plus 5 s for the key row, for one answer.
+
+    PORTHOLE_DEVICE_STATE is how the repo already short-circuits the state
+    probe in tests; the point of this test is that the KEY probe honours it
+    too."""
+    rc, out, err = run("doctor", env={"PORTHOLE_DEVICE_STATE": "absent"})
+    assert "device: state" in out, out
+    assert "device key" in out, out
+    key = [l for l in out.splitlines() if "device key" in l]
+    assert key and "could not be asked" in key[0], key
 
 
 def main():
