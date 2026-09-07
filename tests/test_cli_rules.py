@@ -445,6 +445,21 @@ def test_a_hint_does_not_pad_its_own_column():
     at = [lines[0].index("check the host"), lines[1].index("raise it")]
     assert at[0] == at[1], f"two hints, two columns: {at}\n" + "\n".join(lines)
 
+    # `{:<N}` pads UP TO N -- a command already >= N chars gets no separator
+    # at all, and a note glued straight onto it (`google-taimenthe values...`)
+    # is one unreadable token, worse than the ragged columns this fixes.
+    # `porthole soc inherit google-taimen` is a real hint this repo prints,
+    # and is exactly HINT_COLUMN (34) characters -- the boundary itself.
+    buf2 = io.StringIO()
+    out2 = porthole_cli.Out(stream=buf2, force_colour=False)
+    command = "porthole soc inherit google-taimen"
+    out2.hint(command, "the values worth copying")
+    line = buf2.getvalue().splitlines()[0]
+    command_end = line.index(command) + len(command)
+    note_start = line.index("the values worth copying")
+    assert note_start - command_end >= 1, (
+        f"command and note need at least one space between them: {line!r}")
+
 
 def main():
     return _runner.run(globals())
