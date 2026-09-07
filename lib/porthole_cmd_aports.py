@@ -188,10 +188,10 @@ def cmd_status(args, ctx, pmaports) -> int:
             for path in forks:
                 o(f"  {path}")
             o.blank()
-        o.hint("porthole aports diff            what changed")
-        o.hint("porthole aports start <topic>   a branch for a new change")
-        o.hint("porthole aports patch           a series ready to send")
-        o.hint("porthole pkg search <text>      what else is buildable")
+        o.hint("porthole aports diff", "what changed")
+        o.hint("porthole aports start <topic>", "a branch for a new change")
+        o.hint("porthole aports patch", "a series ready to send")
+        o.hint("porthole pkg search <text>", "what else is buildable")
 
     return ctx.emit(payload, render)
 
@@ -235,7 +235,7 @@ def cmd_start(args, ctx, pmaports) -> int:
     ctx.out(ctx.out.paint(f"  on {topic} (from {base})", "green"))
     ctx.out.blank()
     ctx.out.hint("porthole aports status")
-    ctx.out.hint("pmbootstrap checksum <pkg>   after editing an APKBUILD's sources")
+    ctx.out.hint("pmbootstrap checksum <pkg>", "after editing an APKBUILD's sources")
     return EX_OK
 
 
@@ -1180,7 +1180,7 @@ def cmd_patches(args, ctx, pmaports) -> int:
         o.blank()
         o.hint(f"porthole aports build {pkgname} --force")
         o.hint("porthole aports lint")
-        o.hint("porthole aports patch      when it is ready to send")
+        o.hint("porthole aports patch", "when it is ready to send")
 
     return ctx.emit(payload, render)
 

@@ -634,8 +634,8 @@ def _up(ctx, args) -> int:
         if stale:
             for message in stale:
                 ctx.out.warn(message)
-            ctx.out.hint("porthole sandbox down     then `up` -- mounts are "
-                         "fixed when the container is created")
+            ctx.out.hint("porthole sandbox down",
+                         "then `up` -- mounts are fixed when the container is created")
             return EX_STATE
         ctx.out(f"  {CONTAINER} is already up")
         return EX_OK
@@ -1054,8 +1054,8 @@ def _status(ctx) -> int:
                 o(f"  {o.paint(o.sym('•', '-'), 'yellow')} {issue}")
             o.blank()
             if not workspace_up:
-                o.hint("porthole sandbox up          start the workspace")
-            o.hint("docs/SANDBOX.md             the threat model")
+                o.hint("porthole sandbox up", "start the workspace")
+            o.hint("docs/SANDBOX.md", "the threat model")
         else:
             o(o.paint("sandbox is configured", "green"))
 

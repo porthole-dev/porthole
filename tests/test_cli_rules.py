@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -413,6 +414,36 @@ def test_a_grouped_flag_is_rendered_under_its_action():
     assert headings_found == {"new:", "patches:"}, (
         "aports has 23 flags and 15 of them name their action in prose; "
         "they must be grouped in the parser too:\n" + out)
+
+
+def test_a_hint_does_not_pad_its_own_column():
+    """52 call sites hand-padded a command against an explanation and picked
+    21 different widths between them, so the same `porthole doctor` hint lands
+    in two different columns depending which verb printed it. The layout
+    belongs to Out.hint, which is the only thing that can be consistent about
+    it."""
+    import io
+    import porthole_cli
+
+    # A run of two or more spaces INSIDE a hint string is a hand-built column.
+    padded = []
+    for path in sorted((ROOT / "lib").glob("porthole*.py")):
+        for match in re.finditer(r"""\.hint\(\s*f?["']([^"']*)["']""",
+                                 path.read_text()):
+            if re.search(r"\S  +\S", match.group(1)):
+                padded.append(f"{path.name}: {match.group(1)[:60]}")
+    assert not padded, (
+        "pass the explanation as hint()'s second argument instead:\n  "
+        + "\n  ".join(padded))
+
+    # ...and the second argument actually lines up.
+    buf = io.StringIO()
+    out = porthole_cli.Out(stream=buf, force_colour=False)
+    out.hint("porthole doctor", "check the host and device")
+    out.hint("porthole build ccache --max 25G", "raise it")
+    lines = buf.getvalue().splitlines()
+    at = [lines[0].index("check the host"), lines[1].index("raise it")]
+    assert at[0] == at[1], f"two hints, two columns: {at}\n" + "\n".join(lines)
 
 
 def main():

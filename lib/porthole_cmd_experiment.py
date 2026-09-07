@@ -150,7 +150,7 @@ def cmd_experiment(args, ctx) -> int:
             if not path:
                 o.blank()
                 o.hint(f"profiles/{ctx.cfg.get('PORTHOLE_DEVICE','<device>')}"
-                       f"/probes.conf   to add device-specific ones")
+                       f"/probes.conf", "to add device-specific ones")
         return ctx.emit({"probes": [{"name": n, "command": c} for n, c in probes],
                          "confounds": [{"name": n, "command": c}
                                        for n, c in confounds],

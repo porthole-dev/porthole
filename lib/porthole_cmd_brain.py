@@ -525,7 +525,7 @@ def cmd_new(args, ctx, root) -> int:
         ctx.out.hint(f"$EDITOR {target.relative_to(root)}")
         ctx.out.hint("fill in `refutes:` -- it is how someone finds this "
                      "before re-deriving it")
-        ctx.out.hint("porthole brain lint            does it meet the bar")
+        ctx.out.hint("porthole brain lint", "does it meet the bar")
         return 0
 
     target.write_text(TEMPLATE.format(
@@ -542,8 +542,8 @@ def cmd_new(args, ctx, root) -> int:
             f"{target.relative_to(root)}")
     ctx.out.blank()
     ctx.out.hint(f"$EDITOR {target.relative_to(root)}")
-    ctx.out.hint("porthole brain lint            does it meet the bar")
-    ctx.out.hint("porthole brain submit          branch, commit, PR")
+    ctx.out.hint("porthole brain lint", "does it meet the bar")
+    ctx.out.hint("porthole brain submit", "branch, commit, PR")
     return 0
 
 

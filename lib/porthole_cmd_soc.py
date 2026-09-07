@@ -115,10 +115,9 @@ def cmd_soc(args, ctx) -> int:
             o(f"  {best.codename} ({best.category}) — "
               f"{len(best.info)} deviceinfo keys already answered")
             o.blank()
-            o.hint(f"porthole soc inherit {best.codename}   "
-                   f"# the values worth copying")
-            o.hint(f"porthole soc diff {best.codename}      "
-                   f"# how yours differs")
+            o.hint(f"porthole soc inherit {best.codename}",
+                   "the values worth copying")
+            o.hint(f"porthole soc diff {best.codename}", "how yours differs")
             o(f"  {o.paint(f'read: {best.path}', 'grey')}")
         else:
             o("No sibling on this SoC. You are first — "
