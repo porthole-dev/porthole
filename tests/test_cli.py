@@ -567,9 +567,24 @@ def test_the_host_only_verbs_stay_under_their_budget():
     reading. This filters transient scheduling jitter in a shared test runner
     (where a contention burst can land on one verb while the pool is quiet) from
     real regressions like a network dial, which repeat consistently.
+
+    Same HOME dependency as test_no_device_does_not_open_a_connection_to_the_
+    device (tests/test_doctor.py): `doctor --no-device`'s workspace check only
+    reaches ssh through `_device_key_authorized`, which returns early with no
+    device key file to read. run()'s HOME defaults to the real one, so on a
+    clean HOME (any CI runner) this budget measured nothing but "the CLI
+    starts" -- the entire three-tier design was inert on the only surfaces
+    that run it. A temp HOME with a fake key makes the budget cover the case
+    that actually costs seconds when the guard regresses.
     """
+    fake_home = tempfile.mkdtemp(prefix="porthole-cli-budget-home-")
+    key_dir = pathlib.Path(fake_home) / ".porthole"
+    key_dir.mkdir()
+    (key_dir / "device_key").write_text("fake key, never read\n")
+
     env = {"PORTHOLE_DEVICE_STATE": "absent",
-           "PORTHOLE_HOST": BLACKHOLE, "PHONE": "pmos@" + BLACKHOLE}
+           "PORTHOLE_HOST": BLACKHOLE, "PHONE": "pmos@" + BLACKHOLE,
+           "HOME": fake_home}
     # Time the control first: version touches nothing, so its time is pure
     # interpreter startup plus scheduling jitter.
     started = time.monotonic()
@@ -581,12 +596,23 @@ def test_the_host_only_verbs_stay_under_their_budget():
     absolute_budget_s = 8.0
     slow = []
 
-    # Check the control itself.
+    # Check the control itself. Same retry as every other tier below: `make
+    # test` deliberately oversubscribes the runner, so a lone jitter spike
+    # here must not fail the whole run -- only a repeat on a second reading
+    # is a real regression. Left without this retry, the control was the one
+    # tier a jitter spike could take down outright, which is the exact flake
+    # the retry exists to prevent, just left open on this one tier.
     if control > control_budget_s:
-        slow.append(
-            f"porthole version (control): {control:.2f}s exceeds the control "
-            f"budget of {control_budget_s}s -- the control itself is waiting on "
-            "something, so the relative budget below it is blind")
+        started = time.monotonic()
+        run("version", env=env)
+        control_retry = time.monotonic() - started
+        if control_retry > control_budget_s:
+            slow.append(
+                f"porthole version (control): {control_retry:.2f}s (second "
+                f"reading) exceeds the control budget of {control_budget_s}s "
+                "-- the control itself is waiting on something, so the "
+                "relative budget below it is blind")
+        control = control_retry
 
     # Check the host-only verbs.
     for argv in (["--help"], ["devices"], ["doctor", "--no-device"]):
