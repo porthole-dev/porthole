@@ -1714,6 +1714,39 @@ def ccache_hit_rate(stats: dict):
     return hits / float(hits + misses)
 
 
+# Where a cache stops being a cache. Below the first bound it is filling,
+# which is what a cache does; above the second it is evicting entries it will
+# be asked for again, and the only symptom is that the next rebuild takes as
+# long as the first one did.
+CCACHE_WARN_AT = 0.80
+CCACHE_FULL_AT = 0.95
+
+
+def ccache_pressure(stats: dict):
+    """`(level, detail)` for how close a cache is to evicting. PURE.
+
+    `skip` and not `ok` when the numbers are absent: an empty cache and a
+    healthy one are different states, and calling the first one green is how
+    a check stops being read.
+    """
+    used, ceiling = stats.get("used"), stats.get("max")
+    if used is None or not ceiling:
+        return "skip", ""
+    frac = used / float(ceiling)
+    if frac >= CCACHE_FULL_AT:
+        return "fail", (
+            "{:.0%} of {} -- it is evicting entries the next build will ask "
+            "for again. `porthole build ccache --max 25G`".format(
+                frac, _fmt_bytes(ceiling)))
+    if frac >= CCACHE_WARN_AT:
+        return "warn", (
+            "{:.0%} of {} -- past the ceiling ccache evicts, and an evicted "
+            "entry turns the next rebuild into a full one, silently. "
+            "`porthole build ccache --max 25G`".format(
+                frac, _fmt_bytes(ceiling)))
+    return "ok", "{:.0%} of {}".format(frac, _fmt_bytes(ceiling))
+
+
 def _fmt_bytes(value) -> str:
     if value is None:
         return "?"
@@ -1770,6 +1803,28 @@ def _ccache_run(ctx, usable: bool, arch: str, host_arch: str,
     return done.stdout if done.returncode == 0 else ""
 
 
+def ccache_stats_by_arch(ctx) -> list:
+    """`[(arch, stats)]` for every cache directory that exists.
+
+    Extracted from `_ccache` so the verb and doctor's row read the same
+    numbers by the same route. Two copies of this loop is how the two would
+    come to disagree, which is the whole defect: `build ccache` has always
+    known when a cache was about to evict, in a verb nobody runs before a
+    build.
+    """
+    usable, _why = _workspace_usable(ctx)
+    workdir = pmb_workdir(ctx, usable)
+    host_arch = platform.machine()
+    rows = []
+    for arch in _ccache_dirs(workdir):
+        stats = parse_ccache_stats(
+            _ccache_run(ctx, usable, arch, host_arch, ["-s"]))
+        stats["arch"] = arch
+        stats["rate"] = ccache_hit_rate(stats)
+        rows.append((arch, stats))
+    return rows
+
+
 def _ccache(ctx, args) -> int:
     """Report the compiler cache, and raise its ceiling.
 
@@ -1794,13 +1849,7 @@ def _ccache(ctx, args) -> int:
         for arch in arches:
             _ccache_run(ctx, usable, arch, host_arch, ["-M", args.max])
 
-    rows = []
-    for arch in arches:
-        stats = parse_ccache_stats(
-            _ccache_run(ctx, usable, arch, host_arch, ["-s"]))
-        stats["arch"] = arch
-        stats["rate"] = ccache_hit_rate(stats)
-        rows.append(stats)
+    rows = [stats for _arch, stats in ccache_stats_by_arch(ctx)]
 
     payload = {"where": str(workdir),
                "tier": "workspace" if usable else "host",
@@ -1818,12 +1867,12 @@ def _ccache(ctx, args) -> int:
             return
         o.blank()
         for row in rows:
-            full = (row["used"] is not None and row["max"]
-                    and row["used"] / row["max"] >= 0.9)
+            level, why = ccache_pressure(row)
+            row["pressure"], row["pressure_detail"] = level, why
             rate = row["rate"]
             o("  {}  {}  {:>6} / {:<6} {}".format(
-                o.status("warn" if full else "ok",
-                         "full" if full else "ok", 4),
+                o.status("ok" if level in ("ok", "skip") else level,
+                         "ok" if level in ("ok", "skip") else "full", 4),
                 o.paint("{:<8}".format(row["arch"]), "grey"),
                 _fmt_bytes(row["used"]), _fmt_bytes(row["max"]),
                 o.paint("no compiles yet" if rate is None
