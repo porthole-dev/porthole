@@ -1579,5 +1579,39 @@ def test_prose_about_a_step_does_not_become_the_step():
         assert progress.phase_of(line, "") == want, (line, want)
 
 
+
+def test_a_chroot_session_is_not_a_build():
+    """The log is shared by the whole workspace. `pmbootstrap status`,
+    `pmbootstrap log`, a `chroot -- ccache -s` and an agent sitting in an open
+    `pmbootstrap chroot` all write it, and none of them is a build. Its mtime
+    says only that some pmbootstrap ran."""
+    assert not progress.names_a_build(
+        "(1234) [01:00:00] % sh -c echo hi\n"
+        "(1234) [01:00:01] (native) % busybox su pmos -c HOME=/home/pmos sh ;\n")
+    assert not progress.names_a_build("")
+    assert not progress.names_a_build(
+        "(1234) [01:00:01] (native) % su pmos -c 'ccache -s'\n")
+
+
+def test_the_lines_only_a_build_writes():
+    """Three shapes, all taken from a real log.txt on the reference host:
+    ninja's step counter, abuild's own banners, and the kernel's kbuild
+    prefixes. One of them is in the tail throughout a build -- including the
+    quiet packaging phase, where abuild is the only thing talking."""
+    assert progress.names_a_build("[9429/9429] Generating WebKit-6.0.typelib\n")
+    assert progress.names_a_build(
+        ">>> webkit2gtk-6.0: Build complete at Sun, 06 Sep 2026 18:26:28 +0000\n")
+    assert progress.names_a_build(">>> webkit2gtk-6.0: Entering fakeroot...\n")
+    assert progress.names_a_build("  CC      drivers/media/i2c/imx179.o\n")
+
+
+def test_one_build_line_anywhere_in_the_tail_is_enough():
+    """A build is legitimately silent for minutes during packaging, and the
+    64 KiB tail still holds what it said before it went quiet. Requiring the
+    LAST line to be build-shaped would call a healthy build a phantom."""
+    text = ("[9429/9429] Generating WebKit-6.0.typelib\n"
+            + "(1234) [01:00:01] (native) % busybox su pmos -c sh ;\n" * 50)
+    assert progress.names_a_build(text)
+
 if __name__ == "__main__":
     sys.exit(main())
