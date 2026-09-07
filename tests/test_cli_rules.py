@@ -391,6 +391,25 @@ def test_the_help_lists_each_verb_once():
             f"{verb} appears more than once in `porthole --help`:\n{out}")
 
 
+def test_an_arg_group_never_reaches_add_argument():
+    """`group` is porthole's key, not argparse's. If it is forwarded,
+    add_argument raises TypeError and the verb disappears from the CLI --
+    build() catches that and prints `skipping verb`, so the failure is a
+    missing command rather than a crash."""
+    specs = porthole_cli.discover(ROOT)
+    parser, table = porthole_cli.build(ROOT, specs)
+    missing = [s["verb"] for s in specs if s["verb"] not in table]
+    assert not missing, f"these verbs failed to build: {missing}"
+
+
+def test_a_grouped_flag_is_rendered_under_its_action():
+    rc, out, err = run("aports", "--help")
+    assert rc == 0, err
+    assert "new:" in out and "patches:" in out, (
+        "aports has 23 flags and 15 of them name their action in prose; "
+        "they must be grouped in the parser too:\n" + out)
+
+
 def main():
     return _runner.run(globals())
 

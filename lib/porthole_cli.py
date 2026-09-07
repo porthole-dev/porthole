@@ -454,6 +454,25 @@ GROUP_TITLES = {
 }
 
 
+def add_args(parser, args) -> None:
+    """Attach a SPEC's args, honouring the porthole-only `group` key.
+
+    ONE function, called from both the fast path and the full parser. Two
+    copies of this loop is how `--no-color` came to work before the verb and
+    not after it.
+    """
+    groups = {}
+    for flags, kwargs in args:
+        kwargs = dict(kwargs)
+        name = kwargs.pop("group", "")
+        target = parser
+        if name:
+            if name not in groups:
+                groups[name] = parser.add_argument_group(name)
+            target = groups[name]
+        target.add_argument(*flags, **kwargs)
+
+
 def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
     epilog = []
     width = max((len(s["verb"]) for s in specs), default=10)
@@ -506,8 +525,7 @@ def build(root: pathlib.Path, specs: list[dict]) -> tuple[Parser, dict]:
                         if spec["examples"] else None),
                 formatter_class=argparse.RawDescriptionHelpFormatter),
                 device_flag=spec.get("device_flag", True))
-            for flags, kwargs in spec["args"]:
-                child.add_argument(*flags, **kwargs)
+            add_args(child, spec["args"])
         except (argparse.ArgumentError, TypeError, ValueError) as exc:
             print(f"porthole: skipping verb {spec['verb']!r}: {exc}",
                   file=sys.stderr)
@@ -600,8 +618,7 @@ def main(argv: list[str], root: pathlib.Path) -> int:
                            description=spec.get("description", spec["help"]),
                            formatter_class=argparse.RawDescriptionHelpFormatter),
             device_flag=spec.get("device_flag", True))
-        for flags, kwargs in spec["args"]:
-            child.add_argument(*flags, **kwargs)
+        add_args(child, spec["args"])
         child.set_defaults(_spec=spec)
         args = parser.parse_args(argv)
         out = Out(force_colour=False if getattr(args, "no_color", False) else None)
