@@ -912,15 +912,18 @@ _ph_install_rootfs() {
 				_ph_sudo sh -c "mv '$imgdir'/*.img '$imgdir/.stale-images'/" ||
 				echo ">> WARNING: could not move it; do NOT flash the rootfs" >&2
 		fi
-		echo ">> no loop device here, so the rootfs IMAGE cannot be created."
-		echo ">>   Everything else still runs: the rootfs chroot is populated"
-		echo ">>   and \`pmbootstrap export\` packs boot.img from it."
-		echo ">>   \`--host\` runs the build on this machine instead of in the"
-		echo ">>   workspace, and there a rootfs image can be made."
+		echo ">> no loop device here, so pmbootstrap will not build the rootfs"
+		echo ">>   IMAGE itself. The chroot it populates is still what"
+		echo ">>   \`pmbootstrap export\` packs boot.img from, and porthole"
+		echo ">>   assembles the disk image from that same chroot afterward --"
+		echo ">>   see _ph_assemble_image."
 	fi
 	while :; do
 		attempt=$((attempt + 1))
-		pmbootstrap install --password "$TK_PMOS_PASSWORD" "${extra[@]}" && return 0
+		if pmbootstrap install --password "$TK_PMOS_PASSWORD" "${extra[@]}"; then
+			_ph_can_make_image || _ph_assemble_image || return 1
+			return 0
+		fi
 		# pmbootstrap's own log, not our stdout: capturing stdout would stop
 		# the build streaming, and this file is what porthole already follows
 		# for the progress bar.
@@ -943,6 +946,61 @@ _ph_install_rootfs() {
 		echo ">>   Attempt $((attempt + 1)) of $max -- continuing where it stopped."
 		echo ""
 	done
+}
+
+# Assemble the rootfs disk image porthole_image's way, because there is no
+# loop device to let pmbootstrap do it: mkfs.ext4 -d populates a filesystem
+# from a directory with no mount at all, and sfdisk writes a partition table
+# to a plain file.
+#
+# Ordering, and why it is this way: pmbootstrap's install_system_image writes
+# the fstab and runs mkinitfs AFTER formatting, because it reads the UUIDs
+# back out of the filesystems it has just made. We choose them first, so the
+# order inverts -- fstab, mkinitfs, then build the filesystems around them.
+# That is what makes the boot.img cmdline and the rootfs agree by
+# construction instead of by verification.
+_ph_assemble_image() {
+	local chroot="$_PH_PMB/chroot_rootfs_${PORTHOLE_CODENAME}"
+	local out="$_PH_PMB/chroot_native/home/pmos/rootfs/${PORTHOLE_CODENAME}.img"
+	mkdir -p "$(dirname "$out")"
+	# _PH_REPO_ROOT (this checkout, where lib/porthole_image.py lives), not
+	# _PH_REPO (the device repo of kernel/pmaports/blobs) -- and passed as an
+	# argv, not read back out of the environment, because neither variable is
+	# exported.
+	python3 - "$chroot" "$out" "$_PH_REPO_ROOT" "${PORTHOLE_ARCH:-aarch64}" <<-'PY' || return 1
+	import pathlib, subprocess, sys
+
+	chroot, out, repo_root, arch = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+	sys.path.insert(0, repo_root + "/lib")
+	import porthole_image as image
+
+	chroot = pathlib.Path(chroot)
+
+	def run(argv, stdin=""):
+	    p = subprocess.run([str(a) for a in argv], input=stdin,
+	                        capture_output=True, text=True)
+	    if p.returncode != 0:
+	        raise SystemExit(f">> {argv[0]} failed: {p.stderr.strip()[:200]}")
+	    return p.stdout
+
+	boot_uuid, root_uuid = image.uuids()
+	(chroot / "etc/fstab").write_text(image.fstab(boot_uuid, root_uuid))
+	run(["pmbootstrap", "chroot", "-r", "--", "mkinitfs"])
+
+	size = sum(f.stat().st_size for f in chroot.rglob("*") if f.is_file())
+	boot_mb, root_mb = image.sizes(size)
+	lay = image.layout(boot_mb, root_mb, arch)
+	image.assemble(run, chroot / "boot", chroot, out, lay, boot_uuid, root_uuid)
+	problems = image.verify(run, out, lay, boot_uuid, root_uuid)
+	if problems:
+	    for p in problems:
+	        print(f">> {p}", file=sys.stderr)
+	    raise SystemExit(">> refusing to ship an image that does not match "
+	                      "its own fstab -- NOTHING has been flashed")
+	pathlib.Path(out + ".uuids").write_text(
+	    f"pmos_boot_uuid={boot_uuid}\npmos_root_uuid={root_uuid}\n")
+	print(f">> assembled {out} (boot {boot_mb}M, root {root_mb}M)")
+	PY
 }
 
 
@@ -1050,24 +1108,18 @@ tksysimage() {
 	echo ">> the image is in /tmp/postmarketOS-export"
 	ls -l /tmp/postmarketOS-export/ 2>/dev/null
 	if [ "${_PH_NO_IMAGE:-0}" = 1 ]; then
-		# Say what you got and what you did not, rather than printing advice
-		# whose first half cannot be followed here.
-		echo ">> NOTE: no rootfs image was made. A rootless workspace has no"
-		echo ">>   loop device, and pmbootstrap needs one to build the image"
-		echo ">>   file. Everything else is here and verified."
-		echo ">>"
-		echo ">>   To flash the boot image, which is what most kernel and DTS"
-		echo ">>   work needs:"
-		echo ">>     porthole run tools/ph-flash-boot.sh"
-		echo ">>"
-		echo ">>   To get the rootfs image as well, run the build on THIS"
-		echo ">>   MACHINE instead of in the workspace container (needs"
-		echo ">>   pmbootstrap installed here, with its chroots):"
-		echo ">>     porthole build image --yes --host"
-	else
-		echo ">> flash it with \`porthole flash --yes\` -- rootfs AND boot, because"
-		echo ">>   install reminted the filesystem UUIDs boot.img names."
+		# A rootless workspace has no loop device, so pmbootstrap did not build
+		# the rootfs image itself -- _ph_assemble_image did, before this export
+		# ran, into the same home/pmos/rootfs path pmbootstrap's own install
+		# would have used. `pmbootstrap export` symlinks whatever it finds
+		# there, so the export above already carries it; this is information,
+		# not a missing step.
+		echo ">> NOTE: this workspace has no loop device. The rootfs image was"
+		echo ">>   assembled directly (mkfs.ext4 -d + sfdisk, no mount needed)"
+		echo ">>   instead of through pmbootstrap's own loop-device install."
 	fi
+	echo ">> flash it with \`porthole flash --yes\` -- rootfs AND boot, because"
+	echo ">>   install reminted the filesystem UUIDs boot.img names."
 }
 
 
