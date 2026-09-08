@@ -280,8 +280,11 @@ Every rung returns **when the device is back**, not when it was asked to move.
 `mod` proves by `srcversion` that the module now running is the one just built;
 `boot`, `fast` and `kernel` poll via `tk_wait_ssh` and print the `/proc/version`
 that answered. A `sleep` after one of these is redundant and wrong in both
-directions — see `brain/laws/poll-never-sleep.md`. `TK_BOOT_DEADLINE` is the
-give-up point, not a poll interval.
+directions — see `brain/laws/poll-never-sleep.md`. `PORTHOLE_BOOT_DEADLINE`
+(or the legacy `TK_BOOT_DEADLINE`) is the give-up point, not a poll interval
+— default 300s. Hitting it after a flash exits 124, not 1: the write already
+succeeded by the time `_ph_wait_up` runs, so a slow phone is a timeout to
+raise the deadline for, not a failed flash.
 
 ### Every command that touches the device goes through the mutex
 
@@ -459,13 +462,16 @@ unchanged: `PHONE`, `HOST`, `TK_HOST`, `FASTBOOT`, `TK_POLL`, `TK_FORCE`,
 
 ### Build passwords
 
-`porthole build kernel` and `porthole build upgrade` require `TK_PMOS_PASSWORD`,
-the postmarketOS rootfs user password (set by `pmbootstrap install` on the
-device's user account). Export it once per shell:
+`porthole build kernel` and `porthole build upgrade` require
+`PORTHOLE_PMOS_PASSWORD`, the postmarketOS rootfs user password (set by
+`pmbootstrap install` on the device's user account). Export it once per shell:
 
 ```sh
-export TK_PMOS_PASSWORD=<the rootfs user password>
+export PORTHOLE_PMOS_PASSWORD=<the rootfs user password>
 ```
+
+The legacy `TK_PMOS_PASSWORD` is still honoured and wins if both are set --
+see [Legacy names](docs/CONFIG.md#legacy-names).
 
 It must stay an environment variable, not a flag: `porthole` passes it to the
 workspace container as `-e NAME` with no value on the command line, so it never

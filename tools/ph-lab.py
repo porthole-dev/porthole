@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: FASTBOOT, PHONE, PORTHOLE_LAB_ALLOW_VOL
 # exits: 0 ok
-"""tk-lab -- unattended audio experiment harness for taimen.
+"""ph-lab.py -- unattended audio experiment harness for taimen.
 
 Every audio hypothesis on this device used to cost a kernel build.  This runs
 the whole loop from the host instead: set a mixer recipe, record, snapshot the

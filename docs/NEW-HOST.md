@@ -103,7 +103,7 @@ rung on it compiles a tree — except one.
 
 ```sh
 porthole sandbox up
-export TK_PMOS_PASSWORD=...        # the rootfs user's password
+export PORTHOLE_PMOS_PASSWORD=...  # the rootfs user's password
 porthole build image                        # preview: where it runs, what is missing
 porthole build image --yes                  # pmbootstrap install + export, ~20m
 porthole flash full --yes --replace-rootfs  # rootfs AND boot
@@ -200,7 +200,7 @@ came from. Between the two you never have to guess which variable won.
 | `PORTHOLE_PMAPORTS` | `porthole init` | both |
 | `PORTHOLE_PMAPORTS_<DEVICE>` | `porthole init`, `porthole aports worktree` | both |
 | `PORTHOLE_WORKDIR_<DEVICE>` | `porthole init`, `porthole use --workdir` | both |
-| `TK_PMOS_PASSWORD` | you, in your shell — never a file | both |
+| `PORTHOLE_PMOS_PASSWORD` (or legacy `TK_PMOS_PASSWORD`) | you, in your shell — never a file | both |
 
 `PORTHOLE_PMB_DIR` and `PORTHOLE_SANDBOX_PMB_DIR` are **different
 directories on purpose** and are not interchangeable. A rootless container maps
