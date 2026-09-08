@@ -82,15 +82,6 @@ PACKAGES = {
         "suse": "sudo zypper install podman",
         "macos": "brew install podman && podman machine init",
     },
-    "textual": {
-        "debian": "sudo apt install python3-pip && pip install --user 'textual>=8,<9'",
-        "arch": "sudo pacman -S python-pip && pip install --user 'textual>=8,<9'",
-        "fedora": "sudo dnf install python3-pip && pip install --user 'textual>=8,<9'",
-        "alpine": "sudo apk add py3-pip && pip install --user 'textual>=8,<9'",
-        "suse": "sudo zypper install python3-pip && pip install --user 'textual>=8,<9'",
-        "macos": "pip3 install 'textual>=8,<9'",
-        "*": "pip install --user 'textual>=8,<9'",
-    },
     "shellcheck": {
         "debian": "sudo apt install shellcheck",
         "arch": "sudo pacman -S shellcheck",

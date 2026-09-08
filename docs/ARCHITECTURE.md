@@ -127,21 +127,9 @@ A probe that encodes a vendor protocol or one silicon block lives in
 `profiles/<codename>/tools/`, not `tools/`. `porthole run` searches the active
 profile first. Over-claiming portability is worse than scoping honestly.
 
-## Why the console has a dependency and nothing else does
+## Why the CLI has no dependency
 
-The first console was stdlib `curses`, on the rule that a tool whose job is to
-work on a broken host must not need anything installed. That rule is still
-right, and it is why the CLI will never grow a dependency: `porthole next`,
-`porthole doctor` and all 117 tools run on Python 3.8 with nothing but the
-standard library.
-
-The console is a different contract. It is the interface you drive a port
-*from*, on a working laptop, and holding it to the broken-host rule cost it a
-widget layer: no argument entry, no filesystem navigation, six foreground
-colours, and a palette that could reach a verb's default and nothing past it.
-
-So the rule is scoped rather than deleted. `lib/porthole_tui/` needs Python 3.10
-and `textual`; `lib/porthole_tui/gate.py` is importable on 3.8 and explains why
-when it cannot run. CI enforces the split: the 3.8/3.11/3.13 matrix runs with
-textual absent and must stay green, so an import that leaks into the CLI fails
-the build.
+The rule is that a tool whose job is to work on a broken host must not need
+anything installed: `porthole next`, `porthole doctor` and all 117 tools run
+on Python 3.8 with nothing but the standard library, and `lib/` has no
+exception -- `tests/test_conventions.py` enforces it directly.

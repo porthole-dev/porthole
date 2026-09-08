@@ -107,7 +107,6 @@ is green on GitHub. The individual jobs, if you want one on its own:
 
 ```sh
 make test       # suites, brain lint, shell lib, device mutex
-make console    # the TUI suites, with textual installed (they skip without it)
 make lint       # shellcheck + python syntax
 make smoke      # fresh clone, bare PATH, empty HOME -- tests/ci-local.sh
 make floor      # the suite on python 3.8 in a container (needs podman)
