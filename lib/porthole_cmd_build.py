@@ -174,14 +174,14 @@ LADDER = [
      "flashes the APORT release, so the change must be in the series",
      "flashes boot only", True),
     ("kernel", "rootfs contents changed, or boot/rootfs desynced",
-     "then `porthole flash --yes`", True),
+     "then `porthole flash full --yes --replace-rootfs`", True),
     ("upgrade", "the device moves to a DIFFERENT kernel flavor (a major version "
      "bump): PORTHOLE_KERNEL_PKG now names another aport, so kernel.release "
      "changes and the modules on the phone are absent rather than stale",
      "pushes modules, then flashes boot", True),
     ("image", "you have no kernel tree, or want the whole OS rebuilt from "
      "pmaports as it stands -- the kernel comes from the aport",
-     "then `porthole flash --yes`", False),
+     "then `porthole flash full --yes --replace-rootfs`", False),
 ]
 
 
