@@ -174,6 +174,13 @@ _add(Op("flash-full",
                   "the boot partition"),
         reversible=False, disk_gb=0.0))
 
+# RESERVED, UNREACHABLE: the design spec (S7.4) promised `ph install` as the
+# named from-scratch path, with the assembler behind it. No verb was ever
+# wired to it -- there is no porthole_cmd_install.py and no "install" in any
+# CLI registry, only `porthole build image`, which is a different Op with the
+# same shape. Kept in the manifest because other Op fields (`reversible`,
+# `destroys`) are compared against it in tests as a second data point beside
+# `image`; do not read its presence here as "this is reachable".
 _add(Op("install",
         "mint a fresh rootfs image from pmaports and the local repo",
         needs_state=NONE, needs=(KERNEL_PKG, ARCH, WORKDIR, ROOTFS_PW),

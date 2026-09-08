@@ -103,22 +103,26 @@ def test_the_ordinary_reading_tools_are_granted():
     assert P.rule("git diff") in granted
 
 
-def test_log_is_granted_whole_disk_is_denied_with_report_granted_below():
-    """The two newest verbs.
+def test_log_and_disk_are_both_denied_whole_with_disk_report_granted_below():
+    """Two verbs with a destructive action, held to the same standard.
 
-    `log` only ever writes/deletes inside .run/ -- the same cache boundary
-    the rest of ALLOWED_VERBS already writes under (see its own module
-    docstring) -- so it is granted whole, like `tools`/`config`.
-
-    `disk` stays denied whole, same as `build`/`brain`/`sandbox` -- but
-    fix-round-3 reshaped its destructive actions from flags to a positional
+    `disk` reshaped its destructive actions from flags to a positional
     ACTION word (`report`/`prune`/`retire-host`) specifically so `disk
     report` could be granted the same way `build status`/`brain search`
     are: a distinct SUBCOMMAND STRING, not a flag riding the same bare
-    command line. The dict-membership half of this is trivial; the real
+    command line.
+
+    `log` was granted whole once, on the theory that it only ever
+    writes/deletes inside .run/ -- but its destructive action is a FLAG
+    (`--prune --yes`), not a positional word, so `Bash(porthole log:*)`
+    would also match `porthole log --prune --yes`: exactly the shape `disk`
+    was reshaped to stop being possible. `log` has had no equivalent reshape,
+    so it stays denied whole too, with no positional split to grant a safe
+    subset of. The dict-membership half of this is trivial; the real
     property is the prefix-match one below."""
     granted, held = P.build_rules(ROOT, DEVICE)
-    assert P.rule("porthole log") in granted
+    assert P.rule("porthole log") not in granted
+    assert "porthole log" in held and held["porthole log"]
     assert P.rule("porthole disk report") in granted
     assert "porthole disk" in held and held["porthole disk"]
 
@@ -126,11 +130,16 @@ def test_log_is_granted_whole_disk_is_denied_with_report_granted_below():
 def test_a_rule_granting_disk_report_does_not_reach_prune_or_retire_host():
     """THE point of the fix-round-3 reshape, checked the way the classifier
     actually checks it: `Bash(x:*)` grants every command line that STARTS
-    WITH x. Simulate that against every rule this build emits, for the two
-    command lines that must never be reachable."""
+    WITH x. Simulate that against every rule this build emits, for the
+    command lines that must never be reachable.
+
+    `porthole log --prune --yes` is here for the same reason: `log` has no
+    positional split like `disk`'s, so nothing granted below may start with
+    a prefix short enough to also match it."""
     granted, _held = P.build_rules(ROOT, DEVICE)
     dangerous = ["porthole disk prune --yes",
-                "porthole disk retire-host --yes --discard-host-workdir"]
+                "porthole disk retire-host --yes --discard-host-workdir",
+                "porthole log --prune --yes"]
     for rule_text in granted:
         assert rule_text.startswith("Bash(") and rule_text.endswith(":*)"), (
             rule_text)

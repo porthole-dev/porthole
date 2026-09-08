@@ -702,8 +702,16 @@ def test_an_old_tool_name_is_answered_with_its_new_one():
 # ------------------------------------------------------- confirmation tiers --
 
 def test_a_reversible_operation_needs_no_confirmation():
-    """`porthole build mod --yes` was 30 characters to push one module that a
-    reboot undoes. The gate bought nothing and cost every iteration."""
+    """Pins the manifest's tier classification, not `porthole build`'s actual
+    gating. `porthole build mod --yes` was 30 characters to push one module a
+    reboot undoes, and the confirmation-tier design says a reversible op like
+    `mod` should run with no flag at all -- `plan.op("mod")` and
+    `cli.gate_flag` classify it as tier 1 for exactly that reason. That tier
+    is not wired into `cmd_build`, though: it still gates every rung,
+    including `mod`, on `args.yes` (porthole_cmd_build.py's
+    `if not args.yes and action in BUILD_ACTIONS`) -- see
+    test_build_does_nothing_without_yes. This test pins the manifest half of
+    that gap; it is not proof the CLI honours it."""
     sys.path.insert(0, str(ROOT / "lib"))
     import porthole_cli as cli
     import porthole_plan as plan
