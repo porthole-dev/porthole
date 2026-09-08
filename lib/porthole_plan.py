@@ -150,11 +150,19 @@ _add(Op("purge", "remove envkernel apks that outrank a release",
 
 # ------------------------------------------------------------- the flashes --
 
+# NOT FASTBOOT: `tkflash-boot` (tools/ph-build.sh) checks
+# `tk_in_fastboot || "$_PH_REPO/tools/ph-to-fastboot.sh" || return 1` -- it
+# accepts a device already in the bootloader AND a booted one, moving the
+# booted device there itself. Declaring FASTBOOT here refused a correctly
+# booted phone for an operation that would have worked -- reproduced on
+# hardware 2026-09-08, the same class of bug as `boot` above.
 _add(Op("flash-boot",
         "flash the boot image only, leaving the rootfs alone",
-        needs_state=FASTBOOT, needs=(DTB,),
+        needs_state=ANY, needs=(DTB,),
         destroys=("the boot partition",), reversible=False, disk_gb=0.0))
 
+# Unlike flash-boot, this genuinely needs the bootloader: `tkflash` runs
+# `pmbootstrap flasher flash_rootfs`, which has no booted-device fallback.
 # The operation the whole rework exists for. It needs a rootfs image, and only
 # a site that can make one may run it.
 _add(Op("flash-full",
