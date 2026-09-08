@@ -2537,5 +2537,43 @@ def test_preflight_does_not_refuse_a_loopless_host_an_image_build():
     assert not any("loop" in p for p in problems), problems
 
 
+def test_detach_names_the_log_with_the_compiler_output_in_it():
+    """Same trap as `pkg build --detach` (issue #81): the banner printed one
+    path, called it `log`, and that file holds only redraws of the progress
+    bar. Every compiler line goes to pmbootstrap's log.txt, which nothing
+    named -- so an agent grepping the advertised log for `error:` finds none
+    and reports a clean build."""
+    import porthole_cmd_build as build
+
+    class Out(_FakeCtx._FakeOut):
+        def __init__(self):
+            self.lines = []
+
+        def __call__(self, *parts):
+            self.lines.append(" ".join(str(p) for p in parts))
+
+        def kv(self, key, value, width=0, note=""):
+            self.lines.append(f"{key}  {value}  {note}")
+
+    with tempfile.TemporaryDirectory() as d:
+        ctx = _FakeCtx({"PORTHOLE_RUNDIR": d})
+        ctx.out = Out()
+        args = argparse.Namespace(timeout=3600, rest=[], yes=True)
+        saved = (build.subprocess.Popen, build.log_path)
+        # Neither a spawned build nor podman: the assertion is about what the
+        # banner says, and both would make it a test of this machine.
+        build.subprocess.Popen = lambda *a, **k: type("P", (), {"pid": 99})()
+        build.log_path = lambda _ctx: pathlib.Path("/pmb-host/log.txt")
+        try:
+            build._detach(ctx, args, "fast")
+        finally:
+            build.subprocess.Popen, build.log_path = saved
+
+    said = "\n".join(ctx.out.lines)
+    assert "/pmb-host/log.txt" in said, said
+    spawn = [ln for ln in ctx.out.lines if "detached.log" in ln]
+    assert spawn and build.PROGRESS_ONLY in spawn[0], spawn
+
+
 if __name__ == "__main__":
     sys.exit(main())

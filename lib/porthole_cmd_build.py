@@ -56,6 +56,16 @@ from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_STATE, EX_TIMEOUT,
 # invariant absolute instead of adding an exemption a real typo could hide in.
 AUTO_DESC = "build the cheapest rung that covers what actually changed"
 
+# What each of a detached build's two logs is for. Shared with `pkg`, because
+# the bug was the wording: `--detach` printed one path labelled "log", and an
+# agent that greps it for `error:` or a patch marker gets zero from a file
+# that CANNOT contain either. A real session read that zero as an answer and
+# reported, repeatedly, that a crossdirect patch was not firing -- 3591 hits
+# in the log nothing named. An empty grep and a log with no compiler output in
+# it are indistinguishable from the inside, so the label has to say which.
+PROGRESS_ONLY = "progress bar only -- no compiler output"
+COMPILER_OUTPUT = "every compiler line, warning and error"
+
 # tkmod's non-zero outcomes that are NOT build failures, per its own case
 # statement in tools/ph-build.sh -- which already says "the build is fine and
 # installed; nothing was torn down" and was then contradicted one level up.
@@ -747,6 +757,20 @@ def pmb_workdir(ctx, in_container: bool) -> pathlib.Path:
         return sandbox._sandbox_pmb(ctx.cfg)
     host = ctx.cfg.get("PORTHOLE_PMB_DIR") or "~/.local/var/pmbootstrap"
     return pathlib.Path(host).expanduser()
+
+
+def log_path(ctx) -> pathlib.Path:
+    """pmbootstrap's log -- the file with the compiler output in it.
+
+    On the HOST, so it can simply be grepped: the workspace's work dir is a
+    bind mount, and the 469k-line log a real webkit build wrote to /pmb inside
+    the container is the same file, world-readable, outside it.
+
+    Costs a `_workspace_usable` (one podman ps plus an inspect), which is why
+    it is a call and not a value: only the paths that print or read the log
+    pay for it.
+    """
+    return pmb_workdir(ctx, _workspace_usable(ctx)[0]) / "log.txt"
 
 
 def _tree_inside(tree, workdir) -> str:
@@ -1615,7 +1639,8 @@ def _detach(ctx, args, action: str) -> int:
     # next second reads the PREVIOUS build's final snapshot and reports it.
     progress.publish_pending(rundir, action, proc.pid, "build-status.json")
     ctx.out.kv("pid", str(proc.pid), 10)
-    ctx.out.kv("log", str(spawn_log), 10)
+    ctx.out.kv("log", str(spawn_log), 10, PROGRESS_ONLY)
+    ctx.out.kv("build log", str(log_path(ctx)), 10, COMPILER_OUTPUT)
     ctx.out(ctx.out.paint("  porthole build watch          # live, exits with "
                           "the build", "cyan"))
     ctx.out(ctx.out.paint("  porthole build watch --json   # one JSON object "
@@ -1648,8 +1673,7 @@ def _watch(ctx, args) -> int:
             start_hint="start one with `porthole build <action> --yes` or "
                        "`--detach`",
             probe=lambda: running_build(ctx, True),
-            log=lambda: pmb_workdir(ctx, _workspace_usable(ctx)[0])
-            / "log.txt")
+            log=lambda: log_path(ctx))
 
 
 def tree_banner(rung: str, tree, release: str) -> str:

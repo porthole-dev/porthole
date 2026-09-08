@@ -1087,6 +1087,8 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
     """
     import subprocess
 
+    import porthole_cmd_build as build
+
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
     rundir.mkdir(parents=True, exist_ok=True)
     spawn_log = rundir / f"pkg-{aport}-detached.log"
@@ -1102,7 +1104,8 @@ def _detach(ctx, args, aport: str, arch: str) -> int:
 
     progress.publish_pending(rundir, f"pkg:{aport}", proc.pid)
     ctx.out.kv("pid", str(proc.pid), 10)
-    ctx.out.kv("log", str(spawn_log), 10)
+    ctx.out.kv("log", str(spawn_log), 10, build.PROGRESS_ONLY)
+    ctx.out.kv("build log", str(_log_path(ctx)), 10, build.COMPILER_OUTPUT)
     tty = sys.stdout.isatty()
     ctx.out(ctx.out.paint(watch_hint(tty), "cyan" if tty else "yellow"))
     ctx.out(ctx.out.paint("  porthole pkg status --json  # one-shot, for a "
@@ -1179,13 +1182,12 @@ def _watch(ctx, args) -> int:
 def _log_path(ctx):
     """pmbootstrap's log for whichever buildroot this checkout builds in.
 
-    Resolved lazily, and only when a reattach is actually about to happen: it
-    costs a `_workspace_usable` and the common case never needs it.
+    Resolved lazily, and only when a reattach or a `--detach` banner actually
+    needs it: it costs a `_workspace_usable` and the common case never does.
     """
     import porthole_cmd_build as build
 
-    usable, _ = build._workspace_usable(ctx)
-    return build.pmb_workdir(ctx, usable) / "log.txt"
+    return build.log_path(ctx)
 
 
 def buildroot_staged_name(workdir):

@@ -793,6 +793,61 @@ def test_a_live_tracked_build_is_not_replaced_by_the_buildroot_guess():
     dead = dict(snap, pid=999999)
     assert progress.liveness(dead) != "running"
 
+def test_detach_names_the_log_with_the_compiler_output_in_it():
+    """`--detach` printed one path, labelled `log`, and it holds nothing but
+    redraws of the progress bar -- 229 lines for a 56-minute webkit build, 222
+    of them the bar and zero compiler lines. An agent greps what it is given:
+    a real session read a zero from that file as proof a crossdirect patch was
+    not firing and said so, repeatedly, while the log nothing named held 3591
+    hits. An empty grep and a log that cannot hold the answer look identical
+    from the inside, so the banner has to name both files and say which is
+    which."""
+    import subprocess as real_subprocess
+
+    import porthole_cmd_build as build
+
+    class Out:
+        def __init__(self):
+            self.lines = []
+
+        def __call__(self, *parts):
+            self.lines.append(" ".join(str(p) for p in parts))
+
+        def paint(self, text, _colour=""):
+            return text
+
+        def kv(self, key, value, width=0, note=""):
+            self.lines.append(f"{key}  {value}  {note}")
+
+    class Args:
+        timeout, force, wait, actions, pkgrel = 3600, False, 0.0, "", None
+        apply_new_patches = False
+
+    class Ctx:
+        def __init__(self, rundir):
+            self.cfg = {"PORTHOLE_RUNDIR": str(rundir)}
+            self.root = rundir
+            self.out = Out()
+
+    with tempfile.TemporaryDirectory() as d:
+        rundir = pathlib.Path(d)
+        ctx = Ctx(rundir)
+        saved = (real_subprocess.Popen, build.log_path)
+        # Neither podman nor a spawned build: the assertion is about what the
+        # banner says, and both would make it a test of this machine.
+        real_subprocess.Popen = lambda *a, **k: type("P", (), {"pid": 99})()
+        build.log_path = lambda _ctx: pathlib.Path("/pmb-host/log.txt")
+        try:
+            pkg._detach(ctx, Args(), "webkit2gtk-6.0", "aarch64")
+        finally:
+            real_subprocess.Popen, build.log_path = saved
+
+    said = "\n".join(ctx.out.lines)
+    assert "/pmb-host/log.txt" in said, said
+    # And the spawn log must not still be advertised as simply "the log".
+    spawn = [ln for ln in ctx.out.lines if "detached.log" in ln]
+    assert spawn and build.PROGRESS_ONLY in spawn[0], spawn
+
 
 if __name__ == "__main__":
     sys.exit(main())
