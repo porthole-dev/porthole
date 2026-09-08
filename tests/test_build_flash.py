@@ -1140,6 +1140,222 @@ def test_the_failure_tail_names_the_cause_not_the_boilerplate():
     assert len(tail) <= 6
 
 
+def test_the_tail_finds_an_error_pmbootstrap_stamped_with_the_time():
+    """Reported 2026-09-08: `porthole build fast` failed and printed six lines
+    of pmbootstrap version banner, while the ERROR naming the cause sat in the
+    same log four lines above.
+
+    `_SAYS_WHY` anchors on the start of the line, and pmbootstrap prefixes its
+    own output with `[HH:MM:SS] ` on stdout and `(pid) [HH:MM:SS] ` in
+    log.txt. Every ERROR that got through that anchor before did so on the
+    `not found` fallback instead -- this one says only "Command failed", and
+    fell through to the banner.
+    """
+    log = "\n".join([
+        "[06:32:01] \033[94mNOTE:\033[0m The failed command's output is above",
+        "(336465) [06:32:01] \033[91mERROR:\033[0m Command failed (exit code "
+        "1): (native) % cd /mnt/pmbootstrap/packages/edge/rejected; apk -q "
+        "index --output APKINDEX.tar.gz_ --rewrite-arch rejected *.apk",
+        "See also: <https://postmarketos.org/troubleshooting>",
+        "Find the latest version here: https://gitlab.postmarketos.org/tags",
+        "Your version: 3.11.1",
+        "Channel: systemd-edge",
+        "Device:  google-taimen (aarch64, kernel: mainline)",
+        "systemd: yes (systemd selected in pmbootstrap init)",
+    ])
+    import porthole_cmd_build as B
+
+    tail = B.failure_tail(log)
+    assert any("packages/edge/rejected" in line for line in tail), tail
+
+
+def test_a_stray_directory_in_the_package_repo_is_moved_out_of_it():
+    """The same run's cause. pmbootstrap indexes EVERY directory under
+    `packages/<channel>/` as an architecture, so four .apk files parked in
+    `packages/edge/rejected/` break every later pmbootstrap command with an
+    error naming an apk index and a failed `mv`.
+
+    The first version of this was a diagnosis, and the person who hit it read
+    it and asked what they were supposed to do with it: it named a path inside
+    the container, no host path and no command. So the repair is performed.
+    """
+    import porthole_cmd_build as build
+
+    err = ("[06:32:01] \033[91mERROR:\033[0m Command failed (exit code 1): "
+           "(native) % cd /mnt/pmbootstrap/packages/edge/rejected; busybox su "
+           "pmos -c 'apk -q index --output APKINDEX.tar.gz_ --rewrite-arch "
+           "rejected *.apk' ; mv APKINDEX.tar.gz_ APKINDEX.tar.gz ;")
+    assert build.stray_repo(err) == ("edge", "rejected")
+
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-stray-"))
+    stray = workdir / "packages" / "edge" / "rejected"
+    stray.mkdir(parents=True)
+    (stray / "webkit2gtk-6.0-2.52.6-r63.apk").write_text("apk")
+    real = workdir / "packages" / "edge" / "aarch64"
+    real.mkdir(parents=True)
+
+    said = []
+
+    class FakeOut:
+        def __call__(self, text):
+            said.append(text)
+
+        def paint(self, text, _colour):
+            return text
+
+    class FakeCtx:
+        out = FakeOut()
+
+    assert build.evict_stray_repo(FakeCtx(), err, workdir) is True
+    assert not stray.exists()
+    moved = workdir / build.PARKED / "edge" / "rejected"
+    assert (moved / "webkit2gtk-6.0-2.52.6-r63.apk").read_text() == "apk"
+    assert real.is_dir(), "a real architecture repo must not be touched"
+    assert any(str(moved) in line for line in said), said
+    assert any("mv " in line for line in said), said
+
+    # Nothing to move is not a reason to say nothing: the reader is still
+    # holding a container path they cannot act on.
+    said.clear()
+    assert build.evict_stray_repo(FakeCtx(), err, workdir) is False
+    assert any("packages/edge/rejected" in line for line in said), said
+
+
+def test_a_host_rename_it_cannot_make_is_explained_as_the_workspace_command():
+    """Reported from the first real repair: it printed `[Errno 13] Permission
+    denied`, and the `mv` it suggested would have failed the same way.
+
+    A rename needs write permission on the PARENT, and `packages/<channel>/`
+    belongs to the container's build user -- so the host user cannot move
+    anything out of there even when it owns the directory being moved, which
+    it did. The fallback is the container (which execs as root); when that is
+    not available either, the command it hands back has to be the one that
+    would actually work.
+    """
+    import porthole_cmd_build as build
+
+    err = ("ERROR: Command failed (exit code 1): (native) % cd "
+           "/mnt/pmbootstrap/packages/edge/rejected; apk -q index --output "
+           "APKINDEX.tar.gz_ --rewrite-arch rejected *.apk ;")
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-stray-ro-"))
+    channel = workdir / "packages" / "edge"
+    (channel / "rejected").mkdir(parents=True)
+    said = []
+
+    class FakeOut:
+        def __call__(self, text):
+            said.append(text)
+
+        def paint(self, text, _colour):
+            return text
+
+    class FakeCtx:
+        out = FakeOut()
+        cfg = {}
+
+    os.chmod(channel, 0o555)          # what the build user's ownership costs us
+    try:
+        assert build.evict_stray_repo(FakeCtx(), err, workdir) is False
+    finally:
+        os.chmod(channel, 0o755)
+    advice = "\n".join(said)
+    assert "sandbox shell --command" in advice, advice
+    assert "/pmb/packages/edge/rejected" in advice, advice
+    # ...and never the host `mv` that fails the same way it just did.
+    assert str(workdir / "packages") not in advice.split("--command", 1)[1]
+
+
+def test_a_directory_the_build_user_cannot_write_is_found_before_the_build():
+    """Asked for after the repair shipped as a failure-path-only fix: "why
+    didn't the tool make a pre-flight check instead of landing on the error
+    and then being forced to re-run the build?"
+
+    It is knowable from two stat calls. pmbootstrap indexes every directory
+    under a channel and signs the index AS THE BUILD USER, so a directory
+    that user cannot write is one the index fails in -- and the real one was
+    exactly that: `packages/edge/` and both real repos at the container's
+    `pmos` uid, `packages/edge/rejected` at the host user's, mode 755.
+    """
+    import porthole_cmd_build as build
+
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-pre-"))
+    channel = workdir / "packages" / "edge"
+    for name in ("aarch64", "x86_64", "rejected", "shared"):
+        (channel / name).mkdir(parents=True)
+    (channel / "shared").chmod(0o777)
+
+    # The ownership split, which a test cannot create without root.
+    mine = build._owner(channel)
+    real = build._owner
+    build._owner = lambda path: mine + 1 if path.name in (
+        "rejected", "shared", "aarch64") else mine
+    try:
+        found = build.unindexable_repos(workdir / "packages")
+    finally:
+        build._owner = real
+
+    assert found == [("edge", "rejected")], found
+    # `aarch64` is foreign-owned in that fake too, and is never a candidate:
+    # a real repo moved out from under a working build is the failure this
+    # must not trade for. `shared` is world-writable, so the build user can
+    # write it whoever owns it.
+
+
+def test_the_preflight_runs_before_the_build_does():
+    """The point of finding it early is not finding it early -- it is that the
+    build then runs. Fifty seconds and a re-run was the complaint."""
+    import porthole_cmd_build as build
+
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-pre2-"))
+    stray = workdir / "packages" / "edge" / "rejected"
+    stray.mkdir(parents=True)
+    (stray / "webkit2gtk-6.0-r63.apk").write_text("apk")
+    (workdir / "log.txt").write_text("")
+
+    said = []
+
+    class FakeOut:
+        def __call__(self, text):
+            said.append(text)
+
+        def paint(self, text, _colour):
+            return text
+
+    class FakeCtx:
+        root = ROOT
+        cfg = {"PORTHOLE_RUNDIR": tempfile.mkdtemp(), "PORTHOLE_SANDBOX": ""}
+        out = FakeOut()
+
+    mine = build._owner(workdir / "packages" / "edge")
+    real = build._owner
+    build._owner = lambda path: mine + 1 if path.name == "rejected" else mine
+    try:
+        rc = build._stream(FakeCtx(), ["sh", "-c", "true"], None, 60, "fast",
+                           follow=workdir / "log.txt")
+    finally:
+        build._owner = real
+
+    assert rc == 0, rc
+    assert not stray.exists(), "the build ran with the directory still there"
+    parked = workdir / build.PARKED / "edge" / "rejected"
+    assert (parked / "webkit2gtk-6.0-r63.apk").read_text() == "apk"
+    # ...and it does not tell somebody to re-run something that just ran.
+    assert not any("Run the same command again" in line for line in said), said
+
+
+def test_a_real_architecture_repo_is_never_moved():
+    """The directory is identified by pmbootstrap refusing to index it, and an
+    index can fail inside a real repo for other reasons -- an emptied
+    `aarch64/` indexes no `*.apk` either. Moving that one would break a
+    working build in a way nobody would connect to this."""
+    import porthole_cmd_build as build
+
+    assert build.stray_repo(
+        "ERROR: Command failed (exit code 1): (native) % cd "
+        "/mnt/pmbootstrap/packages/edge/aarch64; apk -q index --output "
+        "APKINDEX.tar.gz_ *.apk ;") is None
+
+
 def test_a_log_with_no_error_line_still_gets_a_tail():
     """No match must not mean no output -- something is always better than
     silence when a build has just failed."""
