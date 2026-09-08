@@ -33,7 +33,7 @@ def can_make_image(site: str, loop_exists: bool) -> bool:
     return bool(loop_exists)
 
 
-def choose_from(op, available, prefer=None):
+def choose_from(op, available, prefer=None, host_can_image=True):
     """(site, why_not) for an Op, given the sites that exist here. Pure.
 
     Returns (None, reason) when nothing can run it, so the caller refuses with
@@ -42,19 +42,32 @@ def choose_from(op, available, prefer=None):
     A `prefer` that cannot run the operation is REFUSED, not quietly swapped:
     silently honouring the fallback is how builds came to run against a
     different package repo than the one the reader was looking at.
+
+    `host_can_image` is the host half of the question `can_make_image`
+    answers -- computed by the caller (`can_make_image(HOST, loop_exists())`)
+    so this stays pure. The static `op.sites` table says `HOST: True`
+    unconditionally for an op that produces a rootfs image, because whether
+    THIS host has a loop device is not something the manifest can know. Left
+    unchecked, a host with no /dev/loop-control would be told it can build
+    one and then fail exactly the way the sandbox already refuses for --
+    unproven for the host half of the plane's central claim.
     """
+    sites_map = op.sites
+    if not host_can_image and "rootfs.img" in op.produces:
+        sites_map = dict(op.sites)
+        sites_map[plan.HOST] = plan.NO_LOOP
     if prefer is not None:
         if prefer not in available:
             return None, f"{prefer} is not available on this host"
-        reason = op.sites.get(prefer)
+        reason = sites_map.get(prefer)
         if reason is not True:
             return None, reason
         return prefer, ""
     # Sandbox first: it needs no standing root, which is the whole point.
     for site in (plan.SANDBOX, plan.HOST):
-        if site in available and op.sites.get(site) is True:
+        if site in available and sites_map.get(site) is True:
             return site, ""
-    reasons = [op.sites[s] for s in available if op.sites.get(s) is not True]
+    reasons = [sites_map[s] for s in available if sites_map.get(s) is not True]
     return None, (reasons[0] if reasons else
                   "no build site is available -- `porthole sandbox up`, or "
                   "install pmbootstrap on the host")
