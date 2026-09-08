@@ -161,6 +161,27 @@ def test_facts_reads_the_profile_keys_it_promises_unmet():
         sites.usable = real_usable
 
 
+def test_facts_free_gb_walks_up_to_an_existing_ancestor():
+    """A fresh host has no pmbootstrap work dir yet -- and is precisely the
+    host about to need ~29 GB it does not know it lacks. Without walking up
+    to a real directory, os.statvfs on a path that does not exist raises,
+    free_gb comes back None, and unmet() skips the space check entirely on
+    the one host where running out is most likely."""
+    import tempfile
+
+    real_usable = sites.usable
+    sites.usable = _no_real_workspace
+    try:
+        existing = pathlib.Path(tempfile.mkdtemp(prefix="porthole-facts-"))
+        nowhere = existing / "not" / "yet" / "created"
+        cfg = {"PORTHOLE_WORKDIR": str(existing),
+               "PORTHOLE_PMB_DIR": str(nowhere)}
+        got = sites.facts(_FakeCtx(cfg))
+        assert isinstance(got["free_gb"], float), got
+    finally:
+        sites.usable = real_usable
+
+
 def main():
     return _runner.run(globals())
 

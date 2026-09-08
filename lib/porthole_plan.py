@@ -181,20 +181,21 @@ _add(Op("install",
 # that names a variable and not where to set it sent people to read a
 # committed profile that correctly says nothing about their working repo.
 _MISSING = {
-    TREE: ("no kernel tree -- this rung compiles one. `ph build image` needs "
-           "no tree; it builds the whole system from pmaports"),
+    TREE: ("no kernel tree -- this rung compiles one. `porthole build "
+           "image` needs no tree; it builds the whole system from "
+           "pmaports"),
     KERNEL_PKG: "PORTHOLE_KERNEL_PKG is not set in the profile",
     DEFCONFIG: "PORTHOLE_DEFCONFIG is not set in the profile",
     ARCH: "PORTHOLE_ARCH is not set in the profile",
     DTB: "PORTHOLE_DTB is not set in the profile",
-    WORKDIR: ("no working repo for this device -- `ph init` sets it, or "
-              "`ph use <codename> --workdir <path>`"),
+    WORKDIR: ("no working repo for this device -- `porthole init` sets it, "
+              "or `porthole use <codename> --workdir <path>`"),
     ROOTFS_PW: ("TK_PMOS_PASSWORD is unset -- `pmbootstrap install` sets the "
                 "rootfs user's password and this operation runs it. Export it "
                 "(a variable on purpose: a flag would show it in `ps`)"),
     CHROOT_INSTALLED: ("no rootfs chroot has been installed in this work dir, "
                        "and this rung packs boot.img out of one -- run "
-                       "`ph build kernel` once against it"),
+                       "`porthole build kernel` once against it"),
 }
 
 
