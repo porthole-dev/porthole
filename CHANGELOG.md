@@ -78,9 +78,12 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 - **A stale rootfs image can no longer be flashed.** A run that died at
   `modprobe loop` had already run `truncate -s 1482M`, leaving a 1.5 GB file
   with nothing in it exactly where `flash_rootfs` looks, beside a perfectly
-  good `boot.img`. `porthole flash` now refuses a rootfs image meaningfully
-  older than the boot image, and an install that cannot make one moves the old
-  one aside rather than leaving it to be found.
+  good `boot.img`. An install that cannot replace one moves the old one aside
+  rather than leaving it to be found. (Superseded later in this same
+  [Unreleased] window: the rootless image assembler chooses the filesystem
+  UUIDs up front and builds the fstab and initramfs around them, so an image
+  and the `boot.img` it ships with agree by construction rather than by an
+  mtime comparison at flash time.)
 - The kernel rungs take the buildroot lock. `porthole pkg build` has held it
   since a `checksum` run destroyed an active kernel build; `porthole build`
   never took it, and `pkg`'s own code described a running kernel build as a
@@ -105,20 +108,20 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   dependency-resolution failure. An install that recovered from one zap and
   then died on apk left both signatures in the window, and the stale one was
   the advice being handed out.
-- **A rootless workspace cannot make the rootfs disk image, and now says so
+- **A rootless workspace could not make the rootfs disk image, and said so
   instead of failing.** `pmbootstrap install` attaches the image file to a
   loop device, and `/dev/loop-control` is `root:disk` -- the loop ioctls want
   `CAP_SYS_ADMIN` in the namespace that owns the device, which a user
   namespace never does. The install rungs pass `--no-image` where no loop
   device exists, so the rootfs chroot is populated and `boot.img` is exported
-  and verified; the message says what you got, what you did not, and spells
-  out that `--host` means running the build on this machine rather than in
-  the workspace.
+  and verified. (Superseded later in this same [Unreleased] window by the
+  rootless image assembler -- see below -- which builds the rootfs disk image
+  itself with no loop device at all, so the workspace no longer needs
+  `--host` to produce one.)
 - **A stale rootfs image can no longer reach the phone.** A run that died at
   `modprobe loop` had already run `truncate -s 1482M`, leaving 1.5 GB of
-  nothing exactly where `flash_rootfs` looks, beside a good `boot.img`.
-  `porthole flash` now refuses a rootfs image meaningfully older than the boot
-  image, and an install that cannot replace one moves it aside.
+  nothing exactly where `flash_rootfs` looks, beside a good `boot.img`. An
+  install that cannot replace one moves it aside.
 - **Prose about a step no longer becomes the step.** `porthole build status`
   reported `phase flash` about a finished `image` run, which flashes nothing:
   every `>>` line was read as an announcement, so detail lines and quoted
@@ -414,6 +417,43 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 - Built-in defaults beat the device profile — exactly backwards.
 - Both config parsers kept the quotes on `KEY="a"  # comment`, which silently
   defeated the forbidden-slot guard.
+
+### Added
+- **`bin/ph`** — a second entry point beside `bin/porthole`, same registry
+  (the two files are identical; `ph` is just the short name).
+- **`porthole flash boot | full`** — `boot` (the new default) flashes the
+  boot partition only, reaching `tkflash-boot` (tools/ph-build.sh), which no
+  verb could reach before. `full` is the old behaviour: rootfs and boot
+  together, gated on `--yes` **and** `--replace-rootfs` because it replaces
+  every locally-installed package. **BREAKING: `porthole flash --yes` used to
+  mean a full rootfs+boot flash; it now means boot only.** A script or muscle
+  memory relying on the old meaning needs `porthole flash full --yes
+  --replace-rootfs`.
+- **The rootless image assembler** (`lib/porthole_image.py`,
+  `_ph_assemble_image` in tools/ph-build.sh) — builds the rootfs disk image
+  directly from the installed chroot with `mkfs.ext4 -d` and `sfdisk` against
+  a plain file, no loop device anywhere. It chooses the filesystem UUIDs up
+  front and writes the fstab and initramfs around them, rather than reading
+  them back out of a filesystem pmbootstrap has just made — the failure mode
+  that let a stale rootfs and a fresh `boot.img` silently disagree and drop
+  the phone into an initramfs debug shell. Proven on hardware 2026-09-08: a
+  from-scratch install, assembled entirely inside the rootless sandbox, then
+  flashed and booted. `--host` is now a choice of build site, not a
+  requirement for getting a rootfs image at all.
+- **`porthole log`** — `.run/`'s build and flash logs: the last run, `--follow`
+  the running one, filtered by rung or date, with rotation by count and age
+  so the directory stops growing without bound.
+- **`porthole disk`** — what porthole owns on this host, what is safe to
+  prune, and where the sandbox and host work dirs disagree (they are
+  divergent package sets, not a duplicate of the same thing). Replaces the
+  flat `SPACE_FLOOR_GB` / `SPACE_WARN_GB` warning with a per-rung preflight
+  driven by the plane's own `disk` field.
+
+### Removed
+- **`porthole tui`.** The console (`lib/porthole_tui/`, the `panes/` screens,
+  `make console`) is gone, along with the CI job and the stdlib-only
+  exemption that existed only to let it use `textual`. Every workflow it
+  covered is reachable through the CLI's own verbs.
 
 ## [0.1.0] — 2026-08-23
 

@@ -95,7 +95,6 @@ ALLOWED_VERBS = {
     "completion": "emits a completion script to stdout",
     "slots":      "reads the A/B policy off the device; setting one is `flash`",
     "statusline": "renders a status line, or installs itself",
-    "log":        "reads .run/'s build logs; --prune only rotates that cache",
 }
 
 # Verbs NOT granted, and the reason each stays out. This half is what makes
@@ -121,6 +120,11 @@ DENIED_VERBS = {
     "blobs":      "extracts vendor images; long, and it writes",
     "disk":       "`disk prune`/`disk retire-host` delete apks or an 18 G "
                   "work dir; `disk report` is granted below",
+    "log":        "flags, not `disk`'s positional actions -- `Bash(porthole "
+                  "log:*)` would prefix-match `porthole log --prune --yes`, "
+                  "which deletes files, the same way `disk` used to before "
+                  "it was reshaped. No safe subset to carve out without that "
+                  "same reshape, so the whole verb stays a question",
     "brain":      "`brain submit` opens a pull request; search is granted below",
     "docs":       "generates the site into the working tree",
     "permissions":
