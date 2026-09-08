@@ -57,6 +57,15 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   to **2m33s**, hits 4 -> 3280.
 
 ### Fixed
+- **`--detach` names the log with the compiler output in it.** It printed one
+  path, labelled `log`, and that file holds only redraws of the progress bar --
+  229 lines for a 56-minute webkit2gtk build, 222 of them the bar, zero
+  compiler lines. The 469,109 lines of actual build output went to
+  pmbootstrap's `log.txt`, which nothing named. An agent greps what it is
+  given: a real session read a zero from the advertised log as proof a
+  crossdirect patch was not firing and reported that, repeatedly, while the
+  unnamed log held 3591 hits. `pkg build --detach` and `build <rung> --detach`
+  now print both paths, each labelled with what is in it.
 - **`pmbootstrap install` now actually runs in the workspace.** The whole
   zero-privilege design rests on `--no-image` -- `docs/SANDBOX-PROVISIONING.md`
   says so, and `sandbox/Containerfile` fails the image build if pmbootstrap
