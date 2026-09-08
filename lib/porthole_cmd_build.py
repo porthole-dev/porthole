@@ -591,46 +591,15 @@ def _changed_artifacts(tree: pathlib.Path, since) -> list:
 def _workspace_usable(ctx):
     """(usable, why_not) -- is the workspace wired for THIS device?
 
-    A merely RUNNING container is not enough, and assuming it was cost a real
-    session three confused build attempts: the container had been created for a
-    different device, so the build routed into it and died with "could not read
-    pkgver/pkgrel / aport is ." -- an error with no relationship to the actual
-    problem. The only clue was a grey line saying "in the workspace".
-
-    So the container has to agree with us about which phone this is. It already
-    records that as a label at creation time, for the device-mutex guard; this
-    reads the same label. Never raises: deciding WHERE to build must not be a
-    way for the build verb to break.
+    Moved to porthole_sites.usable, verbatim -- it was correct, only in the
+    wrong place: porthole_plan needs a pure manifest with no podman and no
+    work dir, and this decision cannot be either. This name stays as a thin
+    alias so its many existing callers keep working; a later task points
+    them at porthole_sites.usable directly and deletes this wrapper.
     """
-    try:
-        import porthole_cmd_sandbox as sandbox
-    except Exception:  # noqa: BLE001
-        return False, "the sandbox module is unavailable"
-    if not shutil.which("podman"):
-        return False, "podman is not installed"
-    try:
-        if not sandbox._container_running():
-            return False, "no workspace is running"
-        want = sandbox._lock_path(ctx.cfg.get("PORTHOLE_DEVICE", ""))
-        got = sandbox._container_lock()
-        if got and got != want:
-            return False, (f"the running workspace is wired for {got}, not "
-                           f"{want} -- `porthole sandbox down` then `up`")
-        if not got:
-            return False, ("the running workspace predates the device label, "
-                           "so it cannot be matched to this device -- "
-                           "`porthole sandbox down` then `up`")
-        # A container is created ONCE, with the mounts its config named then.
-        # Setting a working repo afterwards -- which is the ordinary order on a
-        # new host, and what `porthole init` now does -- leaves the running
-        # workspace with no /work, and ph-build.sh then dies on its own
-        # `${PORTHOLE_WORKDIR:?}` naming neither the container nor the fix.
-        stale = sandbox.workdir_drift(ctx.cfg, sandbox._container_mounts())
-        if stale:
-            return False, stale
-    except Exception:  # noqa: BLE001
-        return False, "could not query the workspace"
-    return True, ""
+    import porthole_sites
+
+    return porthole_sites.usable(ctx)
 
 
 def apk_is_current(packages_dir, pkgname: str, pkgver: str, pkgrel: str,
