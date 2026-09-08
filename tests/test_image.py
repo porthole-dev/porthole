@@ -251,6 +251,77 @@ def test_verification_rejects_an_image_whose_uuid_is_not_the_one_we_chose():
     assert problems and any("uuid" in p.lower() for p in problems)
 
 
+class Skip(Exception):
+    """The suite's skip signal; _runner understands it."""
+
+
+def _in_sandbox(argv, stdin=""):
+    import shutil
+    import subprocess
+    if not shutil.which("podman"):
+        raise Skip("podman is not installed")
+    cmd = ["podman", "exec", "-i", "porthole-sandbox"] + [str(a) for a in argv]
+    out = subprocess.run(cmd, input=stdin, capture_output=True, text=True)
+    if out.returncode != 0 and argv[0] != "dumpe2fs":
+        raise Skip(f"workspace unavailable: {out.stderr.strip()[:120]}")
+    return out.stdout
+
+
+def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
+    """The end-to-end claim, run for real: build a two-partition disk in the
+    workspace with no loop device, then read the root filesystem back out of
+    it and confirm it is the one we asked for.
+
+    Everything this asserts was measured by hand on 2026-09-08 before the
+    module existed; this is that spike, kept."""
+    boot_uuid, root_uuid = image.uuids(seed="test-e2e")
+    lay = image.layout(boot_mb=8, root_mb=32, arch="aarch64")
+
+    _in_sandbox(["sh", "-c",
+                 "rm -rf /tmp/asm && mkdir -p /tmp/asm/boot /tmp/asm/root/etc "
+                 "/tmp/asm/root/usr/bin && echo k > /tmp/asm/boot/vmlinuz && "
+                 "install -m 4755 /bin/busybox /tmp/asm/root/usr/bin/su && "
+                 "mkdir -p /tmp/asm/root/home/user && "
+                 "chown 1000:1000 /tmp/asm/root/home/user"])
+    # Written via stdin, not interpolated into a shell command: a Python
+    # repr() piped through !r into `sh -c` is a Python quoting convention
+    # landing inside a POSIX one, and the two do not agree on every
+    # character. `cat` writing whatever came in on stdin has no quoting to
+    # get wrong.
+    _in_sandbox(["sh", "-c", "cat > /tmp/asm/root/etc/fstab"],
+                stdin=image.fstab(boot_uuid, root_uuid))
+
+    image.assemble(_in_sandbox, "/tmp/asm/boot", "/tmp/asm/root",
+                   "/tmp/asm/disk.img", lay, boot_uuid, root_uuid)
+    assert image.verify(_in_sandbox, "/tmp/asm/disk.img", lay,
+                        boot_uuid, root_uuid) == []
+
+    # Ownership, setuid and a non-root uid must survive mkfs.ext4 -d, or the
+    # rootfs boots with a broken /home and an su that cannot elevate.
+    _in_sandbox(["dd", "if=/tmp/asm/disk.img", "of=/tmp/asm/p2.img",
+                 "bs=512", f"skip={lay['root_start']}",
+                 f"count={lay['root_sectors']}", "status=none"])
+    listing = _in_sandbox(["debugfs", "-R", "ls -l /usr/bin", "/tmp/asm/p2.img"])
+    assert "104755" in listing, "the setuid bit did not survive"
+    home = _in_sandbox(["debugfs", "-R", "ls -l /home", "/tmp/asm/p2.img"])
+    assert "1000" in home, "a non-root uid did not survive"
+
+
+def test_the_assembled_image_converts_to_sparse():
+    """taimen sets deviceinfo_flash_sparse=true, so this is the form that
+    actually reaches the phone. img2simg aborts on an unaligned image, which
+    is why layout() pads to 4096."""
+    boot_uuid, root_uuid = image.uuids(seed="test-sparse")
+    lay = image.layout(boot_mb=8, root_mb=32, arch="aarch64")
+    _in_sandbox(["sh", "-c", "rm -rf /tmp/sp && mkdir -p /tmp/sp/b /tmp/sp/r"])
+    image.assemble(_in_sandbox, "/tmp/sp/b", "/tmp/sp/r", "/tmp/sp/d.img",
+                   lay, boot_uuid, root_uuid)
+    out = _in_sandbox(["sh", "-c",
+                       "img2simg /tmp/sp/d.img /tmp/sp/d.sparse && "
+                       "stat -c %s /tmp/sp/d.sparse"])
+    assert int(out.strip()) > 0
+
+
 def main():
     return _runner.run(globals())
 
