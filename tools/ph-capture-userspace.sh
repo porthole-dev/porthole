@@ -13,6 +13,10 @@
 # repo would return a DIFFERENT gst than the one on the phone, silently. This
 # manifest is what turns that into a decision instead of an accident.
 #
+# device-*/firmware-* packages the repo builds are recorded as `# excluded:`
+# comments, not as restorable lines: the install itself provides them, and
+# `apk add` on one can flash the boot partition or eat the radio stack.
+#
 #   tools/ph-capture-userspace.sh capture <outfile>   record the device's set
 #   tools/ph-capture-userspace.sh restore <infile>    reinstall it
 #   tools/ph-capture-userspace.sh --parse-only        filter stdin, no device
@@ -46,11 +50,24 @@ parse() {
 	# stdin: `apk info -v` output (one `name-pkgver-rN` per line). stdout: only
 	# the lines whose NAME is something the local repo builds -- the exact
 	# pkgrel on the device is kept verbatim, never rewritten to the repo's.
+	#
+	# A device-*/firmware-* NAME THE REPO BUILDS is recorded but never handed
+	# to restore: the install itself provides these (world file, deviceinfo),
+	# and `apk add` on one can flash the boot partition or eat the radio stack
+	# -- brain/traps/installing-firmware-can-flash-the-boot-partition.md and
+	# brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md. Anchored
+	# on repo_names(), not on the raw name, so an unrelated upstream package
+	# that merely starts with "device-" (device-mapper) is not caught by this
+	# -- it was never a locally-built name to begin with.
 	local names; names=$(repo_names)
 	while read -r line; do
 		[ -n "$line" ] || continue
 		local name="${line%-*-r*}"
-		printf '%s\n' "$names" | grep -qxF "$name" && printf '%s\n' "$line"
+		printf '%s\n' "$names" | grep -qxF "$name" || continue
+		case $name in
+			device-*|firmware-*) printf '# excluded: %s\n' "$line" ;;
+			*)                   printf '%s\n' "$line" ;;
+		esac
 	done
 	return 0
 }
@@ -62,6 +79,10 @@ case "${1:-}" in
 		{
 			echo "# porthole userspace manifest -- $(date -u +%FT%TZ)"
 			echo "# device: ${PORTHOLE_DEVICE:-unknown}"
+			echo "# excluded -- device/firmware packages are installed by the install itself, and"
+			echo "# apk add on them can flash boot / eat the radio stack. See"
+			echo "# brain/traps/installing-firmware-can-flash-the-boot-partition.md and"
+			echo "# brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md"
 			tk_run "apk info -v" | parse
 		} > "$2"
 		echo "captured $(grep -cv '^#' "$2") package(s) to $2" ;;
