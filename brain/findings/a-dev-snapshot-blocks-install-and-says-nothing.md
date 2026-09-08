@@ -37,7 +37,31 @@ what catches it. Timestamps do not.
 **What to do.** Both questions belong in preflight, before a rung is chosen:
 
     ls "$PMB/packages/edge/$ARCH"/*_p*.apk                      # the repo
-    pmbootstrap chroot -r -- apk info -W /boot/vmlinuz          # the chroot
+    pmbootstrap chroot -r -- apk info -W /boot/vmlinuz          # the chroot, precise
 
 A check that only reads the repo reports clean on exactly the case that cost a
-session. Related: [[the-lock-says-who-not-what]].
+session.
+
+**The chroot question has a fast method too, and preflight has to use it.**
+`apk info -W /boot/vmlinuz` shells out to `pmbootstrap chroot`, which costs
+seconds -- fine for a one-off diagnosis, wrong for a check that runs on every
+preview. The chroot's own status db answers the cheaper half of the same
+question directly, with no subprocess:
+
+    $PMB/chroot_rootfs_<codename>/lib/apk/db/installed
+
+A flat text file: each installed package is a `P:<name>` line followed by
+others including `V:<version>`, blocks separated by a blank line. Scanning it
+for the kernel package's `V:` and checking the version for `_p<timestamp>-rNN`
+measured 22ms on the reference host, against seconds for `apk info -W`.
+Verified against each other 2026-09-08: both agreed --
+`linux-postmarketos-qcom-msm8998-7.2` at `7.2.2-r31`, a release.
+
+The two methods ask slightly different questions, and where they could
+diverge `apk info -W` is the one to trust: it asks what package OWNS the
+running `/boot/vmlinuz`, while the db scan asks only whether a `_p` build of
+the kernel package is installed at all (e.g. after a partial upgrade, the two
+could name different packages). For a preflight check running before
+anything else, the db scan's answer is the one that is affordable to ask
+every time; `apk info -W` stays the precise fallback for a real diagnosis.
+Related: [[the-lock-says-who-not-what]].

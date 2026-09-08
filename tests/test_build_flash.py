@@ -1825,5 +1825,153 @@ def test_a_running_build_draws_the_same_block_the_watchers_do():
             rows, len(progress.watch_lines({}))))
 
 
+# ---------------------------------------------- preflight derives from the plan --
+
+def test_preflight_refuses_a_full_flash_in_the_sandbox_before_anything_runs():
+    """The reported failure: twelve minutes, then a shell error about a
+    missing .img. The refusal has to be available at second zero and has to
+    name the loop device, because that is what the reader can act on."""
+    import porthole_plan as plan
+    import porthole_sites as sites
+    op = plan.op("flash-full")
+    site, why = sites.choose_from(op, available=[plan.SANDBOX])
+    assert site is None
+    assert "loop" in why and "rootless" in why
+
+
+def test_preflight_reports_a_dev_snapshot_as_a_problem_not_as_a_build_failure():
+    """Seven _p snapshots blocked every clean install on the reference host
+    and nothing said so until _ph_assert_no_devpkgs refused mid-build."""
+    import porthole_cmd_build as build
+    names = ["linux-x-7.2.2_p20260908083444-r0.apk", "linux-x-7.2.2-r31.apk"]
+    assert build.dev_snapshots(names) == ["linux-x-7.2.2_p20260908083444-r0.apk"]
+    assert build.dev_snapshots(["linux-x-7.2.2-r31.apk"]) == []
+
+
+def test_chroot_devkernel_finds_an_installed_dev_snapshot():
+    """The SECOND check `_ph_assert_no_devpkgs` makes, and the one a
+    repo-only scan cannot see: a `_p` kernel already installed in the chroot
+    outranks every release, so apk will not downgrade it and `pmbootstrap
+    export` ships the snapshot. Measured 2026-08-20: the repo was clean and
+    export still shipped an 01:31 envkernel build."""
+    import porthole_cmd_build as build
+
+    db = ("C:Q1abc\n"
+          "P:musl\n"
+          "V:1.2.5-r0\n"
+          "A:aarch64\n"
+          "\n"
+          "C:Q1def\n"
+          "P:linux-postmarketos-qcom-msm8998-7.2\n"
+          "V:7.2.2_p20260820013151-r0\n"
+          "A:aarch64\n")
+    assert build._chroot_devkernel(
+        db, "linux-postmarketos-qcom-msm8998-7.2") == "7.2.2_p20260820013151-r0"
+
+
+def test_chroot_devkernel_says_nothing_about_a_release():
+    import porthole_cmd_build as build
+
+    db = "P:linux-postmarketos-qcom-msm8998-7.2\nV:7.2.2-r31\n"
+    assert build._chroot_devkernel(
+        db, "linux-postmarketos-qcom-msm8998-7.2") == ""
+
+
+def test_chroot_devkernel_ignores_a_different_packages_snapshot():
+    """The db holds every installed package; naming the RIGHT one is the
+    point -- some OTHER package's dev build must not read as this one's."""
+    import porthole_cmd_build as build
+
+    db = "P:musl\nV:1.2.5_p20260101000000-r0\n"
+    assert build._chroot_devkernel(db, "linux-x") == ""
+
+
+def test_preflight_reports_an_installed_dev_kernel_before_export_ships_it():
+    """The wiring, not just the pure function: a chroot with a `_p` kernel
+    already installed must surface as a preflight problem for a rung that
+    produces or reuses the rootfs chroot -- `kernel` produces one."""
+    import argparse
+    import tempfile
+
+    import porthole_cmd_build as build
+    import porthole_sites as sites
+
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-devkernel-"))
+    db_dir = workdir / "chroot_rootfs_google-taimen" / "lib" / "apk" / "db"
+    db_dir.mkdir(parents=True)
+    (db_dir / "installed").write_text(
+        "P:linux-postmarketos-qcom-msm8998-7.2\n"
+        "V:7.2.2_p20260820013151-r0\n")
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": str(workdir),
+               "PORTHOLE_PMB_DIR": str(workdir),
+               "PORTHOLE_KERNEL_PKG": "linux-postmarketos-qcom-msm8998-7.2",
+               "PORTHOLE_ARCH": "aarch64", "PORTHOLE_DTB": "qcom/x",
+               "PORTHOLE_DEFCONFIG": "d", "PORTHOLE_DEVICE": "google-taimen"}
+        args = argparse.Namespace()
+
+    real_usable = sites.usable
+    # A fake ctx, not the real host: forcing the host-workdir branch is what
+    # lets PORTHOLE_PMB_DIR point at the fixture instead of a real
+    # pmbootstrap install or podman workspace.
+    sites.usable = lambda ctx: (False, "faked for the test")
+    try:
+        problems = build._preflight(Ctx(), "kernel")
+    finally:
+        sites.usable = real_usable
+    assert any("envkernel build" in p and "export" in p for p in problems), (
+        problems)
+
+
+def test_preflight_checks_the_repo_of_the_site_actually_chosen():
+    """The workspace and the host keep SEPARATE pmbootstrap work dirs
+    (`pmb_workdir`'s own docstring): re-deriving "is the workspace usable"
+    for this check instead of reading the site `choose_from` actually picked
+    would check the wrong repo whenever `--host` forces the host while the
+    workspace happens to be running. Reproduced against the reference host
+    2026-09-08: the workspace's repo was clean while the host's held 61 dev
+    snapshots, and `--host` must see that second number, not the first."""
+    import argparse
+    import shutil
+    import tempfile
+
+    import porthole_cmd_build as build
+    import porthole_sites as sites
+
+    host_dir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-hostrepo-"))
+    (host_dir / "packages" / "edge" / "aarch64").mkdir(parents=True)
+    (host_dir / "packages" / "edge" / "aarch64"
+     / "linux-x-7.2.2_p20260908083444-r0.apk").write_text("")
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": str(host_dir),
+               "PORTHOLE_PMB_DIR": str(host_dir),
+               "PORTHOLE_KERNEL_PKG": "linux-x", "PORTHOLE_ARCH": "aarch64",
+               "PORTHOLE_DTB": "qcom/x", "PORTHOLE_DEFCONFIG": "d",
+               "PORTHOLE_DEVICE": "google-taimen"}
+        args = argparse.Namespace(host=True)
+
+    real_usable = sites.usable
+    real_which = shutil.which
+    # The workspace reports usable -- a naive re-derivation would read the
+    # SANDBOX's (empty) repo -- but --host asks for the host, whose repo
+    # holds the snapshot. shutil.which is stubbed too so the choice does not
+    # depend on whether this machine happens to have pmbootstrap on PATH.
+    sites.usable = lambda ctx: (True, "")
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
+    os.environ["TK_PMOS_PASSWORD"] = "x"
+    try:
+        problems = build._preflight(Ctx(), "kernel")
+    finally:
+        sites.usable = real_usable
+        shutil.which = real_which
+        del os.environ["TK_PMOS_PASSWORD"]
+    assert any("dev snapshot" in p for p in problems), problems
+
+
 if __name__ == "__main__":
     sys.exit(main())

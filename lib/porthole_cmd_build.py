@@ -231,78 +231,151 @@ def export_problems(workdir, device: str) -> list:
             f"Run `porthole build kernel --yes` once against this work dir."]
 
 
-def _preflight(ctx, action: str = "") -> list[str]:
-    """What must be true before a build can even start.
+# `_p<timestamp>` sorts ABOVE `-rNN` in apk's version order, so a dev snapshot
+# left in the local repo wins against the release the world file asks for and
+# `pmbootstrap install` resolves to it. `_ph_assert_no_devpkgs`
+# (tools/ph-build.sh:687) refuses the build when that happens -- correctly,
+# and twelve minutes in, naming a package rather than the state. Seven of
+# these were sitting in the reference host's repo on 2026-09-08, blocking
+# every clean install, with nothing anywhere reporting it.
+_DEVSNAP = r"_p\d{8,}-r\d+"
+_DEVPKG = re.compile(_DEVSNAP + r"\.apk$")
 
-    Reported together rather than one failure at a time: an envkernel build is
-    minutes long, and finding out about the second missing value after the
-    first one is fixed is how an afternoon goes.
 
-    `action` is optional: the `auto` guard calls this with none, asking
-    "could this profile build at all"; the real call site passes the rung it
-    is about to run, which is what lets the export-rung check below know
-    whether it applies.
+def dev_snapshots(names) -> list:
+    """Which of these apk filenames are envkernel dev snapshots. Pure."""
+    return [n for n in names if _DEVPKG.search(n)]
+
+
+def _chroot_devkernel(db_text: str, kernel_pkg: str) -> str:
+    """The chroot's installed version of `kernel_pkg`, if it is a dev
+    snapshot apk cannot downgrade -- "" otherwise. Pure: takes the db TEXT,
+    not a path, so a fixture can drive it with no chroot on disk.
+
+    apk's status db (`.../lib/apk/db/installed`) is a flat text file: each
+    installed package is a `P:<name>` line followed by others including
+    `V:<version>`. A full scan measured 22ms on the reference host against
+    seconds for `pmbootstrap chroot -r -- apk info -W`, and preflight runs
+    on every preview -- a check slow enough that people skip it is the
+    defect this plane exists to remove.
+
+    `_ph_assert_no_devpkgs`'s SECOND check, and the one a repo-only scan
+    cannot see: a `_p` kernel already installed here outranks every release,
+    so `apk add -U -u` will not replace it and `pmbootstrap export` ships
+    the snapshot. Where the two could diverge, `apk info -W /boot/vmlinuz`
+    is the precise method -- it asks what owns the running kernel; this asks
+    the cheaper question of whether a `_p` build is installed at all. See
+    brain/findings/a-dev-snapshot-blocks-install-and-says-nothing.md.
     """
-    problems = []
-    cfg = ctx.cfg
-    # PORTHOLE_WORKDIR is deliberately NOT in this loop. It is the only one of
-    # these that is not a profile key, so "PORTHOLE_WORKDIR is not set in the
-    # profile" was true of the variable and false about where to set it -- and
-    # it sent people to read a committed file that correctly says nothing
-    # about their working repo.
-    keys = ["PORTHOLE_KERNEL_PKG", "PORTHOLE_ARCH", "PORTHOLE_DTB"]
-    # PORTHOLE_DEFCONFIG configures a kernel COMPILE and nothing else, so the
-    # one rung that compiles no kernel must not be refused for lacking it.
-    # Reported as a missing thing it does not need, `image` would be
-    # unreachable on exactly the host it exists for.
-    if action != "image":
-        keys.append("PORTHOLE_DEFCONFIG")
-    for key in keys:
-        if not cfg.get(key):
-            problems.append(f"{key} is not set in the profile")
-    workdir = cfg.get("PORTHOLE_WORKDIR", "")
-    if not workdir:
-        problems.append(
-            "no working repo for this device -- `porthole init` sets it, or "
-            "`porthole use <codename> --workdir <path>`")
-    elif not pathlib.Path(workdir).is_dir():
-        problems.append(f"PORTHOLE_WORKDIR does not exist: {workdir}")
-    if action in TREE_RUNGS:
-        tree = _tree(cfg)
-        if workdir and not (tree / "Makefile").is_file():
-            # Named as its own problem rather than left to fail inside make.
-            # This is the state a freshly set-up host is in, and `image` is
-            # the answer -- which is only useful if the reader is told the two
-            # facts together.
+    name = ""
+    for line in db_text.splitlines():
+        if line.startswith("P:"):
+            name = line[2:]
+        elif line.startswith("V:") and name == kernel_pkg:
+            version = line[2:]
+            return version if re.search(_DEVSNAP + "$", version) else ""
+    return ""
+
+
+def _preferred_site(ctx):
+    """Which site `--host` asks for, or None to let choose_from decide."""
+    import porthole_plan as plan
+
+    return plan.HOST if getattr(ctx.args, "host", False) else None
+
+
+def _local_repo_names(ctx, in_container: bool) -> list:
+    """Every apk filename in the local package repo of the SITE THAT WAS
+    CHOSEN.
+
+    `in_container` names which one: the workspace and the host keep separate
+    pmbootstrap work dirs (porthole_cmd_build.pmb_workdir's own docstring),
+    so re-deriving "is the workspace usable" here instead of taking the
+    site `choose_from` actually picked would check the wrong repo whenever
+    `--host` forces the host while the workspace happens to be running --
+    measured on the reference host: the workspace's repo was clean while the
+    host's held 61 dev snapshots, and `--host` must see the second number.
+
+    [] on an OSError: a repo that does not exist yet is a new host, not a
+    problem to report.
+    """
+    workdir = pmb_workdir(ctx, in_container)
+    arch = ctx.cfg.get("PORTHOLE_ARCH") or "aarch64"
+    try:
+        return [p.name for p in
+                (workdir / "packages" / "edge" / arch).iterdir()]
+    except OSError:
+        return []
+
+
+def _preflight(ctx, action: str = "") -> list[str]:
+    """What must be true before this operation can start.
+
+    Derived from porthole_plan rather than hand-rolled: the same knowledge
+    lived in three overlapping rung tables plus four ad-hoc checks, and the
+    combination could not answer "can the site I am about to choose actually
+    produce what this needs".
+    """
+    import porthole_plan as plan
+    import porthole_sites as sites
+
+    name = action or "auto"
+    # `auto` measures with a make and then routes; it needs whatever the
+    # cheapest kernel rung needs.
+    op = plan.OPS.get(name) or plan.op("mod")
+    facts = sites.facts(ctx)
+    problems = plan.unmet(op, facts)
+
+    host_can_image = sites.can_make_image(plan.HOST, sites.loop_exists())
+    site, why = sites.choose_from(op, sites.available(ctx),
+                                  prefer=_preferred_site(ctx),
+                                  host_can_image=host_can_image)
+    if site is None:
+        problems.append(why)
+    # The site the checks below have to read is the one just chosen -- which
+    # SITE-SPECIFIC pmbootstrap work dir `--host` or `prefer` actually points
+    # at -- not an independent "is the workspace usable" query that would
+    # silently disagree with it. When nothing was available `site` is None
+    # and there is already a problem about that; `usable(ctx)` is still a
+    # reasonable place to look.
+    in_container = (site == plan.SANDBOX) if site else sites.usable(ctx)[0]
+
+    # Both halves of `_ph_assert_no_devpkgs`, gated on the manifest rather
+    # than a hand-picked list of rung names: the repo half matters to
+    # whatever actually runs `pmbootstrap install` (that is what ROOTFS_PW
+    # means), and the chroot half matters to whatever produces or already
+    # needs a populated rootfs chroot (`fast`/`upgrade` need CHROOT_INSTALLED
+    # already true; `kernel`/`image` produce one).
+    if plan.ROOTFS_PW in op.needs:
+        snaps = dev_snapshots(_local_repo_names(ctx, in_container))
+        if snaps:
             problems.append(
-                f"no kernel tree at {tree} -- `{action}` compiles one. "
-                f"`porthole build image --yes` needs no tree; it builds the "
-                f"whole system from pmaports")
-    # A rootfs password reaches `pmbootstrap install` and nothing else. The
-    # shell parameter expansion in ph-build.sh that enforces it dies with a
-    # bare `${VAR:?...}` message naming no verb and no rung -- and on `image`
-    # that lands after the chroot work rather than before it.
-    # cfg first, then the environment -- the same order `child_env` composes
-    # for the build itself, so this checks the value that will actually reach
-    # `pmbootstrap install` rather than one of the two places it can live.
-    rootfs_pw = rootfs_password(cfg)
-    if action in INSTALL_RUNGS and not rootfs_pw:
-        problems.append(
-            "TK_PMOS_PASSWORD is unset -- `pmbootstrap install` sets the "
-            "rootfs user's password and this rung runs it. Export it (a "
-            "variable on purpose: a flag would show it in `ps`)")
-    if not shutil.which("pmbootstrap") and not _workspace_usable(ctx)[0]:
-        # Only when there is no workspace either. The workspace image carries
-        # pmbootstrap, which is the whole point of the tier, and refusing a
-        # build for a missing HOST copy is the advice `porthole init` spends a
-        # paragraph telling people not to follow.
-        problems.append("no workspace is running and pmbootstrap is not on "
-                        "PATH -- `porthole sandbox up`")
-    problems += _space_problems(cfg)
-    if action in EXPORT_RUNGS:
-        problems += export_problems(
-            pmb_workdir(ctx, _workspace_usable(ctx)[0]),
-            cfg.get("PORTHOLE_DEVICE", ""))
+                f"{len(snaps)} dev snapshot(s) in the local repo outrank "
+                f"the release this installs ({snaps[0]}) -- `porthole "
+                f"build purge` clears them; without it the install "
+                f"resolves to a snapshot and the build refuses partway "
+                f"through")
+
+    if "rootfs chroot" in op.produces or plan.CHROOT_INSTALLED in op.needs:
+        kpkg = ctx.cfg.get("PORTHOLE_KERNEL_PKG", "")
+        device = ctx.cfg.get("PORTHOLE_DEVICE", "")
+        if kpkg and device:
+            db = (pmb_workdir(ctx, in_container)
+                  / f"chroot_rootfs_{device}" / "lib" / "apk" / "db"
+                  / "installed")
+            try:
+                db_text = db.read_text()
+            except OSError:
+                db_text = ""
+            version = _chroot_devkernel(db_text, kpkg)
+            if version:
+                problems.append(
+                    f"the rootfs chroot already has an envkernel build of "
+                    f"{kpkg} installed ({version}) -- apk will not "
+                    f"downgrade it to the release, so `pmbootstrap export` "
+                    f"would ship that kernel. Pin the release explicitly: "
+                    f"`pmbootstrap chroot -r -- apk add --allow-untrusted "
+                    f"'{kpkg}=<pkgver>-r<pkgrel>'`")
     return problems
 
 
@@ -588,18 +661,19 @@ def _changed_artifacts(tree: pathlib.Path, since) -> list:
     return sorted(found)
 
 
-def _workspace_usable(ctx):
-    """(usable, why_not) -- is the workspace wired for THIS device?
-
-    Moved to porthole_sites.usable, verbatim -- it was correct, only in the
-    wrong place: porthole_plan needs a pure manifest with no podman and no
-    work dir, and this decision cannot be either. This name stays as a thin
-    alias so its many existing callers keep working; a later task points
-    them at porthole_sites.usable directly and deletes this wrapper.
-    """
-    import porthole_sites
-
-    return porthole_sites.usable(ctx)
+# Moved to porthole_sites.usable, verbatim -- it was correct, only in the
+# wrong place: porthole_plan needs a pure manifest with no podman and no work
+# dir, and this decision cannot be either. This name stays as a thin alias so
+# its many existing callers keep working; a later task points them at
+# porthole_sites.usable directly and deletes this alias.
+#
+# A plain re-export, not a wrapper with a function-local import: unlike
+# `_preflight`/`facts` (see porthole_sites.facts's own comment on why THAT
+# import must stay function-local), nothing at porthole_sites' top level
+# imports porthole_cmd_build -- only `facts()`'s body does, deferred until
+# it runs -- so this module can import porthole_sites at load time with no
+# cycle.
+from porthole_sites import usable as _workspace_usable  # noqa: E402
 
 
 def apk_is_current(packages_dir, pkgname: str, pkgver: str, pkgrel: str,
