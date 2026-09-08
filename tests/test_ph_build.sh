@@ -801,6 +801,15 @@ is "the unmount runs before the new steps that assume the chroot is clean" \
    "$([ -n "$mounts_line" ] && [ -n "$marker_line" ] && \
       [ "$mounts_line" -lt "$marker_line" ] && echo yes)" "yes"
 
+# A 4096 b/s device's initramfs attaches the image with losetup -b 4096, so
+# a partition table written as though sectors were still 512 bytes sits at
+# the wrong byte entirely -- "failed to mount subpartitions" on a phone
+# whose kernel had otherwise booted. Measured on hardware 2026-09-08.
+is "the device's own sector size is read from its deviceinfo, not assumed" \
+   "$(saw "$asmbody" "deviceinfo_rootfs_image_sector_size")" "yes"
+is "the layout is built in that sector size, not the historical 512 default" \
+   "$(saw "$asmbody" "sector_size=sector_size")" "yes"
+
 
 # ---------------------------------------------------------------------------
 # The rootfs image: never flash one that did not come from this install.
