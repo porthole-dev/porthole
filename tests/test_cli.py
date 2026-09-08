@@ -704,5 +704,43 @@ def test_the_short_binary_is_the_same_program():
     assert (ROOT / "bin" / "ph").read_text() == (ROOT / "bin" / "porthole").read_text()
 
 
+def test_every_op_lands_in_the_tier_its_own_fields_say_it_should():
+    """One case per op is three cases short of what matters: what a NEW op
+    gets when nobody edits a table. Expected tiers are hand-derived from each
+    op's own destroys/reversible in porthole_plan.py, not by calling tier()
+    -- a boundary this checks directly is one a "simplified" condition cannot
+    silently move.
+
+    Mutation-checked: dropping `and not op.reversible` from tier() (so it
+    reads `return 3 if _replaces_rootfs(op) else 2`) sends `image` and
+    `install` to tier 3 -- their destroys says "the previous rootfs image",
+    a substring match away from flash-full's "the device rootfs" -- and every
+    other test in this file still passed 41/41. This is what catches it."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+
+    expect = {
+        "mod":        (1, ""),
+        "boot":       (1, ""),
+        "kernel":     (1, ""),
+        "clean":      (1, ""),
+        "fast":       (2, "--yes"),
+        "upgrade":    (2, "--yes"),
+        "purge":      (2, "--yes"),
+        "image":      (2, "--yes"),
+        "install":    (2, "--yes"),
+        "flash-boot": (2, "--yes"),
+        "flash-full": (3, "--replace-rootfs"),
+    }
+    assert set(expect) == set(plan.OPS), (
+        "a new op has no entry here -- add one, hand-derived from its own "
+        "destroys/reversible, not by calling tier()")
+    for name, (want_tier, want_flag) in expect.items():
+        op = plan.op(name)
+        assert cli.tier(op) == want_tier, name
+        assert cli.gate_flag(op) == want_flag, name
+
+
 if __name__ == "__main__":
     sys.exit(main())
