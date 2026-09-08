@@ -1728,5 +1728,44 @@ def test_the_build_and_the_watcher_draw_the_same_block():
     assert len(progress.watch_lines(snap)) >= 3, progress.watch_lines(snap)
 
 
+def test_a_coloured_line_is_still_cut_to_the_width_it_was_given():
+    """Reported 2026-09-08 from a real `porthole build fast`: the terminal
+    filled with one `fast ... running` header per pmbootstrap line.
+
+    The activity row carries the CHILD's output, and pmbootstrap colours every
+    line it prints. `clip` returned any string containing an escape uncut, so
+    a 170-column `(native) install ...` line came back 192 columns wide, the
+    row wrapped, and the block painter -- which walks back up over the number
+    of ROWS it drew, not the screen lines they took -- landed one line low on
+    the next repaint and stranded the header above it. One stranded header per
+    long line is the spam. A cut that keeps its colour and overflows the
+    terminal is not a cut.
+    """
+    line = ("[06:31:45] \033[92m(native) install bash bison clang elfutils-dev "
+            "findutils flex linux-headers lld llvm openssl-dev pahole perl "
+            "postmarketos-installkernel python3 xz binutils-aarch64\033[0m")
+    assert progress.visible_len(line) > 119, "the fixture must overflow"
+    assert progress.visible_len(progress.clip(line, 119)) <= 119
+
+    for row in progress.watch_lines(_snap(last=line), width=119):
+        assert progress.visible_len(row) <= 119, row
+
+
+def test_an_abuild_error_is_not_evidence_that_a_build_is_running():
+    """`>>> ERROR: failed to sign` is abuild's DIAGNOSTIC, and the tools
+    around a build print those too -- this one came from `abuild-sign` while
+    pmbootstrap indexed a repo, in the tail of a kernel rung that had just
+    failed. Read as a package banner it was the one thing keeping a
+    42-hour phantom on the status line."""
+    assert not progress.names_a_build(
+        ">>> ERROR: failed to sign \n"
+        "mv: can't rename 'APKINDEX.tar.gz_': No such file or directory\n")
+    assert not progress.names_a_build(">>> WARNING: cmd:foo is not a package\n")
+    # ...and the real banner still is one.
+    assert progress.names_a_build(
+        ">>> linux-postmarketos-qcom-msm8998: Building edge/linux 7.2-r0\n")
+    assert progress.names_a_build(">>> webkit2gtk-6.0*: Running postcheck\n")
+
+
 if __name__ == "__main__":
     sys.exit(main())

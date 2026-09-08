@@ -462,6 +462,68 @@ def test_a_build_nobody_tracked_still_reaches_the_status_line():
     assert reattached is True
 
 
+def test_a_failed_rung_does_not_resurrect_the_buildroot_s_last_package():
+    """Reported twice on 2026-09-08 with screenshots: `webkit2gtk-6.0
+    [ unknown ] -- 42h05m  build . reattached` in the status line while
+    `porthole build fast` was the thing actually running -- and failing.
+
+    Every input was behaving except one. The shared log was fresh because the
+    KERNEL rung was writing it; the buildroot still staged a webkit APKBUILD
+    from two days earlier, because a staged APKBUILD outlives its build; and
+    `names_a_build` -- the guard that exists to stop exactly this pair from
+    inventing a row -- said yes, on the strength of `>>> ERROR: failed to
+    sign`. That is abuild's diagnostic, printed here by `abuild-sign` while
+    pmbootstrap indexed a repo, and it was the ONLY build-shaped line in the
+    whole tail.
+
+    The dates are the tell and they were checked: staged 2026-09-06 15:08,
+    screenshot 2026-09-08 08:51, difference 41h43m, which is what the row
+    said.
+    """
+    import time
+    now = time.time()
+    long_ago = now - 42 * 3600
+
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-"))
+    build = work / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+    build.mkdir(parents=True)
+    (build / "APKBUILD").write_text("pkgname=webkit2gtk-6.0\n")
+    os.utime(build / "APKBUILD", (long_ago, long_ago))
+    # The real tail of the failed kernel rung, abridged. No ninja step, no
+    # compile line, no package banner -- one `>>> ERROR:` from abuild-sign.
+    (work / "log.txt").write_text(
+        "(336465) [06:32:01] (native) index edge/rejected repository\n"
+        "Can't open \".SIGN.RSA.pmos@local.rsa.pub\" for writing, "
+        "Permission denied\n"
+        ">>> ERROR: failed to sign \n"
+        "mv: can't rename 'APKINDEX.tar.gz_': No such file or directory\n")
+
+    repo = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-repo-"))
+    (repo / ".run").mkdir()
+    (repo / ".run" / "pkg-status.json").write_text(json.dumps(
+        {"state": "done", "rung": "pkg:webkit2gtk-6.0", "pid": 1,
+         "last_at": long_ago, "started": long_ago - 3000}))
+    (repo / ".run" / "build-status.json").write_text(json.dumps(
+        {"state": "failed", "rung": "fast", "pid": 1, "elapsed": 30.3,
+         "last_at": now - 5, "started": now - 35}))
+
+    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
+    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
+    try:
+        snap, _ = sl.build_snapshot(repo, now)
+    finally:
+        if saved is None:
+            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
+        else:
+            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
+
+    assert snap is not None
+    assert "webkit" not in (snap.get("rung") or ""), snap
+    # ...and what is left is the build the reader just ran, which is what they
+    # were looking for on that line in the first place.
+    assert snap["rung"] == "fast", snap
+
+
 def test_a_quiet_log_is_not_a_running_build():
     """The buildroot's APKBUILD outlives the build that staged it, so naming
     alone must never put a row on screen. Liveness is the log's mtime."""
