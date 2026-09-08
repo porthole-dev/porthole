@@ -40,7 +40,7 @@ DEFCONFIG = "defconfig"          # PORTHOLE_DEFCONFIG
 ARCH = "arch"
 DTB = "dtb"
 WORKDIR = "workdir"
-ROOTFS_PW = "rootfs_pw"          # TK_PMOS_PASSWORD, for pmbootstrap install
+ROOTFS_PW = "rootfs_pw"          # PORTHOLE_PMOS_PASSWORD, for pmbootstrap install
 CHROOT_INSTALLED = "chroot_installed"   # a rootfs chroot `export` can pack
 
 # Why a site cannot run something. Stated once; several ops share it.
@@ -198,9 +198,10 @@ _MISSING = {
     DTB: "PORTHOLE_DTB is not set in the profile",
     WORKDIR: ("no working repo for this device -- `porthole init` sets it, "
               "or `porthole use <codename> --workdir <path>`"),
-    ROOTFS_PW: ("TK_PMOS_PASSWORD is unset -- `pmbootstrap install` sets the "
-                "rootfs user's password and this operation runs it. Export it "
-                "(a variable on purpose: a flag would show it in `ps`)"),
+    ROOTFS_PW: ("PORTHOLE_PMOS_PASSWORD (or the legacy TK_PMOS_PASSWORD) is "
+                "unset -- `pmbootstrap install` sets the rootfs user's "
+                "password and this operation runs it. Export it (a variable "
+                "on purpose: a flag would show it in `ps`)"),
     CHROOT_INSTALLED: ("no rootfs chroot has been installed in this work dir, "
                        "and this rung packs boot.img out of one -- run "
                        "`porthole build kernel` once against it"),

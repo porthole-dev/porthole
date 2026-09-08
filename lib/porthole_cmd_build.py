@@ -31,7 +31,7 @@ import threading
 import time
 import sys
 
-from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_STATE,
+from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_STATE, EX_TIMEOUT,
                           EX_UNAVAILABLE, EX_USAGE, child_env)
 
 # Each verb maps to a shell function ph-build.sh defines. The names are kept
@@ -2197,7 +2197,27 @@ def cmd_build(args, ctx) -> int:
         refused = TKMOD_REFUSED.get(rc) if func == "tkmod" else None
         if refused:
             raise Bail(f"{what}: {refused[0]}", EX_FAIL, refused[1])
-        raise Bail(f"{func} failed", EX_FAIL,
+        # 124 (EX_TIMEOUT): only `boot`, `fast` and `upgrade` can produce
+        # it, all three by ending in `_ph_wait_up` (tools/ph-build.sh) after
+        # their own fastboot writes already returned 0 -- the same "write
+        # succeeded, the device just has not answered ssh yet" case
+        # `porthole flash` distinguishes. See
+        # test_flash_timeout_after_write_success_is_not_reported_as_a_failed_flash.
+        if rc == EX_TIMEOUT:
+            raise Bail(
+                f"{action} wrote successfully but the device has not "
+                "answered ssh yet", EX_TIMEOUT,
+                "check it by hand -- serial console, or "
+                "tools/ph-recover.sh -- before assuming anything is wrong; "
+                "raise PORTHOLE_BOOT_DEADLINE (or the legacy "
+                "TK_BOOT_DEADLINE) past its 300s default if this device is "
+                "just slow to reboot")
+        # `action` (the rung a person typed -- "fast", "image", "mod" -- and
+        # also porthole_plan.OPS's key for it), not `func`: the same leak
+        # `porthole flash` had (rung= was missing there; here rung= is
+        # passed to _run correctly and only this message still named the
+        # shell function -- "tkbuild-kernel failed" for `porthole build fast`).
+        raise Bail(f"{action} failed", EX_FAIL,
                    "the output above is the build's; `pmbootstrap log` has more")
     ctx.out(ctx.out.paint(f"  {what}: done", "green"))
     return EX_OK
