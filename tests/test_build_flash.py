@@ -425,6 +425,33 @@ def test_a_boot_only_flash_runs_on_yes_alone_when_the_device_is_ready():
     assert calls == ["tkflash-boot"]
 
 
+def test_flash_labels_the_run_with_the_operation_name_not_the_shell_function():
+    """Found against `ph log`: `cmd_flash` called `_run(ctx, FUNCS[action],
+    args.timeout)` with no `rung=`, so `_run`'s `effective_rung = rung or
+    func` fell back to the shell function name -- `tkflash`/`tkflash-boot`
+    -- and that leaked into the log filename, build-status.json, the
+    progress bar and the failure message. `rung` must be `plan.op(...).name`
+    (`flash-boot`/`flash-full`, the porthole_plan.OPS key), never FUNCS'
+    value."""
+    import porthole_cmd_flash as flash
+
+    for action, want_rung in (("boot", "flash-boot"), ("full", "flash-full")):
+        args = _flash_args(action=action, yes=True, replace_rootfs=True)
+        ctx = _fake_ctx(state="FASTBOOT")
+        calls = []
+        real_run = flash._run
+        flash._run = lambda ctx, func, timeout, *a, **k: (
+            calls.append((func, k.get("rung"))) or 0)
+        try:
+            rc = flash.cmd_flash(args, ctx)
+        finally:
+            flash._run = real_run
+        assert rc == 0, action
+        [(func, rung)] = calls
+        assert rung == want_rung, (action, func, rung)
+        assert rung != func, "the label must not be the shell function name"
+
+
 def test_a_boot_flash_runs_from_either_state():
     """The defect this guards against: `tkflash-boot` (tools/ph-build.sh)
     checks `tk_in_fastboot || "$_PH_REPO/tools/ph-to-fastboot.sh" || return
