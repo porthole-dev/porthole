@@ -251,6 +251,68 @@ def test_verification_rejects_an_image_whose_uuid_is_not_the_one_we_chose():
     assert problems and any("uuid" in p.lower() for p in problems)
 
 
+# A real chroot went into the phone with no /home/<user>/.ssh/authorized_keys
+# and a surviving /in-pmbootstrap marker -- the image installed, booted, and
+# was unreachable. See tools/ph-build.sh's _ph_assemble_image for the fix and
+# what put both there. `debugfs -R "stat ..."` was tried first and dropped: a
+# missing path's "File not found by ext2_lookup" lands on debugfs's STDERR,
+# which this runner contract never sees (a nonzero exit never happens, so
+# nothing raises, and the message is just gone) -- read that as "not
+# missing" and the check always passes, whether or not the file is really
+# there. `ls -l`, checked below, puts its listing on stdout regardless.
+def _uuids_runner(extra=None):
+    """FakeRunner whose dumpe2fs always matches, so only the check under
+    test can put anything in `problems`."""
+    class R(FakeRunner):
+        def __call__(self, argv, stdin=""):
+            super().__call__(argv, stdin)
+            if argv and argv[0] == "dumpe2fs":
+                return ("Filesystem volume name:   " +
+                        (image.BOOT_LABEL if "boot" in argv[-1]
+                         else image.ROOT_LABEL) + "\n"
+                        "Filesystem UUID:          uu\n")
+            if argv and argv[:2] == ["debugfs", "-R"] and extra:
+                return extra(argv[2])
+            return ""
+    return R()
+
+
+def test_verification_flags_a_root_with_no_authorized_keys():
+    lay = image.layout(32, 64, "aarch64")
+    problems = image.verify(_uuids_runner(lambda cmd: ""),
+                            "/out.img", lay, "uu", "uu", user="user")
+    assert any("authorized_keys" in p for p in problems), problems
+
+
+def test_verification_flags_a_surviving_in_pmbootstrap_marker():
+    def ls(cmd):
+        if cmd == "ls -l /":
+            return "     2  40755 (2)  0  0  1024  1-Jan-2026 0:00 in-pmbootstrap\n"
+        if "authorized_keys" in cmd or ".ssh" in cmd:
+            return "    50  100600 (2)  10000  10000  188  1-Jan-2026 0:00 authorized_keys\n"
+        return ""
+    lay = image.layout(32, 64, "aarch64")
+    problems = image.verify(_uuids_runner(ls),
+                            "/out.img", lay, "uu", "uu", user="user")
+    assert any("in-pmbootstrap" in p for p in problems), problems
+
+
+def test_verification_passes_a_root_that_actually_has_both_right():
+    """THE POSITIVE CONTROL: without this, a check that always reports a
+    problem (as the debugfs-stderr version above briefly did, caught only by
+    running it for real) would look identical to a working one -- every
+    other test here only proves the check CAN fire, not that it can also
+    stay quiet."""
+    def ls(cmd):
+        if cmd == "ls -l /":
+            return "    13  40755 (2)  0  0  1024  1-Jan-2026 0:00 boot\n"
+        return "    50  100600 (2)  10000  10000  188  1-Jan-2026 0:00 authorized_keys\n"
+    lay = image.layout(32, 64, "aarch64")
+    problems = image.verify(_uuids_runner(ls),
+                            "/out.img", lay, "uu", "uu", user="user")
+    assert problems == [], problems
+
+
 class Skip(Exception):
     """The suite's skip signal; _runner understands it."""
 
@@ -342,8 +404,10 @@ def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
                  "rm -rf /tmp/asm && mkdir -p /tmp/asm/boot /tmp/asm/root/etc "
                  "/tmp/asm/root/usr/bin && echo k > /tmp/asm/boot/vmlinuz && "
                  "install -m 4755 /bin/busybox /tmp/asm/root/usr/bin/su && "
-                 "mkdir -p /tmp/asm/root/home/user && "
-                 "chown 1000:1000 /tmp/asm/root/home/user && "
+                 "mkdir -p /tmp/asm/root/home/user/.ssh && "
+                 "echo 'ssh-ed25519 AAAAtest x' "
+                 "> /tmp/asm/root/home/user/.ssh/authorized_keys && "
+                 "chown -R 1000:1000 /tmp/asm/root/home/user && "
                  "install -m 755 /bin/busybox "
                  "/tmp/asm/root/usr/bin/captest && "
                  "setcap cap_net_raw+ep /tmp/asm/root/usr/bin/captest"])
@@ -357,8 +421,16 @@ def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
 
     image.assemble(_in_sandbox, "/tmp/asm/boot", "/tmp/asm/root",
                    "/tmp/asm/disk.img", lay, boot_uuid, root_uuid)
+    # user="user": the same directory the non-root-uid check below already
+    # needs, doing double duty as the configured device user. Runs the NEW
+    # authorized_keys/in-pmbootstrap check against the real debugfs binary,
+    # not FakeRunner -- which is what it takes to catch a check that reads
+    # the wrong output stream (debugfs sends a missing path's error to
+    # STDERR; found and fixed by running exactly this check for real against
+    # a fixture that does NOT have the problem, and watching it wrongly
+    # fire anyway).
     assert image.verify(_in_sandbox, "/tmp/asm/disk.img", lay,
-                        boot_uuid, root_uuid) == []
+                        boot_uuid, root_uuid, user="user") == []
 
     # Ownership, setuid, a non-root uid and a file capability must all
     # survive mkfs.ext4 -d, or the rootfs boots with a broken /home, an su
