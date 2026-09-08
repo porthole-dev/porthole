@@ -114,25 +114,41 @@ from the aport, which is also what gives the exported `boot.img` something to
 be verified against — so `porthole flash` accepts an image built this way,
 which it cannot do for an export with no reference at all.
 
-### What the workspace can and cannot produce
+### The workspace assembles its own rootfs image
 
 A rootless container cannot attach a loop device, and `pmbootstrap install`
-uses one to build the rootfs **disk image**. So in the workspace the rung
-passes `--no-image` and says so: you get a populated rootfs chroot and a
-complete, verified `boot.img`, and no rootfs image.
+normally uses one to build the rootfs **disk image**. So in the workspace the
+rung passes `--no-image` to pmbootstrap and assembles the image itself
+afterward: `mkfs.ext4 -d` populates a filesystem straight from the installed
+rootfs chroot with no mount at all, and `sfdisk` writes the partition table to
+the plain file — no loop device anywhere. porthole chooses the filesystem
+UUIDs up front and builds the fstab and initramfs around them, so the
+assembled image and the `boot.img` it ships with agree by construction, not by
+comparing timestamps afterward. `porthole build image --yes` in the workspace
+now produces both a complete `boot.img` **and** a rootfs image — there is
+nothing extra to ask for:
 
 ```sh
-porthole run tools/ph-flash-boot.sh    # in the workspace: boot only
-porthole build image --yes --host      # if you need the rootfs image too
+porthole flash full --yes --replace-rootfs   # rootfs AND boot, from the workspace
 ```
 
-When you do have a rootfs image, flash **both** it and boot: `pmbootstrap
-install` runs `mkfs` and remints the filesystem UUIDs, so a boot image flashed
-on its own names a root that no longer exists and the initramfs hunts for it
-forever. `porthole flash` refuses a rootfs image that is meaningfully older
-than `boot.img` for exactly that reason — a run that dies partway leaves a
-`truncate`d file where `flash_rootfs` looks, and nothing else can tell it from
-a real one.
+`--host` still exists — it is a choice of *build site* (bare-metal pmbootstrap
+instead of the sandbox), not a requirement for getting a rootfs image at all.
+
+When you do have a rootfs image, flash **both** it and boot together:
+`pmbootstrap install` (or the assembler) remints the filesystem UUIDs, so a
+boot image flashed on its own afterward names a root that no longer exists and
+the initramfs hunts for it forever — `porthole build`'s preview says `porthole
+flash full --yes --replace-rootfs` after `kernel` and `image` for exactly this
+reason. There is no longer a separate mtime check pairing the two images
+before a flash (the `_ph_verify_rootfs_pair` this section used to describe was
+deleted): porthole now chooses the UUIDs itself and builds the fstab and the
+filesystems around them in one pass, so an assembled image and the `boot.img`
+it ships with agree by construction rather than by comparing ages afterward,
+and `image.verify()` (tools/ph-build.sh) refuses to ship one that does not
+match its own fstab before anything is flashed. A run that dies partway still
+cannot leave a stale image where `flash_rootfs` looks — it is moved aside
+under `.stale-images` first.
 
 `porthole build` with no arguments previews rather than builds. It prints
 where the build would run (workspace or host), which work dir it would use,

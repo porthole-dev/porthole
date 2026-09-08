@@ -1,11 +1,15 @@
 # Sandbox provisioning — design
 
-<!-- porthole:design-doc -- phases 0,1,2,4 are BUILT; 3 is partly built -->
+<!-- porthole:design-doc -- phases 0,1,2,3,4 are BUILT -->
 
-**Status:** phases 0, 1, 2 and 4 shipped on 2026-08-29 and the verbs they
-describe are real. Phase 3 is partly built: routing and the space check landed,
-the image build did not -- see §4, whose original design was wrong. Supersedes
-the 2026-08-26 revision of this file. Measurements re-run 2026-08-29.
+**Status:** phases 0-4 have all shipped. Phase 3's image build -- §4 below,
+whose original fuse2fs-shim design was wrong -- landed as
+`_ph_assemble_image` (tools/ph-build.sh): `mkfs.ext4 -d` and `sfdisk` against a
+plain file, UUIDs chosen up front rather than read back, exactly the
+resolution §4's "now the open decision" paragraph anticipated. Verified on
+hardware (Gate C5, 2026-09-08); see `docs/NEW-HOST.md` and `docs/SANDBOX.md`
+for the operator-facing description. Supersedes the 2026-08-26 revision of
+this file. Measurements re-run 2026-08-29.
 
 ## The goal, stated as a guarantee
 
