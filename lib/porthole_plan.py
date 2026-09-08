@@ -47,9 +47,6 @@ CHROOT_INSTALLED = "chroot_installed"   # a rootfs chroot `export` can pack
 NO_LOOP = ("pmbootstrap partitions the rootfs image through a loop device, "
            "and a rootless user namespace cannot have one -- /dev/loop-control "
            "is root:disk on the host and absent in the container")
-NEEDS_HOST_ROOT = ("this needs a host pmbootstrap with its chroots, which "
-                   "means standing root -- the thing the workspace exists to "
-                   "avoid")
 
 
 class Op:
