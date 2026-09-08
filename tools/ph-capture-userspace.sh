@@ -24,8 +24,19 @@
 # "Locally built" does not imply "safe to reinstall": device, firmware and
 # kernel packages are owned by the install, not by this manifest.
 #
+# KNOWN LIMITATION: `restore` does not work against a freshly installed
+# system. pmbootstrap's configure_apk deliberately disables the local repo in
+# the system it installs, so `apk add name=version` cannot resolve a
+# locally-built package there -- it fails "no such package" even though
+# capture recorded it correctly. Gate C7 (2026-09-08) hit this and was
+# completed by hand: push each .apk from the sandbox repo to the device, then
+# `apk add --allow-untrusted /path/to/name-version.apk` per package. `restore`
+# still tries the name=version form first and names this workaround if that
+# fails -- it does not push or retry with --allow-untrusted itself.
+#
 #   tools/ph-capture-userspace.sh capture <outfile>   record the device's set
-#   tools/ph-capture-userspace.sh restore <infile>    reinstall it
+#   tools/ph-capture-userspace.sh restore <infile>    reinstall it -- see the
+#                                                      KNOWN LIMITATION above
 #   tools/ph-capture-userspace.sh --parse-only        filter stdin, no device
 #
 # Manifest format: one `name-version-release` per line, `#` comments allowed.
@@ -196,6 +207,17 @@ case "${1:-}" in
 		done || true)
 		[ -n "$specs" ] || { echo "no packages in $2" >&2; exit 0; }
 		# shellcheck disable=SC2086  # word-splitting the specs is the point
-		tk_run sudo -n apk add $specs ;;
+		tk_run sudo -n apk add $specs || {
+			rc=$?
+			echo "ph-capture-userspace: apk add failed (exit $rc) -- on a" >&2
+			echo "  freshly installed system this is usually 'no such" >&2
+			echo "  package': pmbootstrap's configure_apk disables the local" >&2
+			echo "  repo in the system it installs, so name=version cannot" >&2
+			echo "  resolve a locally-built package there. Workaround: push" >&2
+			echo "  the .apk from the sandbox repo to the device and run" >&2
+			echo "  \`apk add --allow-untrusted /path/to/name-version.apk\`" >&2
+			echo "  per package instead." >&2
+			exit "$rc"
+		} ;;
 	*) echo "usage: $0 {capture OUTFILE|restore INFILE|--parse-only}" >&2; exit 64 ;;
 esac

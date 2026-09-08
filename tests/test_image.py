@@ -563,9 +563,14 @@ def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
 
 
 def test_the_assembled_image_converts_to_sparse():
-    """taimen sets deviceinfo_flash_sparse=true, so this is the form that
-    actually reaches the phone. img2simg aborts on an unaligned image, which
-    is why layout() pads to 4096."""
+    """taimen sets deviceinfo_flash_sparse=true, which is what pmbootstrap's
+    own image build honours -- `_ph_assemble_image` (tools/ph-build.sh) does
+    NOT call img2simg anywhere, so the raw image `assemble()` writes is what
+    actually reaches the phone; Gate C5 proved fastboot accepts it as-is
+    (4.6 GB, no sparse conversion). This test only proves img2simg CAN
+    sparse-convert the layout `assemble()` produces -- alignment matters
+    even though nothing in the shipped pipeline exercises it yet -- not that
+    anything shipped does. See the spec's open-questions note on the gap."""
     _require_sandbox()
     boot_uuid, root_uuid = image.uuids(seed="test-sparse")
     lay = image.layout(boot_mb=8, root_mb=32, arch="aarch64")

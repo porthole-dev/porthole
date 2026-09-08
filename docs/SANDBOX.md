@@ -132,15 +132,22 @@ It matters less than it sounds. `pmbootstrap install --no-image` never touches
 a loop device (`_install.py` returns before `install_system_image`), so the
 install rungs pass it whenever no loop device is present and everything else
 still runs: the rootfs chroot is populated and `pmbootstrap export` packs
-`boot.img` from it.
+`boot.img` from it. Porthole assembles the rootfs disk image itself
+afterward — `_ph_assemble_image` (tools/ph-build.sh) builds it straight from
+that chroot with `mkfs.ext4 -d` (which populates a filesystem from a
+directory, no mount involved) and `sfdisk` (which partitions a plain file),
+neither of which needs a loop device or `CAP_SYS_ADMIN`. `fuse2fs` was never a
+way around the loop device for this — it mounts a filesystem, and what
+pmbootstrap wanted a loop device for was a **partitioned disk**; the assembler
+sidesteps the boundary instead of working around it. See
+`brain/findings/fuse2fs-cannot-replace-the-loop-device.md` and
+`docs/SANDBOX-PROVISIONING.md` for the history.
 
-**What the workspace does not produce is the rootfs disk IMAGE.** `pmbootstrap
-flasher flash_rootfs` needs that file, so a full rootfs+boot flash is a
-`--host` job; `porthole run tools/ph-flash-boot.sh` flashes the boot image the
-workspace did build. `fuse2fs` is *not* a way around this — it mounts a
-filesystem, and what pmbootstrap wants a loop device for is a **partitioned
-disk**; see `brain/findings/fuse2fs-cannot-replace-the-loop-device.md` and
-`docs/SANDBOX-PROVISIONING.md`.
+**The workspace produces the rootfs disk image too, now.** `porthole flash
+full --yes --replace-rootfs` flashes both the rootfs image the workspace
+assembled and the `boot.img` it packed — no `--host` step is needed to get a
+rootfs image at all. `--host` remains a choice of build site (bare-metal
+pmbootstrap instead of the sandbox), not a requirement for producing one.
 
 ## There is no second, weaker path
 
