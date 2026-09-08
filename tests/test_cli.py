@@ -669,5 +669,40 @@ def test_an_old_tool_name_is_answered_with_its_new_one():
         "it invented a replacement that does not exist")
 
 
+# ------------------------------------------------------- confirmation tiers --
+
+def test_a_reversible_operation_needs_no_confirmation():
+    """`porthole build mod --yes` was 30 characters to push one module that a
+    reboot undoes. The gate bought nothing and cost every iteration."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+    assert cli.tier(plan.op("mod")) == 1
+    assert cli.gate_flag(plan.op("mod")) == ""
+
+
+def test_an_irreversible_operation_needs_a_flag_that_names_the_loss():
+    """--yes cannot mean both "push a module" and "erase the rootfs". The
+    second flag cannot arrive by muscle memory from a different command."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+    assert cli.tier(plan.op("flash-full")) == 3
+    assert cli.gate_flag(plan.op("flash-full")) == "--replace-rootfs"
+
+
+def test_flashing_boot_is_gated_but_not_at_the_top_tier():
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+    assert cli.tier(plan.op("flash-boot")) == 2
+    assert cli.gate_flag(plan.op("flash-boot")) == "--yes"
+
+
+def test_the_short_binary_is_the_same_program():
+    """Two entry points that can drift are two programs."""
+    assert (ROOT / "bin" / "ph").read_text() == (ROOT / "bin" / "porthole").read_text()
+
+
 if __name__ == "__main__":
     sys.exit(main())
