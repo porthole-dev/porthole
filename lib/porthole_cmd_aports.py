@@ -225,6 +225,15 @@ def cmd_start(args, ctx, pmaports) -> int:
         raise Bail(f"no such base branch: {base}", EX_FAIL,
                    "pass --base, or `git -C <pmaports> fetch` first")
 
+    left_behind = 0
+    if base != current:
+        _, count, _ = git(pmaports, "rev-list", "--count", f"{base}..{current}")
+        left_behind = int(count or 0)
+    warning = _switch_warning(base, current, left_behind)
+    if warning:
+        ctx.out.warn(warning)
+        ctx.out.hint(f"--base {current}", "branch from your work instead")
+
     if not args.yes:
         ctx.out.heading(f"branch {topic} from {base}")
         ctx.out(f"  in {pmaports}")
@@ -238,6 +247,22 @@ def cmd_start(args, ctx, pmaports) -> int:
     ctx.out.hint("porthole aports status")
     ctx.out.hint("pmbootstrap checksum <pkg>", "after editing an APKBUILD's sources")
     return EX_OK
+
+
+def _switch_warning(base: str, current: str, left_behind: int) -> str:
+    """What `start` says before switching away from unmerged work. Pure, so
+    the decision is testable without a git repo.
+
+    Empty when there is nothing to lose: `base` and `current` are the same
+    branch, or `current` has nothing `base` lacks. `left_behind` is the
+    caller's `git rev-list --count base..current` -- everything reachable
+    from `current` that will not be reachable once `start` switches onto
+    `base`, taking the working tree with it (see #79).
+    """
+    if base == current or left_behind <= 0:
+        return ""
+    return (f"{current} has {left_behind} commit(s) that {base} does not. "
+            f"They will not be in your working tree on this branch.")
 
 
 def _channel_branch(ctx, pmaports) -> str:
