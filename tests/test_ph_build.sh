@@ -812,36 +812,33 @@ is "the layout is built in that sector size, not the historical 512 default" \
 
 
 # ---------------------------------------------------------------------------
-# The rootfs image: never flash one that did not come from this install.
+# The UUID workarounds are gone, because porthole chooses the UUIDs now.
 #
-# `install` writes boot.img into the rootfs chroot and THEN builds the disk
-# image, so in a good pair the image is never meaningfully older. A run that
-# died at `modprobe loop` had already run `truncate -s 1482M`, leaving a 1.5 GB
-# file with nothing in it exactly where flash_rootfs looks -- beside a
-# perfectly good boot.img, and indistinguishable from a real one. flash_rootfs
-# writes ~640 MB and is not undoable. Observed 2026-09-06.
-pair() { # pair <boot-age-s> <rootfs-age-s|none> -> rc of _ph_verify_rootfs_pair
-    rm -rf "$TMP/exp"; mkdir -p "$TMP/exp"
-    : > "$TMP/exp/boot.img"; touch -d "@$(( $(date +%s) - $1 ))" "$TMP/exp/boot.img"
-    if [ "$2" != none ]; then
-        echo x > "$TMP/exp/google-taimen.img"
-        touch -d "@$(( $(date +%s) - $2 ))" "$TMP/exp/google-taimen.img"
-    fi
-    env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
-        PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" \
-        EXP="$TMP/exp" \
-        bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
-                 # Redirect the fixed export path at the fixture.
-                 readlink() { command readlink "${@/\/tmp\/postmarketOS-export/$EXP}"; }
-                 stat()     { command stat     "${@/\/tmp\/postmarketOS-export/$EXP}"; }
-                 _ph_verify_rootfs_pair "$EXP/boot.img" >/dev/null 2>&1; echo $?'
-}
-is "a pair written together is accepted"      "$(pair 10 12)"   "0"
-is "a rootfs older than boot.img is refused"  "$(pair 10 3600)" "1"
-is "no rootfs image at all is refused"        "$(pair 10 none)" "1"
-# THE POSITIVE CONTROL for the threshold: a few seconds of ordering inside one
-# install must not read as two different runs.
-is "seconds of skew inside one install pass"  "$(pair 0 30)"    "0"
+# _ph_verify_rootfs_pair compared mtimes to catch a rootfs and a boot.img from
+# different installs -- that cannot happen any more, because _ph_assemble_image
+# writes both from one set of chosen UUIDs in the same run and verify() refuses
+# before either ships. The .device-uuids cmdline patch in tkflash-boot read the
+# PHONE's UUIDs and patched them into the export because the workspace could
+# not mint its own; that file has never existed on this host, so the
+# "compensation" was only ever a `>> WARNING` line. Verified on hardware
+# 2026-09-08: porthole assembled an image, chose pmos_root_uuid=e883c7c9-...
+# itself, flashed it, and the phone booted with exactly that UUID in its
+# kernel cmdline.
+src=$(cat "$ROOT/tools/ph-build.sh")
+is "_ph_verify_rootfs_pair is gone -- a pair cannot disagree by construction" \
+   "$(saw "$src" "_ph_verify_rootfs_pair")" "no"
+is "the .device-uuids cmdline patch is gone -- the file was never written here" \
+   "$(saw "$src" "device-uuids")" "no"
+
+verifybody=$(sed -n "/^_ph_verify_export() {/,/^}/p" "$ROOT/tools/ph-build.sh")
+is "_ph_verify_export still checks the export against the dtb it was built from" \
+   "$(saw "$verifybody" "bootimg-verify")" "yes"
+
+# The deferred cleanup fix: a pathological `out` must not strand out.boot and
+# out.root behind it. Each unlink is guarded on its own rather than the loop
+# stopping at the first OSError missing_ok=True does not swallow.
+is "assembly's failure cleanup unlinks out, .boot and .root even if one unlink fails" \
+   "$(saw "$asmbody" "contextlib.suppress")" "yes"
 
 
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
