@@ -720,6 +720,30 @@ is "tksysimage verifies against the apk" "$(saw "$imgbody" "_ph_dtb_from_apk")" 
 
 
 # ---------------------------------------------------------------------------
+# The rootless path assembles the image instead of giving up on it.
+#
+# `pmbootstrap install --no-image` returns BEFORE install_system_image() --
+# the step that writes /etc/fstab and runs mkinitfs -- so a workspace build
+# that stopped there produced a chroot with no fstab and an initramfs that
+# never learned this install's UUIDs. porthole chooses the UUIDs instead of
+# reading them back, so the order inverts: fstab, then mkinitfs, then build
+# the filesystems around them.
+installbody=$(sed -n "/^_ph_install_rootfs() {/,/^}/p" "$ROOT/tools/ph-build.sh")
+is "the rootless path assembles an image instead of skipping it" \
+   "$(saw "$installbody" "_ph_assemble_image")" "yes"
+is "pmbootstrap must still not attempt the loop path" \
+   "$(saw "$installbody" "--no-image")" "yes"
+
+asmbody=$(sed -n "/^_ph_assemble_image() {/,/^}/p" "$ROOT/tools/ph-build.sh")
+is "fstab is written so mkinitfs has something to read" \
+   "$(saw "$asmbody" "etc/fstab")" "yes"
+is "mkinitfs runs, so the cmdline carries the chosen UUIDs" \
+   "$(saw "$asmbody" "mkinitfs")" "yes"
+is "assembly goes through the module that verifies it" \
+   "$(saw "$asmbody" "porthole_image")" "yes"
+
+
+# ---------------------------------------------------------------------------
 # The rootfs image: never flash one that did not come from this install.
 #
 # `install` writes boot.img into the rootfs chroot and THEN builds the disk
