@@ -146,6 +146,7 @@ generic notes as well.
 | [androidboot-bootreason-always-says-watchdog-here](traps/androidboot-bootreason-always-says-watchdog-here.md) | `device:google-taimen` | androidboot.bootreason says watchdog on every boot of taimen, including clean ones -- it is not a reset-reason oracle |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
+| [aports-start-bases-a-branch-on-the-channel-not-your-work](traps/aports-start-bases-a-branch-on-the-channel-not-your-work.md) | `generic` | `porthole aports start` bases the new branch on the channel, so your port's commits vanish from the working tree |
 | [apr-service-inherits-a-protection-domain-the-board-deletes](traps/apr-service-inherits-a-protection-domain-the-board-deletes.md) | `soc:qcom` | A new APR service inherits a protection domain the board deletes |
 | [base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork](traps/base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork.md) | `generic` | Base a kernel aport on pristine kernel.org or a pinned tag — never an untagged vendor fork |
 | [build-mod-against-an-aport-kernel-fails-at-the-next-boot](traps/build-mod-against-an-aport-kernel-fails-at-the-next-boot.md) | `generic` | build mod from the tree against a kernel that ships from the aport is refused by MODVERSIONS -- and on a no-reload module the refusal lands at the next boot, with the shipped module already gone |
@@ -229,7 +230,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 115
+- `generic` — 116
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
