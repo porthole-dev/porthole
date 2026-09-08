@@ -64,6 +64,7 @@ generic notes as well.
 | [the-missing-eapol-is-ath10ks-rx-confused-latch](findings/the-missing-eapol-is-ath10ks-rx-confused-latch.md) | `device:google-taimen` | The missing 4-way handshake is ath10k's rx_confused latch: one split A-MSDU disables data RX for the life of the firmware |
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
 | [the-msm8998-thermal-trip-is-a-cliff](findings/the-msm8998-thermal-trip-is-a-cliff.md) | `soc:msm8998` | The mainline msm8998 thermal zone is a cliff -- one passive trip, no limit, 2.36 GHz to 500 MHz in about 7 s |
+| [the-qemu-link-detour-is-not-needed-on-this-toolchain](findings/the-qemu-link-detour-is-not-needed-on-this-toolchain.md) | `generic` | The qemu link detour's "broken cross-ld" premise does not reproduce -- three native link paths all produce a working aarch64 binary |
 | [the-reserved-vht-width-pair-is-why-the-ap-refused](findings/the-reserved-vht-width-pair-is-why-the-ap-refused.md) | `soc:msm8998` | The reserved VHT channel-width pair was the refusal -- clamping it associates 8/8 |
 | [the-scroll-stall-is-the-pages-own-javascript](findings/the-scroll-stall-is-the-pages-own-javascript.md) | `generic` | The browser scroll stall is the page's own JavaScript -- not the engine, not the tile-record path, and not page settling |
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
@@ -228,7 +229,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 114
+- `generic` — 115
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1

@@ -115,3 +115,11 @@ compiler path that bypasses crossdirect's wrapper entirely (in which case
 the cause would be webkit-specific, not this general mechanism), or if a
 future crossdirect release drops the `-c`-only gate now that pmaports#227 is
 resolved.
+
+**Follow-up** — the detour's stated reason was tested against the toolchain
+we actually have and did not reproduce:
+[[the-qemu-link-detour-is-not-needed-on-this-toolchain]] links a working
+aarch64 shared library and executable three different ways, natively,
+including via the same hostspec-prefixed gcc driver crossdirect already uses
+for the compile half. This note remains correct about *what* crossdirect
+does; that one covers whether it still needs to.
