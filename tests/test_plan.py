@@ -140,6 +140,42 @@ def test_flash_boot_state_is_never_reported_as_unmet():
         assert problems == [], (state, problems)
 
 
+# --------------------------------------------------------- the drift gate --
+#
+# §5/§12 of the design spec, and this module's own docstring, both promise a
+# test that fails when a verb grows a prerequisite the manifest does not
+# declare -- porthole_cmd_build.EXPORT_RUNGS and INSTALL_RUNGS are the
+# tenth and eleventh place this knowledge lived (`_preflight`,
+# `export_problems`, `_workspace_usable`, `_ph_can_make_image`,
+# `ph_need_fastboot`, LADDER, TREE_RUNGS make nine), still consulted at
+# porthole_cmd_build.py:974 and porthole_cmd_doctor.py:931, and until now
+# nothing pinned them against the manifest they duplicate by hand.
+
+def test_export_rungs_agrees_with_the_manifests_chroot_installed_need():
+    """EXPORT_RUNGS ("fast", "upgrade") is hand-maintained prose for exactly
+    one manifest fact: which BUILD_ACTIONS rungs need CHROOT_INSTALLED.
+    `kernel` deliberately needs no chroot (it CREATES one) even though it
+    also runs `pmbootstrap export` -- see porthole_cmd_build.py's comment on
+    EXPORT_RUNGS. This fails the day the two disagree, rather than shipping
+    a rung whose gating silently stopped matching what it claims to need."""
+    import porthole_cmd_build as build
+    derived = tuple(sorted(
+        name for name in build.BUILD_ACTIONS
+        if name != "auto" and plan.CHROOT_INSTALLED in plan.op(name).needs))
+    assert tuple(sorted(build.EXPORT_RUNGS)) == derived
+
+
+def test_install_rungs_agrees_with_the_manifests_rootfs_password_need():
+    """INSTALL_RUNGS ("kernel", "image") is hand-maintained prose for which
+    BUILD_ACTIONS rungs need ROOTFS_PW -- also read by
+    porthole_cmd_doctor.py's PORTHOLE_PMOS_PASSWORD check."""
+    import porthole_cmd_build as build
+    derived = tuple(sorted(
+        name for name in build.BUILD_ACTIONS
+        if name != "auto" and plan.ROOTFS_PW in plan.op(name).needs))
+    assert tuple(sorted(build.INSTALL_RUNGS)) == derived
+
+
 def main():
     return _runner.run(globals())
 
