@@ -4,7 +4,7 @@
 # needs: BOOTED
 # env: PHONE, PORTHOLE_AMP
 # exits: 0 ok · non-zero on failure
-"""tk-acoustic -- decide "does audio actually come out / go in" with no human.
+"""ph-acoustic.py -- decide "does audio actually come out / go in" with no human.
 
 The laptop has a speaker and a microphone and the phone sits next to it, so
 both directions are a closed acoustic loop:
