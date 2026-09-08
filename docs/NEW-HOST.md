@@ -104,9 +104,9 @@ rung on it compiles a tree — except one.
 ```sh
 porthole sandbox up
 export TK_PMOS_PASSWORD=...        # the rootfs user's password
-porthole build image               # preview: where it runs, what is missing
-porthole build image --yes         # pmbootstrap install + export, ~20m
-porthole flash --yes               # rootfs AND boot
+porthole build image                        # preview: where it runs, what is missing
+porthole build image --yes                  # pmbootstrap install + export, ~20m
+porthole flash full --yes --replace-rootfs  # rootfs AND boot
 ```
 
 `image` builds the whole system from pmaports as it stands. The kernel comes

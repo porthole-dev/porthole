@@ -1119,9 +1119,10 @@ tkbuild() {
 # the pin, `porthole flash` would refuse the image this rung had just made,
 # naming a .dtb nobody asked for.
 #
-# Pairs with `porthole flash --yes`, which writes rootfs AND boot: `install`
-# runs mkfs and remints the filesystem UUIDs, so flashing boot alone leaves an
-# initramfs hunting for a root that no longer exists under that UUID.
+# Pairs with `porthole flash full --yes --replace-rootfs`, which writes
+# rootfs AND boot: `install` runs mkfs and remints the filesystem UUIDs, so
+# flashing boot alone (the `porthole flash` default) leaves an initramfs
+# hunting for a root that no longer exists under that UUID.
 tksysimage() {
 	# Read before anything runs, not at the end of a twenty-minute install.
 	: "${TK_PMOS_PASSWORD:?set TK_PMOS_PASSWORD (the rootfs user password) before an image build}"
@@ -1174,8 +1175,9 @@ tksysimage() {
 		echo ">>   assembled directly (mkfs.ext4 -d + sfdisk, no mount needed)"
 		echo ">>   instead of through pmbootstrap's own loop-device install."
 	fi
-	echo ">> flash it with \`porthole flash --yes\` -- rootfs AND boot, because"
-	echo ">>   install reminted the filesystem UUIDs boot.img names."
+	echo ">> flash it with \`porthole flash full --yes --replace-rootfs\` --"
+	echo ">>   rootfs AND boot, because install reminted the filesystem UUIDs"
+	echo ">>   boot.img names."
 }
 
 
