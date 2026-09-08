@@ -43,10 +43,15 @@ def test_a_site_that_cannot_run_an_op_says_why():
                     f"{name}/{site} is excluded with no usable reason")
 
 
-def test_the_full_flash_cannot_run_in_the_sandbox_and_names_the_loop_device():
-    op = plan.op("flash-full")
-    assert op.sites[plan.SANDBOX] is not True
-    assert "loop" in op.sites[plan.SANDBOX]
+def test_the_full_flash_and_install_can_both_run_in_the_sandbox():
+    """Stale until this fix: `sites={SANDBOX: NO_LOOP, HOST: True}` was true
+    before `_ph_assemble_image` (tools/ph-build.sh) existed to build the
+    rootfs image straight from the chroot with no loop device. Gate C5
+    proved it false -- .run/build-tkflash-20260908-154750.log opens ">> NOTE:
+    this image was built from /work/linux-ws" (the container mount), and the
+    full flash it fed succeeded."""
+    for name in ("flash-full", "install"):
+        assert plan.op(name).sites[plan.SANDBOX] is True, name
 
 
 def test_an_irreversible_op_is_marked_so():

@@ -15,25 +15,8 @@ import shutil
 
 import porthole_plan as plan
 
-# The node's mere existence is the test. Inside the container we are uid 0 by
-# mapping, so a permission check there would answer about a uid that owns
-# nothing -- and the loop ioctls want CAP_SYS_ADMIN in the namespace that OWNS
-# the device, which a user namespace never is.
-LOOP_CONTROL = "/dev/loop-control"
 
-
-def loop_exists() -> bool:
-    return pathlib.Path(LOOP_CONTROL).exists()
-
-
-def can_make_image(site: str, loop_exists: bool) -> bool:
-    """Pure. The sandbox can never make one, whatever the host has."""
-    if site == plan.SANDBOX:
-        return False
-    return bool(loop_exists)
-
-
-def choose_from(op, available, prefer=None, host_can_image=True):
+def choose_from(op, available, prefer=None):
     """(site, why_not) for an Op, given the sites that exist here. Pure.
 
     Returns (None, reason) when nothing can run it, so the caller refuses with
@@ -43,19 +26,16 @@ def choose_from(op, available, prefer=None, host_can_image=True):
     silently honouring the fallback is how builds came to run against a
     different package repo than the one the reader was looking at.
 
-    `host_can_image` is the host half of the question `can_make_image`
-    answers -- computed by the caller (`can_make_image(HOST, loop_exists())`)
-    so this stays pure. The static `op.sites` table says `HOST: True`
-    unconditionally for an op that produces a rootfs image, because whether
-    THIS host has a loop device is not something the manifest can know. Left
-    unchecked, a host with no /dev/loop-control would be told it can build
-    one and then fail exactly the way the sandbox already refuses for --
-    unproven for the host half of the plane's central claim.
+    Used to also downgrade HOST to a NO_LOOP refusal for any op producing
+    "rootfs.img" when /dev/loop-control was absent on the host -- before
+    `_ph_assemble_image` (tools/ph-build.sh) existed, a missing loop device
+    genuinely meant no image. It no longer does: the assembler builds the
+    image straight from the chroot (mkfs.ext4 -d, sfdisk against a plain
+    file) whenever the loop device is missing, on whichever site is running,
+    so `op.sites` itself is now the whole answer -- see porthole_plan.py's
+    flash-full/install comments and Gate C5.
     """
     sites_map = op.sites
-    if not host_can_image and "rootfs.img" in op.produces:
-        sites_map = dict(op.sites)
-        sites_map[plan.HOST] = plan.NO_LOOP
     if prefer is not None:
         if prefer not in available:
             return None, f"{prefer} is not available on this host"

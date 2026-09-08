@@ -334,10 +334,8 @@ def _preflight(ctx, action: str = "") -> list[str]:
     # chroot instead) -- the second is the exact failure class this rework
     # exists to end. `sites.facts` takes the already-resolved site for
     # exactly this reason.
-    host_can_image = sites.can_make_image(plan.HOST, sites.loop_exists())
     site, why = sites.choose_from(op, sites.available(ctx),
-                                  prefer=_preferred_site(ctx),
-                                  host_can_image=host_can_image)
+                                  prefer=_preferred_site(ctx))
     facts = sites.facts(ctx, site=site)
     problems = plan.unmet(op, facts)
     if site is None:

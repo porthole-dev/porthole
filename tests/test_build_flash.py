@@ -2348,16 +2348,22 @@ def test_a_running_build_draws_the_same_block_the_watchers_do():
 
 # ---------------------------------------------- preflight derives from the plan --
 
-def test_preflight_refuses_a_full_flash_in_the_sandbox_before_anything_runs():
-    """The reported failure: twelve minutes, then a shell error about a
-    missing .img. The refusal has to be available at second zero and has to
-    name the loop device, because that is what the reader can act on."""
+def test_preflight_accepts_a_full_flash_in_the_sandbox():
+    """The originally reported failure: twelve minutes, then a shell error
+    about a missing .img, because the sandbox could never make a rootfs
+    image (no loop device in its user namespace) and nothing asked before
+    the build started. `_ph_assemble_image` (tools/ph-build.sh) removed the
+    limitation itself -- it builds the image straight from the chroot with
+    no loop device -- and Gate C5 proved it on hardware
+    (.run/build-tkflash-20260908-154750.log, ">> NOTE: this image was built
+    from /work/linux-ws"). See test_plan.py and test_sites.py for the
+    manifest-level pins; this one is choose_from's answer for the exact op
+    the incident was about."""
     import porthole_plan as plan
     import porthole_sites as sites
     op = plan.op("flash-full")
     site, why = sites.choose_from(op, available=[plan.SANDBOX])
-    assert site is None
-    assert "loop" in why and "rootless" in why
+    assert site == plan.SANDBOX, why
 
 
 def test_preflight_reports_a_dev_snapshot_as_a_problem_not_as_a_build_failure():
@@ -2494,13 +2500,16 @@ def test_preflight_checks_the_repo_of_the_site_actually_chosen():
     assert any("dev snapshot" in p for p in problems), problems
 
 
-def test_preflight_forwards_host_can_image_to_choose_from():
-    """Pins the wiring, not just choose_from's own already-tested behaviour:
-    without _preflight computing host_can_image and forwarding it,
-    choose_from's default (host_can_image=True) silently lets a host with
-    no loop device through -- exactly the mechanism the headline incident
-    needed. `image` produces "rootfs.img"; only HOST is made available, so
-    the refusal (or its absence) can only come from this wiring."""
+def test_preflight_does_not_refuse_a_loopless_host_an_image_build():
+    """Before the assembler, _preflight computed host_can_image from
+    /dev/loop-control and forwarded it into choose_from, which downgraded
+    HOST to a NO_LOOP refusal for any op producing "rootfs.img". Gate C5
+    proved a missing loop device no longer stops an image build --
+    _ph_assemble_image (tools/ph-build.sh) builds it straight from the
+    chroot (mkfs.ext4 -d, sfdisk against a plain file) instead, on
+    whichever site is running. `image` produces "rootfs.img"; only HOST is
+    made available, so a stray "loop" problem could only come from that
+    now-removed wiring."""
     import argparse
     import shutil
 
@@ -2509,11 +2518,9 @@ def test_preflight_forwards_host_can_image_to_choose_from():
 
     real_usable = sites.usable
     real_which = shutil.which
-    real_loop_exists = sites.loop_exists
     sites.usable = lambda ctx: (False, "faked for the test")  # no sandbox
     shutil.which = lambda name: (
         "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
-    sites.loop_exists = lambda: False  # no /dev/loop-control on this host
 
     class Ctx:
         root = ROOT
@@ -2527,8 +2534,7 @@ def test_preflight_forwards_host_can_image_to_choose_from():
     finally:
         sites.usable = real_usable
         shutil.which = real_which
-        sites.loop_exists = real_loop_exists
-    assert any("loop" in p for p in problems), problems
+    assert not any("loop" in p for p in problems), problems
 
 
 if __name__ == "__main__":
