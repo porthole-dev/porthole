@@ -962,7 +962,7 @@ _ph_install_rootfs() {
 _ph_assemble_image() {
 	local chroot="$_PH_PMB/chroot_rootfs_${PORTHOLE_CODENAME}"
 	local out="$_PH_PMB/chroot_native/home/pmos/rootfs/${PORTHOLE_CODENAME}.img"
-	mkdir -p "$(dirname "$out")"
+	mkdir -p "$(dirname "$out")" || return 1
 	# _PH_REPO_ROOT (this checkout, where lib/porthole_image.py lives), not
 	# _PH_REPO (the device repo of kernel/pmaports/blobs) -- and passed as an
 	# argv, not read back out of the environment, because neither variable is
@@ -990,13 +990,30 @@ _ph_assemble_image() {
 	size = sum(f.stat().st_size for f in chroot.rglob("*") if f.is_file())
 	boot_mb, root_mb = image.sizes(size)
 	lay = image.layout(boot_mb, root_mb, arch)
-	image.assemble(run, chroot / "boot", chroot, out, lay, boot_uuid, root_uuid)
-	problems = image.verify(run, out, lay, boot_uuid, root_uuid)
-	if problems:
-	    for p in problems:
-	        print(f">> {p}", file=sys.stderr)
-	    raise SystemExit(">> refusing to ship an image that does not match "
-	                      "its own fstab -- NOTHING has been flashed")
+
+	# `out` is the CANONICAL path pmbootstrap export's symlinks() links from and
+	# flash_rootfs reads -- the same one .stale-images guards above. A failure
+	# anywhere from here on (a `run()` command inside assemble() dying between
+	# truncate and the closing rm, or verify() finding a mismatch) must not
+	# leave that path, or the .boot/.root build temps beside it, looking like a
+	# real image. Cleanup runs on every non-success exit; only a clean finish
+	# sets `ok`.
+	ok = False
+	try:
+	    image.assemble(run, chroot / "boot", chroot, out, lay, boot_uuid, root_uuid)
+	    problems = image.verify(run, out, lay, boot_uuid, root_uuid)
+	    if problems:
+	        for p in problems:
+	            print(f">> {p}", file=sys.stderr)
+	        raise SystemExit(">> refusing to ship an image that does not match "
+	                          "its own fstab -- removed it, nothing has been "
+	                          "flashed")
+	    ok = True
+	finally:
+	    if not ok:
+	        for f in (out, f"{out}.boot", f"{out}.root"):
+	            pathlib.Path(f).unlink(missing_ok=True)
+
 	pathlib.Path(out + ".uuids").write_text(
 	    f"pmos_boot_uuid={boot_uuid}\npmos_root_uuid={root_uuid}\n")
 	print(f">> assembled {out} (boot {boot_mb}M, root {root_mb}M)")

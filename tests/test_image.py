@@ -401,6 +401,111 @@ def test_the_assembled_image_converts_to_sparse():
     assert int(out.strip()) > 0
 
 
+def _extract_ph_build_function(name: str) -> str:
+    """One shell function's body, verbatim, out of tools/ph-build.sh."""
+    text = (pathlib.Path(__file__).resolve().parent.parent
+           / "tools/ph-build.sh").read_text()
+    m = re.search(rf"\n{re.escape(name)}\(\) \{{\n(.*?\n)\}}\n", text, re.S)
+    assert m, f"{name} not found in tools/ph-build.sh"
+    return m.group(1)
+
+
+def _extract_assemble_image_python() -> str:
+    """The python heredoc _ph_assemble_image feeds to `python3 -`, with the
+    single leading tab `<<-'PY'` strips removed from each line.
+
+    Pulled out of the real shell source rather than reimplemented: a test
+    that reimplements the cleanup logic under test would still pass when the
+    shipped copy regresses. This is the same thing a reviewer did by hand,
+    running the extracted body with verify() shadowed to force a refusal,
+    to find the bug this test guards."""
+    body = _extract_ph_build_function("_ph_assemble_image")
+    m = re.search(r"<<-'PY'[^\n]*\n(.*?)\n\tPY\n", body, re.S)
+    assert m, "python heredoc not found in _ph_assemble_image"
+    return "\n".join(line[1:] if line.startswith("\t") else line
+                     for line in m.group(1).splitlines())
+
+
+def _host_assembler_tools() -> bool:
+    import shutil
+    return all(shutil.which(t) for t in
+              ("mkfs.ext4", "sfdisk", "dd", "truncate", "dumpe2fs"))
+
+
+def test_a_refused_image_is_not_left_where_flash_would_find_it():
+    """_ph_assemble_image's own cleanup, run for real.
+
+    porthole_image.assemble()/verify() have no cleanup of their own -- that
+    is correctly _ph_assemble_image's job, since only the caller knows `out`
+    is the CANONICAL path pmbootstrap export's symlinks() links from and
+    flash_rootfs reads. Before the fix this guards, a verify() refusal (or a
+    run() failure inside assemble(), between truncate creating `out` and the
+    closing rm) left a complete-looking image sitting at exactly that path --
+    the same hazard the .stale-images move guards against, arriving from a
+    new direction. `_ph_verify_rootfs_pair` only checks non-emptiness and
+    mtime skew, so it cannot catch this either; only "does anything survive
+    at all" can.
+
+    Runs against the HOST's own mkfs.ext4/sfdisk/dd/truncate/dumpe2fs rather
+    than through porthole-sandbox: none of them touch a block device or need
+    a container (they build and read plain files), and staging a fixture
+    chroot across the podman boundary just to reuse tools already on this
+    host would be pure overhead for what this test checks. Skipped, not
+    failed, if this host is missing any of them.
+    """
+    if not _host_assembler_tools():
+        raise Skip("mkfs.ext4/sfdisk/dd/truncate/dumpe2fs not all on PATH")
+    import os
+    import subprocess
+    import tempfile
+
+    script = _extract_assemble_image_python()
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        chroot = tmp / "chroot"
+        (chroot / "etc").mkdir(parents=True)
+        (chroot / "boot").mkdir()
+        (chroot / "usr").mkdir()
+        (chroot / "usr/file").write_bytes(b"x" * 50_000)
+        out = tmp / "out" / "test.img"
+        out.parent.mkdir()
+
+        # A repo whose lib/porthole_image.py is the real module with verify()
+        # overridden to always refuse -- the reviewer's own repro. Python
+        # resolves the later definition, so this replaces it cleanly.
+        repo_root = tmp / "repo"
+        (repo_root / "lib").mkdir(parents=True)
+        real = (pathlib.Path(__file__).resolve().parent.parent
+               / "lib/porthole_image.py").read_text()
+        (repo_root / "lib/porthole_image.py").write_text(
+            real +
+            "\n\ndef verify(runner, out, lay, boot_uuid, root_uuid):\n"
+            '    return ["forced failure for the cleanup test"]\n')
+
+        # _ph_assemble_image's only pmbootstrap call is `chroot -r -- mkinitfs`;
+        # nothing in this test needs it to do anything real.
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        stub = bindir / "pmbootstrap"
+        stub.write_text("#!/bin/sh\nexit 0\n")
+        stub.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '')}"
+
+        proc = subprocess.run(
+            ["python3", "-", str(chroot), str(out), str(repo_root), "aarch64"],
+            input=script, capture_output=True, text=True, env=env)
+
+        assert proc.returncode != 0, (
+           "a verify() refusal must fail _ph_assemble_image, not exit 0\n"
+           f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        left = sorted(p.name for p in out.parent.iterdir())
+        assert left == [], (
+           "a refused image must not be left at the canonical path "
+           f"flash_rootfs reads from -- found {left}")
+
+
 def main():
     return _runner.run(globals())
 
