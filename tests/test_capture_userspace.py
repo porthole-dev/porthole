@@ -188,6 +188,31 @@ def test_an_unrelated_linux_prefixed_package_not_built_here_is_untouched():
     assert raw.split() == []
 
 
+def test_the_unconfigured_fallback_excludes_a_repo_built_linux_package():
+    """Different branch from the test above, on purpose: that one proves
+    repo_names() stops an UNBUILT linux-* package before is_kernel_pkg() ever
+    runs -- it never exercises the fallback's own `linux-*` match. Here the
+    fixture repo DOES build the package, so the backstop branch itself has to
+    fire. This is what actually runs in production for any device profile
+    whose device.env does not set PORTHOLE_KERNEL_PKG.
+
+    Popping PORTHOLE_KERNEL_PKG (`_repo_env`'s default) is not enough on its
+    own here: this desk also has PORTHOLE_DEVICE=google-taimen exported
+    directly, and even without that, ph-lib.sh reads
+    ~/.config/porthole/config.env, which sets PORTHOLE_DEVICE, and a known
+    PORTHOLE_DEVICE loads profiles/google-taimen/device.env right back --
+    which sets PORTHOLE_KERNEL_PKG again. Both paths have to be blocked to
+    actually reach the unconfigured fallback."""
+    with tempfile.TemporaryDirectory() as tmp:
+        env = _repo_env(tmp, "linux-lts-6.6.10-r3.apk")
+        env.pop("PORTHOLE_DEVICE", None)
+        env["HOME"] = str(pathlib.Path(tmp) / "no-such-home")
+        out = subprocess.run(["bash", str(TOOL), "--parse-only"],
+                             input="linux-lts-6.6.10-r3\n", capture_output=True,
+                             text=True, check=True, env=env)
+    assert "# excluded: linux-lts-6.6.10-r3" in out.stdout.splitlines()
+
+
 # --------------------------------------------------- capture must not lie --
 #
 # parse() always returns 0 -- it exists to filter a stream, not to report on
@@ -265,6 +290,26 @@ def test_a_relative_outfile_path_resolves_against_the_callers_cwd_not_tools():
                 "must not have been written against tools/ instead"
     finally:
         stray.unlink(missing_ok=True)
+
+
+def test_a_relative_infile_path_resolves_against_the_callers_cwd_not_tools():
+    """Mirrors the outfile test above for `restore`. No repo fixture needed --
+    restore never calls repo_names(), it just reads the manifest and builds
+    apk specs -- so a fake `ssh` that only proves it was reached is enough to
+    keep this hermetic. Reverting the fix makes this look for
+    tools/in.manifest and exit 64 "usage" instead."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = pathlib.Path(tmp) / "somewhere-else"
+        cwd.mkdir()
+        (cwd / "in.manifest").write_text("mesa-26.1.6-r14\n")
+        env = dict(os.environ)
+        env["PATH"] = _fake_ssh_path(
+            tmp, "#!/bin/sh\necho apk-add-reached >&2\n") + ":" + env["PATH"]
+        proc = subprocess.run(["bash", str(TOOL), "restore", "in.manifest"],
+                              capture_output=True, text=True, env=env, cwd=cwd)
+        assert proc.returncode == 0, proc.stderr
+        assert "apk-add-reached" in proc.stderr, \
+            "restore never reached the device call -- it did not find in.manifest"
 
 
 def main():
