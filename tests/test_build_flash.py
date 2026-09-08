@@ -11,6 +11,7 @@ PORTHOLE_ACTIVE_SLOT sat unread in the schema.
 Every test here is a refusal. Nothing in this file builds or flashes anything.
 """
 import argparse
+import contextlib
 import json
 import re
 import os
@@ -311,6 +312,36 @@ def test_typing_auto_out_still_measures_with_no_measure_flag():
     assert ran == ["_auto"]
 
 
+@contextlib.contextmanager
+def _flash_run_tripwire():
+    """Patches `flash._run` to explode if it is ever reached.
+
+    For every direct `cmd_flash()` call in this file that must NOT write to
+    a device -- which is every one of them except the single test below that
+    deliberately exercises the confirmed-run path with its own safe
+    recording stub. `ctx.root` here is the real repo root (`_fake_ctx` sets
+    it), so an unstubbed call that reaches `_run` is not a simulation: it
+    shells into the real workspace/host and can run `pmbootstrap flasher
+    flash_rootfs` / `fastboot flash ...` against whatever hardware is
+    actually attached. A guard regression must fail these tests LOUDLY, from
+    right here -- never by finding out whether a real phone happened to be
+    in the right state to accept the write.
+    """
+    import porthole_cmd_flash as flash
+
+    def _boom(*_a, **_k):
+        raise AssertionError(
+            "flash._run must never be reached in this test -- it would "
+            "flash a real device")
+
+    real_run = flash._run
+    flash._run = _boom
+    try:
+        yield
+    finally:
+        flash._run = real_run
+
+
 def test_the_flash_preview_works_while_the_device_is_booted():
     """Reproduced 2026-09-08: `porthole flash` with no --yes refused with
     EX_STATE because the device was BOOTED. The preview is the thing you run
@@ -319,7 +350,8 @@ def test_the_flash_preview_works_while_the_device_is_booted():
     import porthole_cmd_flash as flash
     args = _flash_args(action="boot", yes=False)
     ctx = _fake_ctx(state="BOOTED")
-    rc = flash.cmd_flash(args, ctx)
+    with _flash_run_tripwire():
+        rc = flash.cmd_flash(args, ctx)
     assert rc == 0
     assert "would flash" in ctx.out.text
 
@@ -329,7 +361,8 @@ def test_the_preview_offers_to_move_the_device_rather_than_only_refusing():
     import porthole_cmd_flash as flash
     args = _flash_args(action="boot", yes=False)
     ctx = _fake_ctx(state="BOOTED")
-    flash.cmd_flash(args, ctx)
+    with _flash_run_tripwire():
+        flash.cmd_flash(args, ctx)
     assert ("ph-to-fastboot" in ctx.out.text
            or "reboot it to the bootloader" in ctx.out.text)
 
@@ -343,19 +376,32 @@ def test_flashing_boot_only_does_not_touch_the_rootfs():
 
 
 def test_a_full_flash_is_refused_without_the_flag_that_names_the_loss():
+    """CRITICAL, fix round 1: this test used to call cmd_flash() with no
+    stub on flash._run at all. Mutation-testing the --replace-rootfs guard
+    it exists to catch reached the real _run -- against the live device
+    attached to this host. The tripwire is the point of this test now, every
+    bit as much as the assertion below is: removing the guard must fail
+    HERE, on the tripwire, not fall through to a shell."""
     import porthole_cmd_flash as flash
     args = _flash_args(action="full", yes=True)   # --yes alone
     ctx = _fake_ctx(state="FASTBOOT")
-    try:
-        flash.cmd_flash(args, ctx)
-        assert False, "a rootfs replacement ran on --yes alone"
-    except Exception as exc:
-        assert "--replace-rootfs" in str(exc)
+    with _flash_run_tripwire():
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a rootfs replacement ran on --yes alone"
+        except AssertionError:
+            raise
+        except Exception as exc:
+            assert "--replace-rootfs" in str(exc)
 
 
 def test_a_boot_only_flash_runs_on_yes_alone_when_the_device_is_ready():
     """The other half of the same rule: `boot` must not also demand
-    --replace-rootfs -- it touches no rootfs, there is nothing to name."""
+    --replace-rootfs -- it touches no rootfs, there is nothing to name.
+
+    This is the one test in the file that WANTS `_run` reached, so it uses
+    its own recording stub rather than `_flash_run_tripwire` -- the stub
+    never shells out either, it only records what it was called with."""
     import porthole_cmd_flash as flash
     args = _flash_args(action="boot", yes=True)
     ctx = _fake_ctx(state="FASTBOOT")
@@ -372,17 +418,21 @@ def test_a_boot_only_flash_runs_on_yes_alone_when_the_device_is_ready():
 
 def test_a_real_flash_still_refuses_the_wrong_state():
     """Preserved: an actual write (not a preview) still refuses EX_STATE
-    when the device disagrees, exactly as before this rework."""
+    when the device disagrees, exactly as before this rework.
+
+    CRITICAL, fix round 1: same missing stub as the test above -- see
+    `_flash_run_tripwire`."""
     import porthole_cmd_flash as flash
     from porthole_cli import Bail, EX_STATE
     args = _flash_args(action="boot", yes=True)
     ctx = _fake_ctx(state="BOOTED")
-    try:
-        flash.cmd_flash(args, ctx)
-        assert False, "a real flash ran against a BOOTED device"
-    except Bail as exc:
-        assert exc.code == EX_STATE
-        assert "FASTBOOT" in exc.hint
+    with _flash_run_tripwire():
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a real flash ran against a BOOTED device"
+        except Bail as exc:
+            assert exc.code == EX_STATE
+            assert "FASTBOOT" in exc.hint
 
 
 def test_build_does_nothing_without_yes():
