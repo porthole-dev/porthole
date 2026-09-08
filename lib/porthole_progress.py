@@ -767,11 +767,16 @@ def clip(text: str, width) -> str:
     if not width or visible_len(text) <= width:
         return text
     # Cutting a coloured string by index can land inside an escape sequence
-    # and dye the rest of the screen, so a line with colour in it is cut on
-    # its plain text and re-tinted by the caller instead.
-    if _ANSI.search(text):
-        return text
-    return text[:max(0, width - 1)] + "\u2026"
+    # and dye the rest of the screen, so the colour comes off and the plain
+    # text is cut. It used to return such a line UNCUT instead, which is the
+    # smear this function exists to prevent, dressed as caution: the activity
+    # row carries the child's own output, pmbootstrap colours every line it
+    # prints, and a 170-column `(native) install ...` line came back 192
+    # columns wide. The row wrapped, the block painter walked back up over the
+    # number of ROWS it drew rather than the screen lines they took, and every
+    # repaint stranded the header above it -- one `fast ... running` per long
+    # line, for the length of the build.
+    return _ANSI.sub("", text)[:max(0, width - 1)] + "\u2026"
 
 
 def term_width(default: int = 100) -> int:
@@ -1597,7 +1602,15 @@ def log_invocation_ended(text: str) -> bool:
 # accident: pmbootstrap prefixes its OWN trace lines with `(pid) [HH:MM:SS] `
 # and relays a command's output unprefixed, so the anchor is itself half the
 # discrimination. Checked against the reference host's 37 MB log.txt.
-_ABUILD_BANNER = re.compile(r"^>>> \S+?\*?: \S")
+# `>>> ERROR:` and `>>> WARNING:` are abuild's DIAGNOSTICS, not its "now
+# building <pkg>" banner, and the tools around a build print them too:
+# `abuild-sign` failing while pmbootstrap indexed a repo wrote `>>> ERROR:
+# failed to sign` into the shared log. That single line was the only
+# build-shaped thing in the tail of a FAILED kernel rung, so `names_a_build`
+# said yes, the staged APKBUILD from two days earlier supplied a name, and the
+# status line showed `webkit2gtk-6.0 ... 42h05m . reattached` for a build
+# nobody had started. Reported twice, with screenshots, 2026-09-08.
+_ABUILD_BANNER = re.compile(r"^>>> (?!ERROR:|WARNING:)\S+?\*?: \S")
 # ...but tolerate pmbootstrap's own `(pid) [HH:MM:SS] ` prefix in front of one.
 # On the reference host's 37 MB log.txt every one of 188276 ninja lines and
 # 7942 abuild banners is bare -- pmbootstrap stamps the lines it writes itself
