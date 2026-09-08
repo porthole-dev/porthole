@@ -182,6 +182,75 @@ def test_facts_free_gb_walks_up_to_an_existing_ancestor():
         sites.usable = real_usable
 
 
+def _chroot(root, populated: bool):
+    info = root / "chroot_rootfs_google-taimen"
+    if populated:
+        info = info / "usr" / "share" / "deviceinfo"
+        info.mkdir(parents=True)
+        (info / "deviceinfo").write_text("deviceinfo_format_version=0\n")
+    else:
+        info.mkdir(parents=True)
+
+
+def test_facts_reads_the_chroot_of_the_resolved_site_not_a_guess_false_refusal():
+    """Reproduced: an installed HOST chroot, `--host` (site=HOST), and an
+    UNRELATED sandbox workspace happens to be running. `facts()` used to
+    call `usable(ctx)[0]` on its own and read the SANDBOX's chroot instead
+    -- wrongly reporting "no rootfs chroot has been installed" for a host
+    that has one."""
+    import tempfile
+
+    import porthole_cmd_sandbox as sandbox
+
+    real_usable = sites.usable
+    real_sandbox_pmb = sandbox._sandbox_pmb
+    host_dir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-hostchroot-"))
+    sandbox_dir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sandboxchroot-"))
+    _chroot(host_dir, populated=True)      # the HOST is properly installed
+    _chroot(sandbox_dir, populated=False)  # the unrelated sandbox is not
+    sites.usable = lambda ctx: (True, "")  # the unrelated workspace IS up
+    sandbox._sandbox_pmb = lambda cfg: sandbox_dir
+    try:
+        cfg = {"PORTHOLE_WORKDIR": str(host_dir),
+               "PORTHOLE_PMB_DIR": str(host_dir),
+               "PORTHOLE_DEVICE": "google-taimen"}
+        got = sites.facts(_FakeCtx(cfg), site=plan.HOST)
+        assert got[plan.CHROOT_INSTALLED] is True, got
+    finally:
+        sites.usable = real_usable
+        sandbox._sandbox_pmb = real_sandbox_pmb
+
+
+def test_facts_reads_the_chroot_of_the_resolved_site_not_a_guess_false_clear():
+    """Reproduced, and the dangerous direction: an UNINSTALLED HOST chroot,
+    `--host` (site=HOST), and a POPULATED sandbox chroot. `facts()` used to
+    read the sandbox's (installed) chroot and report CHROOT_INSTALLED=True
+    -- no refusal at all for a host that cannot actually export. This is
+    the exact failure class the rework exists to end: a preflight that
+    says yes because it looked at the wrong machine."""
+    import tempfile
+
+    import porthole_cmd_sandbox as sandbox
+
+    real_usable = sites.usable
+    real_sandbox_pmb = sandbox._sandbox_pmb
+    host_dir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-hostchroot-"))
+    sandbox_dir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sandboxchroot-"))
+    _chroot(host_dir, populated=False)     # the HOST is NOT installed
+    _chroot(sandbox_dir, populated=True)   # the unrelated sandbox is
+    sites.usable = lambda ctx: (True, "")  # the unrelated workspace IS up
+    sandbox._sandbox_pmb = lambda cfg: sandbox_dir
+    try:
+        cfg = {"PORTHOLE_WORKDIR": str(host_dir),
+               "PORTHOLE_PMB_DIR": str(host_dir),
+               "PORTHOLE_DEVICE": "google-taimen"}
+        got = sites.facts(_FakeCtx(cfg), site=plan.HOST)
+        assert got[plan.CHROOT_INSTALLED] is False, got
+    finally:
+        sites.usable = real_usable
+        sandbox._sandbox_pmb = real_sandbox_pmb
+
+
 def main():
     return _runner.run(globals())
 

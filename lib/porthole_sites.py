@@ -133,12 +133,25 @@ def usable(ctx):
     return True, ""
 
 
-def facts(ctx, state: str = "") -> dict:
+def facts(ctx, state: str = "", site=None) -> dict:
     """The mapping porthole_plan.unmet consumes. Impure; one place.
 
     `state` is passed in rather than probed, so a preview can render without
     touching the device -- the preview being gated behind device state is one
     of the defects this plane exists to remove.
+
+    `site` is the SANDBOX/HOST `choose_from` already picked (resolve it
+    BEFORE calling this), threaded through so CHROOT_INSTALLED and free_gb
+    read the SAME site-specific work dir the operation will actually run
+    against. Re-deriving "is the workspace usable" independently of that
+    choice is the bug `--host` exposed twice: a false refusal (an installed
+    HOST chroot read as missing because an unrelated workspace was running)
+    and a false CLEAR (an uninstalled HOST chroot never checked because this
+    read a populated SANDBOX chroot instead) -- the second is the exact
+    failure class this rework exists to end: a preflight that says yes
+    because it looked at the wrong machine. None (the default) keeps the
+    old fallback, `usable(ctx)[0]`, for callers that have not resolved a
+    site yet.
     """
     # Function-local and DELIBERATE, not an oversight to "tidy" into a
     # module-level import: porthole_cmd_build._preflight will import
@@ -155,7 +168,8 @@ def facts(ctx, state: str = "") -> dict:
     workdir = cfg.get("PORTHOLE_WORKDIR", "")
     tree = build._tree(cfg)
     named = str(tree) not in ("", ".")
-    site_usable = usable(ctx)[0]
+    site_usable = (site == plan.SANDBOX if site is not None
+                  else usable(ctx)[0])
     # Walk up to the nearest existing ancestor before probing, exactly as
     # the original _space_problems did (git show e800df4:lib/
     # porthole_cmd_build.py:323-344) -- a fresh host has no pmbootstrap work
