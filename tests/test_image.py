@@ -78,6 +78,37 @@ def test_the_layout_places_root_immediately_after_boot():
     assert lay["root_start"] == lay["boot_start"] + lay["boot_sectors"]
 
 
+def test_a_512_sector_size_layout_is_unchanged():
+    """sector_size is a new parameter; a device that never mentions it (every
+    device but taimen, today) must get exactly the geometry this module has
+    always produced -- the default here IS the assertion, not a convenience."""
+    lay = image.layout(boot_mb=32, root_mb=64, arch="aarch64")
+    assert lay["sector_size"] == 512
+    assert lay["boot_start"] == 2048
+    assert lay["boot_sectors"] == 32 * 1024 * 1024 // 512
+    assert lay["root_start"] == 2048 + 32 * 1024 * 1024 // 512
+
+
+def test_a_4096_sector_size_layout_puts_everything_at_the_right_byte():
+    """taimen sets deviceinfo_rootfs_image_sector_size=4096; its initramfs
+    attaches the assembled image with `losetup -b 4096`, so LBA 1 -- the GPT
+    header -- is byte 4096 there, not byte 512. Measured on hardware
+    2026-09-08: a table written as though sectors were still 512 bytes put
+    the header at the wrong byte and the kernel's partition scanner found
+    nothing ("failed to mount subpartitions").
+
+    256 sectors of 4096 bytes is the SAME byte position as pmbootstrap's own
+    2048-sector (512-byte) default -- 1 MiB, chosen for erase-block
+    alignment -- not a different number chosen for this device."""
+    lay = image.layout(boot_mb=8, root_mb=32, arch="aarch64", sector_size=4096)
+    assert lay["sector_size"] == 4096
+    assert lay["boot_start"] == 256
+    assert lay["boot_start"] * 4096 == 2048 * 512, "same byte, different unit"
+    assert lay["boot_sectors"] == 8 * 1024 * 1024 // 4096
+    assert lay["root_start"] == lay["boot_start"] + lay["boot_sectors"]
+    assert lay["total_bytes"] % image.ALIGN == 0
+
+
 def test_the_total_is_4096_aligned_because_img2simg_asserts_otherwise():
     """Measured 2026-09-08: an unaligned image aborts img2simg with
     `Assertion failed: pad >= 0`. taimen's rootfs_image_sector_size=4096
@@ -165,13 +196,27 @@ def test_a_layout_the_assembler_does_not_cover_is_refused_by_name():
 
 class FakeRunner:
     """Records argv instead of running it, so assembly order is testable with
-    no container, no e2fsprogs and no disk."""
+    no container, no e2fsprogs and no disk.
+
+    Answers verify()'s two disk-geometry calls (sfdisk -l, the GPT-signature
+    dd) truthfully by default -- echoing back whatever --sector-size was
+    asked for, and a matching "EFI PART" -- so every existing test that does
+    not care about sector-size geometry keeps passing those checks without
+    having to know they exist. A subclass testing something else should
+    fall through to `super().__call__(...)`'s return value, not hardcode
+    its own "", or it silently loses these defaults too."""
 
     def __init__(self):
         self.calls = []
 
     def __call__(self, argv, stdin=""):
         self.calls.append((list(argv), stdin))
+        if argv[:2] == ["sfdisk", "-l"]:
+            size = argv[argv.index("--sector-size") + 1]
+            return (f"Sector size (logical/physical): {size} bytes / "
+                    f"{size} bytes\n")
+        if argv and argv[0] == "dd" and "bs=1" in argv:
+            return "EFI PART"
         return ""
 
     def program(self, name):
@@ -214,6 +259,21 @@ def test_every_dd_carries_conv_notrunc():
         assert "conv=notrunc" in argv
 
 
+def test_assembly_writes_the_table_and_the_filesystems_in_the_layouts_own_geometry():
+    """Not just layout() -- assemble() must build sfdisk and dd in the SAME
+    sector size `lay` describes, or the table and the filesystem placement
+    disagree about where a byte is, which is invisible until the device
+    refuses to boot."""
+    run = FakeRunner()
+    lay = image.layout(8, 32, "aarch64", sector_size=4096)
+    image.assemble(run, "/b", "/r", "/out.img", lay, "bu", "ru")
+    sfdisk_argv = run.program("sfdisk")[0][0]
+    assert "--sector-size" in sfdisk_argv, sfdisk_argv
+    assert sfdisk_argv[sfdisk_argv.index("--sector-size") + 1] == "4096"
+    for argv, _ in run.program("dd"):
+        assert "bs=4096" in argv, argv
+
+
 def test_the_filesystems_are_written_at_their_declared_offsets():
     """Checks which SOURCE lands at which offset, not just that the two
     offsets appear somewhere: a set comparison of {boot_start, root_start}
@@ -239,16 +299,61 @@ def test_verification_rejects_an_image_whose_uuid_is_not_the_one_we_chose():
     its root -- and that must be caught here, on the host, where it is free."""
     class Wrong(FakeRunner):
         def __call__(self, argv, stdin=""):
-            super().__call__(argv, stdin)
+            default = super().__call__(argv, stdin)
             if argv and argv[0] == "dumpe2fs":
                 return ("Filesystem volume name:   pmOS_root\n"
                         "Filesystem UUID:          00000000-0000-0000-0000-000000000000\n")
-            return ""
+            return default
 
     lay = image.layout(32, 64, "aarch64")
     problems = image.verify(Wrong(), "/out.img", lay, "bu",
                             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     assert problems and any("uuid" in p.lower() for p in problems)
+
+
+# A real 4096 b/s device's initramfs attaches the assembled image with
+# `losetup -b 4096`, so LBA 1 -- the GPT header -- is byte 4096 there. A
+# table written as though sectors were still 512 bytes puts the header at
+# byte 512 instead, and the kernel's partition scanner finds nothing:
+# "failed to mount subpartitions" on a phone whose kernel had otherwise
+# booted correctly. See lib/porthole_image.py's layout()/assemble() for the
+# fix. FakeRunner already answers verify()'s sfdisk -l / GPT-signature dd
+# truthfully by default (echoing back --sector-size); these three tests
+# override that default in turn, then confirm the default itself is right.
+def test_verification_flags_a_sector_size_sfdisk_did_not_honour():
+    class WrongSectorSize(FakeRunner):
+        def __call__(self, argv, stdin=""):
+            default = super().__call__(argv, stdin)
+            if argv[:2] == ["sfdisk", "-l"]:
+                return "Sector size (logical/physical): 512 bytes / 512 bytes\n"
+            return default
+
+    lay = image.layout(8, 32, "aarch64", sector_size=4096)
+    problems = image.verify(WrongSectorSize(), "/out.img", lay, "bu", "ru")
+    assert any("sector size" in p.lower() for p in problems), problems
+
+
+def test_verification_flags_a_gpt_signature_at_the_wrong_byte():
+    class WrongSignature(FakeRunner):
+        def __call__(self, argv, stdin=""):
+            default = super().__call__(argv, stdin)
+            if argv and argv[0] == "dd" and "bs=1" in argv:
+                return ""  # nothing at the byte a 4096 b/s device reads
+            return default
+
+    lay = image.layout(8, 32, "aarch64", sector_size=4096)
+    problems = image.verify(WrongSignature(), "/out.img", lay, "bu", "ru")
+    assert any("gpt" in p.lower() or "efi part" in p.lower()
+              for p in problems), problems
+
+
+def test_verification_passes_a_disk_whose_geometry_is_actually_right():
+    """THE POSITIVE CONTROL: the two checks above only prove they CAN fire.
+    Without this, a check that always reports a problem would look
+    identical to a working one."""
+    lay = image.layout(8, 32, "aarch64", sector_size=4096)
+    problems = image.verify(_uuids_runner(), "/out.img", lay, "uu", "uu")
+    assert problems == [], problems
 
 
 # A real chroot went into the phone with no /home/<user>/.ssh/authorized_keys
@@ -265,7 +370,7 @@ def _uuids_runner(extra=None):
     test can put anything in `problems`."""
     class R(FakeRunner):
         def __call__(self, argv, stdin=""):
-            super().__call__(argv, stdin)
+            default = super().__call__(argv, stdin)
             if argv and argv[0] == "dumpe2fs":
                 return ("Filesystem volume name:   " +
                         (image.BOOT_LABEL if "boot" in argv[-1]
@@ -273,7 +378,7 @@ def _uuids_runner(extra=None):
                         "Filesystem UUID:          uu\n")
             if argv and argv[:2] == ["debugfs", "-R"] and extra:
                 return extra(argv[2])
-            return ""
+            return default
     return R()
 
 

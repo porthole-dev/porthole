@@ -998,7 +998,7 @@ _ph_assemble_image() {
 	# argv, not read back out of the environment, because neither variable is
 	# exported.
 	python3 - "$chroot" "$out" "$_PH_REPO_ROOT" "${PORTHOLE_ARCH:-aarch64}" <<-'PY' || return 1
-	import glob, os, pathlib, shutil, subprocess, sys
+	import glob, os, pathlib, re, shutil, subprocess, sys
 
 	chroot, out, repo_root, arch = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 	sys.path.insert(0, repo_root + "/lib")
@@ -1125,9 +1125,26 @@ _ph_assemble_image() {
 	    (ssh_dir / "authorized_keys").write_text("".join(keys))
 	    run(["chown", "-R", "10000:10000", str(ssh_dir)])
 
+	# The device's initramfs attaches the assembled image with
+	# `losetup -b <sector_size>`, so a table written in the wrong sector
+	# size sits at the wrong byte entirely and the kernel's partition
+	# scanner finds nothing -- "failed to mount subpartitions" on a phone
+	# that had otherwise booted correctly. Measured on hardware 2026-09-08.
+	# Read from the CHROOT's own deviceinfo (a symlink to
+	# device-<codename>-kernel-<...>), not guessed: this is a per-device
+	# value and most devices do not set it, in which case 512 -- the
+	# default already in use -- is correct and unchanged.
+	sector_size = 512
+	deviceinfo = chroot / "usr/share/deviceinfo/deviceinfo"
+	if deviceinfo.exists():
+	    m = re.search(r'deviceinfo_rootfs_image_sector_size="?(\d+)"?',
+	                  deviceinfo.read_text())
+	    if m:
+	        sector_size = int(m.group(1))
+
 	size = sum(f.stat().st_size for f in chroot.rglob("*") if f.is_file())
 	boot_mb, root_mb = image.sizes(size)
-	lay = image.layout(boot_mb, root_mb, arch)
+	lay = image.layout(boot_mb, root_mb, arch, sector_size=sector_size)
 
 	# `out` is the CANONICAL path pmbootstrap export's symlinks() links from and
 	# flash_rootfs reads -- the same one .stale-images guards above. A failure
