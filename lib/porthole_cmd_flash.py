@@ -25,6 +25,8 @@ Two gates remain, both refusals rather than warnings:
 """
 from __future__ import annotations
 
+import sys
+
 import porthole_plan as plan
 from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_USAGE, gate_flag
 from porthole_cmd_build import _run
@@ -54,7 +56,10 @@ def cmd_flash(args, ctx) -> int:
     if has_slots and not cfg.get("PORTHOLE_SLOTS_PROBED"):
         ctx.out.warn("slots were never probed on this device — "
                      "HAS_AB_SLOTS may be the shipped default")
-        ctx.out.hint("porthole slots probe", "reads it from the bootloader")
+        # Same stream as the warning above, not the preview's stdout: `2>log`
+        # used to capture the warning and lose the hint that explains it.
+        ctx.out.hint("porthole slots probe", "reads it from the bootloader",
+                     stream=sys.stderr)
 
     action = getattr(args, "action", None) or "boot"
     op = plan.op(f"flash-{action}")

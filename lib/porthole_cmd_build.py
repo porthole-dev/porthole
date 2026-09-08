@@ -2017,6 +2017,14 @@ def _ccache(ctx, args) -> int:
 
 def cmd_build(args, ctx) -> int:
     action = args.action or "auto"
+    # Measuring is something you ask for now: `--measure`, or typing the rung
+    # out as `porthole build auto`. A bare `porthole build` used to reach
+    # `_auto` -- a real incremental make that takes the buildroot lock --
+    # whenever the device happened to be fully configured, so the command run
+    # to ask "what would this do" was itself a build. `_auto` is unchanged:
+    # it still compiles without --yes, because measuring IS the question it
+    # answers. What changed is who is allowed to ask it.
+    measure = bool(getattr(args, "measure", False)) or args.action == "auto"
     # `status` and `auto` are actions, not flags. A store_true `--status` would
     # be a MODE encoded as a boolean, which permits nonsense combinations and
     # is what tests/test_cli_rules.py forbids repo-wide.
@@ -2033,9 +2041,15 @@ def cmd_build(args, ctx) -> int:
         # agent asking for --json already knows which rung it asked for (or
         # didn't) from the JSON's own "action" field, so the line has nothing
         # to tell it.
-        ctx.out(ctx.out.paint(
-            "  auto  no rung given -- measuring, then routing on what "
-            "rebuilds  (porthole build --help for the rungs)", "grey"))
+        if measure:
+            ctx.out(ctx.out.paint(
+                "  auto  no rung given -- measuring, then routing on what "
+                "rebuilds  (porthole build --help for the rungs)", "grey"))
+        else:
+            ctx.out(ctx.out.paint(
+                "  auto  no rung given -- showing the ladder; nothing runs "
+                "(--measure to measure and route, porthole build --help for "
+                "the rungs)", "grey"))
     if action == "status":
         return _status(ctx)
     if action == "watch":
@@ -2056,7 +2070,13 @@ def cmd_build(args, ctx) -> int:
         # preview rather than erroring: "a profile that cannot build yet is the
         # normal state of a new port", and a preview SHOWS what is wrong
         # instead of refusing to describe it.
-        if not _preflight(ctx) and (_tree(ctx.cfg) / "Makefile").is_file():
+        #
+        # Gated on `measure`: a bare `porthole build` renders the ladder
+        # preview below like every other rung and never reaches `_auto`, so
+        # it takes no buildroot lock and runs no make. `--measure`, or typing
+        # `auto` out, is what asks for the real thing.
+        if (measure and not _preflight(ctx)
+                and (_tree(ctx.cfg) / "Makefile").is_file()):
             return _auto(ctx, args)
         func, what = "", AUTO_DESC
         extra = []
@@ -2200,11 +2220,14 @@ SPEC = {
         "whole system from pmaports as it stands and is what a host with a\n"
         "pmaports checkout and no tree can run today. Builds go to the\n"
         "workspace container when one is up; the preview says which.\n\n"
-        "With no ACTION, `build` runs `auto`: it times an incremental make and\n"
-        "then picks the rung that matches what actually rebuilt -- a module push\n"
-        "if one module changed, a boot image if the dtbs did, a full kernel if\n"
-        "the tree moved under it. It is the safe default and it is never a no-op\n"
-        "disguised as one; `porthole build status` says what the last one did."),
+        "With no ACTION, `build` shows the rung ladder -- what each rung costs\n"
+        "and covers -- and runs nothing: measuring is a real incremental make\n"
+        "and takes the buildroot lock, so the command you run to ask \"what\n"
+        "would this do\" must not itself be a build. Add `--measure`, or type\n"
+        "`auto` out, to actually time the make and route on what it rebuilt --\n"
+        "a module push if one module changed, a boot image if the dtbs did, a\n"
+        "full kernel if the tree moved under it. `porthole build status` says\n"
+        "what the last one did."),
     "escapes_scope": True,
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
@@ -2229,6 +2252,10 @@ SPEC = {
                               "the workspace container -- needs pmbootstrap "
                               "installed here, with its chroots"}),
         (["--yes"], {"action": "store_true", "help": "actually build"}),
+        (["--measure"], {"action": "store_true",
+                        "help": "with no ACTION: time an incremental make "
+                                "and route on what it rebuilt, instead of "
+                                "just showing the ladder"}),
         (["--detach"], {"action": "store_true",
                         "help": "start the build in its own session and "
                                 "return; follow it with `build watch`"}),

@@ -641,6 +641,36 @@ def test_the_host_only_verbs_stay_under_their_budget():
         + "docs/PERFORMANCE.md, 'The verbs')")
 
 
+def test_a_hint_lands_on_the_same_stream_as_what_it_explains():
+    """Reproduced 2026-09-08: the slot warning went to stderr, its hint went
+    to stdout, and an unrelated error printed between them. The reader saw
+    warning, error, then advice belonging to the warning -- and `2>log`
+    captured the problem and lost the fix."""
+    import io
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+
+    err = io.StringIO()
+    out = cli.Out(stream=io.StringIO(), force_colour=False)
+    out.warn("slots were never probed", stream=err)
+    out.hint("porthole slots probe", "reads it from the bootloader", stream=err)
+    assert "slots probe" in err.getvalue()
+    assert "slots probe" not in out.stream.getvalue()
+
+
+def test_warn_and_hint_still_default_to_their_own_streams():
+    """No caller threads a stream: warn/error stay on stderr, an ordinary
+    hint stays on the Out's own stream -- same as before this rework."""
+    import io
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+
+    stream = io.StringIO()
+    out = cli.Out(stream=stream, force_colour=False)
+    out.hint("porthole build")
+    assert "porthole build" in stream.getvalue()
+
+
 def main():
     return _runner.run(globals())
 
