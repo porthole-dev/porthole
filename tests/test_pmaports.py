@@ -404,6 +404,25 @@ def test_append_numbers_from_one_when_there_is_no_series():
     assert aports.next_patch_number([]) == 1
 
 
+def test_switch_warning_names_the_count_and_says_nothing_stays():
+    """#79: starting a topic from the channel silently dropped work sitting
+    only on the branch you were standing on. The warning has to say how much
+    and that it will not be in the working tree -- the two things the old
+    success line left the reader to guess."""
+    import porthole_cmd_aports as aports
+
+    msg = aports._switch_warning("origin/main", "taimen-bringup", 255)
+    assert "taimen-bringup" in msg and "255" in msg and "origin/main" in msg
+    assert "working tree" in msg
+
+
+def test_switch_warning_is_silent_when_nothing_is_left_behind():
+    import porthole_cmd_aports as aports
+
+    assert aports._switch_warning("origin/main", "origin/main", 5) == ""
+    assert aports._switch_warning("origin/main", "taimen-bringup", 0) == ""
+
+
 def test_patches_checks_dropped_patches_before_it_unlinks_anything():
     """The order is load-bearing, not tidiness.
 
