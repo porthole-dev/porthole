@@ -351,11 +351,23 @@ def _docs_links(text: str, pages) -> str:
     Done here rather than by lowercasing the filenames on disk: the repository
     is the primary artefact and `docs/NEW-HOST.md` is the name people link to
     from commit messages and issues. The site is the copy, so the site adapts.
+
+    A FRAGMENT SURVIVES THE REWRITE. This matched on the closing paren --
+    `text.replace(f"](docs/{page})", ...)` -- so an anchored cross-reference
+    like `](docs/CONFIG.md#legacy-names)` matched nothing and reached the site
+    still pointing at `docs/CONFIG.md`, which does not exist there. mkdocs
+    strict turns that into a failed docs build: one anchored link added to
+    AGENTS.md took CI down while every unanchored link on the page kept
+    working, so the rewrite looked correct right up until somebody used an
+    anchor.
     """
     for page in pages:
-        text = text.replace(f"]({page})", f"]({page.lower()})")
-        # ...and the repo-relative form, which a page one directory up uses.
-        text = text.replace(f"](docs/{page})", f"]({page.lower()})")
+        low = page.lower()
+        # `](PAGE.md` or `](docs/PAGE.md`, then either `)` or `#fragment)`.
+        pattern = re.compile(r"\]\((?:docs/)?" + re.escape(page)
+                             + r"(#[^)]*)?\)")
+        text = pattern.sub(lambda m, low=low: f"]({low}{m.group(1) or ''})",
+                           text)
     return text
 
 
@@ -383,7 +395,12 @@ def cmd_build(args, ctx) -> int:
             (src / name.lower()).write_text(_docs_links(source.read_text(), pages))
     agents = root / "AGENTS.md"
     if agents.is_file():
-        (src / "agents.md").write_text(agents.read_text())
+        # THROUGH _docs_links, like every other copied page. This was a plain
+        # copy, so AGENTS.md's links into docs/ reached the site unrewritten.
+        # It went unnoticed because AGENTS.md happened to contain none until
+        # one `](docs/CONFIG.md#legacy-names)` was added, and mkdocs strict
+        # failed the whole docs build on it.
+        (src / "agents.md").write_text(_docs_links(agents.read_text(), pages))
 
     # -- generated reference --
     (src / "cli.md").write_text(page_cli(root))
