@@ -227,7 +227,7 @@ _UUID_LINE = "Filesystem UUID:"
 _LABEL_LINE = "Filesystem volume name:"
 
 
-def verify(runner, out, lay: dict, boot_uuid, root_uuid) -> list:
+def verify(runner, out, lay: dict, boot_uuid, root_uuid, user=None) -> list:
     """Read each partition back out of the assembled disk and check it.
 
     Offline, before anything is written to a phone, because flash_rootfs
@@ -237,6 +237,14 @@ def verify(runner, out, lay: dict, boot_uuid, root_uuid) -> list:
     Extracted with dd rather than read through a loop device, so
     verification works in exactly the place assembly does -- no root, no
     loop device, same as the assembler that produced the image.
+
+    `user`, when given, checks the root partition for the two things that
+    made an assembled image install and boot and then be UNREACHABLE: no
+    `~<user>/.ssh/authorized_keys` (nothing to log in with) and a surviving
+    `/in-pmbootstrap` marker (the device would misdetect itself as a build
+    chroot). Found on hardware on 2026-09-08 -- this is the difference
+    between catching it here, in seconds, and catching it after a 20-minute
+    flash.
     """
     problems = []
     for name, start, sectors, want_uuid, want_label in (
@@ -260,6 +268,25 @@ def verify(runner, out, lay: dict, boot_uuid, root_uuid) -> list:
             problems.append(
                 f"{name}: label is {got_label or '(none)'}, expected "
                 f"{want_label}")
+        if name == "root" and user:
+            # `ls -l`, not `stat`: debugfs sends a nonexistent `stat` target's
+            # "File not found by ext2_lookup" to STDERR, which this runner's
+            # contract (stdout only, on a nonzero-exit debugfs never
+            # produces) never sees -- silently, since debugfs itself still
+            # exits 0. `ls -l` puts its listing on stdout regardless, so
+            # presence is read off the listing directly rather than off an
+            # error message that might not even be visible.
+            ssh_ls = runner(["debugfs", "-R",
+                             f"ls -l /home/{user}/.ssh", part])
+            if "authorized_keys" not in _names(ssh_ls):
+                problems.append(
+                    f"root: no authorized_keys for {user} -- the phone "
+                    f"would install and boot with no way to log in")
+            root_ls = runner(["debugfs", "-R", "ls -l /", part])
+            if "in-pmbootstrap" in _names(root_ls):
+                problems.append(
+                    "root: /in-pmbootstrap is still there -- pmbootstrap on "
+                    "the device would misdetect itself as a build chroot")
         runner(["rm", "-f", part])
     return problems
 
@@ -269,3 +296,12 @@ def _field(text: str, prefix: str) -> str:
         if line.startswith(prefix):
             return line[len(prefix):].strip()
     return ""
+
+
+def _names(ls_output: str) -> set:
+    """Entry names out of `debugfs -R "ls -l ..."` output. The name is the
+    last whitespace-separated field of each line; an empty or error-only
+    listing (directory does not exist) yields an empty set, same as an
+    empty directory would -- both correctly read as "not present"."""
+    return {line.split()[-1] for line in (ls_output or "").splitlines()
+            if line.split()}

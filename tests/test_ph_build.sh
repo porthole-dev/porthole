@@ -769,6 +769,40 @@ is "mkinitfs -- which needs the chroot mounted -- runs before the unmount" \
 
 
 # ---------------------------------------------------------------------------
+# install_system_image does NINE things after formatting; --no-image skips
+# them all, and _ph_assemble_image originally reproduced two. A phone
+# flashed from that image installed, booted, and was UNREACHABLE: no ssh
+# key, and /in-pmbootstrap still present. Reproduced from
+# pmb/install/_install.py's rm(in-pmbootstrap), remove_mnt_pmbootstrap,
+# configure_apk and copy_ssh_keys -- against the chroot directly, since
+# porthole has no separate /mnt/install copy to run them against the way
+# pmbootstrap does.
+is "pmbootstrap's build-chroot marker is removed before shipping" \
+   "$(saw "$asmbody" "in-pmbootstrap")" "yes"
+is "the build-time local package mount point is cleaned up" \
+   "$(saw "$asmbody" "mnt/pmbootstrap")" "yes"
+is "the build machine's local apk repo line does not ship to the device" \
+   "$(saw "$asmbody" "etc/apk/repositories")" "yes"
+is "home is populated from skel when adduser left it empty" \
+   "$(saw "$asmbody" "etc/skel")" "yes"
+is "the configured developer keys are authorized" \
+   "$(saw "$asmbody" "authorized_keys")" "yes"
+is "porthole's own device key is authorized too, not just pmbootstrap's ssh_keys config" \
+   "$(saw "$asmbody" "device_key")" "yes"
+is "verify() is told which user's authorized_keys to check" \
+   "$(saw "$asmbody" "user=user")" "yes"
+
+# The removal steps need mnt/pmbootstrap's own bind already gone, or
+# remove_mnt_pmbootstrap's rmdir-only safety (never rm -r) would just leave
+# it in place -- so the unmount must still be the first of the new steps,
+# not the last.
+marker_line=$(printf '%s\n' "$asmbody" | grep -n '"in-pmbootstrap"' | head -1 | cut -d: -f1)
+is "the unmount runs before the new steps that assume the chroot is clean" \
+   "$([ -n "$mounts_line" ] && [ -n "$marker_line" ] && \
+      [ "$mounts_line" -lt "$marker_line" ] && echo yes)" "yes"
+
+
+# ---------------------------------------------------------------------------
 # The rootfs image: never flash one that did not come from this install.
 #
 # `install` writes boot.img into the rootfs chroot and THEN builds the disk

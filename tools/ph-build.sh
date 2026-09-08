@@ -969,6 +969,26 @@ _ph_install_rootfs() {
 # shutdown` -- see brain/findings/pmbootstrap-shutdown-unmounts-portholes-own-binds.md,
 # it takes porthole's own container binds with it), THEN the filesystems are
 # built.
+#
+# install_system_image does NINE things after formatting; --no-image skips
+# ALL of them, and this function originally reproduced only two (fstab,
+# mkinitfs). The other seven matter: a phone flashed from an image missing
+# them installed, booted, and was UNREACHABLE -- no ssh key, and
+# /in-pmbootstrap still present so pmbootstrap on the device would misdetect
+# itself as a build chroot. Reproduced from pmb/install/_install.py below,
+# not invented -- see that file's copy_files_from_chroot,
+# create_home_from_skel, configure_apk and copy_ssh_keys for the originals.
+#
+# pmbootstrap runs those against a FRESH copy at /mnt/install that never
+# carried /home over in the first place (copy_files_from_chroot excludes
+# it). porthole has no such copy -- mkfs.ext4 -d IS the copy -- so they run
+# directly against the chroot instead, and the unmount moves EARLIER, right
+# after mkinitfs and before them: removing /mnt/pmbootstrap needs it already
+# unmounted (rmdir, not rm -r -- see the comment on that step below), and
+# nothing else added here cares about the chroot's own mount state either
+# way. Verified on hardware 2026-09-08: /home/<user> exists but is EMPTY
+# (adduser -D does not copy skel on this base), so create_home_from_skel is
+# not redundant here the way it would be reading a fully-populated chroot.
 _ph_assemble_image() {
 	local chroot="$_PH_PMB/chroot_rootfs_${PORTHOLE_CODENAME}"
 	local out="$_PH_PMB/chroot_native/home/pmos/rootfs/${PORTHOLE_CODENAME}.img"
@@ -978,7 +998,7 @@ _ph_assemble_image() {
 	# argv, not read back out of the environment, because neither variable is
 	# exported.
 	python3 - "$chroot" "$out" "$_PH_REPO_ROOT" "${PORTHOLE_ARCH:-aarch64}" <<-'PY' || return 1
-	import pathlib, subprocess, sys
+	import glob, os, pathlib, shutil, subprocess, sys
 
 	chroot, out, repo_root, arch = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 	sys.path.insert(0, repo_root + "/lib")
@@ -1026,6 +1046,85 @@ _ph_assemble_image() {
 	        f"unmounting -- refusing to run mkfs.ext4 -d over what looks "
 	        f"like a live pseudo-filesystem rather than empty mount points")
 
+	# pmbootstrap's own marker that it is inside a build chroot. Shipped to
+	# the device, pmbootstrap there would misdetect itself as still being one.
+	(chroot / "in-pmbootstrap").unlink(missing_ok=True)
+
+	# remove_mnt_pmbootstrap: rmdir only, bottom-up, never rm -r. Anything
+	# still unexpectedly non-empty here (the unmount above missed something)
+	# is left alone rather than silently deleted -- the same safety property
+	# pmbootstrap's own version keeps, for the same reason: it might be data
+	# inside a mountpoint that did not actually go away.
+	mnt_pmb = chroot / "mnt/pmbootstrap"
+	if mnt_pmb.is_dir():
+	    for p in sorted(mnt_pmb.rglob("*"), key=lambda p: -len(p.parts)):
+	        if p.is_dir():
+	            try:
+	                p.rmdir()
+	            except OSError:
+	                pass
+	    try:
+	        mnt_pmb.rmdir()
+	    except OSError:
+	        pass
+
+	# configure_apk, the one part of it that is a correctness bug rather than
+	# a build-time convenience: /etc/apk/repositories names the build
+	# machine's local package repo, bind-mounted at /mnt/pmbootstrap/packages,
+	# which will not exist on the device. The official+local apk keys and an
+	# offline APKINDEX cache are NOT reproduced here -- every package this
+	# chroot installed already needed working keys in etc/apk/keys/ to
+	# verify, so pmbootstrap's own copy of them is redundant (confirmed
+	# against a real chroot 2026-09-08), and a primed index cache is a
+	# build-time nicety, not something a phone that can reach the network
+	# needs to boot or be logged into.
+	repos = chroot / "etc/apk/repositories"
+	if repos.exists():
+	    repos.write_text("\n".join(
+	        line for line in repos.read_text().splitlines()
+	        if "/mnt/pmbootstrap/packages" not in line) + "\n")
+
+	# create_home_from_skel + copy_ssh_keys: why the phone was unreachable.
+	# pmbootstrap runs both against the fresh /mnt/install copy that never
+	# carried /home over (copy_files_from_chroot excludes it) -- porthole
+	# builds straight from the chroot, where /home/<user> already exists
+	# (adduser -D made it while --no-image's install still ran) but was
+	# measured EMPTY on real hardware, so populate it from /etc/skel only if
+	# it still is.
+	user = run(["pmbootstrap", "config", "user"]).strip()
+	home = chroot / "home" / user
+	skel = chroot / "etc/skel"
+	if not home.exists() or not any(home.iterdir()):
+	    if skel.is_dir():
+	        shutil.copytree(skel, home, dirs_exist_ok=True)
+	    else:
+	        home.mkdir(parents=True, exist_ok=True)
+	run(["chown", "-R", "10000:10000", str(home)])
+
+	keys = []
+	if run(["pmbootstrap", "config", "ssh_keys"]).strip() == "True":
+	    glob_pat = run(["pmbootstrap", "config", "ssh_key_glob"]).strip()
+	    for path in glob.glob(os.path.expanduser(glob_pat)):
+	        try:
+	            keys.append(pathlib.Path(path).read_text())
+	        except (OSError, UnicodeDecodeError):
+	            pass
+	# porthole's own device key -- not pmbootstrap's concern, and not
+	# optional: every ssh-based rung (doctor, build boot, push-modules, ...)
+	# authenticates as this key, and without it a freshly-assembled image
+	# breaks every one of them even when a developer's own key was copied
+	# above. Derived from the private key mounted at /run/porthole/device_key
+	# (no .pub sibling is mounted) with ssh-keygen -y, the standard way to
+	# get a public key back out of a private one.
+	device_key = pathlib.Path("/run/porthole/device_key")
+	if device_key.exists():
+	    keys.append(run(["ssh-keygen", "-y", "-f", str(device_key)]))
+	if keys:
+	    ssh_dir = home / ".ssh"
+	    ssh_dir.mkdir(mode=0o700, exist_ok=True)
+	    (ssh_dir / "authorized_keys").write_text("".join(keys))
+	    run(["chown", "-R", "10000:10000", str(ssh_dir)])
+
 	size = sum(f.stat().st_size for f in chroot.rglob("*") if f.is_file())
 	boot_mb, root_mb = image.sizes(size)
 	lay = image.layout(boot_mb, root_mb, arch)
@@ -1040,7 +1139,7 @@ _ph_assemble_image() {
 	ok = False
 	try:
 	    image.assemble(run, chroot / "boot", chroot, out, lay, boot_uuid, root_uuid)
-	    problems = image.verify(run, out, lay, boot_uuid, root_uuid)
+	    problems = image.verify(run, out, lay, boot_uuid, root_uuid, user=user)
 	    if problems:
 	        for p in problems:
 	            print(f">> {p}", file=sys.stderr)
