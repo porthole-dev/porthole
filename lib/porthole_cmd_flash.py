@@ -130,9 +130,14 @@ def cmd_flash(args, ctx) -> int:
         raise Bail("this device is not ready to flash", EX_STATE,
                    "; ".join(gate_problems))
 
-    rc = _run(ctx, FUNCS[action], args.timeout)
+    # `rung=op.name` ("flash-boot"/"flash-full"), not the default -- without
+    # it `_run` falls back to `rung or func` and the LOG, THE STATUS FILE,
+    # THE PROGRESS BAR and this failure message all show `tkflash`, the name
+    # of a shell function in tools/ph-build.sh, not an operation anyone typed
+    # or would recognise.
+    rc = _run(ctx, FUNCS[action], args.timeout, rung=op.name)
     if rc != 0:
-        raise Bail(f"{FUNCS[action]} failed", EX_FAIL,
+        raise Bail(f"{op.name} failed", EX_FAIL,
                    "the device may be part-flashed; check it before rebooting")
     ctx.out(ctx.out.paint("  flashed", "green"))
     return EX_OK
