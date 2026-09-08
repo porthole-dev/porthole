@@ -7,8 +7,15 @@ nothing reporting what is growing -- see lib/porthole_cmd_disk.py's module
 docstring. `prunable()` and `divergence()` are the whole policy, pure, so
 these run with no filesystem and no real work dir.
 
+READ-ONLY vs DESTRUCTIVE IS A POSITIONAL ACTION, NOT A FLAG
+    `report` (the default) / `prune` / `retire-host` -- fix-round-3: a
+    boolean `--prune` could not be granted to an agent without ALSO
+    granting `--retire-host` in the same breath, because a permission rule
+    is a prefix match and cannot exclude a flag. A positional action word
+    fixes that (see lib/porthole_cmd_disk.py's own module docstring).
+
 DESTRUCTIVE PATHS RUN AGAINST PRIVATE TEMPDIRS ONLY
-    `--prune --yes` and `--retire-host --yes --discard-host-workdir` are
+    `prune --yes` and `retire-host --yes --discard-host-workdir` are
     exercised end-to-end here, but always with PORTHOLE_PMB_DIR /
     PORTHOLE_SANDBOX_PMB_DIR pointed at a throwaway
     tempfile.TemporaryDirectory() this test owns -- never at
@@ -227,7 +234,7 @@ def test_prune_without_yes_is_refused_and_deletes_nothing():
 
         env = _env(tmp / "home", PORTHOLE_PMB_DIR=str(host),
                   PORTHOLE_SANDBOX_PMB_DIR=str(sbox))
-        rc, out, err = _run("disk", "--keep-revisions", "0", "--prune",
+        rc, out, err = _run("disk", "prune", "--keep-revisions", "0",
                             "--json", env=env)
         assert rc != 0, out
         payload = json.loads(out)
@@ -246,7 +253,7 @@ def test_prune_yes_deletes_only_the_prunable_apks():
 
         env = _env(tmp / "home", PORTHOLE_PMB_DIR=str(host),
                   PORTHOLE_SANDBOX_PMB_DIR=str(sbox))
-        rc, out, err = _run("disk", "--keep-revisions", "2", "--prune",
+        rc, out, err = _run("disk", "prune", "--keep-revisions", "2",
                             "--yes", "--json", env=env)
         assert rc == 0, err
         remaining = sorted(p.name for p in pkgdir.glob("*.apk"))
@@ -262,10 +269,10 @@ def _pmb_shaped(base: pathlib.Path) -> pathlib.Path:
 
 
 def test_retire_host_alone_only_previews_and_deletes_nothing():
-    """Fix-round-1: `--retire-host` alone must PREVIEW (rc 0, nothing
-    touched), the same way a bare `porthole flash` previews -- it no longer
-    refuses for a missing --yes, since --yes alone is not enough to run it
-    either (see the next test)."""
+    """`retire-host` alone must PREVIEW (rc 0, nothing touched), the same
+    way a bare `porthole flash` previews -- it does not refuse for a
+    missing --yes, since --yes alone is not enough to run it either (see
+    the next test)."""
     with tempfile.TemporaryDirectory(prefix="porthole-disk-cli-") as tmp:
         tmp = pathlib.Path(tmp)
         host, sbox = _pmb_shaped(tmp / "host-pmb"), tmp / "sbox-pmb"
@@ -273,7 +280,7 @@ def test_retire_host_alone_only_previews_and_deletes_nothing():
 
         env = _env(tmp / "home", PORTHOLE_PMB_DIR=str(host),
                   PORTHOLE_SANDBOX_PMB_DIR=str(sbox))
-        rc, out, err = _run("disk", "--retire-host", "--json", env=env)
+        rc, out, err = _run("disk", "retire-host", "--json", env=env)
         assert rc == 0, err
         payload = json.loads(out)
         assert payload["would_retire"] == str(host), payload
@@ -290,7 +297,7 @@ def test_retire_host_yes_without_the_second_flag_is_refused():
 
         env = _env(tmp / "home", PORTHOLE_PMB_DIR=str(host),
                   PORTHOLE_SANDBOX_PMB_DIR=str(sbox))
-        rc, out, err = _run("disk", "--retire-host", "--yes", "--json",
+        rc, out, err = _run("disk", "retire-host", "--yes", "--json",
                             env=env)
         assert rc != 0, out
         payload = json.loads(out)
@@ -310,7 +317,7 @@ def test_retire_host_refuses_a_dir_that_does_not_look_like_a_pmb_workdir():
 
         env = _env(tmp / "home", PORTHOLE_PMB_DIR=str(host),
                   PORTHOLE_SANDBOX_PMB_DIR=str(sbox))
-        rc, out, err = _run("disk", "--retire-host", "--yes",
+        rc, out, err = _run("disk", "retire-host", "--yes",
                             "--discard-host-workdir", "--json", env=env)
         assert rc != 0, out
         payload = json.loads(out)
@@ -328,13 +335,44 @@ def test_retire_host_full_flags_deletes_only_the_host_dir():
 
         env = _env(tmp / "home", PORTHOLE_PMB_DIR=str(host),
                   PORTHOLE_SANDBOX_PMB_DIR=str(sbox))
-        rc, out, err = _run("disk", "--retire-host", "--yes",
+        rc, out, err = _run("disk", "retire-host", "--yes",
                             "--discard-host-workdir", "--json", env=env)
         assert rc == 0, err
         payload = json.loads(out)
         assert payload["retired"] == str(host), payload
         assert not host.exists(), "host work dir must be gone"
         assert (sbox / "marker").is_file(), "sandbox must be untouched"
+
+
+def test_report_is_the_default_and_the_explicit_action():
+    """`porthole disk` and `porthole disk report` must answer identically --
+    the whole reason a bare invocation stays a synonym for the explicit
+    action, rather than requiring `report` to be typed."""
+    with tempfile.TemporaryDirectory(prefix="porthole-disk-cli-") as tmp:
+        tmp = pathlib.Path(tmp)
+        host, sbox = _pmb_shaped(tmp / "host-pmb"), tmp / "sbox-pmb"
+
+        env = _env(tmp / "home", PORTHOLE_PMB_DIR=str(host),
+                  PORTHOLE_SANDBOX_PMB_DIR=str(sbox))
+        rc1, out1, err1 = _run("disk", "--json", env=env)
+        rc2, out2, err2 = _run("disk", "report", "--json", env=env)
+        assert rc1 == rc2 == 0, (err1, err2)
+        p1, p2 = json.loads(out1), json.loads(out2)
+        # free_bytes is real free space on /tmp, sampled twice a process
+        # apart -- under a parallel test run other workers are writing to
+        # /tmp at the same moment, so it is the one field allowed to differ
+        # between two calls a heartbeat apart. Everything this dispatch
+        # actually computes (sizes, prunable, divergence) must match.
+        for payload in (p1, p2):
+            payload["host"].pop("free_bytes", None)
+        assert p1 == p2
+
+
+def test_an_unknown_action_is_a_usage_error():
+    with tempfile.TemporaryDirectory(prefix="porthole-disk-cli-") as tmp:
+        env = _env(pathlib.Path(tmp) / "home")
+        rc, out, err = _run("disk", "bogus", env=env)
+        assert rc == 64, (rc, out, err)
 
 
 def test_text_output_summarizes_divergence_verbose_shows_every_revision():
