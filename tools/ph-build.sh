@@ -959,6 +959,13 @@ _ph_install_rootfs() {
 # order inverts -- fstab, mkinitfs, then build the filesystems around them.
 # That is what makes the boot.img cmdline and the rootfs agree by
 # construction instead of by verification.
+#
+# One more inversion mkinitfs forces: it needs the chroot MOUNTED (it is
+# still `pmbootstrap chroot`), but mkfs.ext4 -d recurses the whole tree and
+# cannot read a live /proc -- "Permission denied while opening auxv to copy",
+# measured against a real chroot on 2026-09-08. pmbootstrap never hits this
+# because install_system_image unmounts before copying files out; so mkinitfs
+# runs first, THEN `pmbootstrap shutdown`, THEN the filesystems are built.
 _ph_assemble_image() {
 	local chroot="$_PH_PMB/chroot_rootfs_${PORTHOLE_CODENAME}"
 	local out="$_PH_PMB/chroot_native/home/pmos/rootfs/${PORTHOLE_CODENAME}.img"
@@ -986,6 +993,22 @@ _ph_assemble_image() {
 	boot_uuid, root_uuid = image.uuids()
 	(chroot / "etc/fstab").write_text(image.fstab(boot_uuid, root_uuid))
 	run(["pmbootstrap", "chroot", "-r", "--", "mkinitfs"])
+
+	# mkinitfs needed the chroot mounted; mkfs.ext4 -d must not see it mounted.
+	# `pmbootstrap shutdown` is the unmount pmbootstrap itself uses -- a
+	# rootless workspace's recursive /dev bind resists individual umount
+	# calls (brain/findings/what-a-rootless-workspace-cannot-do.md #5), and
+	# pmbootstrap's own zap dies on exactly that, so this is not
+	# hand-rolled.
+	run(["pmbootstrap", "shutdown"])
+	live = [name for name in ("proc", "sys", "dev")
+	       if (chroot / name).is_dir() and any((chroot / name).iterdir())]
+	if live:
+	    raise SystemExit(
+	        f">> {', '.join(live)} still has entries under {chroot} after "
+	        f"`pmbootstrap shutdown` -- refusing to run mkfs.ext4 -d over "
+	        f"what looks like a live pseudo-filesystem rather than empty "
+	        f"mount points")
 
 	size = sum(f.stat().st_size for f in chroot.rglob("*") if f.is_file())
 	boot_mb, root_mb = image.sizes(size)

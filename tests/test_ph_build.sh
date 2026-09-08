@@ -742,6 +742,21 @@ is "mkinitfs runs, so the cmdline carries the chosen UUIDs" \
 is "assembly goes through the module that verifies it" \
    "$(saw "$asmbody" "porthole_image")" "yes"
 
+# mkfs.ext4 -d recurses the whole chroot and cannot read a live procfs --
+# "Permission denied while opening auxv to copy", measured against a real
+# chroot on 2026-09-08. pmbootstrap avoids this itself by unmounting before
+# copying files out; porthole must do the same, and only after mkinitfs,
+# which needs the chroot still mounted.
+is "the chroot is unmounted before mkfs.ext4 runs over it" \
+   "$(saw "$asmbody" "shutdown")" "yes"
+is "a live proc/sys/dev after shutdown refuses rather than lets mkfs.ext4 fail opaquely" \
+   "$(saw "$asmbody" "still has entries")" "yes"
+mkinitfs_line=$(printf '%s\n' "$asmbody" | grep -n '"mkinitfs"' | head -1 | cut -d: -f1)
+shutdown_line=$(printf '%s\n' "$asmbody" | grep -n '"shutdown"' | head -1 | cut -d: -f1)
+is "mkinitfs -- which needs the chroot mounted -- runs before the shutdown" \
+   "$([ -n "$mkinitfs_line" ] && [ -n "$shutdown_line" ] && \
+      [ "$mkinitfs_line" -lt "$shutdown_line" ] && echo yes)" "yes"
+
 
 # ---------------------------------------------------------------------------
 # The rootfs image: never flash one that did not come from this install.
