@@ -11,8 +11,8 @@ envkernel loop from a runbook.
 
 These verbs source it in a subshell and call the function, so the sourced-env
 requirement is honoured and the capability becomes addressable: `porthole
-build`, `porthole flash`, and therefore also `porthole next`, the TUI, and any
-agent reading the verb table.
+build`, `porthole flash`, and therefore also `porthole next` and any agent
+reading the verb table.
 
 Flashing is irreversible on the wrong slot, so it goes through the same
 confirmation boundary as everything else: `--yes` or nothing happens.

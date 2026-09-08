@@ -169,9 +169,9 @@ ran.
 
 Binding, no exceptions, in this order:
 
-1. `make ci` locally — **not** `make check`, which skips the console, smoke and
+1. `make ci` locally — **not** `make check`, which skips the smoke and
    python-floor jobs that CI still runs.
-2. All seven CI jobs green on the PR.
+2. All six CI jobs green on the PR.
 3. For a change to a *check*, the check must be shown to fail without the fix.
    `brain/laws/every-test-needs-a-positive-control.md` already says this; it is
    not in the PR template, and it is the rule that would have caught the
@@ -583,13 +583,15 @@ certifies the bug.
 green the day they landed, which is the argument for adding them now rather
 than after the first regression.
 
-**The stdlib-only claim in this section was wrong.** "Verified: every import in
-`lib/` is stdlib" does not hold — `lib/porthole_tui/` imports `textual` and
-`rich`. That is not a defect, it is the optional console extra: CI installs
-textual for one job, and the matrix jobs run the same files without it, where
-they skip. So the rule is `lib/` is stdlib-only **outside `lib/porthole_tui/`**,
-and it is enforced in both directions — nothing outside the extra may import a
-dependency, and the carve-out cannot widen without failing.
+**The stdlib-only claim in this section was wrong, at the time.** "Verified:
+every import in `lib/` is stdlib" did not hold — `lib/porthole_tui/` imported
+`textual` and `rich`. That was not a defect, it was the optional console
+extra: CI installed textual for one job, and the matrix jobs ran the same
+files without it, where they skipped. So the rule was `lib/` is stdlib-only
+**outside `lib/porthole_tui/`**, enforced in both directions. **The console
+was deleted afterward** (it was not worth maintaining, and the CLI experience
+was where the effort belonged); the carve-out went with it, and `lib/` is now
+stdlib-only with no exception at all.
 
 **The exit-code test found a defect on its first run.** `porthole_cli.py`
 returned a bare `130` for `KeyboardInterrupt` and the table in §6 of

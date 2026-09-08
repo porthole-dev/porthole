@@ -20,10 +20,9 @@ WHY THIS EXISTS
 
 WHY PORTHOLE OWNS IT RATHER THAN A HAND-WRITTEN settings.json
     An allowlist is only as good as its idea of "safe", and porthole already
-    has the only tested one in this repo: `porthole_tui.safety.is_risky`, the
-    second opinion the console applies over its own table before it runs
-    anything. Every tool's header also declares `needs:`, so the toolbox
-    already knows which of its 136 tools move a device.
+    has the only tested one in this repo: `is_risky` below, a word match over
+    a tool's name and summary. Every tool's header also declares `needs:`, so
+    the toolbox already knows which of its 136 tools move a device.
 
     A list typed into somebody's settings file knows none of that and goes
     stale the day a tool is added. So the tool rules here are DERIVED from the
@@ -58,13 +57,24 @@ from porthole_cli import Bail, EX_FAIL, EX_OK
 from porthole_cmd_statusline import (LOCAL_SETTINGS, _exclude_locally,
                                      _git_excluded)
 from porthole_cmd_tools import collect
-from porthole_tui.safety import is_risky
 
 # Claude Code's pattern language: `Bash(x:*)` matches any command line whose
 # first token(s) are `x`. Prefix matching and nothing else -- there is no way
 # to write "ssh, but only to the phone". So a rule may be granted only when
 # EVERY command line it can match is one we would have approved by hand, and
 # `ssh` therefore cannot appear here however much the porter wants it to.
+
+# Words that mean a tool's name or summary names something irreversible. Used
+# to have a second home in the now-deleted console's safety.py, which applied
+# the same second opinion over its own milestone table before running
+# anything; this verb is the only caller left, so the words live here.
+DANGEROUS = ("flash", "set_active", "erase", "format", "dd ", "mkfs",
+             "reboot", "fastboot", "install", "zap", "rm ", "ramp", "recover")
+
+
+def is_risky(command):
+    """Does the command TEXT name something irreversible?"""
+    return bool(command) and any(word in command for word in DANGEROUS)
 
 
 # Verbs granted whole. Each of these reads: it prints the config, the
@@ -110,7 +120,6 @@ DENIED_VERBS = {
     "blobs":      "extracts vendor images; long, and it writes",
     "brain":      "`brain submit` opens a pull request; search is granted below",
     "docs":       "generates the site into the working tree",
-    "tui":        "an interactive full-screen app; an agent must not open one",
     "permissions":
         "a verb that widens an allowlist must not be inside it -- an agent "
         "that could run `--install` could grant itself the rest",
@@ -190,12 +199,7 @@ def _why_risky(subject: str) -> str:
     would have granted. That bias is the right way round -- a held-back tool
     costs one approval, a wrongly granted one runs unattended against a phone
     -- but the reason has to admit it, or an auditor reads `ph-capture.sh:
-    names rm` and concludes the table is nonsense rather than cautious.
-
-    The narrower matcher belongs in safety.py if anywhere, where the console
-    would get it too; it is not worth a second opinion that disagrees with the
-    first."""
-    from porthole_tui.safety import DANGEROUS
+    names rm` and concludes the table is nonsense rather than cautious."""
     hits = sorted({word.strip() for word in DANGEROUS if word in subject})
     where = [f"{w} (in {_fragment(subject, w)!r})" for w in hits]
     return "matches " + ", ".join(where)
@@ -376,11 +380,9 @@ SPEC = {
         "port the same twenty recur all day -- so a porter answers the same\n"
         "questions in every repo, forever.\n\n"
         "The list is DERIVED, not typed: a tool is granted only when\n"
-        "`porthole_tui.safety.is_risky` -- the same second opinion the\n"
-        "console applies before it runs anything -- says its name and summary\n"
-        "name nothing irreversible. Nothing that flashes, reboots, changes a\n"
-        "slot or ramps a thermal load is in it, and the preview says what was\n"
-        "held back and why.\n\n"
+        "`is_risky` says its name and summary name nothing irreversible.\n"
+        "Nothing that flashes, reboots, changes a slot or ramps a thermal\n"
+        "load is in it, and the preview says what was held back and why.\n\n"
         "With no flags this is a preview and writes nothing. `--install`\n"
         "merges into a project's .claude/settings.local.json, keeping what is\n"
         "already there, ignored via .git/info/exclude so it is never a tracked\n"

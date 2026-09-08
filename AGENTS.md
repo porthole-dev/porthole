@@ -79,7 +79,7 @@ rule cost to learn, and how to follow it.
 - **Found the device in a state you did not put it in? Say so and hand back** — it is usually someone else's measurement in progress, not a fault, and recovering it destroys their run
   (`hand-back-a-device-you-did-not-set` · **SHOULD** · no enforcer, and so not a MUST)
 - **Confirm before anything irreversible** — flashing, set_active, thermal ramps -- a bad image on the wrong slot leaves a device that will not boot and cannot be talked to
-  (`confirm-before-irreversible` · **MUST** · enforced by `tests/test_cli_rules.py::test_verbs_escaping_their_scope_require_yes`, `tests/test_tui_safety.py::test_no_safe_milestone_command_is_irreversible`)
+  (`confirm-before-irreversible` · **MUST** · enforced by `tests/test_cli_rules.py::test_verbs_escaping_their_scope_require_yes`)
 - **Never ask for host root; builds go through `porthole sandbox`** — the sandbox grants zero standing host privilege, and a tool that escalates on the host is the one bug this design exists to prevent
   (`no-host-root` · **MUST** · enforced by `tests/test_cli.py::test_init_prints_the_sudoers_snippet_rather_than_applying_it`, `tests/test_sandbox_container.py::test_up_argv_maps_container_root_to_our_uid`)
 - **Never hardcode an IP, username, slot letter or package name** — every one of them comes from the config layer; a hardcoded value is a tool that works on exactly one desk
@@ -106,7 +106,7 @@ rule cost to learn, and how to follow it.
   (`pr-after-the-work` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
 - **Point this clone at the hooks once: `git config core.hooksPath .githooks`** — git ignores in-repo hooks until told, so a fresh clone has the secret scanner and the trailer strip both switched off and no way to notice; `porthole brief` says which clones do
   (`hooks-installed` · **SHOULD** · enforced by `lib/porthole_cmd_brief.py`)
-- **Run `make ci`, not `make check`, before opening a pull request** — `make check` skips the console, smoke and python-floor jobs that CI still runs
+- **Run `make ci`, not `make check`, before opening a pull request** — `make check` skips the smoke and python-floor jobs that CI still runs
   (`make-ci-before-pushing` · **SHOULD** · no enforcer, and so not a MUST)
 - **Changing a check means showing it fail without the fix** — every-test-needs-a-positive-control; the slots fixture used a spelling no device emits and so held the parser bug in place
   (`a-check-must-fail-without-its-fix` · **SHOULD** · no enforcer, and so not a MUST)
@@ -114,8 +114,8 @@ rule cost to learn, and how to follow it.
   (`tool-header-fields` · **MUST** · enforced by `tests/test_tools.py::test_every_tool_declares_the_four_fields`)
 - **A device-specific probe lives in `profiles/<codename>/tools/`** — in tools/ it reads as generic, and the next porter runs it on the wrong phone
   (`device-tools-live-in-a-profile` · **MUST** · enforced by `tests/test_tools.py::test_device_scoped_tools_live_in_a_profile`)
-- **`lib/` is stdlib-only, except `lib/porthole_tui/` which is the optional console extra** — the CLI must work on a bare 3.8 with nothing installed; the console degrades to a skip when textual is absent
-  (`stdlib-only` · **MUST** · enforced by `tests/test_conventions.py::test_lib_is_stdlib_only_outside_the_console_extra`)
+- **`lib/` is stdlib-only, no exceptions** — the CLI must work on a bare 3.8 with nothing installed; a dependency is the one thing that would break it silently on someone else's machine
+  (`stdlib-only` · **MUST** · enforced by `tests/test_conventions.py::test_lib_is_stdlib_only_with_no_exceptions`)
 - **Exit codes come from the documented table and nowhere else** — exit-codes-are-an-api; 69 versus 1 is the difference between 'the check did not happen' and 'the check failed'
   (`exit-codes-are-an-api` · **MUST** · enforced by `tests/test_conventions.py::test_exit_codes_come_from_the_documented_table`)
 - **Python 3.8 is the floor, and bin/porthole, the Makefile and CI agree on it** — a PEP 701 f-string compiled locally on 3.14 and broke every CI job
@@ -524,7 +524,7 @@ portability is worse than scoping narrowly.
 | a device fact | `profiles/<codename>/device.env` | — |
 
 `make ci` before you claim it works -- not `make check`, which skips the
-console, smoke and python-floor jobs that CI will still run. Every CI job is a
+smoke and python-floor jobs that CI will still run. Every CI job is a
 make target, so green locally is green on GitHub. The tool contract is enforced
 by `tests/test_tools.py`, not by review diligence.
 
@@ -604,7 +604,6 @@ nothing else — it will burn a long time and return BLOCKED.
 | verb | does | json | writes outside its profile |
 |---|---|---|---|
 | `init` | set this host up: identity, address, build tier, pmaports, repo | yes | needs --yes |
-| `tui` | open the console: progress, devices, tools, notes, in one screen | no | no |
 | `use` | switch the active device profile, and its working repo | yes | no |
 | `cd` | print a path to cd into: workdir, kernel, pmaports, profile | no | no |
 | `next` | where am I in this port, and what is the one next thing | yes | no |
@@ -626,6 +625,8 @@ nothing else — it will burn a long time and return BLOCKED.
 | `kconfig` | catch the kernel symbols olddefconfig silently dropped | yes | no |
 | `build` | build the kernel and package it, through envkernel | yes | needs --yes |
 | `flash` | flash the built boot image, honouring the slot policy | yes | needs --yes |
+| `log` | list, follow and rotate the build logs .run/ has been accumulating | yes | no |
+| `disk` | report the disk two divergent pmbootstrap work dirs are spending, and what is prunable | yes | needs --yes |
 | `devices` | list device profiles | yes | no |
 | `aports` | work on pmaports: status, feature branches, diffs, patches | yes | needs --yes |
 | `channel` | see and switch the postmarketOS release channel | yes | no |
