@@ -57,12 +57,21 @@ PORTHOLE_USES = {
 # finding about the user's packages. See this module's docstring.
 GUARDED_AT_CALL_SITE = frozenset({"lint"})
 
-# An argv list whose first element is pmbootstrap, or a shell line starting
-# with the word. Anchored to the invocation so prose that merely mentions
-# pmbootstrap -- of which there is a great deal in this repo's comments --
-# cannot be mistaken for a call.
+# An argv list whose first element is pmbootstrap, or a shell command in
+# COMMAND POSITION starting with the word -- start of line, or right after a
+# control keyword (if/elif/while/until/then/do/else) or an operator
+# (;  &&  ||  |  !). That still excludes prose: every mention of pmbootstrap
+# in this repo's many comments is either the first word after `#` (not a
+# control keyword or operator) or embedded mid-sentence ("pmbootstrap's",
+# "pmbootstrap never hits this"), so none of them sit in command position.
+# `if pmbootstrap install ...; then` used to slip past the old start-of-line
+# anchor entirely -- losing `install`, the subcommand every install rung
+# depends on, and losing it silently: see this module's own warning below
+# about a scan that finds too little.
 _CALL_PY = re.compile(r'"pmbootstrap"(?:,\s*"-[^"]*")*,\s*"([a-z_]+)"')
-_CALL_SH = re.compile(r'^\s*pmbootstrap(?:\s+-\S+)*\s+([a-z_]+)\b', re.M)
+_CALL_SH = re.compile(
+    r'(?:^[ \t]*|[;&|!]+[ \t]*|\b(?:if|elif|while|until|then|do|else)\b[ \t]+)'
+    r'pmbootstrap(?:\s+-\S+)*\s+([a-z_]+)\b', re.M)
 # porthole_cmd_aports.pmb() builds the argv itself, so its callers name the
 # subcommand and pmbootstrap never appears beside it. Without this the scan is
 # blind to checksum, lint and pkgrel_bump -- which happen to be hand-listed
@@ -87,7 +96,14 @@ def invoked_subcommands(root) -> set:
         found.update(_CALL_PY.findall(text))
         found.update(_CALL_HELPER.findall(text))
     for path in sorted((root / "tools").glob("*.sh")):
-        found.update(_CALL_SH.findall(path.read_text(errors="replace")))
+        # _CALL_PY too: a Python heredoc inside a .sh file (see
+        # _ph_assemble_image in tools/ph-build.sh) calls pmbootstrap with the
+        # same `["pmbootstrap", ..., "sub"]` argv shape _CALL_PY already
+        # knows, and _CALL_SH cannot see into it -- it is python text sitting
+        # inside a shell file, not a shell command.
+        text = path.read_text(errors="replace")
+        found.update(_CALL_SH.findall(text))
+        found.update(_CALL_PY.findall(text))
     return found
 
 
