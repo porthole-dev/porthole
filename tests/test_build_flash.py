@@ -99,6 +99,169 @@ def test_flash_warns_when_the_slot_layout_was_never_probed():
     assert "never probed" in (out + err) or "SLOTS_PROBED" in (out + err)
 
 
+def test_flash_preview_via_cli_does_not_refuse_when_booted():
+    """The literal repro: `porthole flash` with no --yes against a BOOTED
+    device used to exit non-zero with EX_STATE before printing anything."""
+    rc, out, err = run("-d", DEV, "flash", env={"TK_DEVICE_STATE": "BOOTED"})
+    assert rc == 0, err + out
+    assert "would flash" in out
+
+
+# ------------------------------------------------- flash: boot vs full --
+
+def _flash_args(action="boot", yes=False, slot=None, force=False,
+                replace_rootfs=False, timeout=1800):
+    """An argparse.Namespace shaped like the real parser's output for
+    `flash` -- enough to drive cmd_flash() directly, with no subprocess."""
+    return argparse.Namespace(action=action, yes=yes, slot=slot, force=force,
+                              replace_rootfs=replace_rootfs, timeout=timeout,
+                              json=False)
+
+
+class _FlashPreviewOut:
+    """A ctx.out that records every rendered line into `.text`.
+
+    `_FakeCtx._FakeOut` above swallows everything, which is right for the
+    slot-preview tests (they read real subprocess stdout) and wrong for
+    these -- they call cmd_flash() in-process and need to see what the
+    preview actually said.
+    """
+
+    def __init__(self):
+        self._lines = []
+
+    @property
+    def text(self):
+        return "\n".join(self._lines)
+
+    def __call__(self, *parts):
+        self._lines.append(" ".join(str(p) for p in parts))
+
+    def heading(self, text):
+        self._lines.append(text)
+
+    def kv(self, key, value, width=0, note=""):
+        self._lines.append(f"{key} {value} {note}".rstrip())
+
+    def blank(self):
+        self._lines.append("")
+
+    def hint(self, text, note=""):
+        self._lines.append(f"{text} {note}".rstrip())
+
+    def warn(self, text):
+        self._lines.append(f"warning: {text}")
+
+    def paint(self, s, _color):
+        return s
+
+
+class _FakeFlashDevice:
+    def __init__(self, state):
+        self._state = state
+
+    def state(self, max_age=0.0):
+        return self._state
+
+
+def _fake_ctx(state="BOOTED", cfg=None):
+    """A ctx good enough to drive cmd_flash() with no real profile and no
+    device probe -- `state` is handed straight to a stub device()."""
+    merged = {"PORTHOLE_DEVICE": DEV, "PORTHOLE_DTB": "msm8998-taimen.dtb"}
+    merged.update(cfg or {})
+
+    class _Ctx:
+        def __init__(self):
+            self.cfg = merged
+            self.out = _FlashPreviewOut()
+            self.root = ROOT
+            self.args = argparse.Namespace(wait=0.0)
+
+        def device(self):
+            return _FakeFlashDevice(state)
+
+        def emit(self, payload, render=None):
+            if render:
+                render()
+            return 0
+
+    return _Ctx()
+
+
+def test_the_flash_preview_works_while_the_device_is_booted():
+    """Reproduced 2026-09-08: `porthole flash` with no --yes refused with
+    EX_STATE because the device was BOOTED. The preview is the thing you run
+    to find out what would happen; gating it behind the state it is telling
+    you about is backwards."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="boot", yes=False)
+    ctx = _fake_ctx(state="BOOTED")
+    rc = flash.cmd_flash(args, ctx)
+    assert rc == 0
+    assert "would flash" in ctx.out.text
+
+
+def test_the_preview_offers_to_move_the_device_rather_than_only_refusing():
+    """ph-to-fastboot.sh exists precisely for this and nothing offered it."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="boot", yes=False)
+    ctx = _fake_ctx(state="BOOTED")
+    flash.cmd_flash(args, ctx)
+    assert ("ph-to-fastboot" in ctx.out.text
+           or "reboot it to the bootloader" in ctx.out.text)
+
+
+def test_flashing_boot_only_does_not_touch_the_rootfs():
+    """tkflash-boot existed and no verb could reach it, so the only flash
+    available replaced everything."""
+    import porthole_cmd_flash as flash
+    assert flash.FUNCS["boot"] == "tkflash-boot"
+    assert flash.FUNCS["full"] == "tkflash"
+
+
+def test_a_full_flash_is_refused_without_the_flag_that_names_the_loss():
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="full", yes=True)   # --yes alone
+    ctx = _fake_ctx(state="FASTBOOT")
+    try:
+        flash.cmd_flash(args, ctx)
+        assert False, "a rootfs replacement ran on --yes alone"
+    except Exception as exc:
+        assert "--replace-rootfs" in str(exc)
+
+
+def test_a_boot_only_flash_runs_on_yes_alone_when_the_device_is_ready():
+    """The other half of the same rule: `boot` must not also demand
+    --replace-rootfs -- it touches no rootfs, there is nothing to name."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="boot", yes=True)
+    ctx = _fake_ctx(state="FASTBOOT")
+    calls = []
+    real_run = flash._run
+    flash._run = lambda ctx, func, timeout, *a, **k: calls.append(func) or 0
+    try:
+        rc = flash.cmd_flash(args, ctx)
+    finally:
+        flash._run = real_run
+    assert rc == 0
+    assert calls == ["tkflash-boot"]
+
+
+def test_a_real_flash_still_refuses_the_wrong_state():
+    """Preserved: an actual write (not a preview) still refuses EX_STATE
+    when the device disagrees, exactly as before this rework."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_STATE
+    args = _flash_args(action="boot", yes=True)
+    ctx = _fake_ctx(state="BOOTED")
+    try:
+        flash.cmd_flash(args, ctx)
+        assert False, "a real flash ran against a BOOTED device"
+    except Bail as exc:
+        assert exc.code == EX_STATE
+        assert "FASTBOOT" in exc.hint
+
+
 def test_build_does_nothing_without_yes():
     # The per-device workdir lives in the user config, which this harness
     # deliberately does not have -- so supply it the way a one-off would.
