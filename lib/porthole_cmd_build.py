@@ -323,21 +323,28 @@ def _preflight(ctx, action: str = "") -> list[str]:
     # `auto` measures with a make and then routes; it needs whatever the
     # cheapest kernel rung needs.
     op = plan.OPS.get(name) or plan.op("mod")
-    facts = sites.facts(ctx)
-    problems = plan.unmet(op, facts)
 
+    # The site has to be resolved BEFORE the facts that depend on it.
+    # CHROOT_INSTALLED and free_gb both read a site-specific work dir, and
+    # deriving "is the workspace usable" independently of the site --host
+    # actually chose is the bug a review reproduced twice: a false refusal
+    # (an installed HOST chroot read as missing while an unrelated
+    # workspace happened to be running) and a false CLEAR (an uninstalled
+    # HOST chroot never checked because facts() read a populated SANDBOX
+    # chroot instead) -- the second is the exact failure class this rework
+    # exists to end. `sites.facts` takes the already-resolved site for
+    # exactly this reason.
     host_can_image = sites.can_make_image(plan.HOST, sites.loop_exists())
     site, why = sites.choose_from(op, sites.available(ctx),
                                   prefer=_preferred_site(ctx),
                                   host_can_image=host_can_image)
+    facts = sites.facts(ctx, site=site)
+    problems = plan.unmet(op, facts)
     if site is None:
         problems.append(why)
-    # The site the checks below have to read is the one just chosen -- which
-    # SITE-SPECIFIC pmbootstrap work dir `--host` or `prefer` actually points
-    # at -- not an independent "is the workspace usable" query that would
-    # silently disagree with it. When nothing was available `site` is None
-    # and there is already a problem about that; `usable(ctx)` is still a
-    # reasonable place to look.
+    # The devkernel checks below need the same site-specific work dir.
+    # When nothing was available `site` is None and there is already a
+    # problem about that; `usable(ctx)` is still a reasonable place to look.
     in_container = (site == plan.SANDBOX) if site else sites.usable(ctx)[0]
 
     # Both halves of `_ph_assert_no_devpkgs`, gated on the manifest rather
@@ -384,37 +391,19 @@ def _preflight(ctx, action: str = "") -> list[str]:
 # A kernel tree and its objects sit on top of that. These are the headroom a
 # build needs to FINISH, not the size of the result -- which is the number that
 # matters, because running out at minute forty costs the whole build.
-SPACE_FLOOR_GB = 5      # below this a build cannot finish; refuse
-SPACE_WARN_GB = 20      # below this it may, and it is worth saying so
+#
+# The refusal half of this comment used to live here too (SPACE_FLOOR_GB,
+# _space_problems): removed -- plan.unmet's per-op `disk_gb` against
+# facts()["free_gb"] supersedes it now that facts() has its own walk-up (see
+# porthole_sites.facts), and two independent space-refusal mechanisms is one
+# more than anyone will keep in agreement. This warning is a DIFFERENT
+# thing -- tight but survivable, not a refusal -- and stays.
+SPACE_WARN_GB = 20      # below this it may finish, and it is worth saying so
 
 
 def _free_gb(path: str) -> float:
     st = os.statvfs(path)
     return (st.f_bsize * st.f_bavail) / (1024 ** 3)
-
-
-def _space_problems(cfg) -> list[str]:
-    """Refuse a build that cannot finish, in one second rather than forty
-    minutes.
-
-    pmbootstrap has its own check, but it runs after the chroots are prepared
-    and only covers the image it is about to create. The expensive part is
-    everything before that.
-    """
-    workdir = cfg.get("PORTHOLE_PMB_DIR") or str(
-        pathlib.Path.home() / ".local/var/pmbootstrap")
-    probe = pathlib.Path(workdir).expanduser()
-    while not probe.exists() and probe != probe.parent:
-        probe = probe.parent
-    try:
-        free = _free_gb(str(probe))
-    except OSError:
-        return []
-    if free < SPACE_FLOOR_GB:
-        return [f"only {free:.1f} GB free on {probe} -- a build needs at least "
-                f"{SPACE_FLOOR_GB} GB to finish. Free some space, or point "
-                f"PORTHOLE_PMB_DIR at a bigger filesystem"]
-    return []
 
 
 def _space_warning(cfg) -> str:

@@ -223,7 +223,7 @@ def unmet(op: Op, facts: dict) -> list[str]:
     if free is not None and free < op.disk_gb:
         problems.append(
             f"{free:.1f} GB free where this operation needs {op.disk_gb:.0f} "
-            f"GB to finish -- `ph disk` says what is prunable")
+            f"GB to finish -- `porthole disk` says what is prunable")
     return problems
 
 

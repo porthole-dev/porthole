@@ -412,25 +412,19 @@ def test_tkmod_proves_the_new_module_is_the_running_one():
     assert "srcversion" in body, "tkmod does not verify which build is loaded"
 
 
-def test_a_build_that_cannot_finish_is_refused_before_it_starts():
-    """ENOSPC at minute forty costs the whole build. /proc reports zero free
-    space and always exists, so it is a stable stand-in for a full disk."""
-    import porthole_cmd_build as build
-    problems = build._space_problems({"PORTHOLE_PMB_DIR": "/proc"})
-    assert problems, "a disk with no free space was not refused"
-    assert "PORTHOLE_PMB_DIR" in problems[0], (
-        "the refusal must name the knob that relocates the workdir: "
-        + problems[0])
-
-
-def test_plenty_of_space_is_neither_refused_nor_warned_about():
+def test_plenty_of_space_is_not_warned_about():
+    """The refusal half of this (`_space_problems`, SPACE_FLOOR_GB) was
+    removed: `plan.unmet`'s per-op `disk_gb` against
+    `facts()["free_gb"]` supersedes it (see test_sites.py's `facts()`
+    walk-up coverage and test_plan.py's disk_gb tests). `_space_warning` is
+    a different thing -- tight but survivable, not a refusal -- and is
+    still called from `cmd_build` (a non-blocking advisory), so it keeps
+    its own test."""
     import porthole_cmd_build as build
     root = "/"
     if build._free_gb(root) < build.SPACE_WARN_GB:
         return  # this machine genuinely is tight; nothing to assert
-    cfg = {"PORTHOLE_PMB_DIR": root}
-    assert not build._space_problems(cfg)
-    assert not build._space_warning(cfg)
+    assert not build._space_warning({"PORTHOLE_PMB_DIR": root})
 
 
 def test_a_build_routes_into_the_workspace_by_default():
@@ -1971,6 +1965,43 @@ def test_preflight_checks_the_repo_of_the_site_actually_chosen():
         shutil.which = real_which
         del os.environ["TK_PMOS_PASSWORD"]
     assert any("dev snapshot" in p for p in problems), problems
+
+
+def test_preflight_forwards_host_can_image_to_choose_from():
+    """Pins the wiring, not just choose_from's own already-tested behaviour:
+    without _preflight computing host_can_image and forwarding it,
+    choose_from's default (host_can_image=True) silently lets a host with
+    no loop device through -- exactly the mechanism the headline incident
+    needed. `image` produces "rootfs.img"; only HOST is made available, so
+    the refusal (or its absence) can only come from this wiring."""
+    import argparse
+    import shutil
+
+    import porthole_cmd_build as build
+    import porthole_sites as sites
+
+    real_usable = sites.usable
+    real_which = shutil.which
+    real_loop_exists = sites.loop_exists
+    sites.usable = lambda ctx: (False, "faked for the test")  # no sandbox
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
+    sites.loop_exists = lambda: False  # no /dev/loop-control on this host
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": "/nonexistent",
+               "PORTHOLE_KERNEL_PKG": "linux-x", "PORTHOLE_ARCH": "aarch64",
+               "PORTHOLE_DTB": "qcom/x"}
+        args = argparse.Namespace()
+
+    try:
+        problems = build._preflight(Ctx(), "image")
+    finally:
+        sites.usable = real_usable
+        shutil.which = real_which
+        sites.loop_exists = real_loop_exists
+    assert any("loop" in p for p in problems), problems
 
 
 if __name__ == "__main__":
