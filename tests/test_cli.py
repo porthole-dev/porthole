@@ -641,6 +641,36 @@ def test_the_host_only_verbs_stay_under_their_budget():
         + "docs/PERFORMANCE.md, 'The verbs')")
 
 
+def test_a_hint_lands_on_the_same_stream_as_what_it_explains():
+    """Reproduced 2026-09-08: the slot warning went to stderr, its hint went
+    to stdout, and an unrelated error printed between them. The reader saw
+    warning, error, then advice belonging to the warning -- and `2>log`
+    captured the problem and lost the fix."""
+    import io
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+
+    err = io.StringIO()
+    out = cli.Out(stream=io.StringIO(), force_colour=False)
+    out.warn("slots were never probed", stream=err)
+    out.hint("porthole slots probe", "reads it from the bootloader", stream=err)
+    assert "slots probe" in err.getvalue()
+    assert "slots probe" not in out.stream.getvalue()
+
+
+def test_warn_and_hint_still_default_to_their_own_streams():
+    """No caller threads a stream: warn/error stay on stderr, an ordinary
+    hint stays on the Out's own stream -- same as before this rework."""
+    import io
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+
+    stream = io.StringIO()
+    out = cli.Out(stream=stream, force_colour=False)
+    out.hint("porthole build")
+    assert "porthole build" in stream.getvalue()
+
+
 def main():
     return _runner.run(globals())
 
@@ -667,6 +697,87 @@ def test_an_old_tool_name_is_answered_with_its_new_one():
     assert rc != 0, (out, err)
     assert "ph-not-a-real-tool.sh" not in (out + err), (
         "it invented a replacement that does not exist")
+
+
+# ------------------------------------------------------- confirmation tiers --
+
+def test_a_reversible_operation_needs_no_confirmation():
+    """Pins the manifest's tier classification, not `porthole build`'s actual
+    gating. `porthole build mod --yes` was 30 characters to push one module a
+    reboot undoes, and the confirmation-tier design says a reversible op like
+    `mod` should run with no flag at all -- `plan.op("mod")` and
+    `cli.gate_flag` classify it as tier 1 for exactly that reason. That tier
+    is not wired into `cmd_build`, though: it still gates every rung,
+    including `mod`, on `args.yes` (porthole_cmd_build.py's
+    `if not args.yes and action in BUILD_ACTIONS`) -- see
+    test_build_does_nothing_without_yes. This test pins the manifest half of
+    that gap; it is not proof the CLI honours it."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+    assert cli.tier(plan.op("mod")) == 1
+    assert cli.gate_flag(plan.op("mod")) == ""
+
+
+def test_an_irreversible_operation_needs_a_flag_that_names_the_loss():
+    """--yes cannot mean both "push a module" and "erase the rootfs". The
+    second flag cannot arrive by muscle memory from a different command."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+    assert cli.tier(plan.op("flash-full")) == 3
+    assert cli.gate_flag(plan.op("flash-full")) == "--replace-rootfs"
+
+
+def test_flashing_boot_is_gated_but_not_at_the_top_tier():
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+    assert cli.tier(plan.op("flash-boot")) == 2
+    assert cli.gate_flag(plan.op("flash-boot")) == "--yes"
+
+
+def test_the_short_binary_is_the_same_program():
+    """Two entry points that can drift are two programs."""
+    assert (ROOT / "bin" / "ph").read_text() == (ROOT / "bin" / "porthole").read_text()
+
+
+def test_every_op_lands_in_the_tier_its_own_fields_say_it_should():
+    """One case per op is three cases short of what matters: what a NEW op
+    gets when nobody edits a table. Expected tiers are hand-derived from each
+    op's own destroys/reversible in porthole_plan.py, not by calling tier()
+    -- a boundary this checks directly is one a "simplified" condition cannot
+    silently move.
+
+    Mutation-checked: dropping `and not op.reversible` from tier() (so it
+    reads `return 3 if _replaces_rootfs(op) else 2`) sends `image` and
+    `install` to tier 3 -- their destroys says "the previous rootfs image",
+    a substring match away from flash-full's "the device rootfs" -- and every
+    other test in this file still passed 41/41. This is what catches it."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    import porthole_cli as cli
+    import porthole_plan as plan
+
+    expect = {
+        "mod":        (1, ""),
+        "boot":       (1, ""),
+        "kernel":     (1, ""),
+        "clean":      (1, ""),
+        "fast":       (2, "--yes"),
+        "upgrade":    (2, "--yes"),
+        "purge":      (2, "--yes"),
+        "image":      (2, "--yes"),
+        "install":    (2, "--yes"),
+        "flash-boot": (2, "--yes"),
+        "flash-full": (3, "--replace-rootfs"),
+    }
+    assert set(expect) == set(plan.OPS), (
+        "a new op has no entry here -- add one, hand-derived from its own "
+        "destroys/reversible, not by calling tier()")
+    for name, (want_tier, want_flag) in expect.items():
+        op = plan.op(name)
+        assert cli.tier(op) == want_tier, name
+        assert cli.gate_flag(op) == want_flag, name
 
 
 if __name__ == "__main__":

@@ -13,11 +13,11 @@ WHY THIS EXISTS
     inside the file, which is what this is.
 
 OUTPUT IS BYTE-COMPATIBLE, DELIBERATELY
-    `make console` greps this output to assert the console suites did NOT skip.
-    A format change there would turn that assertion into a silent pass, which is
-    the exact failure mode this repo already paid for once (28 findings reached
-    CI behind a linter that printed "skipping" and exited 0). So the summary
-    line and the FAIL/ERROR shapes are unchanged.
+    `Makefile`'s `floor` target and `tests/ci-local.sh` both read only the last
+    line a suite prints (`tail -1`). A format change there is a silent parse
+    failure, which is the exact failure mode this repo already paid for once
+    (28 findings reached CI behind a linter that printed "skipping" and exited
+    0). So the summary line and the FAIL/ERROR shapes are unchanged.
 
 THE ESCAPE HATCH
     PORTHOLE_TEST_JOBS=1 runs serially, in order, in this process. Parallel
@@ -104,10 +104,9 @@ def run(namespace, suffix: str = "") -> int:
     skips = [msg for _n, st, msg in results if st == "skip"]
     for msg in failures:
         print(msg)
-    # Lowercase, and only when there are any. `make console` greps the suite
-    # output for uppercase SKIP to assert the console suites did NOT skip
-    # wholesale; a per-test skip wearing that word would turn that assertion
-    # into a silent pass.
+    # Lowercase, and only when there are any. Uppercase SKIP is reserved for
+    # "this whole file skipped"; a per-test skip wearing that word would read
+    # as the wrong kind of skip to anything that greps for it.
     for msg in skips:
         print(msg)
     tail = ", {} skipped".format(len(skips)) if skips else ""

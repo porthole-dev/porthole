@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""porthole -- postmarketOS device bring-up toolkit.
+
+A thin launcher. Everything lives in lib/: the registry in porthole_cli.py,
+one module per verb in porthole_cmd_*.py. Adding a verb needs no edit here.
+
+The CLI is deliberately NOT on any tool's hot path: tools source
+lib/porthole.sh or import lib/porthole.py and resolve config themselves in
+under a millisecond. Shelling out here would cost an interpreter start per
+probe, in loops that run hundreds of them.
+"""
+import pathlib
+import sys
+
+if sys.version_info < (3, 8):
+    sys.exit("porthole needs python 3.8 or newer; found "
+             f"{sys.version.split()[0]}. Install python3 and retry.")
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "lib"))
+
+import porthole_cli  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(porthole_cli.main(sys.argv[1:], ROOT))
