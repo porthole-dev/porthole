@@ -67,20 +67,27 @@ class _FakeCtx:
 
 def test_flash_refuses_a_forbidden_slot():
     """Recovery from the bootloader cannot re-arm a slot, so this is the last
-    point at which the mistake is still cheap."""
-    rc, out, err = run("-d", DEV, "flash", "--slot", "a", "--force", "--yes")
-    assert rc != 0, "it agreed to arm a forbidden slot"
-    assert "SLOT_FORBIDDEN" in (out + err)
+    point at which the mistake is still cheap.
 
-
-def test_flash_full_refuses_unless_the_device_is_in_fastboot():
-    """`full` (tkflash -> pmbootstrap flasher flash_rootfs) genuinely needs
-    the bootloader. `boot` (the default action) does not -- tkflash-boot
-    moves a booted device there itself -- so this must exercise `full`, not
-    the default, or it would reach past the state gate and into `_run`."""
-    rc, out, err = run("-d", DEV, "flash", "full", "--yes", "--replace-rootfs")
-    assert rc != 0
-    assert "FASTBOOT" in (out + err)
+    CRITICAL, fix round 2: this used to invoke the CLI as a subprocess with
+    no stub on flash._run, against the real repo root -- mutation-testing
+    the guard below (remove it) reached a live `_run`, which `podman exec`s
+    into the attached sandbox and would have run `tkflash-boot` against
+    whatever hardware is actually connected. Converted to an in-process call
+    under `_flash_run_tripwire`, matching every other refusal in this file
+    that must never write to a device."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_STATE
+    args = _flash_args(action="boot", yes=True, force=True, slot="a")
+    ctx = _fake_ctx(state="FASTBOOT", cfg={"PORTHOLE_HAS_AB_SLOTS": "1",
+                                           "PORTHOLE_SLOT_FORBIDDEN": "a"})
+    with _flash_run_tripwire():
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "it agreed to arm a forbidden slot"
+        except Bail as exc:
+            assert exc.code == EX_STATE
+            assert "SLOT_FORBIDDEN" in exc.message
 
 
 def test_flash_does_nothing_without_yes():
