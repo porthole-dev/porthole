@@ -1203,8 +1203,8 @@ tkbuild() {
 	# (~line 746); tkbuild has to purge here for the same reason.
 	tkpurge-devpkgs || return 1
 	# Password comes from the environment so it is not committed. Set it once:
-	#   export TK_PMOS_PASSWORD=...
-	: "${TK_PMOS_PASSWORD:?set TK_PMOS_PASSWORD (the rootfs user password) before tkbuild}"
+	#   export PORTHOLE_PMOS_PASSWORD=...     (or the legacy TK_PMOS_PASSWORD)
+	: "${TK_PMOS_PASSWORD:?set PORTHOLE_PMOS_PASSWORD, or the legacy TK_PMOS_PASSWORD (the rootfs user password), before tkbuild}"
 	echo ">> installing the kernel into the rootfs chroot (pmbootstrap install) --"
 	echo ">>   mkfs + package installs, normally minutes, no progress signal"
 	_ph_install_rootfs || return 1
@@ -1243,7 +1243,7 @@ tkbuild() {
 # hunting for a root that no longer exists under that UUID.
 tksysimage() {
 	# Read before anything runs, not at the end of a twenty-minute install.
-	: "${TK_PMOS_PASSWORD:?set TK_PMOS_PASSWORD (the rootfs user password) before an image build}"
+	: "${TK_PMOS_PASSWORD:?set PORTHOLE_PMOS_PASSWORD, or the legacy TK_PMOS_PASSWORD (the rootfs user password), before an image build}"
 	# Same hazard tkbuild documents at ~line 838: apk sorts a leftover
 	# envkernel `_p<timestamp>-r0` ABOVE every release `-rNN`, so one stale
 	# apk in the local repo silently wins `install`'s dependency resolution
@@ -1306,15 +1306,28 @@ tksysimage() {
 # and calls a failure when it needed 65. The wait belongs in the tool, where the
 # boot id baseline actually exists.
 #
-# TK_BOOT_DEADLINE overrides the deadline; it is the worst case you are willing
-# to call a failure, NOT a poll interval.
+# PORTHOLE_BOOT_DEADLINE (or the legacy TK_BOOT_DEADLINE) overrides the
+# deadline; it is the worst case you are willing to call a failure, NOT a
+# poll interval.
+#
+# Every caller reaches this AFTER whatever it was writing already succeeded
+# -- fastboot flash/boot/reboot all already returned 0 -- so a deadline miss
+# here is never "the write failed", only "the device has not answered ssh
+# yet". Exit 124 (EX_TIMEOUT), not 1, says so: a caller that collapses this
+# back to a bare failure re-introduces exactly the bug this distinction
+# exists to end (observed on hardware 2026-09-08: a flash that wrote
+# correctly and simply took longer than 300s to reboot was reported as a
+# failed flash).
 _ph_wait_up() {
 	local old_id=${1:-} secs=${TK_BOOT_DEADLINE:-300} new_id
 	echo ">> waiting for the phone (deadline ${secs}s, polling -- not sleeping)"
 	if ! new_id=$(tk_wait_ssh "$old_id" "$(tk_deadline_ms "$secs")"); then
-		echo ">> phone did not come back within ${secs}s" >&2
+		echo ">> the write already succeeded -- the phone just has not answered" >&2
+		echo ">>   ssh within ${secs}s" >&2
 		echo ">>   tools/ph-recover.sh, or porthole serial console, to see why" >&2
-		return 1
+		echo ">>   raise it: PORTHOLE_BOOT_DEADLINE=<seconds>, if this device is" >&2
+		echo ">>   just slow" >&2
+		return 124
 	fi
 	# Which kernel answered is the one question a boot test must not assume.
 	# brain/traps/prove-which-kernel-answered.md
@@ -1665,7 +1678,10 @@ tkbuild-kernel() {
 		echo ">> refusing to flash a stale image"; return 1; }
 
 	tkpush-modules || return 1
-	tkflash-boot || return 1
+	# Not `|| return 1`: tkflash-boot ends in _ph_wait_up, whose 124 (booted
+	# fine, still waiting on ssh) this would otherwise collapse into the
+	# same code as a real flash failure -- see the comment in tkboot.
+	tkflash-boot || return $?
 	_ph_pushed_write
 }
 
@@ -1803,7 +1819,10 @@ tkupgrade-kernel() {
 
 	# Modules first, while the phone is still up on the outgoing kernel.
 	tkpush-modules || return 1
-	tkflash-boot || return 1
+	# Not `|| return 1`: tkflash-boot ends in _ph_wait_up, whose 124 (booted
+	# fine, still waiting on ssh) this would otherwise collapse into the
+	# same code as a real flash failure -- see the comment in tkboot.
+	tkflash-boot || return $?
 	_ph_pushed_write
 }
 
@@ -2604,6 +2623,8 @@ tkboot() {
 	local old_id; old_id=$(tk_boot_id 2>/dev/null || true)
 	"$_PH_REPO/tools/ph-to-fastboot.sh" || return 1
 	"$FASTBOOT" boot "$out" || return 1
-	_ph_wait_up "$old_id" || return 1
+	# Not `|| return 1`: that would collapse _ph_wait_up's 124 (booted fine,
+	# still waiting on ssh) into the same code as a real failure above.
+	_ph_wait_up "$old_id" || return $?
 	_ph_pushed_write
 }

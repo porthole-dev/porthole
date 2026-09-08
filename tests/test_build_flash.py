@@ -452,6 +452,63 @@ def test_flash_labels_the_run_with_the_operation_name_not_the_shell_function():
         assert rung != func, "the label must not be the shell function name"
 
 
+def test_flash_timeout_after_write_success_is_not_reported_as_a_failed_flash():
+    """Observed on hardware 2026-09-08 (Gate C5, attempt 2): the flash wrote
+    everything correctly and the device simply took longer than the 300s
+    TK_BOOT_DEADLINE default to answer ssh, and porthole reported "tkflash
+    failed" / "the device may be part-flashed" -- a false alarm about the
+    one thing that had already gone right.
+
+    _ph_wait_up (tools/ph-build.sh) now returns 124 (EX_TIMEOUT) for exactly
+    this case -- it is only ever reached after every fastboot write already
+    succeeded. cmd_flash must tell the two apart rather than folding both
+    into the same "failed" message."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_TIMEOUT
+
+    args = _flash_args(action="boot", yes=True)
+    ctx = _fake_ctx(state="FASTBOOT")
+    real_run = flash._run
+    flash._run = lambda ctx, func, timeout, *a, **k: 124
+    try:
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a 124 from _run must not report success"
+        except AssertionError:
+            raise
+        except Bail as exc:
+            assert exc.code == EX_TIMEOUT, exc.code
+            assert "part-flashed" not in exc.message, (
+                "a timed-out WAIT must not read as a failed WRITE")
+            assert "PORTHOLE_BOOT_DEADLINE" in exc.hint
+    finally:
+        flash._run = real_run
+
+
+def test_flash_write_failure_still_reports_part_flashed():
+    """The other half of the same rule: an actual write failure (anything
+    other than the 124 _ph_wait_up reserves for a clean write / slow
+    reboot) must still warn that the device may be part-flashed."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_FAIL
+
+    args = _flash_args(action="boot", yes=True)
+    ctx = _fake_ctx(state="FASTBOOT")
+    real_run = flash._run
+    flash._run = lambda ctx, func, timeout, *a, **k: 1
+    try:
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a nonzero _run must not report success"
+        except AssertionError:
+            raise
+        except Bail as exc:
+            assert exc.code == EX_FAIL, exc.code
+            assert "part-flashed" in exc.hint
+    finally:
+        flash._run = real_run
+
+
 def test_a_boot_flash_runs_from_either_state():
     """The defect this guards against: `tkflash-boot` (tools/ph-build.sh)
     checks `tk_in_fastboot || "$_PH_REPO/tools/ph-to-fastboot.sh" || return
@@ -803,6 +860,36 @@ def test_the_fast_rungs_wait_instead_of_handing_back_mid_reboot():
         "_ph_wait_up must poll via tk_wait_ssh, not sleep"
 
 
+def test_wait_up_timeout_exits_124_not_1():
+    """_ph_wait_up is only ever called after its caller's own fastboot writes
+    already returned 0, so a deadline miss here means "still waiting on
+    ssh", not "the write failed" -- they must not share an exit code. Both
+    cmd_flash and cmd_build now special-case 124 (see
+    test_flash_timeout_after_write_success_is_not_reported_as_a_failed_flash
+    and test_build_timeout_after_write_success_is_not_reported_as_a_failure),
+    so every caller in ph-build.sh must let it through unmangled.
+
+    `tkboot` used to swallow it with `_ph_wait_up "$old_id" || return 1`;
+    `tkbuild-kernel` (`fast`) and `tkupgrade-kernel` (`upgrade`) did the same
+    to `tkflash-boot`'s own exit code, one call after `_ph_wait_up` is its
+    last statement. Three rungs, same copy-pasted clamp."""
+    src = (ROOT / "tools" / "ph-build.sh").read_text()
+    body = src.split("_ph_wait_up() {", 1)[1].split("\n}\n", 1)[0]
+    assert "return 124" in body, "_ph_wait_up must exit 124 on a deadline miss"
+    assert "return 1\n" not in body.replace("return 124", ""), (
+        "_ph_wait_up's only failure exit must be the 124 above")
+    for func in ("tkboot", "tkflash-boot"):
+        fbody = src.split(f"\n{func}() {{", 1)[1].split("\n}\n", 1)[0]
+        assert "_ph_wait_up" in fbody
+        assert '_ph_wait_up "$old_id" || return 1' not in fbody, (
+            f"{func} must not collapse _ph_wait_up's exit code back to 1")
+    for func in ("tkbuild-kernel", "tkupgrade-kernel"):
+        fbody = src.split(f"\n{func}() {{", 1)[1].split("\n}\n", 1)[0]
+        assert "tkflash-boot" in fbody
+        assert 'tkflash-boot || return 1' not in fbody, (
+            f"{func} must not collapse tkflash-boot's exit code back to 1")
+
+
 def test_tkmod_proves_the_new_module_is_the_running_one():
     """insmod exiting 0 does not mean the old module unloaded."""
     src = (ROOT / "tools" / "ph-build.sh").read_text()
@@ -907,6 +994,41 @@ def test_the_status_file_agrees_with_the_exit_code():
     call = src.split("tracker.finish(", 1)[1].split(")))", 1)[0]
     assert "TKMOD_INSTALLED_NOT_LOADED" in call, \
         "tracker.finish still calls an installed module a failed build"
+
+
+def test_a_generic_build_failure_names_the_rung_not_the_shell_function():
+    """The same leak `porthole flash` had (rung= missing from `_run`, so the
+    log/status/bar/message all showed `tkflash`): here `rung=` IS passed to
+    `_run` correctly, so only this one failure message still built itself
+    out of `func` -- `porthole build fast --yes` failing said "tkbuild-kernel
+    failed", the name of a shell function in tools/ph-build.sh nobody typed,
+    instead of "fast failed"."""
+    src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
+    site = src.split("rc = _run(ctx, func, args.timeout, extra,", 1)[1][:2000]
+    raise_line = [ln for ln in site.splitlines() if '"{func} failed"' in ln
+                  or '"{action} failed"' in ln]
+    assert raise_line, "the generic failure Bail moved; update this test"
+    assert '"{action} failed"' in raise_line[0], (
+        f"names the shell function, not the rung a person typed: {raise_line[0]}")
+
+
+def test_build_timeout_after_write_success_is_not_reported_as_a_failure():
+    """The `porthole build` half of the same defect `porthole flash` had
+    (test_flash_timeout_after_write_success_is_not_reported_as_a_failed_flash):
+    `fast`, `upgrade` and `boot` all end in `_ph_wait_up` too, one call after
+    a successful `fastboot flash`/`fastboot boot`. A 124 from `_run` there
+    means the same thing it means for flash -- write succeeded, still
+    waiting on ssh -- and must not read as "fast failed"."""
+    src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
+    site = src.split("rc = _run(ctx, func, args.timeout, extra,", 1)[1][:2000]
+    assert "if rc == EX_TIMEOUT:" in site, (
+        "cmd_build never special-cases the wait-timeout code")
+    branch = site.split("if rc == EX_TIMEOUT:", 1)[1].split(
+        '"{action} failed"', 1)[0]
+    assert "PORTHOLE_BOOT_DEADLINE" in branch, (
+        "the timeout message should point at the knob that raises it")
+    assert "EX_TIMEOUT" in branch.split("raise Bail(", 1)[1][:200], (
+        "must raise with EX_TIMEOUT, not EX_FAIL")
 
 
 def test_module_arguments_survive_the_trip():

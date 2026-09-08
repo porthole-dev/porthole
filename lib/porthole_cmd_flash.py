@@ -28,7 +28,8 @@ from __future__ import annotations
 import sys
 
 import porthole_plan as plan
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_USAGE, gate_flag
+from porthole_cli import (Bail, EX_FAIL, EX_OK, EX_STATE, EX_TIMEOUT,
+                          EX_USAGE, gate_flag)
 from porthole_cmd_build import _run
 
 # The verb -> ph-build.sh function it runs. `boot` leaves the rootfs alone;
@@ -136,6 +137,22 @@ def cmd_flash(args, ctx) -> int:
     # of a shell function in tools/ph-build.sh, not an operation anyone typed
     # or would recognise.
     rc = _run(ctx, FUNCS[action], args.timeout, rung=op.name)
+    # 124 (EX_TIMEOUT), specifically: _ph_wait_up (tools/ph-build.sh) returns
+    # it ONLY after every fastboot write it followed already succeeded --
+    # the deadline it hit belongs to the device coming back on ssh, not to
+    # the flash. Reporting that the SAME way as a real write failure is the
+    # defect observed on hardware 2026-09-08: a flash that wrote correctly
+    # and took longer than the 300s default to reboot came back as "tkflash
+    # failed" / "the device may be part-flashed" -- a false alarm about the
+    # one thing (the write) that had already gone right.
+    if rc == EX_TIMEOUT:
+        raise Bail(
+            f"{op.name} wrote successfully but the device has not answered "
+            "ssh yet", EX_TIMEOUT,
+            "check it by hand -- serial console, or tools/ph-recover.sh -- "
+            "before assuming anything is wrong; raise PORTHOLE_BOOT_DEADLINE "
+            "(or the legacy TK_BOOT_DEADLINE) past its 300s default if this "
+            "device is just slow to reboot")
     if rc != 0:
         raise Bail(f"{op.name} failed", EX_FAIL,
                    "the device may be part-flashed; check it before rebooting")
