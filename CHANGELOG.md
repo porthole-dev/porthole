@@ -169,6 +169,34 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   or clones one, rather than `pmbootstrap init`, which is the host-tier
   answer offered on the tier that exists to avoid it.
 
+- **A directory parked in the package repo killed every build in that work
+  dir**, and the error never named it. pmbootstrap indexes every directory
+  under `packages/<channel>/` as an architecture, so four .apk files moved
+  aside by hand into `packages/edge/rejected/` were indexed too, the index
+  failed -- created host-side, so the container's build user could not sign it
+  -- and every later pmbootstrap command died naming an APKINDEX and a failed
+  `mv`. Found now from two stat calls BEFORE the build starts, and moved to
+  `packages-parked/` in the same work dir rather than described: the first
+  version was a diagnosis naming a path inside the container, with no host
+  path and no command. Nothing is deleted and the line that says so says how
+  to put it back.
+- **The failure tail showed six lines of version banner instead of the error.**
+  `_SAYS_WHY` anchors on the start of a line and pmbootstrap prefixes its own
+  output (`[HH:MM:SS] `, or `(pid) [HH:MM:SS] ` in log.txt), so it matched no
+  pmbootstrap line at all -- the ones that got through did so on the `not
+  found` fallback, which `ERROR: Command failed (exit code 1)` does not trip.
+- **`>>> ERROR:` was read as an abuild "now building" banner**, which put
+  `webkit2gtk-6.0 ... 42h05m . reattached` on the status line for a build
+  nobody had started. `abuild-sign` failing while pmbootstrap indexed a repo
+  wrote that line into the shared log; it was the only build-shaped thing in
+  the tail of a failed kernel rung, and the buildroot's staged APKBUILD from
+  two days earlier supplied the name.
+- **A coloured line was returned uncut**, so the activity row overflowed the
+  terminal and every repaint stranded a header above it -- one
+  `fast ... running` per pmbootstrap line, for the length of the build. The
+  row carries the child's output and pmbootstrap colours everything it prints;
+  `clip` now takes the colour off and cuts the plain text.
+
 ### Changed
 - `porthole init`'s prompts and menus use the toolkit's own output vocabulary.
   It held the only hand-rolled interaction in the repository -- a bare
