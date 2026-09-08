@@ -58,6 +58,9 @@ def test_a_seed_makes_the_uuids_reproducible():
     assert on an exact value."""
     assert image.uuids(seed="taimen-1") == image.uuids(seed="taimen-1")
     assert image.uuids(seed="taimen-1") != image.uuids(seed="taimen-2")
+    boot, root = image.uuids(seed="taimen-1")
+    assert boot != root, ("a boot and root filesystem sharing a UUID is two "
+                          "partitions the initramfs cannot tell apart")
 
 
 def test_the_fstab_names_the_uuids_we_chose():
@@ -83,12 +86,48 @@ def test_the_total_is_4096_aligned_because_img2simg_asserts_otherwise():
     assert lay["total_bytes"] % image.ALIGN == 0
 
 
+def test_align_is_4096_not_a_tuning_knob():
+    """Measured 2026-09-08: img2simg aborts with `Assertion failed: pad >= 0`
+    on anything smaller, and taimen's deviceinfo_rootfs_image_sector_size=4096
+    requires the same value independently. Nothing else pins the number."""
+    assert image.ALIGN == 4096
+
+
+def test_the_tail_leaves_room_for_the_backup_gpt():
+    """`% ALIGN == 0` alone is tautological -- total_bytes is computed as
+    `(...) // ALIGN * ALIGN`, so it holds even if that division floors
+    instead of ceils. Flooring truncates into the padding the secondary GPT
+    needs (32 sectors of table + 1 header) instead of rounding up past it:
+    for a default-parameter layout the raw end is always 2 sectors into an
+    8-sector (4096-byte) alignment unit, so flooring drops to 32 tail
+    sectors -- one short -- while ceiling correctly lands on 40."""
+    for boot_mb, root_mb, arch in ((32, 64, "aarch64"), (512, 1250, "x86_64")):
+        lay = image.layout(boot_mb, root_mb, arch)
+        tail = (lay["total_bytes"] // image.SECTOR
+                 - (lay["root_start"] + lay["root_sectors"]))
+        assert tail >= 33, f"only {tail} tail sectors for {(boot_mb, root_mb, arch)}"
+
+
 def test_the_root_partition_type_is_the_arch_specific_dps_guid():
     """b921b045 is SD_GPT_ROOT_ARM64 in pmb/core/dps.py. Writing the generic
     Linux GUID instead would boot but stops systemd's discoverable-partition
     logic recognising it."""
     assert image.layout(1, 1, "aarch64")["root_type"].lower().startswith("b921b045")
     assert image.layout(1, 1, "x86_64")["root_type"].lower().startswith("4f68bce3")
+
+
+def test_the_boot_partition_type_is_the_esp_guid():
+    """The only prior GUID assertion covered root -- ESP_GUID replaced with
+    zeros, or layout() returning root_type for boot_type too, both left
+    every existing test green. The literal is hardcoded rather than compared
+    against image.ESP_GUID: comparing a mutated constant to itself is
+    tautological and catches nothing."""
+    lay = image.layout(32, 64, "aarch64")
+    assert lay["boot_type"] == "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+    assert lay["boot_type"] != lay["root_type"]
+    script = image.sfdisk_script(lay)
+    assert "type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B" in script
+    assert f"type={lay['root_type']}" in script
 
 
 def test_an_unknown_arch_is_refused_rather_than_defaulted():
