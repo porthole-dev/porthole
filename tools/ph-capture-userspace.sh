@@ -3,7 +3,8 @@
 # scope: generic
 # needs: BOOTED
 # env: PHONE, PORTHOLE_USER, HOST, TK_RUN_TIMEOUT, PORTHOLE_ARCH,
-#      PORTHOLE_SANDBOX_PMB_DIR, PORTHOLE_LOCAL_REPO, PORTHOLE_DEVICE
+#      PORTHOLE_SANDBOX_PMB_DIR, PORTHOLE_LOCAL_REPO, PORTHOLE_DEVICE,
+#      PORTHOLE_KERNEL_PKG
 # exits: 0 ok · 1 failed, or the device answered but nothing matched the local
 #        repo · 64 usage · 69 no local repo to compare against, or the device
 #        could not be reached
@@ -16,9 +17,12 @@
 # repo would return a DIFFERENT gst than the one on the phone, silently. This
 # manifest is what turns that into a decision instead of an accident.
 #
-# device-*/firmware-* packages the repo builds are recorded as `# excluded:`
-# comments, not as restorable lines: the install itself provides them, and
-# `apk add` on one can flash the boot partition or eat the radio stack.
+# device-*/firmware-* packages the repo builds -- and the configured kernel
+# package (PORTHOLE_KERNEL_PKG) -- are recorded as `# excluded:` comments, not
+# as restorable lines: the install itself provides all three, and `apk add`
+# on any of them can flash the boot partition or eat the radio stack.
+# "Locally built" does not imply "safe to reinstall": device, firmware and
+# kernel packages are owned by the install, not by this manifest.
 #
 #   tools/ph-capture-userspace.sh capture <outfile>   record the device's set
 #   tools/ph-capture-userspace.sh restore <infile>    reinstall it
@@ -39,6 +43,21 @@
 # gone.
 set -euo pipefail
 
+# Resolved BEFORE the `cd` below, which is what makes `capture`/`restore`'s
+# OUTFILE/INFILE argument mean what the caller typed. `ph-lib.sh` has to be
+# sourced by a relative path from this script's own directory, and that `cd`
+# then silently rebases every later relative path onto tools/ instead of the
+# caller's cwd -- `porthole run tools/ph-capture-userspace.sh capture
+# .run/foo.manifest` failed with "No such file or directory" for exactly this
+# reason before abspath() existed.
+_ph_cwd=$PWD
+abspath() {
+	case $1 in
+		/*) printf '%s\n' "$1" ;;
+		*)  printf '%s/%s\n' "$_ph_cwd" "$1" ;;
+	esac
+}
+
 cd "$(dirname "$0")"
 . ./ph-lib.sh
 
@@ -58,38 +77,71 @@ repo_names() {
 	ls "$dir" | sed -n 's/\.apk$//p' | sed 's/-[^-]*-r[0-9]*$//' | sort -u
 }
 
+is_kernel_pkg() {
+	# $1: a name already confirmed to be something the local repo builds.
+	#
+	# PORTHOLE_KERNEL_PKG (profiles/<device>/device.env) is the AUTHORITY --
+	# taimen's is "linux-postmarketos-qcom-msm8998-7.2", which starts with
+	# neither "device-" nor "firmware-" and sailed through as restorable
+	# before this existed. Matches the package itself and its subpackages
+	# ("-dbg" etc). With PORTHOLE_KERNEL_PKG unset, falls back to "any
+	# repo-built name starting linux-" -- a backstop only, so a misconfigured
+	# profile does not silently un-exclude the kernel; it is not a substitute
+	# for setting the variable.
+	if [ -n "${PORTHOLE_KERNEL_PKG:-}" ]; then
+		case $1 in
+			"$PORTHOLE_KERNEL_PKG"|"$PORTHOLE_KERNEL_PKG"-*) return 0 ;;
+			*) return 1 ;;
+		esac
+	fi
+	case $1 in
+		linux-*) return 0 ;;
+		*)       return 1 ;;
+	esac
+}
+
 parse() {
 	# stdin: `apk info -v` output (one `name-pkgver-rN` per line). stdout: only
 	# the lines whose NAME is something the local repo builds -- the exact
 	# pkgrel on the device is kept verbatim, never rewritten to the repo's.
 	#
-	# A device-*/firmware-* NAME THE REPO BUILDS is recorded but never handed
-	# to restore: the install itself provides these (world file, deviceinfo),
-	# and `apk add` on one can flash the boot partition or eat the radio stack
-	# -- brain/traps/installing-firmware-can-flash-the-boot-partition.md and
-	# brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md. Anchored
-	# on repo_names(), not on the raw name, so an unrelated upstream package
-	# that merely starts with "device-" (device-mapper) is not caught by this
-	# -- it was never a locally-built name to begin with.
+	# A device-*/firmware-*/kernel NAME THE REPO BUILDS is recorded but never
+	# handed to restore: the install itself provides these (world file,
+	# deviceinfo), and `apk add` on any of them can flash the boot partition
+	# or eat the radio stack -- brain/traps/installing-firmware-can-flash-the-boot-partition.md
+	# and brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md. The
+	# kernel is excluded for a SECOND reason too: deviceinfo_flash_kernel_on_update
+	# means installing it flashes boot the same as firmware, but a kernel
+	# package can also be a DOWNGRADE -- the device may carry an older build
+	# than the chroot now does, and restore must never drag it backwards.
+	# Anchored on repo_names(), not on the raw name, so an unrelated upstream
+	# package that merely starts with "device-" (device-mapper) is not caught
+	# by this -- it was never a locally-built name to begin with.
 	#
-	# The match itself is a bare `device-*`/`firmware-*` prefix on a name the
-	# repo DOES build, which is deliberately broader than "packages this
-	# device port owns": a hypothetical locally-built `device-mapper` would
-	# also be excluded by it (tests/test_capture_userspace.py proves this).
-	# Left as is on purpose -- the two costs are not symmetric. Wrongly
-	# excluding a restorable package costs a rebuild; wrongly restoring a
-	# device/firmware package can flash boot or kill the radio. Erring toward
-	# exclusion is correct, so do not tighten this without re-reading that
-	# asymmetry.
+	# The device/firmware match itself is a bare `device-*`/`firmware-*`
+	# prefix on a name the repo DOES build, which is deliberately broader than
+	# "packages this device port owns": a hypothetical locally-built
+	# `device-mapper` would also be excluded by it (tests/test_capture_userspace.py
+	# proves this). Left as is on purpose -- the two costs are not symmetric.
+	# Wrongly excluding a restorable package costs a rebuild; wrongly
+	# restoring a device/firmware/kernel package can flash boot or kill the
+	# radio. Erring toward exclusion is correct, so do not tighten this
+	# without re-reading that asymmetry.
 	local names; names=$(repo_names)
 	while read -r line; do
 		[ -n "$line" ] || continue
 		local name="${line%-*-r*}"
 		printf '%s\n' "$names" | grep -qxF "$name" || continue
+		local excluded=false
 		case $name in
-			device-*|firmware-*) printf '# excluded: %s\n' "$line" ;;
-			*)                   printf '%s\n' "$line" ;;
+			device-*|firmware-*) excluded=true ;;
 		esac
+		is_kernel_pkg "$name" && excluded=true
+		if $excluded; then
+			printf '# excluded: %s\n' "$line"
+		else
+			printf '%s\n' "$line"
+		fi
 	done
 	return 0
 }
@@ -98,7 +150,8 @@ case "${1:-}" in
 	--parse-only) parse ;;
 	capture)
 		[ -n "${2:-}" ] || { echo "usage: $0 capture OUTFILE" >&2; exit 64; }
-		# Captured into a variable BEFORE anything is written to $2, and
+		out=$(abspath "$2")
+		# Captured into a variable BEFORE anything is written to $out, and
 		# checked in two stages, so a failed capture never produces a file at
 		# all -- not a truncated one, not a "0 package(s)" success. pipefail
 		# (set above) is what makes the `||` here see tk_run's failure through
@@ -118,11 +171,16 @@ case "${1:-}" in
 			echo "# apk add on them can flash boot / eat the radio stack. See"
 			echo "# brain/traps/installing-firmware-can-flash-the-boot-partition.md and"
 			echo "# brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md"
+			echo "# the kernel is excluded too: deviceinfo_flash_kernel_on_update flashes"
+			echo "# boot the same as firmware, and restoring it can be a downgrade from"
+			echo "# what the chroot now builds."
 			printf '%s\n' "$body"
-		} > "$2"
+		} > "$out"
 		echo "captured $(printf '%s\n' "$body" | grep -cv '^#') package(s) to $2" ;;
 	restore)
-		[ -s "${2:-}" ] || { echo "usage: $0 restore INFILE" >&2; exit 64; }
+		[ -n "${2:-}" ] || { echo "usage: $0 restore INFILE" >&2; exit 64; }
+		in=$(abspath "$2")
+		[ -s "$in" ] || { echo "usage: $0 restore INFILE" >&2; exit 64; }
 		# `apk add` pins an exact build with `name=version`, not with the
 		# manifest's own dash-joined `name-version` -- so split each line the
 		# same way parse() does before handing it to the device.
@@ -131,7 +189,7 @@ case "${1:-}" in
 		# `grep -v '^#'` find nothing, which is a normal outcome here, not a
 		# failure -- pipefail must not turn that into a hard stop before the
 		# empty-specs check below gets to see it.
-		specs=$(grep -v '^#' "$2" | while read -r line; do
+		specs=$(grep -v '^#' "$in" | while read -r line; do
 			[ -n "$line" ] || continue
 			name="${line%-*-r*}"
 			printf '%s=%s\n' "$name" "${line#"$name"-}"

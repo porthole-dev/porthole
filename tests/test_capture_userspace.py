@@ -31,35 +31,44 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TOOL = ROOT / "tools" / "ph-capture-userspace.sh"
 
 
-def _repo_env(tmp, *apk_names):
+def _repo_env(tmp, *apk_names, **env_overrides):
     """A local-repo directory holding exactly these built packages, named as
     apk filenames (`mesa-26.1.6-r14.apk`) -- the shape repo_names() reads --
     plus the environment that points the tool at it instead of any real
-    ~/.local/var/porthole-sandbox."""
+    ~/.local/var/porthole-sandbox.
+
+    PORTHOLE_KERNEL_PKG is popped unconditionally first: a porter's own shell
+    has it set (from profiles/<device>/device.env), and a test that wants the
+    "unconfigured" fallback path must not silently pass just because it
+    happens to run on that desk. `**env_overrides` reinstates whatever a
+    given test actually wants."""
     repo = pathlib.Path(tmp) / "repo"
     repo.mkdir()
     for name in apk_names:
         (repo / name).touch()
-    return dict(os.environ, PORTHOLE_LOCAL_REPO=str(repo))
+    env = dict(os.environ, PORTHOLE_LOCAL_REPO=str(repo))
+    env.pop("PORTHOLE_KERNEL_PKG", None)
+    env.update(env_overrides)
+    return env
 
 
-def _parse(text, *apk_names):
+def _parse(text, *apk_names, **env_overrides):
     """The tool's own parser, exercised through `--parse-only` against a
     fixture repo built just for this call."""
     with tempfile.TemporaryDirectory() as tmp:
         out = subprocess.run(["bash", str(TOOL), "--parse-only"], input=text,
                              capture_output=True, text=True, check=True,
-                             env=_repo_env(tmp, *apk_names))
+                             env=_repo_env(tmp, *apk_names, **env_overrides))
     return out.stdout.split()
 
 
-def _parse_raw(text, *apk_names):
+def _parse_raw(text, *apk_names, **env_overrides):
     """Full stdout, comment lines included -- `_parse`'s `.split()` would
     tear a `# excluded: ...` line into separate tokens."""
     with tempfile.TemporaryDirectory() as tmp:
         out = subprocess.run(["bash", str(TOOL), "--parse-only"], input=text,
                              capture_output=True, text=True, check=True,
-                             env=_repo_env(tmp, *apk_names))
+                             env=_repo_env(tmp, *apk_names, **env_overrides))
     return out.stdout
 
 
@@ -138,6 +147,47 @@ def test_a_plain_package_is_still_captured_unmarked():
     assert got == ["mesa-26.1.6-r14"]
 
 
+# --------------------------------------------------------------- kernel --
+#
+# Confirmed live on this hardware: the real device carried
+# linux-postmarketos-qcom-msm8998-7.2-7.2.2-r21, which the device-*/firmware-*
+# match alone let straight through -- it starts with neither. Two hazards,
+# not one: taimen's deviceinfo sets deviceinfo_flash_kernel_on_update="true",
+# so `apk add` on a kernel package flashes boot, same hazard class as
+# firmware; and the chroot/local repo already carry r31, newer than the
+# device's r21, so restoring would silently downgrade it. "Locally built"
+# does not imply "safe to reinstall" -- the install owns the kernel too.
+
+KERNEL_PKG = "linux-postmarketos-qcom-msm8998-7.2"
+
+
+def test_the_configured_kernel_package_is_excluded():
+    raw = _parse_raw("%s-7.2.2-r21\n" % KERNEL_PKG,
+                      "%s-7.2.2-r31.apk" % KERNEL_PKG,
+                      PORTHOLE_KERNEL_PKG=KERNEL_PKG)
+    assert "%s-7.2.2-r21" % KERNEL_PKG not in raw.splitlines(), \
+        "the kernel must never reach restore's apk add"
+    assert "# excluded: %s-7.2.2-r21" % KERNEL_PKG in raw.splitlines()
+
+
+def test_a_kernel_subpackage_is_excluded_too():
+    sub = KERNEL_PKG + "-dbg"
+    raw = _parse_raw("%s-7.2.2-r21\n" % sub, "%s-7.2.2-r31.apk" % sub,
+                      PORTHOLE_KERNEL_PKG=KERNEL_PKG)
+    assert "# excluded: %s-7.2.2-r21" % sub in raw.splitlines()
+
+
+def test_an_unrelated_linux_prefixed_package_not_built_here_is_untouched():
+    """linux-firmware-ath10k is upstream, not this repo's kernel aport -- the
+    fixture repo builds nothing under that name, so it must vanish like musl
+    does (not restorable, not "excluded"), regardless of PORTHOLE_KERNEL_PKG.
+    Proves the linux-* fallback heuristic cannot reach a package the repo
+    never built in the first place -- repo_names() gates before it does."""
+    raw = _parse_raw("linux-firmware-ath10k-20250101-r1\n")  # repo builds nothing
+    assert "excluded" not in raw
+    assert raw.split() == []
+
+
 # --------------------------------------------------- capture must not lie --
 #
 # parse() always returns 0 -- it exists to filter a stream, not to report on
@@ -185,6 +235,36 @@ def test_a_device_with_nothing_locally_built_installed_is_a_hard_error():
                               capture_output=True, text=True, env=env)
         assert proc.returncode == 1, (proc.returncode, proc.stderr)
         assert not outfile.exists()
+
+
+# ------------------------------------------------------------ relative path --
+#
+# The tool `cd`s to tools/ (to source ./ph-lib.sh by a relative path) before
+# it ever looks at OUTFILE/INFILE. Reproduced: `porthole run
+# tools/ph-capture-userspace.sh capture .run/foo.manifest` from the repo root
+# failed with "No such file or directory" because ".run/foo.manifest" was
+# then being opened against tools/.run/foo.manifest instead.
+
+def test_a_relative_outfile_path_resolves_against_the_callers_cwd_not_tools():
+    # A stray write into the real tools/ (this checkout is shared) is exactly
+    # the bug under test, so clean it up even if an assertion below fails.
+    stray = TOOL.parent / "out.manifest"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = pathlib.Path(tmp) / "somewhere-else"
+            cwd.mkdir()
+            env = _repo_env(tmp, "mesa-26.1.6-r14.apk")
+            env["PATH"] = _fake_ssh_path(
+                tmp, "#!/bin/sh\necho mesa-26.1.6-r14\n") + ":" + env["PATH"]
+            proc = subprocess.run(["bash", str(TOOL), "capture", "out.manifest"],
+                                  capture_output=True, text=True, env=env, cwd=cwd)
+            assert proc.returncode == 0, proc.stderr
+            assert (cwd / "out.manifest").exists(), \
+                "the relative OUTFILE must land in the caller's cwd, not tools/"
+            assert not stray.exists(), \
+                "must not have been written against tools/ instead"
+    finally:
+        stray.unlink(missing_ok=True)
 
 
 def main():
