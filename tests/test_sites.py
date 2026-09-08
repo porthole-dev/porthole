@@ -19,18 +19,16 @@ import porthole_plan as plan  # noqa: E402
 import porthole_sites as sites  # noqa: E402
 
 
-def test_the_sandbox_cannot_make_an_image_even_when_the_host_has_a_loop():
-    """The host's /dev/loop-control is irrelevant inside a user namespace that
-    does not own it. Answering from the host's node is the mistake."""
-    assert sites.can_make_image(plan.HOST, loop_exists=True) is True
-    assert sites.can_make_image(plan.SANDBOX, loop_exists=True) is False
-
-
-def test_choosing_a_site_for_a_full_flash_refuses_the_sandbox_with_the_reason():
+def test_a_full_flash_can_run_in_the_sandbox_now_the_assembler_covers_it():
+    """Before `_ph_assemble_image` (tools/ph-build.sh) existed, minting a
+    rootfs image needed a loop device the sandbox's user namespace can never
+    own, so this refused the sandbox with a NO_LOOP reason. Gate C5 proved
+    that stale: .run/build-tkflash-20260908-154750.log opens ">> NOTE: this
+    image was built from /work/linux-ws" (the container mount), and the full
+    flash it fed succeeded. See test_plan.py for the manifest-level pin."""
     op = plan.op("flash-full")
     site, why = sites.choose_from(op, available=[plan.SANDBOX])
-    assert site is None
-    assert "loop" in why
+    assert site == plan.SANDBOX, why
 
 
 def test_a_rung_both_sites_can_run_prefers_the_sandbox():
@@ -50,44 +48,17 @@ def test_an_explicit_preference_is_honoured_when_the_site_can_run_it():
 
 def test_a_preference_for_a_site_that_cannot_run_it_is_refused_not_ignored():
     """Silently honouring the fallback is how a build ran against the wrong
-    package repo."""
-    op = plan.op("flash-full")
+    package repo. No real op currently refuses either site -- every Op now
+    defaults to {SANDBOX: True, HOST: True}, since the assembler made both
+    able to mint a rootfs image -- so a synthetic Op exercises the
+    mechanism itself rather than a manifest value that no longer refuses
+    anything."""
+    op = plan.Op("fake-op", "exercises choose_from only",
+                 sites={plan.SANDBOX: "made up for this test", plan.HOST: True})
     site, why = sites.choose_from(op, available=[plan.SANDBOX, plan.HOST],
                                   prefer=plan.SANDBOX)
     assert site is None
-    assert "loop" in why
-
-
-# ------------------------------- the host half of "can this site make one" --
-
-def test_a_host_with_no_loop_device_cannot_mint_a_rootfs_image_either():
-    """The static `op.sites` table says HOST: True unconditionally for
-    `install` -- correct about the SANDBOX (which can never do it) and
-    unproven about the host, which is the other half of the plane's central
-    claim: a host with no /dev/loop-control would be told it can build a
-    rootfs image and then fail exactly the way the sandbox already refuses
-    for."""
-    op = plan.op("install")
-    site, why = sites.choose_from(op, available=[plan.HOST],
-                                  host_can_image=False)
-    assert site is None
-    assert "loop" in why
-
-
-def test_a_host_with_a_loop_device_can_mint_a_rootfs_image():
-    op = plan.op("install")
-    site, why = sites.choose_from(op, available=[plan.HOST],
-                                  host_can_image=True)
-    assert site == plan.HOST, why
-
-
-def test_host_can_image_is_irrelevant_to_an_op_that_produces_no_image():
-    """`mod` never touches a rootfs image; a host with no loop device must
-    not be refused for a reason that does not apply to it."""
-    op = plan.op("mod")
-    site, why = sites.choose_from(op, available=[plan.SANDBOX, plan.HOST],
-                                  host_can_image=False)
-    assert site == plan.SANDBOX, why
+    assert why == "made up for this test"
 
 
 # -------------------------------------------------------------------- facts --

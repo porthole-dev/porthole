@@ -43,11 +43,6 @@ WORKDIR = "workdir"
 ROOTFS_PW = "rootfs_pw"          # PORTHOLE_PMOS_PASSWORD, for pmbootstrap install
 CHROOT_INSTALLED = "chroot_installed"   # a rootfs chroot `export` can pack
 
-# Why a site cannot run something. Stated once; several ops share it.
-NO_LOOP = ("pmbootstrap partitions the rootfs image through a loop device, "
-           "and a rootless user namespace cannot have one -- /dev/loop-control "
-           "is root:disk on the host and absent in the container")
-
 
 class Op:
     """One operation: what it needs, where it runs, what it costs and destroys.
@@ -163,13 +158,18 @@ _add(Op("flash-boot",
 
 # Unlike flash-boot, this genuinely needs the bootloader: `tkflash` runs
 # `pmbootstrap flasher flash_rootfs`, which has no booted-device fallback.
-# The operation the whole rework exists for. It needs a rootfs image, and only
-# a site that can make one may run it.
+# The operation the whole rework exists for. Both sites can produce the
+# rootfs image it flashes: `_ph_assemble_image` (tools/ph-build.sh) builds it
+# directly from the chroot -- mkfs.ext4 -d and sfdisk against a plain file,
+# no loop device -- whenever /dev/loop-control is absent, which is always
+# true in the sandbox's user namespace and sometimes true on the host too.
+# Before the assembler this was `sites={SANDBOX: NO_LOOP, HOST: True}`; Gate
+# C5 (.run/build-tkflash-20260908-154750.log, ">> NOTE: this image was built
+# from /work/linux-ws") proved the sandbox does it now.
 _add(Op("flash-full",
         "flash the rootfs AND the boot image -- replaces everything on the "
         "device",
         needs_state=FASTBOOT, needs=(DTB,),
-        sites={SANDBOX: NO_LOOP, HOST: True},
         destroys=("the device rootfs", "every locally-installed package",
                   "the boot partition"),
         reversible=False, disk_gb=0.0))
@@ -177,7 +177,6 @@ _add(Op("flash-full",
 _add(Op("install",
         "mint a fresh rootfs image from pmaports and the local repo",
         needs_state=NONE, needs=(KERNEL_PKG, ARCH, WORKDIR, ROOTFS_PW),
-        sites={SANDBOX: NO_LOOP, HOST: True},
         produces=("rootfs.img",),
         destroys=("the previous rootfs image",),
         reversible=True, disk_gb=25.0))
