@@ -168,3 +168,104 @@ def sfdisk_script(lay: dict) -> str:
         f"type={lay['boot_type']}, name={BOOT_LABEL}\n"
         f"start={lay['root_start']}, size={lay['root_sectors']}, "
         f"type={lay['root_type']}, name={ROOT_LABEL}\n")
+
+
+def mkfs_argv(out, size_mb: int, label: str, uuid: str, source_dir,
+              inode_ratio: int = 8192) -> list:
+    """`mkfs.ext4 -d` populates a filesystem from a directory with no mount.
+
+    -F because the target is a file rather than a block device, -q because
+    the build's own progress line is the output that matters.
+
+    inode_ratio defaults to 8192, not 0: pmb#2568 -- without `-i 8192` an
+    install runs out of inodes and reports it as out of space, and that has
+    to hold for a caller that does not think to pass it, not just the one
+    that remembers to.
+    """
+    argv = ["mkfs.ext4", "-F", "-q", "-L", label, "-U", uuid]
+    if inode_ratio:
+        argv += ["-i", str(inode_ratio)]
+    argv += ["-d", str(source_dir), str(out), f"{size_mb}M"]
+    return argv
+
+
+def assemble(runner, boot_dir, root_dir, out, lay: dict, boot_uuid,
+             root_uuid) -> None:
+    """Build the two filesystems and place them in a partitioned disk.
+
+    ORDER IS LOAD-BEARING. The table is written first: `dd conv=notrunc`
+    into a file `sfdisk` has not touched yet leaves a disk with no table and
+    contents that look perfectly fine.
+
+    conv=notrunc on every dd is equally load-bearing: dd's default is to
+    truncate its OUTPUT file to the length of what it just wrote, so a
+    second dd without it would cut the disk down to the tail partition's own
+    length and erase the one written before it.
+
+    Sizes are always derived from `lay`, not taken from a caller: sfdisk
+    already carved out `boot_sectors`/`root_sectors` for this partition, and
+    a filesystem built to any other size either overflows its slot or
+    leaves it partly empty -- both silent.
+    """
+    boot_mb = lay["boot_sectors"] * SECTOR // (1024 * 1024)
+    root_mb = lay["root_sectors"] * SECTOR // (1024 * 1024)
+    boot_img, root_img = f"{out}.boot", f"{out}.root"
+
+    runner(mkfs_argv(boot_img, boot_mb, BOOT_LABEL, boot_uuid, boot_dir))
+    runner(mkfs_argv(root_img, root_mb, ROOT_LABEL, root_uuid, root_dir,
+                     inode_ratio=8192))
+    runner(["truncate", "-s", str(lay["total_bytes"]), str(out)])
+    runner(["sfdisk", "-q", str(out)], stdin=sfdisk_script(lay))
+    for src, start in ((boot_img, lay["boot_start"]),
+                       (root_img, lay["root_start"])):
+        runner(["dd", f"if={src}", f"of={out}", f"bs={SECTOR}",
+                f"seek={start}", "conv=notrunc", "status=none"])
+    runner(["rm", "-f", boot_img, root_img])
+
+
+_UUID_LINE = "Filesystem UUID:"
+_LABEL_LINE = "Filesystem volume name:"
+
+
+def verify(runner, out, lay: dict, boot_uuid, root_uuid) -> list:
+    """Read each partition back out of the assembled disk and check it.
+
+    Offline, before anything is written to a phone, because flash_rootfs
+    writes hundreds of MB that is not undoable and a refusal after it has
+    run leaves a half-flashed device.
+
+    Extracted with dd rather than read through a loop device, so
+    verification works in exactly the place assembly does -- no root, no
+    loop device, same as the assembler that produced the image.
+    """
+    problems = []
+    for name, start, sectors, want_uuid, want_label in (
+            ("boot", lay["boot_start"], lay["boot_sectors"], boot_uuid,
+             BOOT_LABEL),
+            ("root", lay["root_start"], lay["root_sectors"], root_uuid,
+             ROOT_LABEL)):
+        part = f"{out}.verify-{name}"
+        runner(["dd", f"if={out}", f"of={part}", f"bs={SECTOR}",
+                f"skip={start}", f"count={sectors}", "status=none"])
+        text = runner(["dumpe2fs", "-h", part])
+        got_uuid = _field(text, _UUID_LINE)
+        got_label = _field(text, _LABEL_LINE)
+        if got_uuid.lower() != str(want_uuid).lower():
+            problems.append(
+                f"{name}: the filesystem carries UUID {got_uuid or '(none)'} "
+                f"but the fstab and cmdline name {want_uuid} -- the phone "
+                f"would come up in the initramfs hunting for a root that is "
+                f"not there")
+        if got_label != want_label:
+            problems.append(
+                f"{name}: label is {got_label or '(none)'}, expected "
+                f"{want_label}")
+        runner(["rm", "-f", part])
+    return problems
+
+
+def _field(text: str, prefix: str) -> str:
+    for line in (text or "").splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return ""

@@ -163,6 +163,94 @@ def test_a_layout_the_assembler_does_not_cover_is_refused_by_name():
             assert "--host" in str(exc), "the refusal must name the way out"
 
 
+class FakeRunner:
+    """Records argv instead of running it, so assembly order is testable with
+    no container, no e2fsprogs and no disk."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, argv, stdin=""):
+        self.calls.append((list(argv), stdin))
+        return ""
+
+    def program(self, name):
+        return [c for c in self.calls if c[0] and c[0][0] == name]
+
+
+def test_mkfs_is_told_the_uuid_the_label_and_the_source_directory():
+    argv = image.mkfs_argv("/tmp/root.ext4", 64, image.ROOT_LABEL,
+                           "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "/mnt/root")
+    assert "-U" in argv and "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" in argv
+    assert "-L" in argv and image.ROOT_LABEL in argv
+    assert "-d" in argv and "/mnt/root" in argv
+    assert argv[-1] == "64M", "size is mke2fs's last argument"
+
+
+def test_the_root_filesystem_asks_for_more_inodes():
+    """pmb#2568: without -i 8192 an install runs out of inodes and reports it
+    as out of space."""
+    argv = image.mkfs_argv("/tmp/root.ext4", 64, image.ROOT_LABEL, "u", "/d")
+    assert "-i" in argv and "8192" in argv
+
+
+def test_assembly_writes_the_table_before_it_writes_the_filesystems():
+    """dd with conv=notrunc into a file sfdisk has not written yet leaves a
+    disk whose table is missing and whose contents look fine."""
+    run = FakeRunner()
+    lay = image.layout(32, 64, "aarch64")
+    image.assemble(run, "/b", "/r", "/out.img", lay, "bu", "ru")
+    names = [c[0][0] for c in run.calls]
+    assert names.index("sfdisk") < names.index("dd")
+
+
+def test_every_dd_carries_conv_notrunc():
+    """Without it the second dd truncates the disk to its own length and the
+    first partition is gone."""
+    run = FakeRunner()
+    image.assemble(run, "/b", "/r", "/out.img",
+                   image.layout(32, 64, "aarch64"), "bu", "ru")
+    for argv, _ in run.program("dd"):
+        assert "conv=notrunc" in argv
+
+
+def test_the_filesystems_are_written_at_their_declared_offsets():
+    """Checks which SOURCE lands at which offset, not just that the two
+    offsets appear somewhere: a set comparison of {boot_start, root_start}
+    would still pass a mutant that swapped boot and root, writing each
+    filesystem into the other's slot -- a disk that partitions correctly
+    and boots nothing."""
+    run = FakeRunner()
+    lay = image.layout(32, 64, "aarch64")
+    image.assemble(run, "/b", "/r", "/out.img", lay, "bu", "ru")
+    seek_by_src = {}
+    for argv, _ in run.program("dd"):
+        src = next(a.split("=", 1)[1] for a in argv if a.startswith("if="))
+        seek = int(next(a.split("=", 1)[1] for a in argv
+                        if a.startswith("seek=")))
+        seek_by_src[src] = seek
+    assert seek_by_src["/out.img.boot"] == lay["boot_start"]
+    assert seek_by_src["/out.img.root"] == lay["root_start"]
+
+
+def test_verification_rejects_an_image_whose_uuid_is_not_the_one_we_chose():
+    """The whole point of choosing it. If the filesystem does not carry the
+    number we wrote into the fstab and the cmdline, the phone will not find
+    its root -- and that must be caught here, on the host, where it is free."""
+    class Wrong(FakeRunner):
+        def __call__(self, argv, stdin=""):
+            super().__call__(argv, stdin)
+            if argv and argv[0] == "dumpe2fs":
+                return ("Filesystem volume name:   pmOS_root\n"
+                        "Filesystem UUID:          00000000-0000-0000-0000-000000000000\n")
+            return ""
+
+    lay = image.layout(32, 64, "aarch64")
+    problems = image.verify(Wrong(), "/out.img", lay, "bu",
+                            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    assert problems and any("uuid" in p.lower() for p in problems)
+
+
 def main():
     return _runner.run(globals())
 
