@@ -51,10 +51,41 @@ def test_the_full_flash_cannot_run_in_the_sandbox_and_names_the_loop_device():
 
 def test_an_irreversible_op_is_marked_so():
     """Confirm tiers derive from this, so a wrong value here is a device
-    written without a gate."""
+    written without a gate. `flash-full` is the only op that earns this
+    tier: it is the irreversible act, not the host-side rebuild `image` and
+    `install` do on the way there -- rebuilding regenerates the artefact it
+    overwrites, so both stay reversible and share the same `destroys`."""
     assert plan.op("flash-full").reversible is False
-    assert plan.op("install").reversible is False
     assert plan.op("mod").reversible is True
+    assert plan.op("install").reversible is True
+    assert plan.op("image").reversible is True
+    assert plan.op("image").destroys == plan.op("install").destroys
+
+
+def test_ops_that_reach_the_device_over_ssh_declare_booted():
+    """A mutation from BOOTED to FASTBOOT on `boot` passed the whole suite
+    once -- nothing pinned it. `mod`, `boot`, `fast` and `upgrade` all ssh
+    into the device before moving it (tkboot seeds its base image with
+    `tk_run 'uname -r'` before it ever calls `ph-to-fastboot.sh`); `flash-boot`
+    and `flash-full` move the device straight from the bootloader and never
+    ssh in first."""
+    for name in ("mod", "boot", "fast", "upgrade"):
+        assert plan.op(name).needs_state == plan.BOOTED, name
+    for name in ("flash-boot", "flash-full"):
+        assert plan.op(name).needs_state == plan.FASTBOOT, name
+
+
+def test_fast_requires_an_installed_chroot():
+    """Fixing the facts dicts above to include chroot_installed left nothing
+    asserting `fast` actually needs it -- dropping CHROOT_INSTALLED from its
+    `needs` left the suite green."""
+    op = plan.op("fast")
+    problems = plan.unmet(op, {"state": "BOOTED", "tree": True,
+                               "kernel_pkg": "linux-x", "defconfig": "d",
+                               "arch": "aarch64", "dtb": "x",
+                               "workdir": "/tmp", "free_gb": 100.0,
+                               "chroot_installed": False})
+    assert plan._MISSING[plan.CHROOT_INSTALLED] in problems
 
 
 def test_unmet_is_pure_and_names_the_fix():

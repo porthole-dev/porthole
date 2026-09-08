@@ -93,9 +93,16 @@ _add(Op("mod",
         needs_state=BOOTED, needs=_KERNEL_INPUTS,
         produces=("module",), reversible=True, disk_gb=5.0))
 
+# Same shape as `fast`/`upgrade`, not `flash-boot`: before it compiles
+# anything, tkboot ssh's in (`tk_run 'uname -r'`) to seed the base image it
+# repacks, and only afterwards moves the device to FASTBOOT itself
+# (tools/ph-build.sh:2400-2436). Declaring FASTBOOT here refused a
+# correctly-booted phone and sent the device to the one state where tkboot
+# cannot reach it to seed the base image -- the same circular refusal the
+# `kernel` rung exists to avoid.
 _add(Op("boot",
         "build the dtb, repack and RAM-boot it -- no packaging step",
-        needs_state=FASTBOOT, needs=_KERNEL_INPUTS,
+        needs_state=BOOTED, needs=_KERNEL_INPUTS,
         produces=("boot.img",), reversible=True, disk_gb=5.0))
 
 # `fast` and `upgrade` end in `pmbootstrap export`, which packs boot.img out
@@ -115,17 +122,26 @@ _add(Op("upgrade",
         produces=("boot.img",),
         destroys=("the boot partition",), reversible=False, disk_gb=20.0))
 
+# tkbuild makes no ssh or fastboot call (tools/ph-build.sh:952-1010) -- same
+# device-interaction profile as `image` (none), so the same NONE.
 _add(Op("kernel",
         "build the kernel, package it, install and verify, but NOT flash",
-        needs_state=ANY, needs=_KERNEL_INPUTS + (ROOTFS_PW,),
+        needs_state=NONE, needs=_KERNEL_INPUTS + (ROOTFS_PW,),
         produces=("rootfs chroot", "boot.img"), reversible=True, disk_gb=25.0))
 
 # The only rung that compiles no kernel tree, and therefore the one a freshly
 # set-up host can actually run.
+#
+# `image` and `install` both wrap `_ph_install_rootfs` (tools/ph-build.sh:884)
+# and both replace the rootfs image on disk -- functionally the same host-side
+# act, so they share destroys/reversible. Rebuilding regenerates the artefact
+# that gets overwritten, so that is not the irreversible act; `flash-full` is,
+# and is the only op strict enough to earn reversible=False.
 _add(Op("image",
         "build the whole system image from pmaports -- no kernel tree",
         needs_state=NONE, needs=(KERNEL_PKG, ARCH, DTB, WORKDIR, ROOTFS_PW),
-        produces=("rootfs chroot", "rootfs.img"), reversible=True,
+        produces=("rootfs chroot", "rootfs.img"),
+        destroys=("the previous rootfs image",), reversible=True,
         disk_gb=25.0))
 
 _add(Op("clean", "unstack /mnt/linux binds", needs_state=NONE, disk_gb=0.0))
@@ -156,7 +172,7 @@ _add(Op("install",
         sites={SANDBOX: NO_LOOP, HOST: True},
         produces=("rootfs.img",),
         destroys=("the previous rootfs image",),
-        reversible=False, disk_gb=25.0))
+        reversible=True, disk_gb=25.0))
 
 
 # -------------------------------------------------------------- the checks --
@@ -192,6 +208,9 @@ def unmet(op: Op, facts: dict) -> list[str]:
     problems = []
     want = op.needs_state
     got = facts.get("state", "")
+    # An empty/unknown state is not a mismatch: a preview has to render
+    # without probing the device, and gating it behind a state check would
+    # put the probe back that this rework exists to remove. Leave this be.
     if want in (BOOTED, FASTBOOT) and got and got != want:
         problems.append(
             f"the device is {got}, not {want} -- this operation needs it "
