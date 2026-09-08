@@ -998,7 +998,7 @@ _ph_assemble_image() {
 	# argv, not read back out of the environment, because neither variable is
 	# exported.
 	python3 - "$chroot" "$out" "$_PH_REPO_ROOT" "${PORTHOLE_ARCH:-aarch64}" <<-'PY' || return 1
-	import glob, os, pathlib, re, shutil, subprocess, sys
+	import contextlib, glob, os, pathlib, re, shutil, subprocess, sys
 
 	chroot, out, repo_root, arch = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 	sys.path.insert(0, repo_root + "/lib")
@@ -1166,8 +1166,13 @@ _ph_assemble_image() {
 	    ok = True
 	finally:
 	    if not ok:
+	        # Each unlink guarded on its OWN, not by the loop's missing_ok: a
+	        # pathological `out` (e.g. a directory, or an unreadable parent)
+	        # raises something missing_ok=True does not swallow, and a loop
+	        # that stops at the first error strands the other two temps.
 	        for f in (out, f"{out}.boot", f"{out}.root"):
-	            pathlib.Path(f).unlink(missing_ok=True)
+	            with contextlib.suppress(OSError):
+	                pathlib.Path(f).unlink(missing_ok=True)
 
 	pathlib.Path(out + ".uuids").write_text(
 	    f"pmos_boot_uuid={boot_uuid}\npmos_root_uuid={root_uuid}\n")
@@ -1203,9 +1208,6 @@ tkbuild() {
 	echo ">> installing the kernel into the rootfs chroot (pmbootstrap install) --"
 	echo ">>   mkfs + package installs, normally minutes, no progress signal"
 	_ph_install_rootfs || return 1
-	# install just reminted the filesystem UUIDs, so any recorded set is now a
-	# lie -- and tkflash-boot would patch the fresh export back to the old ones.
-	rm -f "$_PH_REPO/.device-uuids"
 	echo ">> exporting the built image (pmbootstrap export)"
 	pmbootstrap export || return 1
 
@@ -1258,9 +1260,6 @@ tksysimage() {
 	echo ">> installing the system into the rootfs chroot (pmbootstrap install) --"
 	echo ">>   mkfs + package installs, normally minutes, no progress signal"
 	_ph_install_rootfs || return 1
-	# install just reminted the filesystem UUIDs, so any recorded set is now a
-	# lie -- and tkflash-boot would patch the fresh export back to the old ones.
-	rm -f "$_PH_REPO/.device-uuids"
 	# Pin the kernel to the aport release and remember WHICH apk, for the dtb
 	# reference below. Cheap and idempotent when `install` already resolved to
 	# the same package; it also BUILDS the aport when the local repo does not
@@ -1463,48 +1462,18 @@ _ph_ref_dtb() {
 }
 
 # Verify the export before ANYTHING is written to the device.
-# Refuse a rootfs image that did not come from the same install as boot.img.
 #
-# `install` writes boot.img into the rootfs chroot and THEN builds the disk
-# image, so in a good pair the image is never meaningfully older. A rootfs left
-# behind by an earlier run is: on 2026-09-06 a 1.5 GB file `truncate` had
-# created seven minutes before -- and then never populated, because that run
-# died at `modprobe loop` -- sat where flash_rootfs looks, with a perfectly
-# good boot.img beside it. Nothing could tell them apart, and flash_rootfs
-# writes ~640 MB that is not undoable.
-#
-# Generous threshold: this must never fire on one real install, only on a pair
-# that came from two different ones.
-_PH_ROOTFS_SKEW_S=300
-_ph_verify_rootfs_pair() {
-	local boot=$1 root
-	root=$(readlink -f "/tmp/postmarketOS-export/${PORTHOLE_CODENAME}.img" 2>/dev/null)
-	[ -n "$root" ] && [ -s "$root" ] || {
-		echo ">> no rootfs image at /tmp/postmarketOS-export/${PORTHOLE_CODENAME}.img" >&2
-		echo ">>   A workspace build cannot make one (no loop device). Flash boot" >&2
-		echo ">>   only with tools/ph-flash-boot.sh, or build the rung --host." >&2
-		return 1; }
-	local bt rt
-	bt=$(stat -Lc %Y "$boot" 2>/dev/null) || return 0
-	rt=$(stat -Lc %Y "$root" 2>/dev/null) || return 0
-	if [ "$((bt - rt))" -gt "$_PH_ROOTFS_SKEW_S" ]; then
-		echo "REFUSING: the rootfs image is $(( (bt - rt) / 60 )) minutes older than boot.img." >&2
-		echo "  $root" >&2
-		echo "  They are from different installs, so the UUIDs boot.img names" >&2
-		echo "  are not the ones in that rootfs -- the phone would come up in" >&2
-		echo "  the initramfs hunting for a root that is not there." >&2
-		echo "  Re-run the install rung, or flash boot only." >&2
-		return 1
-	fi
-}
-
+# There used to be a second check here: a rootfs image and boot.img can only
+# mismatch if they came from different installs, and that is exactly what
+# `_ph_assemble_image` no longer allows -- it writes both from one set of
+# chosen UUIDs in the same run, and `verify()` (lib/porthole_image.py)
+# refuses before either one ships. A rootfs left behind by an earlier,
+# unrelated run is not "the other half of this pair"; it is a stale file
+# `_ph_assemble_image`'s own failure cleanup removes.
 _ph_verify_export() {
 	local img dtb
 	img=$(readlink -f /tmp/postmarketOS-export/boot.img 2>/dev/null)
 	[ -s "$img" ] || { echo ">> no exported boot.img -- run a build first" >&2; return 1; }
-	# Before the dtb check, because this one is about what would be WRITTEN and
-	# the other is about what was built.
-	_ph_verify_rootfs_pair "$img" || return 1
 	dtb=$(_ph_ref_dtb) || return 1
 	echo ">> pre-flight: verifying the export before writing anything"
 	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
@@ -1515,9 +1484,8 @@ _ph_verify_export() {
 tkflash() {
 	# Verify FIRST. flash_rootfs writes ~640 MB and is not undoable, so a
 	# refusal after it has run leaves a half-flashed device and an error that
-	# reads like a build problem. The UUID patch below only rewrites the
-	# cmdline, never the dtb, so checking the unpatched export here is the same
-	# check tkflash-boot repeats on the final image.
+	# reads like a build problem. tkflash-boot repeats the same dtb check
+	# against the same export below.
 	_ph_verify_export || return 1
 	pmbootstrap flasher flash_rootfs || return 1
 	tkflash-boot
@@ -1559,25 +1527,11 @@ tkflash-boot() {
 	#   PORTHOLE_REF_DTB=/path/to/unpacked-apk/boot/dtbs/qcom/msm8998-google-taimen.dtb
 	local dtb; dtb=$(_ph_ref_dtb) || return 1
 
-	# The exported boot.img carries the UUIDs of whatever rootfs the CHROOT was
-	# last installed with. If `pmbootstrap install` has re-run since the device's
-	# rootfs was flashed, those no longer name any filesystem on the phone: the
-	# initramfs comes up (USB gadget enumerates, ssh refused), hunts forever, and
-	# the phone sits at a black screen looking bricked. Every failed boot also
-	# burns a slot-retry-count, so after three of them the bootloader gives up on
-	# the slot and drops to fastboot -- which reads as a second, unrelated fault.
-	# Cost an afternoon on 2026-08-03. tkpush-modules records the phone's real
-	# UUIDs while it is still up; patch them in rather than trusting the export.
-	local uf="$_PH_REPO/.device-uuids" tok args=()
-	if [ -s "$uf" ]; then
-		for tok in $(cat "$uf"); do args+=(--remove "${tok%%=*}=" --add "$tok"); done
-		"$_PH_REPO/tools/bootimg-cmdline.py" patch "$img" \
-			-o /tmp/tk-boot-uuid.img "${args[@]}" || return 1
-		img=/tmp/tk-boot-uuid.img
-	else
-		echo ">> WARNING: no $uf -- flashing the export's UUIDs unchecked"
-	fi
-
+	# The exported boot.img carries the UUIDs `_ph_assemble_image` (or
+	# `pmbootstrap install`) chose for this same install and wrote into both
+	# the rootfs's fstab and mkinitfs's cmdline, so it already names a
+	# filesystem that exists -- there is nothing on the phone to read back
+	# and nothing here to patch.
 	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
 		echo ">> refusing to flash a stale image"; return 1; }
 
@@ -1971,16 +1925,6 @@ tkpush-modules() {
 			exit 1; }
 
 		echo \">> pushed \$n modules, vermagic OK\"" || return 1
-
-	# While the phone is still up, record the UUIDs its initramfs actually needs.
-	# tkflash-boot patches them into the export; see the comment there.
-	ssh "${TK_SSH_OPTS[@]}" "$phone" 'cat /proc/cmdline' 2>/dev/null | tr ' ' '\n' |
-		grep -E '^pmos_(boot|root)_uuid=' > "$_PH_REPO/.device-uuids"
-	# A cmdline without pmos_*_uuid= (taimen boots by partition, not UUID) leaves
-	# the file empty; that is the flash step's warning, not this step's failure.
-	if [ -s "$_PH_REPO/.device-uuids" ]; then
-		echo ">> recorded device UUIDs: $(tr '\n' ' ' < "$_PH_REPO/.device-uuids")"
-	fi
 
 	# What is now on the phone, so an interrupted rung can resume. Written only
 	# here, after the device has confirmed the swap.

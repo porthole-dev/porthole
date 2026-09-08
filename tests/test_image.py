@@ -619,9 +619,8 @@ def test_a_refused_image_is_not_left_where_flash_would_find_it():
     run() failure inside assemble(), between truncate creating `out` and the
     closing rm) left a complete-looking image sitting at exactly that path --
     the same hazard the .stale-images move guards against, arriving from a
-    new direction. `_ph_verify_rootfs_pair` only checks non-emptiness and
-    mtime skew, so it cannot catch this either; only "does anything survive
-    at all" can.
+    new direction. Nothing else checks whether anything survives at that path
+    at all.
 
     Runs against the HOST's own mkfs.ext4/sfdisk/dd/truncate/dumpe2fs rather
     than through porthole-sandbox: none of them touch a block device or need
