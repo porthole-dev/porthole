@@ -1078,6 +1078,14 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
         except OSError:
             follow_offset = 0
 
+    # BEFORE the child starts. A directory pmbootstrap cannot index kills
+    # every command in this work dir, and waiting for the failure to say so
+    # cost a real session fifty seconds and a re-run for something two stat
+    # calls knew at the outset.
+    if follow:
+        for channel, name in unindexable_repos(follow.parent / "packages"):
+            evict_repo(ctx, follow.parent, channel, name)
+
     rundir = pathlib.Path(ctx.cfg.get("PORTHOLE_RUNDIR") or (ctx.root / ".run"))
     rundir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -1272,13 +1280,24 @@ def _stream(ctx, cmd, env, timeout: int, rung: str,
         # known signature the cause is somewhere the message does not mention.
         for why in diagnose(text + "\n" + inner):
             ctx.out(ctx.out.paint(f"  ? {why}", "yellow"))
+        # `follow.parent` is the pmbootstrap work dir -- the log lives in it --
+        # so the repair needs nothing this function did not already have.
+        evict_stray_repo(ctx, text + "\n" + inner,
+                         follow.parent if follow else None)
     return rc
 
 
 # Anything that names the failure. Deliberately narrow -- a pattern that
 # matched "error" anywhere would select compiler warnings mentioning the word.
+# The anchor tolerates pmbootstrap's own prefix -- `[HH:MM:SS] ` on stdout,
+# `(pid) [HH:MM:SS] ` in log.txt -- because without it the anchor matched no
+# pmbootstrap line at all. The ones that got through before did so on the
+# `not found` fallback; an `ERROR: Command failed (exit code 1)` says none of
+# those words, and a real 2026-09-08 failure printed six lines of version
+# banner instead of the error four lines above it.
 _SAYS_WHY = re.compile(
-    r"^\s*(ERROR|FATAL|Traceback|error:|fatal:|\S+: error:)|"
+    r"^\s*(?:\(\d+\)\s*)?(?:\[\d\d:\d\d:\d\d\]\s*)?"
+    r"(ERROR|FATAL|Traceback|error:|fatal:|\S+: error:)|"
     r"\bcould not\b|\bnot found\b|\bNo such file\b", re.I)
 
 
@@ -1305,6 +1324,193 @@ def failure_tail(text: str, limit: int = 6) -> list[str]:
     if lines[-1] not in keep:
         keep = keep + [lines[-1]]
     return keep
+
+
+# pmbootstrap indexes EVERY directory under packages/<channel>/ as an
+# architecture. A directory parked in there -- `packages/edge/rejected`, four
+# .apk files moved aside by hand -- gets indexed too, and the index fails: the
+# measured one was created host-side, so the container's build user could not
+# write the signature into it. Every pmbootstrap command in that work dir then
+# dies naming an APKINDEX and a failed `mv`, and never the directory. Measured
+# 2026-09-08 on a 42-second kernel rung that had nothing to do with any of it.
+#
+# The name comes from pmbootstrap's OWN error rather than from a list of what
+# an architecture looks like. A list would move a real repo for an arch
+# porthole had not heard of out from under a working build; this way the only
+# directory that can move is the one pmbootstrap has just refused to index.
+_STRAY_REPO = re.compile(
+    r"cd\s+\S*/packages/([^/\s;]+)/([^/\s;]+)\s*;[^\n]*\bapk\b[^\n]*\bindex\b")
+
+# Moved here, not deleted, and inside the work dir so the move cannot cross a
+# filesystem and cannot land somewhere the user has to go hunting for.
+PARKED = "packages-parked"
+
+# Only as a brake. Identifying the directory is pmbootstrap's job above; this
+# is what stops a repair from touching a REAL repo when an index fails inside
+# one for some other reason.
+_ARCHES = frozenset((
+    "aarch64", "armhf", "armv7", "x86", "x86_64", "riscv64", "ppc64le",
+    "s390x", "loongarch64"))
+
+
+def stray_repo(text: str):
+    """`(channel, name)` of the package directory pmbootstrap could not index,
+    or None. Pure, and never a known architecture."""
+    match = _STRAY_REPO.search(_strip_ansi(text))
+    if not match or match.group(2) in _ARCHES:
+        return None
+    return match.group(1), match.group(2)
+
+
+def unindexable_repos(packages):
+    """`[(channel, name)]` for package directories pmbootstrap cannot index.
+
+    Knowable BEFORE the build, from two stat calls, which is the whole point:
+    the first version of this repair only ran after pmbootstrap had failed, so
+    the answer to "why did my build die" was fifty seconds and a re-run. The
+    directory is fatal the moment it exists -- every pmbootstrap command in
+    this work dir fails while it is there -- so noticing it at the start is
+    not an optimisation, it is when the fact became true.
+
+    NOT a list of what an architecture is called. A list would move a real
+    repo for an arch porthole had not heard of out from under a working build.
+    The test is the one that actually breaks: pmbootstrap indexes every
+    directory under a channel and signs the index AS THE BUILD USER, so a
+    directory that user cannot write is one the index will fail in. The
+    reference uid is the channel directory's own -- pmbootstrap created it, as
+    the user it builds as -- and a world-writable directory is writable by
+    that user whoever owns it.
+
+    Measured on the real one: `packages/edge/` and both real repos at uid
+    536632 (the container's `pmos`), `packages/edge/rejected` at 1000, mode
+    755. Nothing else in the work dir differed.
+    """
+    found = []
+    try:
+        channels = sorted(p for p in pathlib.Path(packages).iterdir()
+                          if p.is_dir())
+    except OSError:
+        return found            # no packages dir yet is not a problem to fix
+    for channel in channels:
+        try:
+            ref = _owner(channel)
+            for repo in sorted(channel.iterdir()):
+                if not repo.is_dir() or repo.name in _ARCHES:
+                    continue
+                if _owner(repo) != ref and not repo.stat().st_mode & 0o002:
+                    found.append((channel.name, repo.name))
+        except OSError:
+            continue
+    return found
+
+
+def _owner(path) -> int:
+    """The uid owning `path`.
+
+    Its own function so a test can produce the ownership split this looks
+    for: a directory owned by another uid is not something a test can create
+    without root, and the branch that MOVES somebody's packages is not one to
+    leave unexercised.
+    """
+    return path.stat().st_uid
+
+
+def _evict_inside(ctx, workdir, channel: str, name: str) -> bool:
+    """The same move, made by the container, because the host cannot make it.
+
+    A rename needs write permission on the PARENT directory, and
+    `packages/<channel>/` belongs to the container's build user -- so the host
+    user cannot move anything out of it, no matter who owns the directory
+    being moved. Measured on the first real repair, which failed with EACCES
+    on a directory the host user owned outright.
+
+    Only for the workspace's own work dir. `/pmb` is where THAT one is
+    mounted; a host pmbootstrap work dir is not inside the container at all,
+    and there the host rename is the one that works.
+    """
+    import porthole_cmd_sandbox as sandbox
+
+    if not shutil.which("podman"):
+        return False
+    try:
+        if pathlib.Path(workdir) != sandbox._sandbox_pmb(ctx.cfg):
+            return False
+        if not sandbox._container_running():
+            return False
+    except Exception:  # noqa: BLE001
+        return False    # deciding this must not be a way for the repair to raise
+    parked = f"/pmb/{PARKED}/{channel}"
+    script = "mkdir -p {0} && mv {1} {0}/".format(
+        shlex.quote(parked), shlex.quote(f"/pmb/packages/{channel}/{name}"))
+    done = subprocess.run(
+        ["podman", "exec", sandbox.CONTAINER, "sh", "-c", script],
+        capture_output=True, text=True)
+    return done.returncode == 0
+
+
+def evict_repo(ctx, workdir, channel: str, name: str, ran: bool = False) -> bool:
+    """Move one directory out of the package repo. Loudly.
+
+    Two callers, one repair: the preflight, which finds it from ownership
+    before anything runs, and the failure path, which finds it in
+    pmbootstrap's own error for a case the preflight did not predict.
+
+    The alternative to moving it was a diagnosis, and the person who hit this
+    read that diagnosis and asked what they were supposed to do with it -- it
+    named a path inside the container, no host path and no command. Nothing
+    here is guessed: the directory cannot stay where it is, because every
+    pmbootstrap command in this work dir fails while it does.
+
+    `ran` says the build already spent its time; only then is there anything
+    to re-run.
+    """
+    if not workdir:
+        return False
+    src = pathlib.Path(workdir) / "packages" / channel / name
+    dest = pathlib.Path(workdir) / PARKED / channel / name
+    say = ctx.out.paint(
+        f"  ! packages/{channel}/{name} is not an architecture, and "
+        f"pmbootstrap indexes every directory under packages/{channel}/ as "
+        f"one -- so it fails there before it builds anything", "yellow")
+    if not src.is_dir() or dest.exists():
+        # Say it anyway. A work dir we cannot reach from here (or a parked
+        # copy already sitting in the way) still leaves the reader holding a
+        # container path and no idea what to do with it.
+        ctx.out(say)
+        ctx.out(ctx.out.paint(f"  move {src} out of packages/", "grey"))
+        return False
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dest)
+    except OSError as err:
+        if not _evict_inside(ctx, workdir, channel, name):
+            ctx.out(say)
+            ctx.out(ctx.out.paint(
+                f"  move it out of packages/ -- from INSIDE the workspace, "
+                f"because the host cannot ({err.strerror or err}): "
+                f"porthole sandbox shell --command "
+                f"'mv /pmb/packages/{channel}/{name} /pmb/{PARKED}/{channel}/'",
+                "grey"))
+            return False
+    ctx.out(say)
+    ctx.out(ctx.out.paint(f"  moved it to {dest}", "green"))
+    ctx.out(ctx.out.paint(
+        f"  nothing was deleted -- `mv {dest} {src}` puts it back."
+        + ("  Run the same command again." if ran else ""), "grey"))
+    return True
+
+
+def evict_stray_repo(ctx, text: str, workdir) -> bool:
+    """The same repair, for a directory the PREFLIGHT did not predict.
+
+    It reads the name out of pmbootstrap's own error, so it covers an index
+    that failed for a reason ownership does not describe. When the preflight
+    did its job this never fires.
+    """
+    found = stray_repo(text)
+    if not found:
+        return False
+    return evict_repo(ctx, workdir, found[0], found[1], ran=True)
 
 
 def tail_text(path, limit_bytes: int = 2_000_000) -> str:
