@@ -119,17 +119,8 @@ DENIED_VERBS = {
     "serial":     "takes the UART, which another session may be holding",
     "experiment": "runs an arbitrary command with device state either side",
     "blobs":      "extracts vendor images; long, and it writes",
-    # NOT split like build/brain/sandbox below: those grant a distinct
-    # SUBCOMMAND token (`status`, `search`) that a prefix rule can name
-    # without also matching the dangerous one. disk's --prune and
-    # --retire-host are FLAGS on the exact same bare command line as the
-    # safe report, and prefix matching cannot exclude a flag -- a rule
-    # naming `porthole disk` would equally match `porthole disk --prune
-    # --yes` (829 apks, one real run) and `porthole disk --retire-host
-    # --yes --discard-host-workdir` (an 18 G work dir). No sub-grant exists
-    # here for the same reason none exists for `flash`.
-    "disk":       "reports safely by default, but --prune/--retire-host share "
-                  "its bare command line rather than a separate subcommand",
+    "disk":       "`disk prune`/`disk retire-host` delete apks or an 18 G "
+                  "work dir; `disk report` is granted below",
     "brain":      "`brain submit` opens a pull request; search is granted below",
     "docs":       "generates the site into the working tree",
     "permissions":
@@ -146,6 +137,12 @@ ALLOWED_SUBCOMMANDS = {
     "porthole sandbox status": "reports whether the workspace is up",
     "porthole brain search":  "searches the corpus; `new`/`submit` write",
     "porthole tools":         "listed for the completion of `tools --grep`",
+    # `disk`'s three actions are a POSITIONAL word specifically so this could
+    # be written safely: `porthole disk report` and `porthole disk prune`
+    # are different strings a prefix rule can tell apart, unlike the flags
+    # `disk` used to take (a rule for `porthole disk` matched --prune too).
+    "porthole disk report":  "reports work-dir sizes and what is prunable; "
+                             "prune/retire-host delete things",
 }
 
 # Host commands that are reads, and that a session runs constantly. `git

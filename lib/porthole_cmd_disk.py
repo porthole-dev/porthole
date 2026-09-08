@@ -9,14 +9,22 @@ workspace's own pmbootstrap, 22 G) and `~/.local/var/pmbootstrap` (the host's,
 prunes either one and nothing reports what is growing.
 
 READ-ONLY BY DEFAULT
-    A bare `porthole disk` only reports. `--prune --yes` deletes apks this
-    module's own `prunable()` names; `--retire-host --yes` deletes the WHOLE
-    host work dir. Neither runs on a bare invocation.
+    Three positional actions -- `report` (the default, so a bare `porthole
+    disk` is the same thing), `prune`, `retire-host` -- same shape as
+    `build status|watch|<rung>`, `brain search|submit`, `flash boot|full`.
+    Not flags: `--prune`/`--retire-host` booleans could not be granted to an
+    agent without ALSO granting the destructive action, because Claude
+    Code's permission rules are prefix matches and a flag cannot be excluded
+    from one -- `Bash(porthole disk:*)` matches `porthole disk --prune
+    --yes` exactly as well as it matches the report. A positional ACTION
+    token fixes that: `porthole disk report` is a different, shorter string
+    than `porthole disk prune`, so a rule can name one without reaching the
+    other. `prune`/`retire-host` still each need `--yes` too.
 
 THE TWO WORK DIRS ARE NEVER MERGED
     They hold different builds of the same packages -- picking a winner is a
     decision about which build is right, and porthole must not make that
-    decision silently. `divergence()` reports the mismatch; `--retire-host`
+    decision silently. `divergence()` reports the mismatch; `retire-host`
     is the one explicit, named way to resolve it (by discarding the host
     side entirely, never by copying one apk over the other).
 """
@@ -124,7 +132,7 @@ def divergence(host_names, sandbox_names) -> list:
     Each row is `(pkgname, host_versions, sandbox_versions)`, both lists in
     ascending real-version order. Reports the mismatch; chooses nothing. Two
     work dirs holding different builds of the same package is not a bug this
-    function fixes -- it is a decision `--retire-host` makes explicit, on
+    function fixes -- it is a decision `retire-host` makes explicit, on
     request, never here.
     """
     def by_pkg(names):
@@ -227,7 +235,7 @@ def _delete_apks(workdir: pathlib.Path, names) -> list:
 
 def _looks_like_pmb_workdir(path: pathlib.Path):
     """(ok, reason) -- a pmbootstrap work dir has a packages/ directory and
-    at least one chroot_* beside it. Checked before --retire-host's rmtree
+    at least one chroot_* beside it. Checked before retire-host's rmtree
     so a mis-resolved PORTHOLE_PMB_DIR (unset, or pointed at $HOME by a
     typo) cannot send a recursive delete at an arbitrary directory."""
     if not (path / "packages").is_dir():
@@ -245,10 +253,11 @@ def _looks_like_pmb_workdir(path: pathlib.Path):
 def cmd_disk(args, ctx) -> int:
     import porthole_cmd_build as build
 
+    action = args.action or "report"
     host_dir, sandbox_dir = _work_dirs(ctx)
     host_apks, sandbox_apks = _apk_names(host_dir), _apk_names(sandbox_dir)
 
-    if args.retire_host:
+    if action == "retire-host":
         existed = host_dir.is_dir()
         size, size_err = _dir_size_bytes(host_dir) if existed else (None, "")
         shape_ok, shape_reason = (
@@ -264,20 +273,20 @@ def cmd_disk(args, ctx) -> int:
                 ctx.out.warn(f"refusing: {shape_reason}")
             ctx.out.blank()
             ctx.out.hint(
-                "porthole disk --retire-host --yes --discard-host-workdir")
+                "porthole disk retire-host --yes --discard-host-workdir")
 
         if not armed:
             payload = {"would_retire": str(host_dir), "existed": existed,
                       "bytes": size, "shape_ok": shape_ok}
             if not args.yes:
                 return ctx.emit(payload, render_preview)
-            # `--yes` alone confirms `--prune`, but not this -- the flag
-            # that names the specific loss is required in addition, same
-            # rule `porthole flash full` applies to `--replace-rootfs`.
+            # `--yes` alone confirms `prune`, but not this -- the flag that
+            # names the specific loss is required in addition, same rule
+            # `porthole flash full` applies to `--replace-rootfs`.
             raise Bail(
                 "retiring the host work dir deletes it outright -- that "
                 "needs --discard-host-workdir as well as --yes", EX_FAIL,
-                "porthole disk --retire-host --yes --discard-host-workdir")
+                "porthole disk retire-host --yes --discard-host-workdir")
 
         if existed and not shape_ok:
             raise Bail(f"{host_dir} does not look like a pmbootstrap work "
@@ -297,10 +306,10 @@ def cmd_disk(args, ctx) -> int:
     host_prune = prunable(host_apks, args.keep_revisions)
     sandbox_prune = prunable(sandbox_apks, args.keep_revisions)
 
-    if args.prune:
+    if action == "prune":
         if not args.yes:
-            raise Bail("--prune deletes apks -- pass --yes too", EX_FAIL,
-                      "porthole disk --prune --yes")
+            raise Bail("prune deletes apks -- pass --yes too", EX_FAIL,
+                      "porthole disk prune --yes")
         deleted = (_delete_apks(host_dir, host_prune)
                   + _delete_apks(sandbox_dir, sandbox_prune))
         payload = {"deleted": deleted}
@@ -347,12 +356,12 @@ def cmd_disk(args, ctx) -> int:
             if not args.verbose:
                 ctx.out.hint("porthole disk --json",
                              "the full revision list, per package")
-            ctx.out.hint("porthole disk --retire-host",
+            ctx.out.hint("porthole disk retire-host",
                          "see what retiring the host work dir would do")
         total_prune = len(host_prune) + len(sandbox_prune)
         if total_prune:
             ctx.out.blank()
-            ctx.out.hint("porthole disk --prune --yes",
+            ctx.out.hint("porthole disk prune --yes",
                          f"{total_prune} apks are old revisions "
                          f"(keeping {args.keep_revisions} per package)")
 
@@ -368,12 +377,17 @@ SPEC = {
     "description": (
         "porthole keeps two pmbootstrap work dirs -- the host's and the\n"
         "workspace's own -- and neither is ever pruned automatically.\n"
-        "`porthole disk` reports their size, which apks are old revisions,\n"
-        "and where the two dirs hold different builds of the same package.\n"
-        "Nothing is deleted without --prune --yes, or --retire-host --yes\n"
-        "--discard-host-workdir (--retire-host alone only previews)."),
+        "`report` (the default) shows their size, which apks are old\n"
+        "revisions, and where the two dirs hold different builds of the\n"
+        "same package. `prune --yes` deletes the old-revision apks;\n"
+        "`retire-host --yes --discard-host-workdir` removes the whole HOST\n"
+        "work dir (retire-host alone only previews)."),
     "escapes_scope": True,
     "args": [
+        (["action"], {"nargs": "?", "metavar": "ACTION", "default": "report",
+                      "choices": ["report", "prune", "retire-host"],
+                      "help": "report (default), prune old revisions, or "
+                              "retire-host"}),
         (["--keep-revisions"], {"type": int, "default": 2, "metavar": "N",
                                 "dest": "keep_revisions",
                                 "help": "how many revisions per package to "
@@ -381,29 +395,22 @@ SPEC = {
         (["--verbose"], {"action": "store_true",
                          "help": "print every divergent revision instead of "
                                  "a count and range"}),
-        (["--prune"], {"action": "store_true",
-                       "help": "delete old-revision apks (destructive; "
-                               "needs --yes)"}),
-        (["--retire-host"], {"action": "store_true", "dest": "retire_host",
-                             "help": "preview retiring the HOST work dir; "
-                                     "add --yes --discard-host-workdir to "
-                                     "actually delete it"}),
         (["--discard-host-workdir"], {"action": "store_true",
                                       "dest": "discard_host_workdir",
-                                      "help": "names the loss --retire-host "
-                                              "--yes causes: the whole host "
-                                              "work dir, gone"}),
+                                      "help": "names the loss `retire-host "
+                                              "--yes` causes: the whole "
+                                              "host work dir, gone"}),
         (["--yes"], {"action": "store_true",
-                     "help": "confirm --prune / --retire-host"}),
+                     "help": "confirm prune / retire-host"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_disk,
     "examples": [
         "porthole disk",
-        "porthole disk --json",
-        "porthole disk --verbose",
-        "porthole disk --prune --yes",
-        "porthole disk --retire-host",
-        "porthole disk --retire-host --yes --discard-host-workdir",
+        "porthole disk report --json",
+        "porthole disk report --verbose",
+        "porthole disk prune --yes",
+        "porthole disk retire-host",
+        "porthole disk retire-host --yes --discard-host-workdir",
     ],
 }

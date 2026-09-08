@@ -68,7 +68,8 @@ def test_nothing_irreversible_is_granted():
     Every one of them must be absent from the granted set."""
     granted, _held = P.build_rules(ROOT, DEVICE)
     hazards = ["porthole flash", "porthole push", "porthole run",
-               "porthole sandbox:", "porthole disk", "tools/ph-flash-boot.sh",
+               "porthole sandbox:", "porthole disk prune",
+               "porthole disk retire-host", "tools/ph-flash-boot.sh",
                "tools/ph-reboot.sh", "tools/ph-to-fastboot.sh",
                "tools/ph-thermal-ramp.sh", "tools/ph-recover.sh"]
     leaked = [h for h in hazards
@@ -102,24 +103,41 @@ def test_the_ordinary_reading_tools_are_granted():
     assert P.rule("git diff") in granted
 
 
-def test_log_is_granted_disk_is_not():
-    """The two newest verbs, placed on opposite sides for opposite reasons.
+def test_log_is_granted_whole_disk_is_denied_with_report_granted_below():
+    """The two newest verbs.
 
     `log` only ever writes/deletes inside .run/ -- the same cache boundary
     the rest of ALLOWED_VERBS already writes under (see its own module
-    docstring) -- so it is granted whole, like `tools`/`config`. `disk`'s
-    --prune and --retire-host are flags on the SAME bare command line as
-    its safe report, not a separate subcommand a prefix rule could name
-    without also matching them (the way `build status`/`brain search` can),
-    so no partial grant exists for it -- it is denied whole, same as
-    `flash`."""
+    docstring) -- so it is granted whole, like `tools`/`config`.
+
+    `disk` stays denied whole, same as `build`/`brain`/`sandbox` -- but
+    fix-round-3 reshaped its destructive actions from flags to a positional
+    ACTION word (`report`/`prune`/`retire-host`) specifically so `disk
+    report` could be granted the same way `build status`/`brain search`
+    are: a distinct SUBCOMMAND STRING, not a flag riding the same bare
+    command line. The dict-membership half of this is trivial; the real
+    property is the prefix-match one below."""
     granted, held = P.build_rules(ROOT, DEVICE)
     assert P.rule("porthole log") in granted
-    assert P.rule("porthole disk") not in granted
-    assert not any(r.startswith("Bash(porthole disk") for r in granted), (
-        "no rule may name porthole disk at all -- a prefix would also "
-        "match --prune/--retire-host")
+    assert P.rule("porthole disk report") in granted
     assert "porthole disk" in held and held["porthole disk"]
+
+
+def test_a_rule_granting_disk_report_does_not_reach_prune_or_retire_host():
+    """THE point of the fix-round-3 reshape, checked the way the classifier
+    actually checks it: `Bash(x:*)` grants every command line that STARTS
+    WITH x. Simulate that against every rule this build emits, for the two
+    command lines that must never be reachable."""
+    granted, _held = P.build_rules(ROOT, DEVICE)
+    dangerous = ["porthole disk prune --yes",
+                "porthole disk retire-host --yes --discard-host-workdir"]
+    for rule_text in granted:
+        assert rule_text.startswith("Bash(") and rule_text.endswith(":*)"), (
+            rule_text)
+        prefix = rule_text[len("Bash("):-len(":*)")]
+        for command in dangerous:
+            assert not command.startswith(prefix), (
+                f"granted rule {rule_text!r} would also match {command!r}")
 
 
 def test_a_rule_is_a_prefix_pattern_and_nothing_else():
