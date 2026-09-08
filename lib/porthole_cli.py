@@ -50,6 +50,34 @@ EX_UNAVAILABLE = 69
 CMD_PREFIX = "porthole_cmd_"
 
 
+# ----------------------------------------------------- confirmation tiers --
+
+# `--yes` had come to mean four different things -- preview-vs-run, confirm-an-
+# irreversible-write, "I know the device is in the right state", and "actually
+# build" -- so the one flag guarding a module push (a reboot undoes it) also
+# guarded a partition write. Confirmation is DERIVED from the plan's own
+# `destroys`/`reversible` fields, never hand-set per verb: that is the whole
+# point, a new op gets the right gate without anyone remembering a table.
+#
+# Tier 3 is a second flag naming the specific loss, not an interactive prompt:
+# agents are porthole's primary users, and a prompt is either unanswerable or
+# auto-answered. A flag that names what is lost cannot arrive by muscle memory
+# from a different command, and the tier-0 preview prints it verbatim so it is
+# copy-pasteable from the thing that just explained it.
+def tier(op) -> int:
+    if not op.destroys:
+        return 1
+    return 3 if not op.reversible and _replaces_rootfs(op) else 2
+
+
+def _replaces_rootfs(op) -> bool:
+    return any("rootfs" in d for d in op.destroys)
+
+
+def gate_flag(op) -> str:
+    return {1: "", 2: "--yes", 3: "--replace-rootfs"}[tier(op)]
+
+
 # ----------------------------------------------------------------- output --
 
 class Out:
