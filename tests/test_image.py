@@ -255,16 +255,76 @@ class Skip(Exception):
     """The suite's skip signal; _runner understands it."""
 
 
-def _in_sandbox(argv, stdin=""):
+def _sandbox_reachable() -> bool:
+    """Probe ONCE, cheaply: podman on PATH and porthole-sandbox answering a
+    trivial exec. This is the only place a missing workspace may become a
+    skip -- `_in_sandbox` itself must not, see its docstring."""
     import shutil
     import subprocess
     if not shutil.which("podman"):
-        raise Skip("podman is not installed")
+        return False
+    out = subprocess.run(["podman", "exec", "porthole-sandbox", "true"],
+                         capture_output=True, text=True)
+    return out.returncode == 0
+
+
+def _require_sandbox() -> None:
+    if not _sandbox_reachable():
+        raise Skip("podman is not installed, or porthole-sandbox is not "
+                   "running")
+
+
+def _in_sandbox(argv, stdin=""):
+    """Run one command inside porthole-sandbox and return its stdout.
+
+    Callers must call _require_sandbox() first. From here on, a nonzero
+    exit is a real failure, never a skip: podman exec's exit code cannot
+    tell "no container" from "the command that just ran -- mkfs, sfdisk,
+    dd, debugfs -- failed for a real reason". Treating both as
+    "workspace unavailable" is the bug this replaced: a mutated assemble()
+    that left the image one byte short of ALIGN made img2simg abort inside
+    the container, and that abort was reported as a skip, not a failure --
+    21/22, exit 0, on a broken assembler.
+    """
+    import subprocess
     cmd = ["podman", "exec", "-i", "porthole-sandbox"] + [str(a) for a in argv]
     out = subprocess.run(cmd, input=stdin, capture_output=True, text=True)
-    if out.returncode != 0 and argv[0] != "dumpe2fs":
-        raise Skip(f"workspace unavailable: {out.stderr.strip()[:120]}")
+    if out.returncode != 0:
+        raise RuntimeError(
+            f"{' '.join(str(a) for a in argv)} failed ({out.returncode}) "
+            f"in the sandbox: {out.stderr.strip()[:300]}")
     return out.stdout
+
+
+def test_a_failure_inside_the_container_fails_the_suite_not_skips_it():
+    """The fix, proven rather than asserted: once the container is known to
+    be reachable, a command that fails inside it must fail the test -- not
+    be reported as the workspace being unavailable. Skip that check and the
+    e2e test can go green while the assembler is broken; see
+    _in_sandbox's docstring for the mutation that did exactly that."""
+    _require_sandbox()
+    try:
+        _in_sandbox(["false"])
+    except Skip:
+        raise AssertionError(
+            "a command that failed for a real reason inside a reachable "
+            "container was reported as the workspace being unavailable")
+    except RuntimeError:
+        return
+    raise AssertionError("a nonzero exit inside the container did not "
+                         "raise at all")
+
+
+def _debugfs_entry(listing: str, name: str) -> dict:
+    """Parse one line of `debugfs -R "ls -l"` output for the entry named
+    `name`: inode, mode(links), uid, gid, size, date, time, name -- split on
+    whitespace and matched by field, not by substring, so a uid that happens
+    to equal another column's value cannot be mistaken for it."""
+    for line in listing.splitlines():
+        parts = line.split()
+        if parts and parts[-1] == name:
+            return {"mode": parts[1], "uid": parts[3], "gid": parts[4]}
+    raise AssertionError(f"{name!r} not found in debugfs listing:\n{listing}")
 
 
 def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
@@ -274,6 +334,7 @@ def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
 
     Everything this asserts was measured by hand on 2026-09-08 before the
     module existed; this is that spike, kept."""
+    _require_sandbox()
     boot_uuid, root_uuid = image.uuids(seed="test-e2e")
     lay = image.layout(boot_mb=8, root_mb=32, arch="aarch64")
 
@@ -282,7 +343,10 @@ def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
                  "/tmp/asm/root/usr/bin && echo k > /tmp/asm/boot/vmlinuz && "
                  "install -m 4755 /bin/busybox /tmp/asm/root/usr/bin/su && "
                  "mkdir -p /tmp/asm/root/home/user && "
-                 "chown 1000:1000 /tmp/asm/root/home/user"])
+                 "chown 1000:1000 /tmp/asm/root/home/user && "
+                 "install -m 755 /bin/busybox "
+                 "/tmp/asm/root/usr/bin/captest && "
+                 "setcap cap_net_raw+ep /tmp/asm/root/usr/bin/captest"])
     # Written via stdin, not interpolated into a shell command: a Python
     # repr() piped through !r into `sh -c` is a Python quoting convention
     # landing inside a POSIX one, and the two do not agree on every
@@ -296,21 +360,36 @@ def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
     assert image.verify(_in_sandbox, "/tmp/asm/disk.img", lay,
                         boot_uuid, root_uuid) == []
 
-    # Ownership, setuid and a non-root uid must survive mkfs.ext4 -d, or the
-    # rootfs boots with a broken /home and an su that cannot elevate.
+    # Ownership, setuid, a non-root uid and a file capability must all
+    # survive mkfs.ext4 -d, or the rootfs boots with a broken /home, an su
+    # that cannot elevate, and a binary like ping that cannot open a raw
+    # socket -- found out only on the phone.
     _in_sandbox(["dd", "if=/tmp/asm/disk.img", "of=/tmp/asm/p2.img",
                  "bs=512", f"skip={lay['root_start']}",
                  f"count={lay['root_sectors']}", "status=none"])
     listing = _in_sandbox(["debugfs", "-R", "ls -l /usr/bin", "/tmp/asm/p2.img"])
-    assert "104755" in listing, "the setuid bit did not survive"
+    su = _debugfs_entry(listing, "su")
+    assert su["mode"] == "104755", "the setuid bit did not survive"
+    assert su["uid"] == "0" and su["gid"] == "0", "su must stay root-owned"
+
     home = _in_sandbox(["debugfs", "-R", "ls -l /home", "/tmp/asm/p2.img"])
-    assert "1000" in home, "a non-root uid did not survive"
+    user = _debugfs_entry(home, "user")
+    assert user["uid"] == "1000" and user["gid"] == "1000", \
+        "a non-root uid did not survive"
+
+    ea = _in_sandbox(["debugfs", "-R", "ea_list /usr/bin/captest",
+                      "/tmp/asm/p2.img"])
+    assert "security.capability" in ea, (
+        "a file capability did not survive mkfs.ext4 -d -- a binary like "
+        "ping that needs cap_net_raw would fail only once it is on the "
+        "phone")
 
 
 def test_the_assembled_image_converts_to_sparse():
     """taimen sets deviceinfo_flash_sparse=true, so this is the form that
     actually reaches the phone. img2simg aborts on an unaligned image, which
     is why layout() pads to 4096."""
+    _require_sandbox()
     boot_uuid, root_uuid = image.uuids(seed="test-sparse")
     lay = image.layout(boot_mb=8, root_mb=32, arch="aarch64")
     _in_sandbox(["sh", "-c", "rm -rf /tmp/sp && mkdir -p /tmp/sp/b /tmp/sp/r"])

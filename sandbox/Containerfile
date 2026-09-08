@@ -31,10 +31,15 @@ FROM docker.io/library/alpine:3.24
 # cannot check its own output is worse than none: the failure it would miss
 # is a phone that comes up in the initramfs hunting for a root that is not
 # there, which reads as a brick.
+# libcap-utils carries setcap, which the e2e test uses to give a source file
+# a file capability BEFORE assembly, so it can prove -- rather than assert
+# in a comment -- that `mkfs.ext4 -d` carries security.capability into the
+# image the same way it carries setuid and ownership. Untested, that claim
+# was resting on a manual spike nobody could re-run.
 RUN apk add --no-cache \
       pmbootstrap \
       android-tools \
-      e2fsprogs e2fsprogs-extra fuse2fs fuse \
+      e2fsprogs e2fsprogs-extra fuse2fs fuse libcap-utils \
       util-linux parted multipath-tools \
       openssh-client rsync git \
       dtc \
