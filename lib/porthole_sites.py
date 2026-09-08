@@ -156,8 +156,21 @@ def facts(ctx, state: str = "") -> dict:
     tree = build._tree(cfg)
     named = str(tree) not in ("", ".")
     site_usable = usable(ctx)[0]
+    # Walk up to the nearest existing ancestor before probing, exactly as
+    # the original _space_problems did (git show e800df4:lib/
+    # porthole_cmd_build.py:323-344) -- a fresh host has no pmbootstrap work
+    # dir yet, and that is precisely the host about to need ~29 GB it does
+    # not know it lacks. Without the walk-up, os.statvfs on a path that does
+    # not exist yet raises, unmet() sees free_gb=None and skips the check
+    # entirely -- no space check on the one host where ENOSPC at minute
+    # forty is most likely. Probing pmb_workdir (what the build actually
+    # writes to) rather than the original's PORTHOLE_PMB_DIR is deliberate:
+    # it is the more accurate target and the walk-up makes either safe.
+    probe = build.pmb_workdir(ctx, site_usable)
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
     try:
-        st = os.statvfs(str(build.pmb_workdir(ctx, site_usable)))
+        st = os.statvfs(str(probe))
         free = (st.f_bsize * st.f_bavail) / (1024 ** 3)
     except OSError:
         free = None
