@@ -84,10 +84,10 @@ losing an afternoon to it:
 Then you can build. **You do not need a kernel tree to build a system image**:
 
 ```sh
-porthole sandbox up               # start the workspace, once
-porthole build                    # the rung ladder — what each one costs
-porthole build image --yes        # the whole OS from pmaports, no tree needed
-porthole flash --yes              # rootfs and boot
+porthole sandbox up                        # start the workspace, once
+porthole build                             # the rung ladder — what each one costs
+porthole build image --yes                 # the whole OS from pmaports, no tree needed
+porthole flash full --yes --replace-rootfs # rootfs and boot
 ```
 
 Every rung except `image` compiles a kernel tree. `porthole build` says which
