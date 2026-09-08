@@ -99,6 +99,16 @@ def test_flash_warns_when_the_slot_layout_was_never_probed():
     assert "never probed" in (out + err) or "SLOTS_PROBED" in (out + err)
 
 
+def test_the_slot_warning_and_its_hint_share_a_stream():
+    """Reproduced 2026-09-08: the warning went to stderr and its hint went to
+    stdout, so `2>log` captured the warning and lost the fix that explains
+    it, three lines below on a stream nobody redirected."""
+    rc, out, err = run("-d", DEV, "flash", "--force")
+    assert "never probed" in err, err
+    assert "slots probe" in err, err
+    assert "slots probe" not in out, out
+
+
 def test_flash_preview_via_cli_does_not_refuse_when_booted():
     """The literal repro: `porthole flash` with no --yes against a BOOTED
     device used to exit non-zero with EX_STATE before printing anything."""
@@ -146,14 +156,17 @@ class _FlashPreviewOut:
     def blank(self):
         self._lines.append("")
 
-    def hint(self, text, note=""):
+    def hint(self, text, note="", stream=None):
         self._lines.append(f"{text} {note}".rstrip())
 
-    def warn(self, text):
+    def warn(self, text, stream=None):
         self._lines.append(f"warning: {text}")
 
     def paint(self, s, _color):
         return s
+
+    def sym(self, fancy, plain):
+        return fancy
 
 
 class _FakeFlashDevice:
@@ -186,6 +199,116 @@ def _fake_ctx(state="BOOTED", cfg=None):
             return 0
 
     return _Ctx()
+
+
+# --------------------------------------------------- build: preview vs auto --
+
+def _build_args(action=None, yes=False, measure=False, json=False):
+    """Shaped like the real parser's Namespace for `build` -- enough to drive
+    cmd_build() directly, with no subprocess."""
+    return argparse.Namespace(action=action, yes=yes, measure=measure,
+                              json=json, timeout=5400, host=False,
+                              kernel=False, allow_env_override=False,
+                              verbose=False, detach=False, wait=0.0,
+                              rest=[])
+
+
+def _build_fake_ctx(tree):
+    """A ctx good enough to drive cmd_build()'s routing decision.
+
+    `cfg` is a real `porthole.Config`, not a plain dict: `_assert_no_drift`
+    calls `cfg.source(key)`, which a plain dict does not have. Built via the
+    dict constructor rather than `.set(...)`, every key's source stays at the
+    default layer -- never LAYER_ENV -- so `porthole.drift()` finds nothing
+    to flag no matter what PORTHOLE_KERNEL_PKG/PORTHOLE_DEVICE this host has
+    exported into the environment.
+    """
+    import porthole as porthole_mod
+
+    class _Ctx:
+        def __init__(self):
+            self.cfg = porthole_mod.Config({
+                "PORTHOLE_DEVICE": DEV,
+                "PORTHOLE_KERNEL_TREE": str(tree),
+            })
+            self.out = _FlashPreviewOut()
+            self.root = ROOT
+
+        def emit(self, payload, render=None):
+            if render:
+                render()
+            return 0
+
+    return _Ctx()
+
+
+def _build_fake_tree():
+    root = pathlib.Path(tempfile.mkdtemp(prefix="porthole-build-tree-"))
+    (root / "Makefile").write_text("")
+    return root
+
+
+def test_a_bare_build_plans_and_does_not_compile():
+    """`porthole build` ran a real incremental make and took the buildroot
+    lock, so the thing you run to ask "what would this do" was itself a
+    build. `_preflight` is forced clear and a fake tree supplied so the
+    shortcut to `_auto` WOULD be reachable if anything still let it through --
+    the only thing standing between a bare invocation and a real measure must
+    be the routing in cmd_build itself."""
+    import porthole_cmd_build as build
+
+    ctx = _build_fake_ctx(_build_fake_tree())
+    args = _build_args(action=None, yes=False, measure=False)
+
+    ran = []
+    real_auto, real_preflight = build._auto, build._preflight
+    build._auto = lambda *a, **k: ran.append("_auto") or 0
+    build._preflight = lambda *a, **k: []
+    try:
+        build.cmd_build(args, ctx)
+    finally:
+        build._auto, build._preflight = real_auto, real_preflight
+    assert ran == [], f"a preview ran {ran}"
+    assert "would build" in ctx.out.text
+
+
+def test_measuring_is_something_you_ask_for():
+    """--measure (or an explicit `porthole build auto`) still reaches _auto,
+    exactly as a bare `porthole build` used to."""
+    import porthole_cmd_build as build
+
+    ctx = _build_fake_ctx(_build_fake_tree())
+    args = _build_args(action=None, yes=False, measure=True)
+
+    ran = []
+    real_auto, real_preflight = build._auto, build._preflight
+    build._auto = lambda *a, **k: ran.append("_auto") or 0
+    build._preflight = lambda *a, **k: []
+    try:
+        build.cmd_build(args, ctx)
+    finally:
+        build._auto, build._preflight = real_auto, real_preflight
+    assert ran == ["_auto"]
+
+
+def test_typing_auto_out_still_measures_with_no_measure_flag():
+    """`porthole build auto` (the rung named explicitly) is the other
+    documented way to ask for the real thing -- --measure is not the only
+    door."""
+    import porthole_cmd_build as build
+
+    ctx = _build_fake_ctx(_build_fake_tree())
+    args = _build_args(action="auto", yes=False, measure=False)
+
+    ran = []
+    real_auto, real_preflight = build._auto, build._preflight
+    build._auto = lambda *a, **k: ran.append("_auto") or 0
+    build._preflight = lambda *a, **k: []
+    try:
+        build.cmd_build(args, ctx)
+    finally:
+        build._auto, build._preflight = real_auto, real_preflight
+    assert ran == ["_auto"]
 
 
 def test_the_flash_preview_works_while_the_device_is_booted():

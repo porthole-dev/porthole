@@ -180,7 +180,7 @@ class Out:
     # does not fit is still a command somebody has to type.
     HINT_COLUMN = 34
 
-    def hint(self, text: str, note: str = ""):
+    def hint(self, text: str, note: str = "", stream=None):
         """A command worth running, and optionally what it is for.
 
         The COLUMN is here rather than at the call site. 52 call sites padded
@@ -198,18 +198,25 @@ class Out:
         worse than the ragged columns this method exists to fix. Padding to
         N-1 and appending a literal space keeps the same column for anything
         that fits and guarantees one space when it does not.
+
+        `stream` defaults to `self.stream` -- an ordinary hint is part of the
+        normal output, same as `heading`/`kv`. A hint that explains a
+        `warn`/`error` must be handed THAT call's stream instead: the two
+        were reproduced landing on different streams (the warning on stderr,
+        the hint on stdout), so `2>log` captured the problem and lost the
+        fix that was sitting three lines below it on stdout.
         """
         command = text if not note else "{:<{}} ".format(text, self.HINT_COLUMN - 1)
         body = self.paint(command, "cyan")
         if note:
             body += self.paint(note, "grey")
-        print("  {} {}".format(self.mark("note"), body), file=self.stream)
+        print("  {} {}".format(self.mark("note"), body), file=stream or self.stream)
 
-    def warn(self, text: str):
-        print(self.paint(f"warning: {text}", "yellow"), file=sys.stderr)
+    def warn(self, text: str, stream=None):
+        print(self.paint(f"warning: {text}", "yellow"), file=stream or sys.stderr)
 
-    def error(self, text: str):
-        print(self.paint(f"porthole: {text}", "red"), file=sys.stderr)
+    def error(self, text: str, stream=None):
+        print(self.paint(f"porthole: {text}", "red"), file=stream or sys.stderr)
 
 
 class Bail(Exception):
