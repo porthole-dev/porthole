@@ -66,13 +66,23 @@ def test_ops_that_reach_the_device_over_ssh_declare_booted():
     """A mutation from BOOTED to FASTBOOT on `boot` passed the whole suite
     once -- nothing pinned it. `mod`, `boot`, `fast` and `upgrade` all ssh
     into the device before moving it (tkboot seeds its base image with
-    `tk_run 'uname -r'` before it ever calls `ph-to-fastboot.sh`); `flash-boot`
-    and `flash-full` move the device straight from the bootloader and never
-    ssh in first."""
+    `tk_run 'uname -r'` before it ever calls `ph-to-fastboot.sh`)."""
     for name in ("mod", "boot", "fast", "upgrade"):
         assert plan.op(name).needs_state == plan.BOOTED, name
-    for name in ("flash-boot", "flash-full"):
-        assert plan.op(name).needs_state == plan.FASTBOOT, name
+
+
+def test_flash_full_needs_the_bootloader_but_flash_boot_accepts_either():
+    """External fact, not a manifest round-trip: `tkflash` (flash-full) runs
+    `pmbootstrap flasher flash_rootfs`, which has no booted-device fallback
+    and genuinely needs the device already in the bootloader. `tkflash-boot`
+    (flash-boot) does not -- tools/ph-build.sh has it check
+    `tk_in_fastboot || "$_PH_REPO/tools/ph-to-fastboot.sh" || return 1`,
+    which accepts FASTBOOT as-is and moves a BOOTED device there itself.
+    Declaring FASTBOOT for flash-boot refused a correctly booted phone for
+    an operation that would have worked -- reproduced on hardware
+    2026-09-08."""
+    assert plan.op("flash-full").needs_state == plan.FASTBOOT
+    assert plan.op("flash-boot").needs_state == plan.ANY
 
 
 def test_fast_requires_an_installed_chroot():
@@ -104,12 +114,25 @@ def test_unmet_is_pure_and_names_the_fix():
 
 
 def test_a_state_mismatch_is_reported_as_state_not_as_failure():
-    op = plan.op("flash-boot")
+    """flash-full is the op that actually gates on FASTBOOT -- see
+    test_flash_full_needs_the_bootloader_but_flash_boot_accepts_either."""
+    op = plan.op("flash-full")
     problems = plan.unmet(op, {"state": "BOOTED", "tree": True,
                                "kernel_pkg": "k", "defconfig": "d",
                                "arch": "aarch64", "dtb": "x",
                                "workdir": "/tmp", "free_gb": 100.0})
     assert any("FASTBOOT" in p for p in problems)
+
+
+def test_flash_boot_state_is_never_reported_as_unmet():
+    """tkflash-boot accepts either state and moves the device itself when it
+    is not already in the bootloader (tools/ph-build.sh: `tk_in_fastboot ||
+    "$_PH_REPO/tools/ph-to-fastboot.sh" || return 1`) -- no state a real
+    device probe can return should show up in `unmet`'s problems."""
+    op = plan.op("flash-boot")
+    for state in ("BOOTED", "FASTBOOT", "ABSENT", "INITRAMFS", "FROZEN", ""):
+        problems = plan.unmet(op, {"state": state, "dtb": "x"})
+        assert problems == [], (state, problems)
 
 
 def main():

@@ -73,8 +73,12 @@ def test_flash_refuses_a_forbidden_slot():
     assert "SLOT_FORBIDDEN" in (out + err)
 
 
-def test_flash_refuses_unless_the_device_is_in_fastboot():
-    rc, out, err = run("-d", DEV, "flash", "--yes")
+def test_flash_full_refuses_unless_the_device_is_in_fastboot():
+    """`full` (tkflash -> pmbootstrap flasher flash_rootfs) genuinely needs
+    the bootloader. `boot` (the default action) does not -- tkflash-boot
+    moves a booted device there itself -- so this must exercise `full`, not
+    the default, or it would reach past the state gate and into `_run`."""
+    rc, out, err = run("-d", DEV, "flash", "full", "--yes", "--replace-rootfs")
     assert rc != 0
     assert "FASTBOOT" in (out + err)
 
@@ -357,9 +361,14 @@ def test_the_flash_preview_works_while_the_device_is_booted():
 
 
 def test_the_preview_offers_to_move_the_device_rather_than_only_refusing():
-    """ph-to-fastboot.sh exists precisely for this and nothing offered it."""
+    """ph-to-fastboot.sh exists precisely for this and nothing offered it.
+
+    `full` genuinely needs FASTBOOT, so its preview still has something to
+    offer here. `boot` does not -- tkflash-boot moves a booted device to the
+    bootloader itself, so its preview has no state problem to hint about;
+    see test_a_boot_flash_runs_from_either_state."""
     import porthole_cmd_flash as flash
-    args = _flash_args(action="boot", yes=False)
+    args = _flash_args(action="full", yes=False)
     ctx = _fake_ctx(state="BOOTED")
     with _flash_run_tripwire():
         flash.cmd_flash(args, ctx)
@@ -416,15 +425,41 @@ def test_a_boot_only_flash_runs_on_yes_alone_when_the_device_is_ready():
     assert calls == ["tkflash-boot"]
 
 
-def test_a_real_flash_still_refuses_the_wrong_state():
+def test_a_boot_flash_runs_from_either_state():
+    """The defect this guards against: `tkflash-boot` (tools/ph-build.sh)
+    checks `tk_in_fastboot || "$_PH_REPO/tools/ph-to-fastboot.sh" || return
+    1` -- it moves a booted device to the bootloader itself. Declaring
+    FASTBOOT for flash-boot refused a correctly booted phone for an
+    operation that would have worked -- reproduced on hardware 2026-09-08.
+    `full` (test_a_full_flash_still_refuses_the_wrong_state) is the op that
+    genuinely needs the bootloader; `boot` runs from either state."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="boot", yes=True)
+    for state in ("BOOTED", "FASTBOOT"):
+        ctx = _fake_ctx(state=state)
+        calls = []
+        real_run = flash._run
+        flash._run = lambda ctx, func, timeout, *a, **k: calls.append(func) or 0
+        try:
+            rc = flash.cmd_flash(args, ctx)
+        finally:
+            flash._run = real_run
+        assert rc == 0, state
+        assert calls == ["tkflash-boot"], state
+
+
+def test_a_full_flash_still_refuses_the_wrong_state():
     """Preserved: an actual write (not a preview) still refuses EX_STATE
-    when the device disagrees, exactly as before this rework.
+    when the device disagrees, exactly as before this rework -- for `full`,
+    which genuinely needs the bootloader. `boot` does not (see
+    test_a_boot_flash_runs_from_either_state): declaring FASTBOOT for it was
+    the defect, refusing a booted device an op that would have worked.
 
     CRITICAL, fix round 1: same missing stub as the test above -- see
     `_flash_run_tripwire`."""
     import porthole_cmd_flash as flash
     from porthole_cli import Bail, EX_STATE
-    args = _flash_args(action="boot", yes=True)
+    args = _flash_args(action="full", yes=True, replace_rootfs=True)
     ctx = _fake_ctx(state="BOOTED")
     with _flash_run_tripwire():
         try:
