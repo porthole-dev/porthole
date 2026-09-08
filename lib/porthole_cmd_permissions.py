@@ -95,6 +95,7 @@ ALLOWED_VERBS = {
     "completion": "emits a completion script to stdout",
     "slots":      "reads the A/B policy off the device; setting one is `flash`",
     "statusline": "renders a status line, or installs itself",
+    "log":        "reads .run/'s build logs; --prune only rotates that cache",
 }
 
 # Verbs NOT granted, and the reason each stays out. This half is what makes
@@ -118,6 +119,17 @@ DENIED_VERBS = {
     "serial":     "takes the UART, which another session may be holding",
     "experiment": "runs an arbitrary command with device state either side",
     "blobs":      "extracts vendor images; long, and it writes",
+    # NOT split like build/brain/sandbox below: those grant a distinct
+    # SUBCOMMAND token (`status`, `search`) that a prefix rule can name
+    # without also matching the dangerous one. disk's --prune and
+    # --retire-host are FLAGS on the exact same bare command line as the
+    # safe report, and prefix matching cannot exclude a flag -- a rule
+    # naming `porthole disk` would equally match `porthole disk --prune
+    # --yes` (829 apks, one real run) and `porthole disk --retire-host
+    # --yes --discard-host-workdir` (an 18 G work dir). No sub-grant exists
+    # here for the same reason none exists for `flash`.
+    "disk":       "reports safely by default, but --prune/--retire-host share "
+                  "its bare command line rather than a separate subcommand",
     "brain":      "`brain submit` opens a pull request; search is granted below",
     "docs":       "generates the site into the working tree",
     "permissions":

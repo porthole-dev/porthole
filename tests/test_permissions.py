@@ -68,7 +68,7 @@ def test_nothing_irreversible_is_granted():
     Every one of them must be absent from the granted set."""
     granted, _held = P.build_rules(ROOT, DEVICE)
     hazards = ["porthole flash", "porthole push", "porthole run",
-               "porthole sandbox:", "tools/ph-flash-boot.sh",
+               "porthole sandbox:", "porthole disk", "tools/ph-flash-boot.sh",
                "tools/ph-reboot.sh", "tools/ph-to-fastboot.sh",
                "tools/ph-thermal-ramp.sh", "tools/ph-recover.sh"]
     leaked = [h for h in hazards
@@ -100,6 +100,26 @@ def test_the_ordinary_reading_tools_are_granted():
         assert P.rule(tool) in granted, f"{tool} should be granted"
     assert P.rule("porthole brief") in granted
     assert P.rule("git diff") in granted
+
+
+def test_log_is_granted_disk_is_not():
+    """The two newest verbs, placed on opposite sides for opposite reasons.
+
+    `log` only ever writes/deletes inside .run/ -- the same cache boundary
+    the rest of ALLOWED_VERBS already writes under (see its own module
+    docstring) -- so it is granted whole, like `tools`/`config`. `disk`'s
+    --prune and --retire-host are flags on the SAME bare command line as
+    its safe report, not a separate subcommand a prefix rule could name
+    without also matching them (the way `build status`/`brain search` can),
+    so no partial grant exists for it -- it is denied whole, same as
+    `flash`."""
+    granted, held = P.build_rules(ROOT, DEVICE)
+    assert P.rule("porthole log") in granted
+    assert P.rule("porthole disk") not in granted
+    assert not any(r.startswith("Bash(porthole disk") for r in granted), (
+        "no rule may name porthole disk at all -- a prefix would also "
+        "match --prune/--retire-host")
+    assert "porthole disk" in held and held["porthole disk"]
 
 
 def test_a_rule_is_a_prefix_pattern_and_nothing_else():
