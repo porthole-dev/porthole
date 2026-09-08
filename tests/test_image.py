@@ -482,8 +482,9 @@ def test_a_refused_image_is_not_left_where_flash_would_find_it():
             "\n\ndef verify(runner, out, lay, boot_uuid, root_uuid):\n"
             '    return ["forced failure for the cleanup test"]\n')
 
-        # _ph_assemble_image's only pmbootstrap call is `chroot -r -- mkinitfs`;
-        # nothing in this test needs it to do anything real.
+        # _ph_assemble_image's two pmbootstrap calls are `chroot -r --
+        # mkinitfs` and `shutdown`; nothing in this test needs either to do
+        # anything real.
         bindir = tmp / "bin"
         bindir.mkdir()
         stub = bindir / "pmbootstrap"
@@ -504,6 +505,64 @@ def test_a_refused_image_is_not_left_where_flash_would_find_it():
         assert left == [], (
            "a refused image must not be left at the canonical path "
            f"flash_rootfs reads from -- found {left}")
+
+
+def test_a_live_proc_refuses_before_mkfs_ext4_ever_runs():
+    """mkfs.ext4 -d recurses the whole chroot and cannot read a live procfs:
+    'Permission denied while opening auxv to copy', measured against a real
+    chroot on 2026-09-08 where the unmount had not actually cleared
+    /proc/1/auxv. That opaque mkfs.ext4 error is exactly what the
+    <chroot>/proc emptiness guard exists to head off with a message that
+    names what is still there instead.
+
+    No real mkfs.ext4/sfdisk needed, and PATH deliberately carries neither:
+    the stub `pmbootstrap shutdown` below does nothing, so the fixture's
+    /proc/1/auxv survives it -- proving the guard fires on its own, before
+    image.sizes()/image.assemble() ever run. If the guard did not catch
+    this first, the next thing to fail would be `mkfs.ext4: not found`, a
+    different error this test also checks for.
+    """
+    import subprocess
+    import tempfile
+
+    script = _extract_assemble_image_python()
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        chroot = tmp / "chroot"
+        for d in ("etc", "boot", "usr", "proc/1", "sys", "dev"):
+            (chroot / d).mkdir(parents=True)
+        (chroot / "proc/1/auxv").write_bytes(b"")
+        out = tmp / "out" / "test.img"
+        out.parent.mkdir()
+
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        stub = bindir / "pmbootstrap"
+        stub.write_text("#!/bin/sh\nexit 0\n")  # does nothing -- /proc stays live
+        stub.chmod(0o755)
+
+        repo_root = pathlib.Path(__file__).resolve().parent.parent
+
+        proc = subprocess.run(
+            [sys.executable, "-", str(chroot), str(out), str(repo_root),
+            "aarch64"],
+            input=script, capture_output=True, text=True,
+            env={"PATH": str(bindir)})
+
+        assert proc.returncode != 0, (
+           "a live /proc must fail _ph_assemble_image, not exit 0\n"
+           f"stdout: {proc.stdout}\nstderr: {proc.stderr}")
+        assert "proc" in proc.stderr and "still has entries" in proc.stderr, (
+           f"expected the guard's own message naming what is still "
+           f"mounted, got: {proc.stderr}")
+        # The opaque failure this guard heads off: `mkfs.ext4` itself was
+        # never even reached, let alone run and denied permission by a live
+        # /proc -- distinct from our own message, which names mkfs.ext4 by
+        # way of explanation.
+        assert "Permission denied" not in proc.stderr, (
+           f"the guard let mkfs.ext4 run over a live /proc instead of "
+           f"refusing first: {proc.stderr}")
+        assert not out.exists()
 
 
 def main():
