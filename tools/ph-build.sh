@@ -965,7 +965,10 @@ _ph_install_rootfs() {
 # cannot read a live /proc -- "Permission denied while opening auxv to copy",
 # measured against a real chroot on 2026-09-08. pmbootstrap never hits this
 # because install_system_image unmounts before copying files out; so mkinitfs
-# runs first, THEN `pmbootstrap shutdown`, THEN the filesystems are built.
+# runs first, THEN a targeted unmount of just this chroot (NOT `pmbootstrap
+# shutdown` -- see brain/findings/pmbootstrap-shutdown-unmounts-portholes-own-binds.md,
+# it takes porthole's own container binds with it), THEN the filesystems are
+# built.
 _ph_assemble_image() {
 	local chroot="$_PH_PMB/chroot_rootfs_${PORTHOLE_CODENAME}"
 	local out="$_PH_PMB/chroot_native/home/pmos/rootfs/${PORTHOLE_CODENAME}.img"
@@ -995,20 +998,33 @@ _ph_assemble_image() {
 	run(["pmbootstrap", "chroot", "-r", "--", "mkinitfs"])
 
 	# mkinitfs needed the chroot mounted; mkfs.ext4 -d must not see it mounted.
-	# `pmbootstrap shutdown` is the unmount pmbootstrap itself uses -- a
-	# rootless workspace's recursive /dev bind resists individual umount
-	# calls (brain/findings/what-a-rootless-workspace-cannot-do.md #5), and
-	# pmbootstrap's own zap dies on exactly that, so this is not
-	# hand-rolled.
-	run(["pmbootstrap", "shutdown"])
+	# NOT `pmbootstrap shutdown`: umount_all() walks pmbootstrap's whole work
+	# dir, not just this chroot, and takes porthole's own container binds
+	# (cache_git/pmaports among them) with it -- measured on hardware, see
+	# brain/findings/pmbootstrap-shutdown-unmounts-portholes-own-binds.md.
+	# Unmount only what is under THIS chroot, deepest first so a child is
+	# gone before its parent is tried, and ignore every failure: the
+	# recursive /dev bind returns "not mounted" on some entries even in a
+	# healthy workspace (brain/findings/what-a-rootless-workspace-cannot-do.md
+	# #5), and pmbootstrap raising on exactly that is what kills its own zap.
+	# The emptiness guard right below is what turns a partial unmount into a
+	# named refusal instead of mkfs.ext4's opaque one -- load-bearing, not
+	# belt-and-braces.
+	prefix = str(chroot) + "/"
+	mounts = [line.split()[1] for line in
+	         pathlib.Path("/proc/mounts").read_text().splitlines()]
+	under = sorted((m for m in mounts if m.startswith(prefix)),
+	               key=lambda m: m.count("/"), reverse=True)
+	for m in under:
+	    subprocess.run(["umount", m], capture_output=True)
+
 	live = [name for name in ("proc", "sys", "dev")
 	       if (chroot / name).is_dir() and any((chroot / name).iterdir())]
 	if live:
 	    raise SystemExit(
 	        f">> {', '.join(live)} still has entries under {chroot} after "
-	        f"`pmbootstrap shutdown` -- refusing to run mkfs.ext4 -d over "
-	        f"what looks like a live pseudo-filesystem rather than empty "
-	        f"mount points")
+	        f"unmounting -- refusing to run mkfs.ext4 -d over what looks "
+	        f"like a live pseudo-filesystem rather than empty mount points")
 
 	size = sum(f.stat().st_size for f in chroot.rglob("*") if f.is_file())
 	boot_mb, root_mb = image.sizes(size)

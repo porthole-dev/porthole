@@ -482,9 +482,11 @@ def test_a_refused_image_is_not_left_where_flash_would_find_it():
             "\n\ndef verify(runner, out, lay, boot_uuid, root_uuid):\n"
             '    return ["forced failure for the cleanup test"]\n')
 
-        # _ph_assemble_image's two pmbootstrap calls are `chroot -r --
-        # mkinitfs` and `shutdown`; nothing in this test needs either to do
-        # anything real.
+        # _ph_assemble_image's only pmbootstrap call is `chroot -r --
+        # mkinitfs`; nothing in this test needs it to do anything real. The
+        # unmount step after it reads the real /proc/mounts rather than
+        # calling pmbootstrap, and this fixture has nothing mounted under
+        # it, so that step is a no-op here too.
         bindir = tmp / "bin"
         bindir.mkdir()
         stub = bindir / "pmbootstrap"
@@ -515,12 +517,14 @@ def test_a_live_proc_refuses_before_mkfs_ext4_ever_runs():
     <chroot>/proc emptiness guard exists to head off with a message that
     names what is still there instead.
 
-    No real mkfs.ext4/sfdisk needed, and PATH deliberately carries neither:
-    the stub `pmbootstrap shutdown` below does nothing, so the fixture's
-    /proc/1/auxv survives it -- proving the guard fires on its own, before
-    image.sizes()/image.assemble() ever run. If the guard did not catch
-    this first, the next thing to fail would be `mkfs.ext4: not found`, a
-    different error this test also checks for.
+    No real mkfs.ext4/sfdisk needed, and PATH deliberately carries neither.
+    The unmount step scans the real /proc/mounts for paths under the
+    fixture chroot and finds none there (nothing in this test is actually
+    mounted), so it is a no-op and the fixture's /proc/1/auxv survives --
+    proving the guard fires on its own, before image.sizes()/image.assemble()
+    ever run. If the guard did not catch this first, the next thing to fail
+    would be `mkfs.ext4: not found`, a different error this test also checks
+    for.
     """
     import subprocess
     import tempfile

@@ -747,15 +747,25 @@ is "assembly goes through the module that verifies it" \
 # chroot on 2026-09-08. pmbootstrap avoids this itself by unmounting before
 # copying files out; porthole must do the same, and only after mkinitfs,
 # which needs the chroot still mounted.
-is "the chroot is unmounted before mkfs.ext4 runs over it" \
-   "$(saw "$asmbody" "shutdown")" "yes"
-is "a live proc/sys/dev after shutdown refuses rather than lets mkfs.ext4 fail opaquely" \
+#
+# NOT `pmbootstrap shutdown`: measured on hardware to unmount pmbootstrap's
+# whole work dir, taking porthole's own container binds (cache_git/pmaports)
+# down with it and failing the NEXT build at 0s naming an aport --
+# see brain/findings/pmbootstrap-shutdown-unmounts-portholes-own-binds.md.
+# The unmount must be scoped to the chroot's own path prefix instead.
+is "the chroot is unmounted before mkfs.ext4 runs over it, but pmbootstrap shutdown is not what does it" \
+   "$(saw "$asmbody" '"shutdown"')" "no"
+is "the unmount reads the real mount table" \
+   "$(saw "$asmbody" "/proc/mounts")" "yes"
+is "the unmount is scoped to paths under the chroot, not the whole work dir" \
+   "$(saw "$asmbody" "startswith(prefix)")" "yes"
+is "a live proc/sys/dev after unmounting refuses rather than lets mkfs.ext4 fail opaquely" \
    "$(saw "$asmbody" "still has entries")" "yes"
 mkinitfs_line=$(printf '%s\n' "$asmbody" | grep -n '"mkinitfs"' | head -1 | cut -d: -f1)
-shutdown_line=$(printf '%s\n' "$asmbody" | grep -n '"shutdown"' | head -1 | cut -d: -f1)
-is "mkinitfs -- which needs the chroot mounted -- runs before the shutdown" \
-   "$([ -n "$mkinitfs_line" ] && [ -n "$shutdown_line" ] && \
-      [ "$mkinitfs_line" -lt "$shutdown_line" ] && echo yes)" "yes"
+mounts_line=$(printf '%s\n' "$asmbody" | grep -n '/proc/mounts' | head -1 | cut -d: -f1)
+is "mkinitfs -- which needs the chroot mounted -- runs before the unmount" \
+   "$([ -n "$mkinitfs_line" ] && [ -n "$mounts_line" ] && \
+      [ "$mkinitfs_line" -lt "$mounts_line" ] && echo yes)" "yes"
 
 
 # ---------------------------------------------------------------------------
