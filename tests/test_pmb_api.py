@@ -181,5 +181,43 @@ def test_the_guard_names_every_subcommand_porthole_invokes():
     # fails above. Verified by loosening it on purpose.
 
 
+def test_install_is_found_even_when_guarded_by_an_if():
+    """Regression: `_ph_install_rootfs` changed from
+    `pmbootstrap install ... && return 0` to
+    `if pmbootstrap install ...; then`, and _CALL_SH's old `^\\s*pmbootstrap`
+    anchor -- start of line only -- went blind to it. `install` is the
+    subcommand every install rung depends on; losing it here means the guard
+    above reads as a clean bill of health while porthole's own `install`
+    call is unguarded."""
+    assert "install" in api.invoked_subcommands(ROOT)
+
+
+def test_a_python_list_call_inside_a_sh_heredoc_is_found():
+    """_ph_assemble_image (tools/ph-build.sh) invokes pmbootstrap from a
+    Python heredoc: `run(["pmbootstrap", "chroot", "-r", "--", "mkinitfs"])`.
+    That is python text sitting inside a .sh file, not a shell command --
+    _CALL_SH cannot see it, so invoked_subcommands must also run _CALL_PY
+    over tools/*.sh, not just lib/*.py. `chroot` already had another,
+    ordinary shell call elsewhere in the same file, so this exact gap did
+    not fail anything -- luck, not coverage. A subcommand invoked ONLY from
+    inside a heredoc would have been invisible."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        (tmp / "lib").mkdir()
+        (tmp / "tools").mkdir()
+        (tmp / "tools" / "fake.sh").write_text(
+            'fake() {\n'
+            '\tpython3 - <<-\'PY\'\n'
+            '\trun(["pmbootstrap", "totallyfakesubcmd", "arg"])\n'
+            '\tPY\n'
+            '}\n')
+        found = api.invoked_subcommands(tmp)
+        assert "totallyfakesubcmd" in found, (
+            "a pmbootstrap call in python-list form inside a .sh file's "
+            f"heredoc was not found: {sorted(found)}")
+
+
 if __name__ == "__main__":
     sys.exit(main())

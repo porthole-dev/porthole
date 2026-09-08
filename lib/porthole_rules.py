@@ -91,8 +91,7 @@ RULES = [
          "Confirm before anything irreversible",
          "flashing, set_active, thermal ramps -- a bad image on the wrong slot "
          "leaves a device that will not boot and cannot be talked to",
-         ["tests/test_cli_rules.py::test_verbs_escaping_their_scope_require_yes",
-          "tests/test_tui_safety.py::test_no_safe_milestone_command_is_irreversible"],
+         ["tests/test_cli_rules.py::test_verbs_escaping_their_scope_require_yes"],
          session=True),
 
     Rule("no-host-root", MUST,
@@ -193,7 +192,7 @@ RULES = [
     # ------------------------------------------------- contributing code ----
     Rule("make-ci-before-pushing", SHOULD,
          "Run `make ci`, not `make check`, before opening a pull request",
-         "`make check` skips the console, smoke and python-floor jobs that CI "
+         "`make check` skips the smoke and python-floor jobs that CI "
          "still runs"),
 
     Rule("a-check-must-fail-without-its-fix", SHOULD,
@@ -214,11 +213,11 @@ RULES = [
          ["tests/test_tools.py::test_device_scoped_tools_live_in_a_profile"]),
 
     Rule("stdlib-only", MUST,
-         "`lib/` is stdlib-only, except `lib/porthole_tui/` which is the "
-         "optional console extra",
-         "the CLI must work on a bare 3.8 with nothing installed; the console "
-         "degrades to a skip when textual is absent",
-         ["tests/test_conventions.py::test_lib_is_stdlib_only_outside_the_console_extra"]),
+         "`lib/` is stdlib-only, no exceptions",
+         "the CLI must work on a bare 3.8 with nothing installed; a "
+         "dependency is the one thing that would break it silently on "
+         "someone else's machine",
+         ["tests/test_conventions.py::test_lib_is_stdlib_only_with_no_exceptions"]),
 
     Rule("exit-codes-are-an-api", MUST,
          "Exit codes come from the documented table and nowhere else",

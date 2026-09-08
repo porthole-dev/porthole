@@ -84,10 +84,10 @@ losing an afternoon to it:
 Then you can build. **You do not need a kernel tree to build a system image**:
 
 ```sh
-porthole sandbox up               # start the workspace, once
-porthole build                    # the rung ladder — what each one costs
-porthole build image --yes        # the whole OS from pmaports, no tree needed
-porthole flash --yes              # rootfs and boot
+porthole sandbox up                        # start the workspace, once
+porthole build                             # the rung ladder — what each one costs
+porthole build image --yes                 # the whole OS from pmaports, no tree needed
+porthole flash full --yes --replace-rootfs # rootfs and boot
 ```
 
 Every rung except `image` compiles a kernel tree. `porthole build` says which
@@ -132,7 +132,6 @@ to finish the job is below, and **you do not need all of it to start**.
 | **fastboot** | reaching and leaving the bootloader | flashing and recovery unavailable |
 | **podman** | building images in the rootless workspace | builds unavailable; probing and debugging still work |
 | **flock** *(util-linux)* | serialising parallel workers on one device | the mutex cannot serialise; fine if you work alone |
-| **textual** *(optional)* | `porthole tui`, the full-screen console | the console says so; every verb still works |
 | adb | talking to a stock or recovery system | optional, rarely needed |
 
 `porthole doctor` reads `/etc/os-release` and prints the install command **for
@@ -146,11 +145,6 @@ $ porthole doctor
         fix: sudo apt install android-sdk-platform-tools
     ok  host: pmaports        ~/.local/var/pmbootstrap/cache_git/pmaports  (via PORTHOLE_PMB_DIR/cache_git)
 ```
-
-The console (`porthole tui`) is the one optional extra: it needs Python 3.10+
-and `textual`. Nothing else does, and nothing else ever will — a host that is
-already broken is exactly where `porthole next` has to keep working with nothing
-installed.
 
 Package names per distribution, and the udev rule that lets fastboot work
 without `sudo`, are in **[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.
@@ -376,8 +370,6 @@ lib/
   porthole.sh           the same semantics for shell tools
   porthole_cli.py       command registry and output helpers
   porthole_cmd_*.py     one module per verb — drop one in to add a verb
-  porthole_tui/         the console (`porthole tui`) — needs python 3.10+
-                        and textual; gate.py itself runs on 3.8 to say so
 tools/                  150 tk-* tools: boot, flash, probe, benchmark, soak
 profiles/
   _template/            every device key, documented

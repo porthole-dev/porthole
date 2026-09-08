@@ -23,7 +23,7 @@ TEST_JOBS ?= 8
 TOOLS := $(shell find tools profiles/*/tools -type f \( -name '*.sh' -o -name '*.py' \) \
                   -not -type l 2>/dev/null)
 
-.PHONY: help test console smoke lint floor check ci trailers issue-trailers distros fmt tools-doc tools-audit brain-index clean install-completion docs docs-serve rules
+.PHONY: help test smoke lint floor check ci trailers issue-trailers distros fmt tools-doc tools-audit brain-index clean install-completion docs docs-serve rules
 
 help:            ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -42,26 +42,6 @@ test:            ## CI job "tests": suites, brain lint, shell lib, device mutex
 	printf '%-28s ' ph-device-test.sh; bash tools/ph-device-test.sh >/dev/null \
 	  && echo "ok" || { echo FAIL; fail=1; }; \
 	exit $$fail
-
-console:         ## CI job "console": the TUI suites with textual installed
-	@# `make test` runs these same files WITHOUT textual, where they skip. A
-	@# skip that nothing verifies is a hole, so here a SKIP is a failure.
-	@if ! $(PY) -c 'import textual' 2>/dev/null; then \
-	  echo "ERROR: textual is not installed, so tests/test_tui_*.py would skip."; \
-	  echo "       pip install 'textual>=8,<9'"; \
-	  echo "       (or: make console CONSOLE_SKIP=1 -- and know CI will not)"; \
-	  [ -n "$(CONSOLE_SKIP)" ]; \
-	else \
-	  fail=0; \
-	  for t in tests/test_tui_*.py; do \
-	    printf '%-28s ' "$$(basename $$t)"; \
-	    out=$$($(PY) $$t) || fail=1; \
-	    echo "$$out" | tail -1; \
-	    case "$$out" in *SKIP*) \
-	      echo "  ^^ skipped where textual IS installed"; fail=1;; esac; \
-	  done; \
-	  exit $$fail; \
-	fi
 
 smoke:           ## CI job "smoke": fresh clone, bare PATH, empty HOME
 	@bash tests/ci-local.sh
@@ -120,7 +100,7 @@ distros:         ## does doctor's install advice actually work, per distro? (nee
 
 check: lint test ## lint then test, on YOUR interpreter -- the everyday one
 
-ci: check console smoke floor trailers ## every job CI runs, plus the python floor
+ci: check smoke floor trailers ## every job CI runs, plus the python floor
 	@echo
 	@echo "== green here means green on GitHub: the jobs run these same targets =="
 

@@ -32,11 +32,6 @@ sys.path.insert(0, str(ROOT / "tests"))
 import _runner                                              # noqa: E402
 import porthole_secrets as secrets                          # noqa: E402
 
-# The console is an optional extra: CI installs textual for one job, and the
-# matrix jobs run the same files without it, where they skip. Everything else
-# in lib/ must import on a bare interpreter with nothing installed.
-CONSOLE_EXTRA = "porthole_tui"
-
 # tk_* is a compatibility surface for tools outside this repo. Frozen means
 # frozen: tk_wait_fastboot has no callers in this tree and stays anyway. New
 # helpers are ph_*. Removing a name here must be a visible line in a diff.
@@ -99,38 +94,23 @@ def _imports(tree):
             yield n.lineno, n.module.split(".")[0]
 
 
-def test_lib_is_stdlib_only_outside_the_console_extra():
+def test_lib_is_stdlib_only_with_no_exceptions():
     """`porthole` must work on a bare 3.8 with nothing installed -- that is the
     floor the CLI declares, and a dependency is the one thing that would break
-    it silently on someone else's machine. The rule holds perfectly today,
-    which is exactly why it is worth pinning now."""
+    it silently on someone else's machine. The console was the one exception,
+    and a rule with one exception is a rule everybody has to remember the
+    shape of. Deleting it makes the rule simpler than the one it replaces."""
     stdlib = _stdlib_names() | LATER_STDLIB
     assert "json" in stdlib and "pathlib" in stdlib, (
         "the stdlib set came back wrong, so this check would flag everything")
-    local = {p.stem for p in (ROOT / "lib").glob("*.py")} | {CONSOLE_EXTRA}
+    local = {p.stem for p in (ROOT / "lib").glob("*.py")}
     bad = []
     for path in sorted((ROOT / "lib").rglob("*.py")):
         rel = path.relative_to(ROOT)
-        if CONSOLE_EXTRA in rel.parts:
-            continue
         for lineno, mod in _imports(ast.parse(path.read_text())):
             if mod not in stdlib and mod not in local:
                 bad.append(f"{rel}:{lineno}: {mod}")
-    assert not bad, (
-        "lib/ is stdlib-only outside the console extra:\n  " + "\n  ".join(bad))
-
-
-def test_the_console_extra_is_the_only_place_a_dependency_lives():
-    """The other direction, so the carve-out cannot quietly widen. If textual
-    ever appears outside lib/porthole_tui/, the skip-without-it contract that
-    `make console` checks is broken and the matrix jobs would fail instead."""
-    outside = []
-    for path in sorted((ROOT / "lib").rglob("*.py")):
-        rel = path.relative_to(ROOT)
-        for lineno, mod in _imports(ast.parse(path.read_text())):
-            if mod in ("textual", "rich") and CONSOLE_EXTRA not in rel.parts:
-                outside.append(f"{rel}:{lineno}: {mod}")
-    assert not outside, "\n  ".join(outside)
+    assert not bad, ("lib/ is stdlib-only, no exceptions:\n  " + "\n  ".join(bad))
 
 
 def test_exit_codes_come_from_the_documented_table():
@@ -215,7 +195,6 @@ ENV_COPIES_THAT_SPAWN_NOTHING = {
     "lib/porthole.py": "load_config's own env argument",
     "lib/porthole_cli.py": "Ctx.cfg builds that argument -- and child_env "
                            "itself lives here",
-    "lib/porthole_tui/state.py": "the console reloads config, same reason",
 }
 
 
@@ -289,8 +268,8 @@ def test_the_runner_reports_a_skip_as_a_skip():
     assert "1/2 passed" in out, out
     assert "1 skipped" in out, out
     assert "SKIP" not in out, (
-        "uppercase SKIP means 'this whole file skipped' and `make console` "
-        "greps for it -- a per-test skip must not wear that word:\n" + out)
+        "uppercase SKIP is reserved for 'this whole file skipped' -- a "
+        "per-test skip must not wear that word:\n" + out)
 
 
 def test_no_suite_hand_rolls_its_own_test_loop():

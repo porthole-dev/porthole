@@ -11,9 +11,12 @@
 #   tools/ph-afk.sh on [duration]   mask suspend; unmask again after `duration`
 #   tools/ph-afk.sh off             unmask, and cancel any pending expiry
 #
-#   `duration` is whatever systemd parses -- 90m, 4h, '1h 30min'. Given none,
-#   the mask is INDEFINITE and survives reboots. That is the point, and it is
-#   also the hazard; see below.
+#   `duration` is whatever systemd parses -- 90m, 4h, '1h 30min'. Given one,
+#   the mask is a RUNTIME mask (/run, not /etc) with a matching transient
+#   timer: a reboot before the timer fires wipes both together, so suspend
+#   is never left masked longer than asked for. Given none, the mask is
+#   PERSISTENT and INDEFINITE and survives reboots. That is the point of the
+#   no-duration form, and it is also the hazard; see below.
 #
 # WHY THIS EXISTS
 #   brain/traps/unmasked-suspend-during-an-automated-wait-is-a-death-loop.md:
@@ -27,10 +30,14 @@
 # WHY A MASK AND NOT systemd-inhibit
 #   An inhibitor lives and dies with the process that holds it, so it cannot
 #   survive the reboot in the middle of your unattended run, and an ssh session
-#   dropping takes it with it. A mask is a symlink in /etc: it survives both.
-#   That is exactly why it also needs an expiry -- a mask nobody removes is a
-#   phone that never sleeps and a battery that explains itself badly a week
-#   later. `on 4h` arms a transient systemd timer to take it off for you.
+#   dropping takes it with it. A mask is a symlink instead, so it survives that.
+#   `on 4h` also arms a transient systemd timer (always in /run) to take the
+#   mask off for you -- and the mask itself is written with `mask --runtime`,
+#   into /run alongside the timer, so the two share a lifetime by construction:
+#   whichever end a reboot destroys, it destroys both, and suspend can never be
+#   left masked longer than the timer that was supposed to lift it. `on` with
+#   no duration instead writes the mask to /etc, which is the one case that is
+#   meant to outlive a reboot -- see the hazard note above.
 #
 # WHY THREE UNITS
 #   logind starts suspend.target, so masking that is the one that blocks it.
@@ -52,7 +59,7 @@ cd "$(dirname "$0")" || exit 1
 UNITS="sleep.target suspend.target systemd-suspend.service"
 EXPIRE=porthole-afk-expire
 
-usage() { sed -n '8,17p' "./${0##*/}" | sed 's/^# \?//'; exit 64; }
+usage() { sed -n '8,20p' "./${0##*/}" | sed 's/^# \?//'; exit 64; }
 
 # Read the state back off the device rather than trusting the write. Every
 # tunable in this repo that was "set" and never re-read turned out not to be:
@@ -69,27 +76,53 @@ report() {
     '
 }
 
+# `masked-runtime` (mask --runtime, lives in /run) and `masked` (persistent
+# mask, lives in /etc) are two different is-enabled words; '^masked' matches
+# either so masked_count still means "how many of the 3 units are masked,
+# any which way". runtime_masked_count narrows that to just the /run form, to
+# tell the two apart when reporting.
 masked_count() { tk_run "systemctl is-enabled $UNITS 2>&1 | grep -c '^masked'" | tr -d '\r'; }
+runtime_masked_count() { tk_run "systemctl is-enabled $UNITS 2>&1 | grep -c '^masked-runtime\$'" | tr -d '\r'; }
+timer_active() { tk_run "systemctl is-active $EXPIRE.timer 2>/dev/null" | tr -d '\r'; }
 
 case ${1:-status} in
 status)
     echo ">> suspend on $PHONE:"
     report
-    if [ "$(masked_count)" = 3 ]; then
-        echo ">> AFK: suspend is MASKED. \`tools/ph-afk.sh off\` puts it back."
+    n=$(masked_count)
+    if [ "$n" = 3 ]; then
+        if [ "$(timer_active)" = active ]; then
+            echo ">> AFK: suspend is MASKED, expiry armed. \`tools/ph-afk.sh off\` puts it back early."
+        elif [ "$(runtime_masked_count)" = 3 ]; then
+            echo ">> AFK: suspend is MASKED (runtime) with NO expiry armed."
+            echo ">> It clears itself on the next reboot, but not before that. \`tools/ph-afk.sh off\` puts it back now."
+        else
+            echo ">> AFK: suspend is MASKED with NO expiry armed -- it will NOT unmask itself, not even across a reboot."
+            echo ">> \`tools/ph-afk.sh off\` puts it back."
+        fi
+    elif [ "$n" != 0 ]; then
+        echo ">> WARNING: suspend is PARTIALLY masked ($n/3 units) -- an inconsistent state. \`tools/ph-afk.sh off\` clears it."
     fi
     ;;
 on)
     DUR=${2:-}
+    # Clear whichever form (or both) a previous arm left, so switching modes
+    # can never stack a leftover /etc mask under a fresh /run one.
     tk_run "sudo -n systemctl stop $EXPIRE.timer 2>/dev/null
-            sudo -n systemctl mask $UNITS" >/dev/null
+            sudo -n systemctl unmask --runtime $UNITS 2>/dev/null
+            sudo -n systemctl unmask $UNITS 2>/dev/null" >/dev/null
     if [ -n "$DUR" ]; then
+        # --runtime: the mask itself goes to /run, same as the timer below,
+        # so a reboot before the timer fires wipes both -- no orphaned mask.
+        tk_run "sudo -n systemctl mask --runtime $UNITS" >/dev/null
         # --collect so a transient unit that fails does not linger in the
         # failed state and block the next arm under the same name.
         tk_run "sudo -n systemd-run --collect --unit=$EXPIRE --on-active='$DUR' \
                 --timer-property=AccuracySec=30s \
-                systemctl unmask $UNITS" >/dev/null ||
-            echo ">> WARNING: the expiry timer was NOT armed -- the mask is indefinite"
+                systemctl unmask --runtime $UNITS" >/dev/null ||
+            echo ">> WARNING: the expiry timer was NOT armed -- \`off\` it yourself when done (it still clears on the next reboot)"
+    else
+        tk_run "sudo -n systemctl mask $UNITS" >/dev/null
     fi
     report
     if [ "$(masked_count)" != 3 ]; then
@@ -97,7 +130,7 @@ on)
         exit 1
     fi
     if [ -n "$DUR" ]; then
-        echo ">> AFK for $DUR. It unmasks itself; nothing has to remember."
+        echo ">> AFK for $DUR. It unmasks itself: the timer fires it explicitly, and a reboot before that clears it for free too, because the mask lives in /run next to the timer, not in /etc."
     else
         echo ">> AFK indefinitely, ACROSS REBOOTS. Nothing will undo this but you."
         echo ">> Prefer \`tools/ph-afk.sh on 4h\` if you know when you are back."
@@ -105,7 +138,8 @@ on)
     ;;
 off)
     tk_run "sudo -n systemctl stop $EXPIRE.timer $EXPIRE.service 2>/dev/null
-            sudo -n systemctl unmask $UNITS" >/dev/null
+            sudo -n systemctl unmask --runtime $UNITS 2>/dev/null
+            sudo -n systemctl unmask $UNITS 2>/dev/null" >/dev/null
     report
     if [ "$(masked_count)" != 0 ]; then
         echo ">> FAILED: something is still masked."

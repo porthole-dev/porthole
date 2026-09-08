@@ -40,21 +40,6 @@ jobs:
       - name: make test
         run: make test
 
-  console:
-    name: console (textual, python 3.12)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: install the console extra
-        run: python3 -m pip install 'textual>=8,<9'
-      # The matrix job above runs these same files WITHOUT textual, where they
-      # skip. `make console` fails on a skip here, where it has no excuse.
-      - name: make console
-        run: make console
-
   lint:
     runs-on: ubuntu-latest
     steps:

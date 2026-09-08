@@ -12,6 +12,7 @@ generic notes as well.
 |---|---|---|
 | [a-comment-cannot-unset-an-inherited-dt-property](findings/a-comment-cannot-unset-an-inherited-dt-property.md) | `soc:msm8998` | A board file that declines to mention a DT property does not unset it, and a comment is not a revert |
 | [a-created-mvm-carries-call-audio](findings/a-created-mvm-carries-call-audio.md) | `soc:msm8998` | A (created) MVM carries call audio: what matters is whether the modem had a call, not the joined flag |
+| [a-dev-snapshot-blocks-install-and-says-nothing](findings/a-dev-snapshot-blocks-install-and-says-nothing.md) | `generic` | An envkernel _p snapshot blocks every install, and nothing reports it until a build refuses twelve minutes in |
 | [a-level-irq-with-a-pull-up-storms-when-its-chip-is-off](findings/a-level-irq-with-a-pull-up-storms-when-its-chip-is-off.md) | `device:google-taimen` | The NFC interrupt storm was a devicetree pull-up, not a driver bug |
 | [a-phone-in-the-bootloader-can-be-off-the-bus](findings/a-phone-in-the-bootloader-can-be-off-the-bus.md) | `generic` | A phone can reach the bootloader and never enumerate, and porthole read that as never reaching it |
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
@@ -46,6 +47,7 @@ generic notes as well.
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 | [panel-corruption-was-gpu-reset-wreckage-not-tearing](findings/panel-corruption-was-gpu-reset-wreckage-not-tearing.md) | `device:google-taimen` | The panel corruption and degraded phosh were one GPU reset's wreckage -- not display tearing, and not the rd_ptr patch |
 | [phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it](findings/phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it.md) | `device:google-taimen` | A GPU reset aborts phosh, not phoc -- the session restarts and looks like a reboot |
+| [pmbootstrap-shutdown-unmounts-portholes-own-binds](findings/pmbootstrap-shutdown-unmounts-portholes-own-binds.md) | `generic` | pmbootstrap shutdown unmounts porthole's own container binds, not just pmbootstrap's chroot mounts |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
@@ -226,7 +228,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 112
+- `generic` — 114
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1

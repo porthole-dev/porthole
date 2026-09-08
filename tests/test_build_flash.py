@@ -11,6 +11,7 @@ PORTHOLE_ACTIVE_SLOT sat unread in the schema.
 Every test here is a refusal. Nothing in this file builds or flashes anything.
 """
 import argparse
+import contextlib
 import json
 import re
 import os
@@ -66,16 +67,27 @@ class _FakeCtx:
 
 def test_flash_refuses_a_forbidden_slot():
     """Recovery from the bootloader cannot re-arm a slot, so this is the last
-    point at which the mistake is still cheap."""
-    rc, out, err = run("-d", DEV, "flash", "--slot", "a", "--force", "--yes")
-    assert rc != 0, "it agreed to arm a forbidden slot"
-    assert "SLOT_FORBIDDEN" in (out + err)
+    point at which the mistake is still cheap.
 
-
-def test_flash_refuses_unless_the_device_is_in_fastboot():
-    rc, out, err = run("-d", DEV, "flash", "--yes")
-    assert rc != 0
-    assert "FASTBOOT" in (out + err)
+    CRITICAL, fix round 2: this used to invoke the CLI as a subprocess with
+    no stub on flash._run, against the real repo root -- mutation-testing
+    the guard below (remove it) reached a live `_run`, which `podman exec`s
+    into the attached sandbox and would have run `tkflash-boot` against
+    whatever hardware is actually connected. Converted to an in-process call
+    under `_flash_run_tripwire`, matching every other refusal in this file
+    that must never write to a device."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_STATE
+    args = _flash_args(action="boot", yes=True, force=True, slot="a")
+    ctx = _fake_ctx(state="FASTBOOT", cfg={"PORTHOLE_HAS_AB_SLOTS": "1",
+                                           "PORTHOLE_SLOT_FORBIDDEN": "a"})
+    with _flash_run_tripwire():
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "it agreed to arm a forbidden slot"
+        except Bail as exc:
+            assert exc.code == EX_STATE
+            assert "SLOT_FORBIDDEN" in exc.message
 
 
 def test_flash_does_nothing_without_yes():
@@ -97,6 +109,456 @@ def test_flash_warns_when_the_slot_layout_was_never_probed():
     """HAS_AB_SLOTS="0" is both the shipped default and a real answer."""
     rc, out, err = run("-d", DEV, "flash", "--force")
     assert "never probed" in (out + err) or "SLOTS_PROBED" in (out + err)
+
+
+def test_the_slot_warning_and_its_hint_share_a_stream():
+    """Reproduced 2026-09-08: the warning went to stderr and its hint went to
+    stdout, so `2>log` captured the warning and lost the fix that explains
+    it, three lines below on a stream nobody redirected."""
+    rc, out, err = run("-d", DEV, "flash", "--force")
+    assert "never probed" in err, err
+    assert "slots probe" in err, err
+    assert "slots probe" not in out, out
+
+
+def test_flash_preview_via_cli_does_not_refuse_when_booted():
+    """The literal repro: `porthole flash` with no --yes against a BOOTED
+    device used to exit non-zero with EX_STATE before printing anything."""
+    rc, out, err = run("-d", DEV, "flash", env={"TK_DEVICE_STATE": "BOOTED"})
+    assert rc == 0, err + out
+    assert "would flash" in out
+
+
+# ------------------------------------------------- flash: boot vs full --
+
+def _flash_args(action="boot", yes=False, slot=None, force=False,
+                replace_rootfs=False, timeout=1800):
+    """An argparse.Namespace shaped like the real parser's output for
+    `flash` -- enough to drive cmd_flash() directly, with no subprocess."""
+    return argparse.Namespace(action=action, yes=yes, slot=slot, force=force,
+                              replace_rootfs=replace_rootfs, timeout=timeout,
+                              json=False)
+
+
+class _FlashPreviewOut:
+    """A ctx.out that records every rendered line into `.text`.
+
+    `_FakeCtx._FakeOut` above swallows everything, which is right for the
+    slot-preview tests (they read real subprocess stdout) and wrong for
+    these -- they call cmd_flash() in-process and need to see what the
+    preview actually said.
+    """
+
+    def __init__(self):
+        self._lines = []
+
+    @property
+    def text(self):
+        return "\n".join(self._lines)
+
+    def __call__(self, *parts):
+        self._lines.append(" ".join(str(p) for p in parts))
+
+    def heading(self, text):
+        self._lines.append(text)
+
+    def kv(self, key, value, width=0, note=""):
+        self._lines.append(f"{key} {value} {note}".rstrip())
+
+    def blank(self):
+        self._lines.append("")
+
+    def hint(self, text, note="", stream=None):
+        self._lines.append(f"{text} {note}".rstrip())
+
+    def warn(self, text, stream=None):
+        self._lines.append(f"warning: {text}")
+
+    def paint(self, s, _color):
+        return s
+
+    def sym(self, fancy, plain):
+        return fancy
+
+
+class _FakeFlashDevice:
+    def __init__(self, state):
+        self._state = state
+
+    def state(self, max_age=0.0):
+        return self._state
+
+
+def _fake_ctx(state="BOOTED", cfg=None):
+    """A ctx good enough to drive cmd_flash() with no real profile and no
+    device probe -- `state` is handed straight to a stub device()."""
+    merged = {"PORTHOLE_DEVICE": DEV, "PORTHOLE_DTB": "msm8998-taimen.dtb"}
+    merged.update(cfg or {})
+
+    class _Ctx:
+        def __init__(self):
+            self.cfg = merged
+            self.out = _FlashPreviewOut()
+            self.root = ROOT
+            self.args = argparse.Namespace(wait=0.0)
+
+        def device(self):
+            return _FakeFlashDevice(state)
+
+        def emit(self, payload, render=None):
+            if render:
+                render()
+            return 0
+
+    return _Ctx()
+
+
+# --------------------------------------------------- build: preview vs auto --
+
+def _build_args(action=None, yes=False, measure=False, json=False):
+    """Shaped like the real parser's Namespace for `build` -- enough to drive
+    cmd_build() directly, with no subprocess."""
+    return argparse.Namespace(action=action, yes=yes, measure=measure,
+                              json=json, timeout=5400, host=False,
+                              kernel=False, allow_env_override=False,
+                              verbose=False, detach=False, wait=0.0,
+                              rest=[])
+
+
+def _build_fake_ctx(tree):
+    """A ctx good enough to drive cmd_build()'s routing decision.
+
+    `cfg` is a real `porthole.Config`, not a plain dict: `_assert_no_drift`
+    calls `cfg.source(key)`, which a plain dict does not have. Built via the
+    dict constructor rather than `.set(...)`, every key's source stays at the
+    default layer -- never LAYER_ENV -- so `porthole.drift()` finds nothing
+    to flag no matter what PORTHOLE_KERNEL_PKG/PORTHOLE_DEVICE this host has
+    exported into the environment.
+    """
+    import porthole as porthole_mod
+
+    class _Ctx:
+        def __init__(self):
+            self.cfg = porthole_mod.Config({
+                "PORTHOLE_DEVICE": DEV,
+                "PORTHOLE_KERNEL_TREE": str(tree),
+            })
+            self.out = _FlashPreviewOut()
+            self.root = ROOT
+
+        def emit(self, payload, render=None):
+            if render:
+                render()
+            return 0
+
+    return _Ctx()
+
+
+def _build_fake_tree():
+    root = pathlib.Path(tempfile.mkdtemp(prefix="porthole-build-tree-"))
+    (root / "Makefile").write_text("")
+    return root
+
+
+def test_a_bare_build_plans_and_does_not_compile():
+    """`porthole build` ran a real incremental make and took the buildroot
+    lock, so the thing you run to ask "what would this do" was itself a
+    build. `_preflight` is forced clear and a fake tree supplied so the
+    shortcut to `_auto` WOULD be reachable if anything still let it through --
+    the only thing standing between a bare invocation and a real measure must
+    be the routing in cmd_build itself."""
+    import porthole_cmd_build as build
+
+    ctx = _build_fake_ctx(_build_fake_tree())
+    args = _build_args(action=None, yes=False, measure=False)
+
+    ran = []
+    real_auto, real_preflight = build._auto, build._preflight
+    build._auto = lambda *a, **k: ran.append("_auto") or 0
+    build._preflight = lambda *a, **k: []
+    try:
+        build.cmd_build(args, ctx)
+    finally:
+        build._auto, build._preflight = real_auto, real_preflight
+    assert ran == [], f"a preview ran {ran}"
+    assert "would build" in ctx.out.text
+
+
+def test_measuring_is_something_you_ask_for():
+    """--measure (or an explicit `porthole build auto`) still reaches _auto,
+    exactly as a bare `porthole build` used to."""
+    import porthole_cmd_build as build
+
+    ctx = _build_fake_ctx(_build_fake_tree())
+    args = _build_args(action=None, yes=False, measure=True)
+
+    ran = []
+    real_auto, real_preflight = build._auto, build._preflight
+    build._auto = lambda *a, **k: ran.append("_auto") or 0
+    build._preflight = lambda *a, **k: []
+    try:
+        build.cmd_build(args, ctx)
+    finally:
+        build._auto, build._preflight = real_auto, real_preflight
+    assert ran == ["_auto"]
+
+
+def test_typing_auto_out_still_measures_with_no_measure_flag():
+    """`porthole build auto` (the rung named explicitly) is the other
+    documented way to ask for the real thing -- --measure is not the only
+    door."""
+    import porthole_cmd_build as build
+
+    ctx = _build_fake_ctx(_build_fake_tree())
+    args = _build_args(action="auto", yes=False, measure=False)
+
+    ran = []
+    real_auto, real_preflight = build._auto, build._preflight
+    build._auto = lambda *a, **k: ran.append("_auto") or 0
+    build._preflight = lambda *a, **k: []
+    try:
+        build.cmd_build(args, ctx)
+    finally:
+        build._auto, build._preflight = real_auto, real_preflight
+    assert ran == ["_auto"]
+
+
+@contextlib.contextmanager
+def _flash_run_tripwire():
+    """Patches `flash._run` to explode if it is ever reached.
+
+    For every direct `cmd_flash()` call in this file that must NOT write to
+    a device -- which is every one of them except the single test below that
+    deliberately exercises the confirmed-run path with its own safe
+    recording stub. `ctx.root` here is the real repo root (`_fake_ctx` sets
+    it), so an unstubbed call that reaches `_run` is not a simulation: it
+    shells into the real workspace/host and can run `pmbootstrap flasher
+    flash_rootfs` / `fastboot flash ...` against whatever hardware is
+    actually attached. A guard regression must fail these tests LOUDLY, from
+    right here -- never by finding out whether a real phone happened to be
+    in the right state to accept the write.
+    """
+    import porthole_cmd_flash as flash
+
+    def _boom(*_a, **_k):
+        raise AssertionError(
+            "flash._run must never be reached in this test -- it would "
+            "flash a real device")
+
+    real_run = flash._run
+    flash._run = _boom
+    try:
+        yield
+    finally:
+        flash._run = real_run
+
+
+def test_the_flash_preview_works_while_the_device_is_booted():
+    """Reproduced 2026-09-08: `porthole flash` with no --yes refused with
+    EX_STATE because the device was BOOTED. The preview is the thing you run
+    to find out what would happen; gating it behind the state it is telling
+    you about is backwards."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="boot", yes=False)
+    ctx = _fake_ctx(state="BOOTED")
+    with _flash_run_tripwire():
+        rc = flash.cmd_flash(args, ctx)
+    assert rc == 0
+    assert "would flash" in ctx.out.text
+
+
+def test_the_preview_offers_to_move_the_device_rather_than_only_refusing():
+    """ph-to-fastboot.sh exists precisely for this and nothing offered it.
+
+    `full` genuinely needs FASTBOOT, so its preview still has something to
+    offer here. `boot` does not -- tkflash-boot moves a booted device to the
+    bootloader itself, so its preview has no state problem to hint about;
+    see test_a_boot_flash_runs_from_either_state."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="full", yes=False)
+    ctx = _fake_ctx(state="BOOTED")
+    with _flash_run_tripwire():
+        flash.cmd_flash(args, ctx)
+    assert ("ph-to-fastboot" in ctx.out.text
+           or "reboot it to the bootloader" in ctx.out.text)
+
+
+def test_flashing_boot_only_does_not_touch_the_rootfs():
+    """tkflash-boot existed and no verb could reach it, so the only flash
+    available replaced everything."""
+    import porthole_cmd_flash as flash
+    assert flash.FUNCS["boot"] == "tkflash-boot"
+    assert flash.FUNCS["full"] == "tkflash"
+
+
+def test_a_full_flash_is_refused_without_the_flag_that_names_the_loss():
+    """CRITICAL, fix round 1: this test used to call cmd_flash() with no
+    stub on flash._run at all. Mutation-testing the --replace-rootfs guard
+    it exists to catch reached the real _run -- against the live device
+    attached to this host. The tripwire is the point of this test now, every
+    bit as much as the assertion below is: removing the guard must fail
+    HERE, on the tripwire, not fall through to a shell."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="full", yes=True)   # --yes alone
+    ctx = _fake_ctx(state="FASTBOOT")
+    with _flash_run_tripwire():
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a rootfs replacement ran on --yes alone"
+        except AssertionError:
+            raise
+        except Exception as exc:
+            assert "--replace-rootfs" in str(exc)
+
+
+def test_a_boot_only_flash_runs_on_yes_alone_when_the_device_is_ready():
+    """The other half of the same rule: `boot` must not also demand
+    --replace-rootfs -- it touches no rootfs, there is nothing to name.
+
+    This is the one test in the file that WANTS `_run` reached, so it uses
+    its own recording stub rather than `_flash_run_tripwire` -- the stub
+    never shells out either, it only records what it was called with."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="boot", yes=True)
+    ctx = _fake_ctx(state="FASTBOOT")
+    calls = []
+    real_run = flash._run
+    flash._run = lambda ctx, func, timeout, *a, **k: calls.append(func) or 0
+    try:
+        rc = flash.cmd_flash(args, ctx)
+    finally:
+        flash._run = real_run
+    assert rc == 0
+    assert calls == ["tkflash-boot"]
+
+
+def test_flash_labels_the_run_with_the_operation_name_not_the_shell_function():
+    """Found against `ph log`: `cmd_flash` called `_run(ctx, FUNCS[action],
+    args.timeout)` with no `rung=`, so `_run`'s `effective_rung = rung or
+    func` fell back to the shell function name -- `tkflash`/`tkflash-boot`
+    -- and that leaked into the log filename, build-status.json, the
+    progress bar and the failure message. `rung` must be `plan.op(...).name`
+    (`flash-boot`/`flash-full`, the porthole_plan.OPS key), never FUNCS'
+    value."""
+    import porthole_cmd_flash as flash
+
+    for action, want_rung in (("boot", "flash-boot"), ("full", "flash-full")):
+        args = _flash_args(action=action, yes=True, replace_rootfs=True)
+        ctx = _fake_ctx(state="FASTBOOT")
+        calls = []
+        real_run = flash._run
+        flash._run = lambda ctx, func, timeout, *a, **k: (
+            calls.append((func, k.get("rung"))) or 0)
+        try:
+            rc = flash.cmd_flash(args, ctx)
+        finally:
+            flash._run = real_run
+        assert rc == 0, action
+        [(func, rung)] = calls
+        assert rung == want_rung, (action, func, rung)
+        assert rung != func, "the label must not be the shell function name"
+
+
+def test_flash_timeout_after_write_success_is_not_reported_as_a_failed_flash():
+    """Observed on hardware 2026-09-08 (Gate C5, attempt 2): the flash wrote
+    everything correctly and the device simply took longer than the 300s
+    TK_BOOT_DEADLINE default to answer ssh, and porthole reported "tkflash
+    failed" / "the device may be part-flashed" -- a false alarm about the
+    one thing that had already gone right.
+
+    _ph_wait_up (tools/ph-build.sh) now returns 124 (EX_TIMEOUT) for exactly
+    this case -- it is only ever reached after every fastboot write already
+    succeeded. cmd_flash must tell the two apart rather than folding both
+    into the same "failed" message."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_TIMEOUT
+
+    args = _flash_args(action="boot", yes=True)
+    ctx = _fake_ctx(state="FASTBOOT")
+    real_run = flash._run
+    flash._run = lambda ctx, func, timeout, *a, **k: 124
+    try:
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a 124 from _run must not report success"
+        except AssertionError:
+            raise
+        except Bail as exc:
+            assert exc.code == EX_TIMEOUT, exc.code
+            assert "part-flashed" not in exc.message, (
+                "a timed-out WAIT must not read as a failed WRITE")
+            assert "PORTHOLE_BOOT_DEADLINE" in exc.hint
+    finally:
+        flash._run = real_run
+
+
+def test_flash_write_failure_still_reports_part_flashed():
+    """The other half of the same rule: an actual write failure (anything
+    other than the 124 _ph_wait_up reserves for a clean write / slow
+    reboot) must still warn that the device may be part-flashed."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_FAIL
+
+    args = _flash_args(action="boot", yes=True)
+    ctx = _fake_ctx(state="FASTBOOT")
+    real_run = flash._run
+    flash._run = lambda ctx, func, timeout, *a, **k: 1
+    try:
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a nonzero _run must not report success"
+        except AssertionError:
+            raise
+        except Bail as exc:
+            assert exc.code == EX_FAIL, exc.code
+            assert "part-flashed" in exc.hint
+    finally:
+        flash._run = real_run
+
+
+def test_a_boot_flash_runs_from_either_state():
+    """The defect this guards against: `tkflash-boot` (tools/ph-build.sh)
+    checks `tk_in_fastboot || "$_PH_REPO/tools/ph-to-fastboot.sh" || return
+    1` -- it moves a booted device to the bootloader itself. Declaring
+    FASTBOOT for flash-boot refused a correctly booted phone for an
+    operation that would have worked -- reproduced on hardware 2026-09-08.
+    `full` (test_a_full_flash_still_refuses_the_wrong_state) is the op that
+    genuinely needs the bootloader; `boot` runs from either state."""
+    import porthole_cmd_flash as flash
+    args = _flash_args(action="boot", yes=True)
+    for state in ("BOOTED", "FASTBOOT"):
+        ctx = _fake_ctx(state=state)
+        calls = []
+        real_run = flash._run
+        flash._run = lambda ctx, func, timeout, *a, **k: calls.append(func) or 0
+        try:
+            rc = flash.cmd_flash(args, ctx)
+        finally:
+            flash._run = real_run
+        assert rc == 0, state
+        assert calls == ["tkflash-boot"], state
+
+
+def test_a_full_flash_still_refuses_the_wrong_state():
+    """Preserved: an actual write (not a preview) still refuses EX_STATE
+    when the device disagrees, exactly as before this rework -- for `full`,
+    which genuinely needs the bootloader. `boot` does not (see
+    test_a_boot_flash_runs_from_either_state): declaring FASTBOOT for it was
+    the defect, refusing a booted device an op that would have worked.
+
+    CRITICAL, fix round 1: same missing stub as the test above -- see
+    `_flash_run_tripwire`."""
+    import porthole_cmd_flash as flash
+    from porthole_cli import Bail, EX_STATE
+    args = _flash_args(action="full", yes=True, replace_rootfs=True)
+    ctx = _fake_ctx(state="BOOTED")
+    with _flash_run_tripwire():
+        try:
+            flash.cmd_flash(args, ctx)
+            assert False, "a real flash ran against a BOOTED device"
+        except Bail as exc:
+            assert exc.code == EX_STATE
+            assert "FASTBOOT" in exc.hint
 
 
 def test_build_does_nothing_without_yes():
@@ -405,6 +867,36 @@ def test_the_fast_rungs_wait_instead_of_handing_back_mid_reboot():
         "_ph_wait_up must poll via tk_wait_ssh, not sleep"
 
 
+def test_wait_up_timeout_exits_124_not_1():
+    """_ph_wait_up is only ever called after its caller's own fastboot writes
+    already returned 0, so a deadline miss here means "still waiting on
+    ssh", not "the write failed" -- they must not share an exit code. Both
+    cmd_flash and cmd_build now special-case 124 (see
+    test_flash_timeout_after_write_success_is_not_reported_as_a_failed_flash
+    and test_build_timeout_after_write_success_is_not_reported_as_a_failure),
+    so every caller in ph-build.sh must let it through unmangled.
+
+    `tkboot` used to swallow it with `_ph_wait_up "$old_id" || return 1`;
+    `tkbuild-kernel` (`fast`) and `tkupgrade-kernel` (`upgrade`) did the same
+    to `tkflash-boot`'s own exit code, one call after `_ph_wait_up` is its
+    last statement. Three rungs, same copy-pasted clamp."""
+    src = (ROOT / "tools" / "ph-build.sh").read_text()
+    body = src.split("_ph_wait_up() {", 1)[1].split("\n}\n", 1)[0]
+    assert "return 124" in body, "_ph_wait_up must exit 124 on a deadline miss"
+    assert "return 1\n" not in body.replace("return 124", ""), (
+        "_ph_wait_up's only failure exit must be the 124 above")
+    for func in ("tkboot", "tkflash-boot"):
+        fbody = src.split(f"\n{func}() {{", 1)[1].split("\n}\n", 1)[0]
+        assert "_ph_wait_up" in fbody
+        assert '_ph_wait_up "$old_id" || return 1' not in fbody, (
+            f"{func} must not collapse _ph_wait_up's exit code back to 1")
+    for func in ("tkbuild-kernel", "tkupgrade-kernel"):
+        fbody = src.split(f"\n{func}() {{", 1)[1].split("\n}\n", 1)[0]
+        assert "tkflash-boot" in fbody
+        assert 'tkflash-boot || return 1' not in fbody, (
+            f"{func} must not collapse tkflash-boot's exit code back to 1")
+
+
 def test_tkmod_proves_the_new_module_is_the_running_one():
     """insmod exiting 0 does not mean the old module unloaded."""
     src = (ROOT / "tools" / "ph-build.sh").read_text()
@@ -412,25 +904,19 @@ def test_tkmod_proves_the_new_module_is_the_running_one():
     assert "srcversion" in body, "tkmod does not verify which build is loaded"
 
 
-def test_a_build_that_cannot_finish_is_refused_before_it_starts():
-    """ENOSPC at minute forty costs the whole build. /proc reports zero free
-    space and always exists, so it is a stable stand-in for a full disk."""
-    import porthole_cmd_build as build
-    problems = build._space_problems({"PORTHOLE_PMB_DIR": "/proc"})
-    assert problems, "a disk with no free space was not refused"
-    assert "PORTHOLE_PMB_DIR" in problems[0], (
-        "the refusal must name the knob that relocates the workdir: "
-        + problems[0])
-
-
-def test_plenty_of_space_is_neither_refused_nor_warned_about():
+def test_plenty_of_space_is_not_warned_about():
+    """The refusal half of this (`_space_problems`, SPACE_FLOOR_GB) was
+    removed: `plan.unmet`'s per-op `disk_gb` against
+    `facts()["free_gb"]` supersedes it (see test_sites.py's `facts()`
+    walk-up coverage and test_plan.py's disk_gb tests). `_space_warning` is
+    a different thing -- tight but survivable, not a refusal -- and is
+    still called from `cmd_build` (a non-blocking advisory), so it keeps
+    its own test."""
     import porthole_cmd_build as build
     root = "/"
     if build._free_gb(root) < build.SPACE_WARN_GB:
         return  # this machine genuinely is tight; nothing to assert
-    cfg = {"PORTHOLE_PMB_DIR": root}
-    assert not build._space_problems(cfg)
-    assert not build._space_warning(cfg)
+    assert not build._space_warning({"PORTHOLE_PMB_DIR": root})
 
 
 def test_a_build_routes_into_the_workspace_by_default():
@@ -515,6 +1001,41 @@ def test_the_status_file_agrees_with_the_exit_code():
     call = src.split("tracker.finish(", 1)[1].split(")))", 1)[0]
     assert "TKMOD_INSTALLED_NOT_LOADED" in call, \
         "tracker.finish still calls an installed module a failed build"
+
+
+def test_a_generic_build_failure_names_the_rung_not_the_shell_function():
+    """The same leak `porthole flash` had (rung= missing from `_run`, so the
+    log/status/bar/message all showed `tkflash`): here `rung=` IS passed to
+    `_run` correctly, so only this one failure message still built itself
+    out of `func` -- `porthole build fast --yes` failing said "tkbuild-kernel
+    failed", the name of a shell function in tools/ph-build.sh nobody typed,
+    instead of "fast failed"."""
+    src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
+    site = src.split("rc = _run(ctx, func, args.timeout, extra,", 1)[1][:2000]
+    raise_line = [ln for ln in site.splitlines() if '"{func} failed"' in ln
+                  or '"{action} failed"' in ln]
+    assert raise_line, "the generic failure Bail moved; update this test"
+    assert '"{action} failed"' in raise_line[0], (
+        f"names the shell function, not the rung a person typed: {raise_line[0]}")
+
+
+def test_build_timeout_after_write_success_is_not_reported_as_a_failure():
+    """The `porthole build` half of the same defect `porthole flash` had
+    (test_flash_timeout_after_write_success_is_not_reported_as_a_failed_flash):
+    `fast`, `upgrade` and `boot` all end in `_ph_wait_up` too, one call after
+    a successful `fastboot flash`/`fastboot boot`. A 124 from `_run` there
+    means the same thing it means for flash -- write succeeded, still
+    waiting on ssh -- and must not read as "fast failed"."""
+    src = (ROOT / "lib" / "porthole_cmd_build.py").read_text()
+    site = src.split("rc = _run(ctx, func, args.timeout, extra,", 1)[1][:2000]
+    assert "if rc == EX_TIMEOUT:" in site, (
+        "cmd_build never special-cases the wait-timeout code")
+    branch = site.split("if rc == EX_TIMEOUT:", 1)[1].split(
+        '"{action} failed"', 1)[0]
+    assert "PORTHOLE_BOOT_DEADLINE" in branch, (
+        "the timeout message should point at the knob that raises it")
+    assert "EX_TIMEOUT" in branch.split("raise Bail(", 1)[1][:200], (
+        "must raise with EX_TIMEOUT, not EX_FAIL")
 
 
 def test_module_arguments_survive_the_trip():
@@ -1823,6 +2344,197 @@ def test_a_running_build_draws_the_same_block_the_watchers_do():
     assert rows >= len(progress.watch_lines({})), (
         "the build painted {} row(s); the watchers draw {}".format(
             rows, len(progress.watch_lines({}))))
+
+
+# ---------------------------------------------- preflight derives from the plan --
+
+def test_preflight_accepts_a_full_flash_in_the_sandbox():
+    """The originally reported failure: twelve minutes, then a shell error
+    about a missing .img, because the sandbox could never make a rootfs
+    image (no loop device in its user namespace) and nothing asked before
+    the build started. `_ph_assemble_image` (tools/ph-build.sh) removed the
+    limitation itself -- it builds the image straight from the chroot with
+    no loop device -- and Gate C5 proved it on hardware
+    (.run/build-tkflash-20260908-154750.log, ">> NOTE: this image was built
+    from /work/linux-ws"). See test_plan.py and test_sites.py for the
+    manifest-level pins; this one is choose_from's answer for the exact op
+    the incident was about."""
+    import porthole_plan as plan
+    import porthole_sites as sites
+    op = plan.op("flash-full")
+    site, why = sites.choose_from(op, available=[plan.SANDBOX])
+    assert site == plan.SANDBOX, why
+
+
+def test_preflight_reports_a_dev_snapshot_as_a_problem_not_as_a_build_failure():
+    """Seven _p snapshots blocked every clean install on the reference host
+    and nothing said so until _ph_assert_no_devpkgs refused mid-build."""
+    import porthole_cmd_build as build
+    names = ["linux-x-7.2.2_p20260908083444-r0.apk", "linux-x-7.2.2-r31.apk"]
+    assert build.dev_snapshots(names) == ["linux-x-7.2.2_p20260908083444-r0.apk"]
+    assert build.dev_snapshots(["linux-x-7.2.2-r31.apk"]) == []
+
+
+def test_chroot_devkernel_finds_an_installed_dev_snapshot():
+    """The SECOND check `_ph_assert_no_devpkgs` makes, and the one a
+    repo-only scan cannot see: a `_p` kernel already installed in the chroot
+    outranks every release, so apk will not downgrade it and `pmbootstrap
+    export` ships the snapshot. Measured 2026-08-20: the repo was clean and
+    export still shipped an 01:31 envkernel build."""
+    import porthole_cmd_build as build
+
+    db = ("C:Q1abc\n"
+          "P:musl\n"
+          "V:1.2.5-r0\n"
+          "A:aarch64\n"
+          "\n"
+          "C:Q1def\n"
+          "P:linux-postmarketos-qcom-msm8998-7.2\n"
+          "V:7.2.2_p20260820013151-r0\n"
+          "A:aarch64\n")
+    assert build._chroot_devkernel(
+        db, "linux-postmarketos-qcom-msm8998-7.2") == "7.2.2_p20260820013151-r0"
+
+
+def test_chroot_devkernel_says_nothing_about_a_release():
+    import porthole_cmd_build as build
+
+    db = "P:linux-postmarketos-qcom-msm8998-7.2\nV:7.2.2-r31\n"
+    assert build._chroot_devkernel(
+        db, "linux-postmarketos-qcom-msm8998-7.2") == ""
+
+
+def test_chroot_devkernel_ignores_a_different_packages_snapshot():
+    """The db holds every installed package; naming the RIGHT one is the
+    point -- some OTHER package's dev build must not read as this one's."""
+    import porthole_cmd_build as build
+
+    db = "P:musl\nV:1.2.5_p20260101000000-r0\n"
+    assert build._chroot_devkernel(db, "linux-x") == ""
+
+
+def test_preflight_reports_an_installed_dev_kernel_before_export_ships_it():
+    """The wiring, not just the pure function: a chroot with a `_p` kernel
+    already installed must surface as a preflight problem for a rung that
+    produces or reuses the rootfs chroot -- `kernel` produces one."""
+    import argparse
+    import tempfile
+
+    import porthole_cmd_build as build
+    import porthole_sites as sites
+
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-devkernel-"))
+    db_dir = workdir / "chroot_rootfs_google-taimen" / "lib" / "apk" / "db"
+    db_dir.mkdir(parents=True)
+    (db_dir / "installed").write_text(
+        "P:linux-postmarketos-qcom-msm8998-7.2\n"
+        "V:7.2.2_p20260820013151-r0\n")
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": str(workdir),
+               "PORTHOLE_PMB_DIR": str(workdir),
+               "PORTHOLE_KERNEL_PKG": "linux-postmarketos-qcom-msm8998-7.2",
+               "PORTHOLE_ARCH": "aarch64", "PORTHOLE_DTB": "qcom/x",
+               "PORTHOLE_DEFCONFIG": "d", "PORTHOLE_DEVICE": "google-taimen"}
+        args = argparse.Namespace()
+
+    real_usable = sites.usable
+    # A fake ctx, not the real host: forcing the host-workdir branch is what
+    # lets PORTHOLE_PMB_DIR point at the fixture instead of a real
+    # pmbootstrap install or podman workspace.
+    sites.usable = lambda ctx: (False, "faked for the test")
+    try:
+        problems = build._preflight(Ctx(), "kernel")
+    finally:
+        sites.usable = real_usable
+    assert any("envkernel build" in p and "export" in p for p in problems), (
+        problems)
+
+
+def test_preflight_checks_the_repo_of_the_site_actually_chosen():
+    """The workspace and the host keep SEPARATE pmbootstrap work dirs
+    (`pmb_workdir`'s own docstring): re-deriving "is the workspace usable"
+    for this check instead of reading the site `choose_from` actually picked
+    would check the wrong repo whenever `--host` forces the host while the
+    workspace happens to be running. Reproduced against the reference host
+    2026-09-08: the workspace's repo was clean while the host's held 61 dev
+    snapshots, and `--host` must see that second number, not the first."""
+    import argparse
+    import shutil
+    import tempfile
+
+    import porthole_cmd_build as build
+    import porthole_sites as sites
+
+    host_dir = pathlib.Path(tempfile.mkdtemp(prefix="porthole-hostrepo-"))
+    (host_dir / "packages" / "edge" / "aarch64").mkdir(parents=True)
+    (host_dir / "packages" / "edge" / "aarch64"
+     / "linux-x-7.2.2_p20260908083444-r0.apk").write_text("")
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": str(host_dir),
+               "PORTHOLE_PMB_DIR": str(host_dir),
+               "PORTHOLE_KERNEL_PKG": "linux-x", "PORTHOLE_ARCH": "aarch64",
+               "PORTHOLE_DTB": "qcom/x", "PORTHOLE_DEFCONFIG": "d",
+               "PORTHOLE_DEVICE": "google-taimen"}
+        args = argparse.Namespace(host=True)
+
+    real_usable = sites.usable
+    real_which = shutil.which
+    # The workspace reports usable -- a naive re-derivation would read the
+    # SANDBOX's (empty) repo -- but --host asks for the host, whose repo
+    # holds the snapshot. shutil.which is stubbed too so the choice does not
+    # depend on whether this machine happens to have pmbootstrap on PATH.
+    sites.usable = lambda ctx: (True, "")
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
+    os.environ["TK_PMOS_PASSWORD"] = "x"
+    try:
+        problems = build._preflight(Ctx(), "kernel")
+    finally:
+        sites.usable = real_usable
+        shutil.which = real_which
+        del os.environ["TK_PMOS_PASSWORD"]
+    assert any("dev snapshot" in p for p in problems), problems
+
+
+def test_preflight_does_not_refuse_a_loopless_host_an_image_build():
+    """Before the assembler, _preflight computed host_can_image from
+    /dev/loop-control and forwarded it into choose_from, which downgraded
+    HOST to a NO_LOOP refusal for any op producing "rootfs.img". Gate C5
+    proved a missing loop device no longer stops an image build --
+    _ph_assemble_image (tools/ph-build.sh) builds it straight from the
+    chroot (mkfs.ext4 -d, sfdisk against a plain file) instead, on
+    whichever site is running. `image` produces "rootfs.img"; only HOST is
+    made available, so a stray "loop" problem could only come from that
+    now-removed wiring."""
+    import argparse
+    import shutil
+
+    import porthole_cmd_build as build
+    import porthole_sites as sites
+
+    real_usable = sites.usable
+    real_which = shutil.which
+    sites.usable = lambda ctx: (False, "faked for the test")  # no sandbox
+    shutil.which = lambda name: (
+        "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
+
+    class Ctx:
+        root = ROOT
+        cfg = {"PORTHOLE_WORKDIR": "/nonexistent",
+               "PORTHOLE_KERNEL_PKG": "linux-x", "PORTHOLE_ARCH": "aarch64",
+               "PORTHOLE_DTB": "qcom/x"}
+        args = argparse.Namespace()
+
+    try:
+        problems = build._preflight(Ctx(), "image")
+    finally:
+        sites.usable = real_usable
+        shutil.which = real_which
+    assert not any("loop" in p for p in problems), problems
 
 
 if __name__ == "__main__":
