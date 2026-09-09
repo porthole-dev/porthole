@@ -912,5 +912,70 @@ def test_an_uncountable_transaction_is_not_silently_blessed():
     assert pkg.install_verdict(1269, None, "") != ""
 
 
+
+# ------------------------------- what the DEVICE is actually running --------
+
+def _apk_with_pkginfo(path, builddate):
+    """A minimal .apk: a gzip tar whose first member is .PKGINFO."""
+    import io, tarfile
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        body = ("pkgname = demo\nbuilddate = %d\n" % builddate).encode()
+        info = tarfile.TarInfo(".PKGINFO")
+        info.size = len(body)
+        tar.addfile(info, io.BytesIO(body))
+    pathlib.Path(path).write_bytes(buf.getvalue())
+
+
+def test_the_apk_builddate_is_read_from_pkginfo():
+    """Read from .PKGINFO, never from the file's mtime -- mtime is exactly what
+    `outdated` had to stop trusting, because a copy or a checkout restamps it
+    without changing a byte."""
+    d = tempfile.mkdtemp(prefix="porthole-bd-")
+    f = pathlib.Path(d) / "demo-1-r0.apk"
+    _apk_with_pkginfo(f, 1788982108)
+    assert pkg.apk_builddate(f) == 1788982108
+
+
+def test_the_pkginfo_member_name_is_matched_exactly():
+    """Regression: `".PKGINFO".lstrip("./")` yields "PKGINFO", because lstrip
+    strips ANY of those characters -- so the member never matched and every
+    build date came back None, which read as "the device is up to date" while
+    it was five days behind on a kernel."""
+    d = tempfile.mkdtemp(prefix="porthole-bd-")
+    f = pathlib.Path(d) / "demo-1-r0.apk"
+    _apk_with_pkginfo(f, 99)
+    assert pkg.apk_builddate(f) == 99, "the .PKGINFO member must match exactly"
+
+
+def test_a_file_that_is_not_an_apk_yields_no_date():
+    d = tempfile.mkdtemp(prefix="porthole-bd-")
+    f = pathlib.Path(d) / "junk.apk"
+    f.write_bytes(b"not gzip at all")
+    assert pkg.apk_builddate(f) is None
+
+
+def test_the_device_is_behind_when_the_apk_is_newer():
+    behind = pkg.device_behind({"mesa": 1000, "phoc": 5000},
+                               {"mesa": 9000, "phoc": 5000})
+    assert [n for n, _d, _b in behind] == ["mesa"], behind
+
+
+def test_a_package_installed_just_after_it_was_built_is_not_behind():
+    """The phone's clock and this host's are not the same clock; a few seconds
+    of skew must not read as a missed update."""
+    assert pkg.device_behind({"mesa": 1000}, {"mesa": 1030}) == []
+    assert [n for n, _d, _b in pkg.device_behind({"mesa": 1000},
+                                                 {"mesa": 5000})] == ["mesa"]
+
+
+def test_a_package_with_no_counterpart_is_not_guessed_at():
+    """Only packages present on BOTH sides are compared. A build with nothing
+    installed, or an installed package we never built, is not a verdict."""
+    assert pkg.device_behind({"mesa": 1}, {}) == []
+    assert pkg.device_behind({}, {"mesa": 9999}) == []
+    assert pkg.device_behind({"mesa": None}, {"mesa": 9999}) == []
+
+
 if __name__ == "__main__":
     sys.exit(main())
