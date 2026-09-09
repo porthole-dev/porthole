@@ -779,5 +779,107 @@ def test_the_cache_ceiling_is_reported_where_people_actually_look():
     assert by_name["workspace: ccache x86_64"]["status"] == "ok", by_name
 
 
+
+# ------------------------------------------------------------ disk space --
+
+def _disk_rows(cfg, probe):
+    """Run _check_disk with the probe faked and one filesystem in play.
+
+    `_sandbox_pmb_or_none` is neutralised so the workspace's real work dir does
+    not add a second row on the developer's machine and none on CI, which would
+    make these tests pass or fail depending on whose laptop they ran on.
+    """
+    saved_probe, saved_pmb = doctor._write_probe, doctor._sandbox_pmb_or_none
+    saved_tmp = os.environ.get("TMPDIR")
+    try:
+        doctor._write_probe = lambda _p: probe
+        doctor._sandbox_pmb_or_none = lambda _c: None
+        os.environ["TMPDIR"] = cfg["PORTHOLE_PMB_DIR"]
+        ch = doctor.Checks()
+        doctor._check_disk(ch, cfg)
+        return ch
+    finally:
+        doctor._write_probe, doctor._sandbox_pmb_or_none = saved_probe, saved_pmb
+        if saved_tmp is None:
+            os.environ.pop("TMPDIR", None)
+        else:
+            os.environ["TMPDIR"] = saved_tmp
+
+
+def test_an_exhausted_quota_fails_and_says_free_space():
+    """The branch this whole check exists for -- and the one that cannot be
+    produced for real without root, since exhausting a quota needs a filesystem
+    you are allowed to exhaust. So the probe is faked and the ROUTING is what
+    is tested, which is the half that was written by hand twice.
+
+    On 2026-09-09 an exhausted /tmp quota made every command in an agent
+    session return exit 1 with empty output, and doctor reported 25 ok / 3 warn
+    / 1 fail without mentioning disk once.
+    """
+    d = tempfile.mkdtemp(prefix="porthole-doctor-disk-")
+    ch = _disk_rows({"PORTHOLE_PMB_DIR": d, "PORTHOLE_WORKDIR": ""},
+                    ("EDQUOT", "EDQUOT -- Disk quota exceeded"))
+    row = [r for r in ch.rows if r["name"].startswith("host: disk")][0]
+    assert row["status"] == "fail", row
+    assert "free space" in row["fix"], row["fix"]
+    assert "EDQUOT" in row["doc"], row["doc"]
+
+
+def test_a_full_disk_is_the_same_verdict_as_a_quota():
+    """ENOSPC and EDQUOT differ only in who is charged. Both mean free something."""
+    d = tempfile.mkdtemp(prefix="porthole-doctor-disk-")
+    ch = _disk_rows({"PORTHOLE_PMB_DIR": d, "PORTHOLE_WORKDIR": ""},
+                    ("ENOSPC", "ENOSPC -- No space left on device"))
+    row = [r for r in ch.rows if r["name"].startswith("host: disk")][0]
+    assert row["status"] == "fail", row
+    assert "free space" in row["fix"], row["fix"]
+
+
+def test_an_unwritable_directory_does_not_tell_you_to_delete_things():
+    """EACCES and EROFS are not space problems. A row that answers them with
+    'free space' sends someone deleting build artifacts over a mode bit --
+    the confident wrong fix this file's own docstring calls worse than no
+    check at all."""
+    d = tempfile.mkdtemp(prefix="porthole-doctor-disk-")
+    ch = _disk_rows({"PORTHOLE_PMB_DIR": d, "PORTHOLE_WORKDIR": ""},
+                    ("EACCES", "EACCES -- Permission denied"))
+    row = [r for r in ch.rows if r["name"].startswith("host: disk")][0]
+    assert row["status"] == "fail", row
+    assert "free space" not in row["fix"], row["fix"]
+    assert "mode" in row["fix"] or "owner" in row["fix"], row["fix"]
+
+
+def test_a_writable_directory_with_room_is_ok():
+    d = tempfile.mkdtemp(prefix="porthole-doctor-disk-")
+    ch = _disk_rows({"PORTHOLE_PMB_DIR": d, "PORTHOLE_WORKDIR": ""}, ("", ""))
+    row = [r for r in ch.rows if r["name"].startswith("host: disk")][0]
+    assert row["status"] in ("ok", "warn"), row
+    assert "GiB free" in row["detail"], row
+
+
+def test_the_write_probe_really_catches_an_unwritable_directory():
+    """The one branch that does NOT need faking, so it is not faked: a real
+    directory, really made unwritable, really probed. Without this the routing
+    tests above could all pass over a probe that never fails at all."""
+    d = pathlib.Path(tempfile.mkdtemp(prefix="porthole-doctor-ro-"))
+    os.chmod(d, 0o500)
+    try:
+        code, why = doctor._write_probe(d)
+        assert code == "EACCES", (code, why)
+        assert "Permission denied" in why, why
+    finally:
+        os.chmod(d, 0o700)
+
+
+def test_the_write_probe_leaves_nothing_behind():
+    """It writes into a directory porthole owns; leaving the probe file there
+    would be this repo's own temp-leak bug in miniature."""
+    d = pathlib.Path(tempfile.mkdtemp(prefix="porthole-doctor-probe-"))
+    code, _why = doctor._write_probe(d)
+    assert code == "", code
+    assert list(d.iterdir()) == [], list(d.iterdir())
+
+
 if __name__ == "__main__":
     sys.exit(main())
+

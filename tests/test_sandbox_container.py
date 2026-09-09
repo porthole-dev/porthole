@@ -1073,5 +1073,80 @@ def test_the_ceiling_it_asks_for_is_the_ceiling_it_reads_back():
     assert calls == [], calls
 
 
+# ------------------------------------------------------- gc: what is stale --
+
+def _repo(names):
+    d = pathlib.Path(tempfile.mkdtemp(prefix="porthole-gc-"))
+    for n in names:
+        (d / n).write_bytes(b"x")
+    return d
+
+
+def test_gc_keeps_the_newest_builds_and_offers_the_rest():
+    d = _repo(["foo-1-r1.apk", "foo-1-r2.apk", "foo-1-r3.apk", "foo-1-r4.apk"])
+    got = sorted(f.name for f in sb.superseded_apks(d, 2))
+    assert got == ["foo-1-r1.apk", "foo-1-r2.apk"], got
+
+
+def test_gc_never_offers_the_newest_build():
+    """The one failure that must not happen. A wrong version sort here deletes
+    the build you just made and reports success, and you find out at the next
+    install -- which is exactly the silent-wrong-answer shape `pkg drift`
+    exists to catch, so it must not be introduced by the thing cleaning up
+    after it."""
+    for names, newest in (
+        (["foo-1-r9.apk", "foo-1-r10.apk"], "foo-1-r10.apk"),
+        (["m-26.1.6-r14.apk", "m-26.2.2-r0.apk"], "m-26.2.2-r0.apk"),
+        (["l-99990.7.2-r3.apk", "l-99990.7.2-r18.apk"], "l-99990.7.2-r18.apk"),
+        (["d-1-r34.apk", "d-1-r41.apk", "d-1-r42.apk"], "d-1-r42.apk"),
+        (["w-2.48.1-r4.apk", "w-2.52.6-r64.apk"], "w-2.52.6-r64.apk"),
+    ):
+        d = _repo(names)
+        offered = {f.name for f in sb.superseded_apks(d, 1)}
+        assert newest not in offered, (newest, offered)
+        assert len(offered) == len(names) - 1, (names, offered)
+
+
+def test_gc_orders_r10_after_r9_rather_than_as_text():
+    """`-r10` sorts before `-r9` as a string. pkgrel is a number and is read as
+    one; getting this wrong deletes the newest build of anything past r9, which
+    on this port is every package that matters."""
+    d = _repo(["foo-1-r9.apk", "foo-1-r10.apk"])
+    assert [f.name for f in sb.superseded_apks(d, 1)] == ["foo-1-r9.apk"]
+
+
+def test_gc_does_not_trip_over_a_non_numeric_version():
+    """Comparing an int against a str raises TypeError in py3, and it would do
+    so only on the one oddly-versioned package rather than in any test -- so
+    here is that test. Each version part carries its kind in the sort key."""
+    d = _repo(["x-1.2.3-r1.apk", "x-1.2.3-r2.apk", "x-alpha-r1.apk",
+               "x-2020beta1-r1.apk"])
+    got = sb.superseded_apks(d, 1)          # must not raise
+    assert len(got) == 3, [f.name for f in got]
+
+
+def test_gc_treats_each_package_separately():
+    d = _repo(["foo-1-r1.apk", "foo-1-r2.apk", "bar-1-r1.apk"])
+    got = sorted(f.name for f in sb.superseded_apks(d, 1))
+    assert got == ["foo-1-r1.apk"], got
+
+
+def test_gc_keeps_at_least_one_even_if_asked_for_none():
+    """`--keep 0` would empty the repo, including the build the device is
+    running. Clamped, because a flag that can delete everything is a flag
+    someone types by accident."""
+    d = _repo(["foo-1-r1.apk", "foo-1-r2.apk"])
+    assert [f.name for f in sb.superseded_apks(d, 0)] == ["foo-1-r1.apk"]
+
+
+def test_gc_ignores_files_that_are_not_apks():
+    d = _repo(["foo-1-r1.apk", "foo-1-r2.apk"])
+    (d / "APKINDEX.tar.gz").write_bytes(b"x")
+    (d / "notes.txt").write_bytes(b"x")
+    got = [f.name for f in sb.superseded_apks(d, 1)]
+    assert got == ["foo-1-r1.apk"], got
+
+
+
 if __name__ == "__main__":
     sys.exit(main())

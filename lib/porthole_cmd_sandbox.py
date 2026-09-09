@@ -993,8 +993,10 @@ def cmd_sandbox(args, ctx) -> int:
         return _up(ctx, args)
     if action == "down":
         return _down(ctx)
+    if action == "gc":
+        return _gc(ctx, args)
     raise Bail(f"unknown action {action!r}", EX_USAGE,
-               "actions: status, shell, build, up, down")
+               "actions: status, shell, build, up, down, gc")
 
 
 def _status(ctx) -> int:
@@ -1241,6 +1243,250 @@ def _shell(ctx, args) -> int:
     return subprocess.run(argv).returncode
 
 
+# --------------------------------------------------------------- reclaim --
+
+# How many builds of one package to keep. Two, not one: the previous build is
+# what you reinstall when the new one turns out to BE the problem, and on this
+# port that is the difference between a one-minute revert and a rebuild.
+GC_KEEP_DEFAULT = 2
+
+_APK_RE = re.compile(r"^(?P<name>.+)-(?P<ver>[^-]+)-r(?P<rel>\d+)\.apk$")
+
+
+def _ver_key(ver: str, rel: str):
+    """Sort key for one package's builds, newest last.
+
+    Deliberately NOT a copy of apk's version ordering: that is subtle enough
+    that a wrong copy would delete the NEWEST build while reporting success,
+    which is the same class of silent-wrong-answer `pkg drift` exists to catch.
+    And deliberately not mtime either, which fails the other way -- rebuilding
+    an older pkgver would make it look newest.
+
+    Splitting into numeric and text runs orders every shape this port actually
+    carries (1-r42, 26.1.6-r14, 99990.7.2-r18, 2.52.6-r64) and stays stable for
+    anything it does not. Each part is tagged with its kind so an int is never
+    compared against a str -- that raises TypeError in py3, and it would do so
+    only on the one oddly-versioned package rather than in any test.
+    """
+    parts = tuple((0, int(s)) if s.isdigit() else (1, s)
+                  for s in re.split(r"[^0-9A-Za-z]+", ver) if s)
+    return (parts, int(rel))
+
+
+def superseded_apks(repo: pathlib.Path, keep: int) -> list:
+    """Every apk in `repo` that is not among the newest `keep` of its package.
+
+    A pure function of a directory listing, so it can be wrong in a test
+    instead of on someone's disk.
+    """
+    keep = max(1, keep)
+    by: dict = {}
+    for f in sorted(repo.glob("*.apk")):
+        m = _APK_RE.match(f.name)
+        if m:
+            by.setdefault(m.group("name"), []).append(
+                (_ver_key(m.group("ver"), m.group("rel")), f))
+    out = []
+    for entries in by.values():
+        entries.sort(key=lambda e: e[0])
+        out.extend(f for _k, f in entries[:-keep])
+    return out
+
+
+def _human(n: int) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024 or unit == "GiB":
+            return "{:.1f} {}".format(n, unit) if unit != "B" else "{} B".format(n)
+        n /= 1024.0
+    return str(n)
+
+
+def _dir_size(path: pathlib.Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path, onerror=lambda _e: None):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _gc(ctx, args) -> int:
+    """Reclaim what the workspace has superseded, and name what it has not.
+
+    The workspace has no artificial ceiling -- it is a plain directory, and it
+    grows on demand up to the disk. What it never did is SHRINK: nothing
+    removed an artifact that a newer one replaced, so growth was monotonic
+    until the disk decided. Measured 2026-09-09 on the reference host: 36 GiB
+    of workspace, of which the package repo was 3.9 GiB and **3.6 GiB of that
+    was superseded builds** -- 353 apks of 425, seven pkgrels of the device
+    package among them.
+
+    Only the package repo is deleted from, and only builds that a newer build
+    of the same package replaced. Everything else is REPORTED with the command
+    that reclaims it, and not touched:
+
+    - distfiles are upstream tarballs. Deleting 4 GiB to re-download it over a
+      link that has already been this port's problem is a bad trade, and the
+      chromium tarball alone is ~2 GiB.
+    - ccache already HAS a cap, and a verb that sets it. Reimplementing that
+      here would be a second opinion about the same directory.
+    - chroots are the expensive ones to rebuild, and a developer building
+      several packages wants the buildroot warm. That is the whole reason gc
+      exists, so gc must not defeat it.
+
+    Dry run unless `--yes`, and the preview prints the flag, so the thing that
+    explains the loss is the thing you copy the confirmation from.
+    """
+    pmb = _sandbox_pmb(ctx.cfg)
+    keep = max(1, getattr(args, "keep", None) or GC_KEEP_DEFAULT)
+    repos = sorted(d for d in pmb.glob("packages/*/*") if d.is_dir())
+    victims = []
+    for repo in repos:
+        victims.extend(superseded_apks(repo, keep))
+    sizes = {}
+    for f in victims:
+        try:
+            sizes[f] = f.stat().st_size
+        except OSError:
+            sizes[f] = 0
+    freed = sum(sizes.values())
+
+    kept = []
+    for label, path, how in (
+        ("distfiles", pmb / "cache_distfiles",
+         "upstream tarballs -- re-downloading costs more than the space"),
+        ("ccache", pmb / "cache_ccache_aarch64",
+         "porthole build ccache --max 25G"),
+        ("chroots", None, "pmbootstrap zap    # rebuilding these is the cost gc exists to avoid"),
+    ):
+        if path is None:
+            total = sum(_dir_size(d) for d in pmb.glob("chroot_*") if d.is_dir())
+        else:
+            total = _dir_size(path) if path.is_dir() else 0
+        if total:
+            kept.append({"what": label, "bytes": total, "how": how})
+
+    payload = {
+        "workspace": str(pmb),
+        "keep": keep,
+        "applied": bool(getattr(args, "yes", False)),
+        "reclaimable_bytes": freed,
+        "reclaimable_files": len(victims),
+        "files": [str(f) for f in victims],
+        "untouched": kept,
+    }
+
+    if getattr(args, "yes", False):
+        gone, failed = _delete(ctx, victims, sizes)
+        payload["freed_bytes"] = gone
+        payload["failed_files"] = len(failed)
+        payload["reindexed"] = _reindex(ctx) if gone else False
+
+    def render():
+        ctx.out.heading("workspace reclaim")
+        ctx.out("  {:<26} {}".format("workspace", pmb))
+        if not victims:
+            ctx.out("  {:<26} nothing superseded (keeping {} per package)"
+                    .format("packages", keep))
+        elif payload.get("applied"):
+            # The number REPORTED is the number actually removed, never the
+            # number attempted. The first cut of this printed the attempted
+            # total and said "freed 3.3 GiB" on a run where every single
+            # unlink had failed with EACCES -- success claimed for a total
+            # failure, which is the one thing a cleanup verb must never do.
+            ctx.out("  {:<26} {} in {} apk(s), keeping {} per package".format(
+                "packages freed", _human(payload["freed_bytes"]),
+                len(victims) - payload["failed_files"], keep))
+            if payload["failed_files"]:
+                ctx.out(ctx.out.paint(
+                    "  {:<26} {} apk(s) could not be removed".format(
+                        "packages FAILED", payload["failed_files"]), "red"))
+        else:
+            ctx.out("  {:<26} {} in {} apk(s), keeping {} per package".format(
+                "packages reclaimable", _human(freed), len(victims), keep))
+        for row in kept:
+            ctx.out("  {:<26} {}  -- not touched".format(
+                row["what"], _human(row["bytes"])))
+            ctx.out(ctx.out.paint("        {}".format(row["how"]), "grey"))
+        if victims and not payload.get("applied"):
+            ctx.out.blank()
+            ctx.out(ctx.out.paint(
+                "  porthole sandbox gc --yes    # delete the {} superseded apk(s)"
+                .format(len(victims)), "cyan"))
+        if payload.get("applied") and victims:
+            ctx.out.blank()
+            ctx.out("  index {}".format(
+                "regenerated" if payload.get("reindexed") else
+                "NOT regenerated -- run: porthole sandbox shell "
+                "--command 'pmbootstrap index'"))
+
+    ctx.emit(payload, render)
+    # Nothing removed when something was supposed to be is a failure, not a
+    # quiet zero. An agent reads the exit code.
+    if payload.get("applied") and victims and not payload["freed_bytes"]:
+        return EX_FAIL
+    return EX_OK
+
+
+def _delete(ctx, victims, sizes):
+    """Remove the apks, entering the user namespace if the host cannot.
+
+    The workspace is rootless: `--userns=keep-id:uid=0,gid=0` maps your uid to
+    root inside and everything the chroot creates to a subuid in your range.
+    Those files are NOT yours outside the namespace, so a plain unlink from the
+    host fails with EACCES -- measured here, 425 of 425 apks owned by uid
+    536632. `podman unshare` re-enters that namespace, which is the same remedy
+    doctor already prints for this exact directory.
+
+    Host first, namespace second, because a host-only setup has no podman and
+    must still be able to clean up its own files.
+    """
+    gone, failed = 0, []
+    for f in victims:
+        try:
+            f.unlink()
+            gone += sizes[f]
+        except OSError:
+            failed.append(f)
+    if failed and shutil.which("podman"):
+        payload = "\0".join(str(f) for f in failed).encode()
+        try:
+            done = subprocess.run(
+                ["podman", "unshare", "sh", "-c", "xargs -0 rm -f"],
+                input=payload, capture_output=True, timeout=300)
+            if done.returncode == 0:
+                still = [f for f in failed if f.exists()]
+                gone += sum(sizes[f] for f in failed if f not in still)
+                failed = still
+        except (OSError, subprocess.SubprocessError) as exc:
+            ctx.out.warn("podman unshare: {}".format(exc))
+    for f in failed[:3]:
+        ctx.out.warn("could not remove {}".format(f.name))
+    if len(failed) > 3:
+        ctx.out.warn("... and {} more".format(len(failed) - 3))
+    return gone, failed
+
+
+def _reindex(ctx) -> bool:
+    """Regenerate APKINDEX after deleting from the repo.
+
+    Not cosmetic. The index lists an entry per apk FILE, so pruning without
+    reindexing leaves entries pointing at files that are gone, and the next
+    thing to resolve against this repo fails for a reason that names the
+    package rather than the prune. `pmbootstrap index` is what pmbootstrap
+    itself calls, so this is not a second implementation of it.
+    """
+    try:
+        done = subprocess.run(
+            ["podman", "exec", CONTAINER, "sh", "-c", "pmbootstrap index"],
+            capture_output=True, text=True, timeout=300)
+        return done.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 SPEC = {
     "verb": "sandbox",
     "order": 22,
@@ -1261,9 +1507,10 @@ SPEC = {
         "See docs/SANDBOX.md for the threat model."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["status", "shell", "build", "up", "down"],
+                      "choices": ["status", "shell", "build", "up", "down",
+                                  "gc"],
                       "help": "status | shell | build (the container IMAGE, "
-                              "not a package) | up | down"}),
+                              "not a package) | up | down | gc"}),
         (["--mount"], {"action": "append", "metavar": "PATH",
                        "help": "up: extra path to mount into the workspace"}),
         (["--command"], {"nargs": "...", "help": "shell: command instead of a shell"}),
@@ -1280,6 +1527,11 @@ SPEC = {
                                 "host with no podman"}),
         (["--denied"], {"action": "store_true", "help": "audit: only denials"}),
         (["--limit"], {"type": int, "default": 40, "help": "audit: how many"}),
+        (["--keep"], {"type": int, "metavar": "N",
+                      "help": "gc: builds of each package to keep "
+                              "(default {})".format(GC_KEEP_DEFAULT)}),
+        (["--yes"], {"action": "store_true",
+                     "help": "gc: actually delete; without it gc only reports"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_sandbox,
@@ -1289,5 +1541,7 @@ SPEC = {
         "porthole sandbox shell --command pmbootstrap status",
         "porthole sandbox status",
         "porthole sandbox down",
+        "porthole sandbox gc              # what is superseded, deleting nothing",
+        "porthole sandbox gc --yes        # delete it, then reindex",
     ],
 }
