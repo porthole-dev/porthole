@@ -849,5 +849,68 @@ def test_detach_names_the_log_with_the_compiler_output_in_it():
     assert spawn and build.PROGRESS_ONLY in spawn[0], spawn
 
 
+
+# --------------------------------------------- pkg install: what and whether --
+
+def _apks(d, names):
+    out = []
+    for n in names:
+        f = pathlib.Path(d) / n
+        f.write_bytes(b"x")
+        out.append(f)
+    return out
+
+
+def test_install_picks_only_packages_the_device_already_has():
+    """An aport's subpackages include things this phone does not use -- mesa
+    builds vulkan-intel, -broadcom, -panfrost. Installing them because they
+    exist would add packages nobody asked for, so the DEVICE's list decides."""
+    d = tempfile.mkdtemp(prefix="porthole-inst-")
+    apks = _apks(d, ["mesa-26.1.6-r14.apk", "mesa-gl-26.1.6-r14.apk",
+                     "mesa-vulkan-intel-26.1.6-r14.apk"])
+    got = pkg.apks_for_device(["mesa", "mesa-gl", "bash"], apks, "26.1.6-r14")
+    assert [n for n, _p in got] == ["mesa", "mesa-gl"], got
+
+
+def test_install_ignores_a_stale_build_of_another_version():
+    """The aport's CURRENT pkgver-pkgrel is the only thing installed. An older
+    apk left in the repo must never be picked up by accident."""
+    d = tempfile.mkdtemp(prefix="porthole-inst-")
+    apks = _apks(d, ["mesa-26.1.6-r13.apk", "mesa-26.1.6-r14.apk"])
+    got = pkg.apks_for_device(["mesa"], apks, "26.1.6-r14")
+    assert len(got) == 1 and got[0][1].name == "mesa-26.1.6-r14.apk", got
+
+
+def test_install_does_not_confuse_a_longer_package_name():
+    """`mesa` must not match `mesa-gl`'s apk, nor the reverse. Splitting on the
+    version suffix rather than on dashes is what makes that hold, because
+    package names contain dashes themselves."""
+    d = tempfile.mkdtemp(prefix="porthole-inst-")
+    apks = _apks(d, ["mesa-26.1.6-r14.apk", "mesa-gl-26.1.6-r14.apk"])
+    got = pkg.apks_for_device(["mesa"], apks, "26.1.6-r14")
+    assert [n for n, _p in got] == ["mesa"], got
+
+
+def test_a_dropped_package_count_is_a_failure_not_a_shrug():
+    """A sideloaded device apk once removed rmtfs, tqftpserv and pd-mapper and
+    took the whole radio stack with it -- a modem in a 40s fatal-error loop and
+    wifi dead, diagnosed for a day as a kernel fault. A drop must be loud."""
+    bad = pkg.install_verdict(1269, 1205, "")
+    assert bad and "DROPPED" in bad, bad
+    assert "1269" in bad and "1205" in bad, bad
+
+
+def test_a_risen_package_count_is_fine():
+    """A new dependency is normal: installing mesa pulled in xcb-util-keysyms
+    on 2026-09-09 and that was correct."""
+    assert pkg.install_verdict(1268, 1269, "") == ""
+    assert pkg.install_verdict(1269, 1269, "") == ""
+
+
+def test_an_uncountable_transaction_is_not_silently_blessed():
+    assert pkg.install_verdict(None, 1269, "") != ""
+    assert pkg.install_verdict(1269, None, "") != ""
+
+
 if __name__ == "__main__":
     sys.exit(main())
