@@ -26,10 +26,59 @@ THE ESCAPE HATCH
 """
 from __future__ import annotations
 
+import atexit
 import multiprocessing
 import os
+import shutil
 import sys
+import tempfile
 from concurrent.futures import ProcessPoolExecutor
+
+
+def _own_tmp() -> None:
+    """Give the whole suite ONE temp root, and remove it when the run ends.
+
+    There are ~100 `tempfile.mkdtemp()` call sites across tests/ and almost
+    none of them clean up. Measured 2026-09-09: **20531 abandoned directories
+    in /tmp holding 572 MB**, one fresh batch per `make test` since the suite
+    was written. On the reference host /tmp is a 20 GiB tmpfs -- so that is
+    RAM, and it is the same tmpfs the suite itself needs to write into. It
+    filled, and `test_ph_build.sh` then reported 29 failures whose errors named
+    no cause (`echo: write error: Disk quota exceeded`). A test suite that
+    leaks is one that eventually fails itself and blames something else.
+
+    Fixed HERE rather than at the hundred call sites, because `mkdtemp()`
+    honours TMPDIR: one root covers every existing call and every future one,
+    with no way for a new test to forget. Both `tempfile.tempdir` and the
+    environment variable are set -- the first for this process (tempfile
+    caches its answer after the first call, so assigning the env var alone can
+    be too late), the second so subprocesses land in the same place.
+
+    Imported before the suites'' own module-level mkdtemp calls, which is what
+    makes those covered too: `import _runner` sits above them.
+    """
+    keep = os.environ.get("PORTHOLE_KEEP_TMP")
+    root = tempfile.mkdtemp(prefix="porthole-run-")
+    tempfile.tempdir = root
+    os.environ["TMPDIR"] = root
+    if keep:
+        # A failing test''s scratch directory is often the thing you want to
+        # look at. Opting out prints where it is rather than silently hoarding.
+        print("PORTHOLE_KEEP_TMP: temp root kept at {}".format(root))
+        return
+    owner = os.getpid()
+
+    def _sweep():
+        # Only the process that MADE it removes it. The pool below forks, and
+        # a worker running this on its own exit would delete the root out from
+        # under its siblings mid-run.
+        if os.getpid() == owner:
+            shutil.rmtree(root, ignore_errors=True)
+
+    atexit.register(_sweep)
+
+
+_own_tmp()
 
 
 def jobs() -> int:

@@ -20,12 +20,14 @@ was written; `porthole build mod` did not, for the whole life of the verb.
 
 Needs no device, no root, no cross toolchain and no real module.
 """
+import atexit
 import importlib.util
 import os
 import pathlib
 import struct
 import subprocess
 import sys
+import shutil
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -34,7 +36,12 @@ _spec = importlib.util.spec_from_file_location(
 tk_strip_btf = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(tk_strip_btf)
 
+# Cleaned up, unlike every other mkdtemp in tests/ was until 2026-09-09.
+# This suite is the one that runs its own main() instead of _runner.run(),
+# so the shared temp root in tests/_runner.py cannot reach it -- it is
+# never imported here. Hence the local sweep.
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="porthole-btf-test-"))
+atexit.register(shutil.rmtree, TMP, True)
 SHENT = 64
 
 
