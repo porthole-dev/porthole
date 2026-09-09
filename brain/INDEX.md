@@ -58,6 +58,7 @@ generic notes as well.
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-browser-stutter-is-a-blocked-webkit-main-thread](findings/the-browser-stutter-is-a-blocked-webkit-main-thread.md) | `generic` | The browser stutter is a blocked WebKit main thread, not the display stack |
+| [the-browsers-blank-band-is-a-main-thread-record-not-a-prepaint-shortfall](findings/the-browsers-blank-band-is-a-main-thread-record-not-a-prepaint-shortfall.md) | `generic` | The unpainted band during a fast fling is a 200 ms record() on the WebKit main thread, and no prepaint knob bridges it |
 | [the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized](findings/the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized.md) | `device:google-taimen` | Epiphany's frame period is CPU paint PLUS the GPU tail, serialized -- frameDone to next frame start is 0.1 ms |
 | [the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible](findings/the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible.md) | `device:google-taimen` | Epiphany's frame period is pinned at 2 refreshes because the CPU paint alone exceeds one -- every sub-quantum optimisation measures as neutral |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
@@ -231,7 +232,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 117
+- `generic` — 118
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
