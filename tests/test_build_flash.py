@@ -2791,5 +2791,65 @@ def test_detach_names_the_log_with_the_compiler_output_in_it():
     assert spawn and build.PROGRESS_ONLY in spawn[0], spawn
 
 
+
+# ------------------------------------------- the boot image's root UUID --
+
+def _bootimg_mod():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "bootimg_verify", str(ROOT / "tools" / "bootimg-verify.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _fake_bootimg(path, cmdline):
+    """The first page of an Android boot image, which is all cmdline() reads."""
+    import struct
+    hdr = b"ANDROID!" + struct.pack("<IIIIIIII", 0, 0, 0, 0, 0, 0, 0, 4096)
+    hdr += b"\0" * (64 - len(hdr))
+    cl = cmdline.encode() + b"\0"
+    hdr += cl + b"\0" * (512 - len(cl))
+    pathlib.Path(path).write_bytes(hdr + b"\0" * (4096 - len(hdr)))
+
+
+def test_the_root_uuid_is_read_out_of_a_boot_image():
+    bv = _bootimg_mod()
+    d = pathlib.Path(tempfile.mkdtemp(prefix="porthole-bootimg-"))
+    img = d / "boot.img"
+    _fake_bootimg(img, "quiet pmos_root_uuid=e883c7c9-dead-beef pmos_rootfsopts=defaults")
+    assert bv.cmdline_uuid(bv.cmdline(str(img)), "pmos_root_uuid") == "e883c7c9-dead-beef"
+
+
+def test_a_key_that_merely_starts_the_same_is_not_the_uuid():
+    """`pmos_root_uuid` must not match `pmos_root_uuid_backup=`. A substring
+    search here would silently compare the wrong value and pass a flash that
+    bricks the boot, which is the failure this guard exists to stop."""
+    bv = _bootimg_mod()
+    assert bv.cmdline_uuid("pmos_root_uuidX=NO other=1", "pmos_root_uuid") == ""
+    assert bv.cmdline_uuid("xpmos_root_uuid=NO", "pmos_root_uuid") == ""
+    assert bv.cmdline_uuid("a=1 pmos_root_uuid=YES b=2", "pmos_root_uuid") == "YES"
+
+
+def test_an_absent_or_empty_root_uuid_reads_as_empty():
+    """Empty means "no opinion", and the guard treats that as the label
+    fallback rather than as a mismatch -- an image naming no UUID boots fine."""
+    bv = _bootimg_mod()
+    assert bv.cmdline_uuid("quiet splash", "pmos_root_uuid") == ""
+    assert bv.cmdline_uuid("pmos_root_uuid= x=1", "pmos_root_uuid") == ""
+
+
+def test_a_non_android_file_is_refused_rather_than_guessed_at():
+    bv = _bootimg_mod()
+    d = pathlib.Path(tempfile.mkdtemp(prefix="porthole-bootimg-"))
+    junk = d / "junk.img"
+    junk.write_bytes(b"not a boot image at all" + b"\0" * 5000)
+    try:
+        bv.cmdline(str(junk))
+        assert False, "a non-Android file should not parse as a boot image"
+    except SystemExit:
+        pass
+
+
 if __name__ == "__main__":
     sys.exit(main())
