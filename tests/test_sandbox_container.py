@@ -899,7 +899,11 @@ def test_a_workspace_that_cannot_see_pmaports_says_so():
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = {"PORTHOLE_SANDBOX_PMB_DIR": tmp}
-        gap = sandbox.aports_gap(cfg, {"/pmb", "/porthole"})
+        # (None, None) = the host has no checkout either. Injected, because
+        # otherwise this reads the DEVELOPER's real pmaports and takes the
+        # other branch -- which is exactly what it did, so this assertion only
+        # held on a machine with no checkout at all, i.e. CI.
+        gap = sandbox.aports_gap(cfg, {"/pmb", "/porthole"}, (None, None))
         assert gap, "a workspace with no pmaports at all was reported as fine"
         assert "porthole init" in gap, gap
 
@@ -910,7 +914,8 @@ def test_a_workspace_that_cannot_see_pmaports_says_so():
         checkout = pathlib.Path(tmp) / "elsewhere" / "pmaports"
         (checkout / "device").mkdir(parents=True)
         cfg["PORTHOLE_PMAPORTS"] = str(checkout)
-        gap = sandbox.aports_gap(cfg, {"/pmb", "/porthole"})
+        gap = sandbox.aports_gap(cfg, {"/pmb", "/porthole"},
+                                 (checkout, "PORTHOLE_PMAPORTS"))
         assert "sandbox down" in gap, gap
         assert str(checkout) in gap, gap
 
@@ -960,11 +965,22 @@ def test_an_explicit_kernel_beats_the_host_config_which_beats_the_derived_one():
         (d / "APKBUILD").write_text(
             'pkgname=device-acme-x\nsubpackages="\n\t$pkgname-kernel-mainline:k\n"\n')
 
+        # An explicit value beats a host config that says otherwise, so the
+        # host is given one here rather than left to whatever this machine has.
         got, why = sandbox.resolve_pmb_kernel(
-            {"PORTHOLE_PMB_KERNEL": "downstream"}, tmp, "acme-x")
+            {"PORTHOLE_PMB_KERNEL": "downstream"}, tmp, "acme-x",
+            host_cfg={"kernel": "stable"})
         assert got == "downstream" and "PORTHOLE_PMB_KERNEL" in why, (got, why)
 
-        got, why = sandbox.resolve_pmb_kernel({}, tmp, "acme-x")
+        # The middle step, asserted rather than assumed.
+        got, why = sandbox.resolve_pmb_kernel({}, tmp, "acme-x",
+                                              host_cfg={"kernel": "stable"})
+        assert got == "stable" and "host" in why, (got, why)
+
+        # And with nothing above it, the derived answer. host_cfg={} is the
+        # point: without it this read the developer's own pmbootstrap config
+        # and returned that, so the derived branch was never exercised.
+        got, why = sandbox.resolve_pmb_kernel({}, tmp, "acme-x", host_cfg={})
         assert got == "mainline", (got, why)
         assert "only one" in why, why
 
@@ -980,7 +996,11 @@ def test_two_flavours_are_not_guessed_between():
         (d / "APKBUILD").write_text(
             'pkgname=device-acme-y\nsubpackages="\n'
             '\t$pkgname-kernel-mainline:a\n\t$pkgname-kernel-downstream:b\n"\n')
-        got, _why = sandbox.resolve_pmb_kernel({}, tmp, "acme-y")
+        # host_cfg={} or this never reaches the branch under test. It did not:
+        # on any machine with a kernel configured it returned that instead, so
+        # the one check standing between porthole and guessing which kernel
+        # lands on a phone asserted nothing.
+        got, _why = sandbox.resolve_pmb_kernel({}, tmp, "acme-y", host_cfg={})
         assert got == "", got
         # ...and the preview says so before a build spends twenty minutes
         # reaching pmbootstrap's own refusal.
