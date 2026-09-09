@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: device:google-taimen
-# needs: host (reads the aport sources; touches no device)
+# needs: - (host only, no device -- reads the aport sources)
 # env: PORTHOLE_PMB_DIR
 # exits: 0 ok · 1 a contributed flag was lost · 64 usage · 69 confs not found
 # ph-chromium-conf-check.sh [confdir] -- runs ON THE HOST.
