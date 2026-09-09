@@ -29,8 +29,18 @@ binaries gone -- so do not trust the rootfs after this.
 - BEFORE sideloading a device apk: note `apk info | wc -l`, and diff it
   after. A drop is packages being removed under you; abort and read the
   full transaction output (never tail -1 an apk transaction).
-- To confirm the class of breakage: `apk audit --system` lists deleted
-  files (lowercase `x` lines) that the db still expects.
+- **`apk audit --system` is NOT usable for this on apk-tools 3.x.** Measured
+  2026-09-09 on apk-tools 3.0.8: it reported 24689 files as deleted, and of
+  300 sampled at random exactly ONE was actually absent -- a ~99.7% false
+  positive rate, identical whether run from `/` or elsewhere. Anyone following
+  this trap after a real incident would either panic at the number or learn to
+  ignore it, and ignoring it is how the next real one gets missed. Verify any
+  `x` line with `test -e` before believing it.
+- The signal that DOES still work is the package COUNT, and apk prints it at
+  the end of the transaction itself: `OK: <size> in <N> packages`. Compare
+  that N against `apk info | wc -l` from before. It held at 1268 across the
+  libcamera r3 -> r18 upgrade on 2026-09-09, which is what cleared that
+  install.
 - Surgical repair works for the radio set (push rmtfs/tqftpserv/
   qcom-diag/pd-mapper apks from the host cache, canonical names + `apk
   index --allow-untrusted`, extract the -systemd units by hand if the
