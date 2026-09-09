@@ -145,7 +145,8 @@ def _host_pmb_cfg() -> dict:
     return out
 
 
-def resolve_pmb_kernel(cfg, pmaports, device: str) -> tuple[str, str]:
+def resolve_pmb_kernel(cfg, pmaports, device: str,
+                       host_cfg=None) -> tuple[str, str]:
     """(value, why) for pmbootstrap's `kernel` setting. "" when it has no say.
 
     pmbootstrap defaults this to `stable` and only `pmbootstrap init` -- an
@@ -164,10 +165,23 @@ def resolve_pmb_kernel(cfg, pmaports, device: str) -> tuple[str, str]:
     """
     import porthole_pmaports as pmap
 
+    # `host_cfg` is INJECTABLE so this decision is decidable from its
+    # arguments. It used to read the host unconditionally, which made the
+    # function untestable and, worse, quietly untested: three tests passed an
+    # empty cfg expecting the derived answer and got the developer's real
+    # pmbootstrap config instead. Two of them therefore asserted nothing on any
+    # machine with a kernel configured, and one of those was
+    # test_two_flavours_are_not_guessed_between -- the check that porthole must
+    # never pick which kernel lands on the phone. It passed in CI only because
+    # CI has no pmbootstrap config to find.
+    #
+    # None still means "read the host", so the production path is unchanged.
+    if host_cfg is None:
+        host_cfg = _host_pmb_cfg()
     explicit = (cfg.get("PORTHOLE_PMB_KERNEL") or "").strip()
     if explicit:
         return explicit, "PORTHOLE_PMB_KERNEL"
-    carried = (_host_pmb_cfg().get("kernel") or "").strip()
+    carried = (host_cfg.get("kernel") or "").strip()
     if carried:
         return carried, "the host's pmbootstrap config"
     if not pmaports:
@@ -566,8 +580,13 @@ def _inside(path, base) -> bool:
     return True
 
 
-def aports_gap(cfg, mounts) -> str:
-    """Why the workspace cannot see pmaports, or "". PURE given `mounts`.
+def aports_gap(cfg, mounts, host_pmaports=None) -> str:
+    """Why the workspace cannot see pmaports, or "".
+
+    Pure given `mounts` AND `host_pmaports`. It was documented as pure given
+    `mounts` alone and was not: the lookup below reads the host, so the "no
+    checkout anywhere" branch was unreachable in a test on any machine that
+    has one. Injecting it makes the docstring true and the branch reachable.
 
     Two ways it can be there and only one of them is a mount: the workspace's
     own work dir may hold a clone at the path pmbootstrap derives (`pmbootstrap
@@ -585,7 +604,10 @@ def aports_gap(cfg, mounts) -> str:
     # is how "one command sets this host up" stops being believed.
     import porthole_pmaports as pmap
 
-    found, via = pmap.find_pmaports_with_source(cfg)
+    # None means "ask the host", which is the production path.
+    if host_pmaports is None:
+        host_pmaports = pmap.find_pmaports_with_source(cfg)
+    found, via = host_pmaports
     if found:
         return (f"the workspace cannot see pmaports ({found}, via {via}) -- "
                 f"it started before that was configured, and mounts are fixed "

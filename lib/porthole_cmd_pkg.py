@@ -446,11 +446,19 @@ def outdated(pmaports: pathlib.Path, packages: pathlib.Path, arch: str):
 
     Two things count as outdated, and they are different mistakes:
       - the aport declares a pkgver-pkgrel that has no apk  (you bumped it)
-      - a file beside the APKBUILD is newer than the apk    (you edited it)
+      - its CONTENT changed since the apk was built         (you edited it)
 
     The second is the one that bit: temp/phoc sat at 0.56.0 while the mirror
     moved on, apk installed the newer stock build, and both GPU-reset patches
     vanished with no message anywhere.
+
+    "Content changed" is asked of git, not of mtime. mtime was the first
+    implementation and it cried wolf: pmaports is a branch-switched checkout,
+    and every `git checkout` restamps every file it touches without changing a
+    byte. On 2026-09-09 that reported 13 aports as needing a rebuild when all
+    13 already had their exact pkgver-pkgrel sitting in the repo -- an alarm
+    with a 100% false positive rate, which is an alarm nobody reads, which is
+    how the phoc incident happens again.
     """
     built = {}
     for apk in packages.glob(f"*/{arch}/*.apk"):
@@ -478,11 +486,47 @@ def outdated(pmaports: pathlib.Path, packages: pathlib.Path, arch: str):
                                 f"{fields.get('pkgrel')}, built {have}"))
             continue
         apk_at = current[0].stat().st_mtime
-        newest = max((f.stat().st_mtime for f in directory.iterdir()
-                      if f.is_file()), default=0.0)
-        if newest > apk_at:
-            found.append((name, "edited since it was last built"))
+        changed_at, how = aport_changed_at(directory)
+        if changed_at > apk_at:
+            found.append((name, "{} since it was last built".format(how)))
     return found
+
+
+def aport_changed_at(directory) -> tuple:
+    """(when this aport's content last changed, how we know it).
+
+    git first, because it is the only source that distinguishes a change from a
+    checkout. An uncommitted edit is the loudest case and is reported as now,
+    so it always beats the apk. Otherwise the last commit that touched this
+    directory is when its content actually moved -- restamping every file, as
+    a branch switch does, does not move it.
+
+    Falls back to mtime when git cannot answer (not a checkout, no git on the
+    host, a bare export). That is the old behaviour, kept deliberately: it
+    over-reports, and over-reporting a rebuild costs minutes while
+    under-reporting one ships a phone without a patch.
+    """
+    import subprocess
+    import time
+
+    d = str(directory)
+    try:
+        dirty = subprocess.run(["git", "-C", d, "status", "--porcelain", "--", d],
+                               capture_output=True, text=True, timeout=10)
+        if dirty.returncode == 0:
+            if dirty.stdout.strip():
+                return time.time(), "edited (uncommitted)"
+            log = subprocess.run(
+                ["git", "-C", d, "log", "-1", "--format=%ct", "--", d],
+                capture_output=True, text=True, timeout=10)
+            stamp = (log.stdout or "").strip()
+            if log.returncode == 0 and stamp.isdigit():
+                return float(stamp), "committed"
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    newest = max((f.stat().st_mtime for f in pathlib.Path(d).iterdir()
+                  if f.is_file()), default=0.0)
+    return newest, "edited"
 
 
 def container_cmd(aport: str, arch: str, force: bool = False) -> list[str]:
