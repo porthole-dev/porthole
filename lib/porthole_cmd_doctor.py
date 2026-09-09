@@ -522,13 +522,13 @@ def _check_disk(ch: Checks, cfg) -> None:
         if code in ("ENOSPC", "EDQUOT"):
             ch.add("host: disk ({})".format(primary), "fail",
                    "cannot write {}: {}".format(where, broken),
-                   fix="free space. Largest hogs first:\n"
-                       "          du -sh ~/.local/var/porthole-sandbox "
-                       "~/.local/var/pmbootstrap\n"
-                       "          porthole sandbox shell --command "
-                       "'pmbootstrap zap --help'\n"
-                       "          # a work dir under a rootless container needs"
-                       " `podman unshare rm -rf`, never plain rm",
+                   fix="free space -- start here, it deletes nothing until "
+                       "you add --yes:\n"
+                       "          porthole sandbox gc\n"
+                       "          porthole build ccache --max 25G"
+                       "    # if gc says ccache is the hog\n"
+                       "          # gc leaves distfiles and chroots alone on "
+                       "purpose and says what they cost",
                    doc="EDQUOT is a quota rather than a full disk -- `df` still "
                        "looks fine, and every tool that writes goes silent")
             continue
