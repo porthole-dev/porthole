@@ -1286,25 +1286,95 @@ def _verdict(ctx, aport: str, out) -> int:
     return EX_FAIL
 
 
+def _device_build_times(ctx):
+    """{package: builddate} for what the PHONE has installed, or {}.
+
+    apk records it per installed package as `t:` in /lib/apk/db/installed, so
+    this is the phone's own answer rather than anything inferred from a name.
+    """
+    dev = ctx.device()
+    if dev.state(max_age=30) != "BOOTED":
+        return {}
+    rc, out, _ = dev.run_full(
+        "awk '/^P:/{p=substr($0,3)} /^t:/{if(p)print p, substr($0,3); p=p}' "
+        "/lib/apk/db/installed 2>/dev/null", timeout=90)
+    if rc != 0:
+        return {}
+    times = {}
+    for line in out.split("\n"):
+        parts = line.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            times.setdefault(parts[0], int(parts[1]))
+    return times
+
+
 def _outdated(ctx) -> int:
-    """Which local aports no longer match the .apk that was built from them."""
+    """Which local aports no longer match the .apk built from them -- and which
+    apks the DEVICE is older than.
+
+    Two different questions, and only the first one existed. A phone ran a
+    five-day-old kernel on 2026-09-09 while this verb said one aport was left
+    and ph-pkgcheck said `running kernel #32 == aport r31 + 1  ok`: both
+    compared labels, and a rebuild at an unchanged pkgrel moves no label.
+    """
     pmaports = _find_pmaports(ctx)
     arch = ctx.cfg.get("PORTHOLE_ARCH") or "aarch64"
     usable, _ = __import__("porthole_cmd_build")._workspace_usable(ctx)
-    stale = outdated(pmaports, _packages_dir(ctx, usable), arch)
+    packages = _packages_dir(ctx, usable)
+    stale = outdated(pmaports, packages, arch)
+
+    on_device = _device_build_times(ctx)
+    built = {}
+    if on_device:
+        for apk in packages.glob("*/{}/*.apk".format(arch)):
+            stem = apk.name[:-4]
+            parts = stem.rsplit("-", 2)
+            if len(parts) == 3 and parts[0] in on_device:
+                when = apk_builddate(apk)
+                if when and when > built.get(parts[0], 0):
+                    built[parts[0]] = when
+    behind = device_behind({k: v for k, v in on_device.items() if k in built},
+                           built)
+
+    def _ago(a, b):
+        hours = (b - a) / 3600.0
+        return "%.0f h" % hours if hours < 48 else "%.0f days" % (hours / 24)
 
     def render():
         if not stale:
             ctx.out("every locally built aport matches its apk")
+        else:
+            ctx.out.heading(f"{len(stale)} aport(s) need rebuilding")
+            for name, why in stale:
+                ctx.out.kv(name, why, 22)
+            ctx.out.blank()
+            ctx.out(ctx.out.paint(
+                f"  porthole pkg build {stale[0][0]}", "cyan"))
+        if not on_device:
+            ctx.out.blank()
+            ctx.out(ctx.out.paint(
+                "  device not read (not BOOTED) -- nothing here says what it "
+                "is actually running", "grey"))
             return
-        ctx.out.heading(f"{len(stale)} aport(s) need rebuilding")
-        for name, why in stale:
-            ctx.out.kv(name, why, 22)
+        ctx.out.blank()
+        if not behind:
+            ctx.out("the device runs the newest build of everything we carry")
+            return
+        ctx.out.heading(f"{len(behind)} package(s) the DEVICE is behind on")
+        for name, dev_t, built_t in behind:
+            ctx.out.kv(name, "device build is %s older than the apk here"
+                       % _ago(dev_t, built_t), 22)
         ctx.out.blank()
         ctx.out(ctx.out.paint(
-            f"  porthole pkg build {stale[0][0]}", "cyan"))
+            f"  porthole pkg install {behind[0][0]} --yes", "cyan"))
 
-    return ctx.emit([{"aport": n, "why": w} for n, w in stale], render)
+    payload = {
+        "stale": [{"aport": n, "why": w} for n, w in stale],
+        "device_behind": [{"package": n, "device_builddate": d,
+                           "built_builddate": b} for n, d, b in behind],
+        "device_read": bool(on_device),
+    }
+    return ctx.emit(payload, render)
 
 
 def _status(ctx) -> int:
@@ -1695,6 +1765,53 @@ def install_verdict(before, after, transaction):
                 "brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md"
                 .format(before, after, before - after))
     return ""
+
+
+def apk_builddate(path):
+    """The `builddate` inside an .apk, or None. Pure w.r.t. the file.
+
+    Read out of .PKGINFO rather than taken from the file's mtime, because
+    mtime is what `outdated` had to stop trusting: a copy, a restore or a
+    checkout restamps it without changing a byte.
+    """
+    import tarfile
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            for member in tar:
+                # NOT lstrip("./"): that strips any of those characters, so
+                # ".PKGINFO" becomes "PKGINFO" and never matches.
+                if member.name in (".PKGINFO", "./.PKGINFO"):
+                    data = tar.extractfile(member).read().decode("utf-8", "replace")
+                    for line in data.splitlines():
+                        if line.startswith("builddate"):
+                            return int(line.split("=", 1)[1].strip())
+                    return None
+    except (OSError, tarfile.TarError, ValueError):
+        return None
+    return None
+
+
+def device_behind(installed, built, slack=60):
+    """[(name, device_time, built_time)] for packages the phone runs older than
+    what has been built here. Pure.
+
+    This is the question neither check could answer, and it is why a phone ran
+    a five-day-old kernel while `pkg outdated` said one aport was left and
+    `ph-pkgcheck` said `running kernel #32 == aport r31 + 1  ok`. Both compared
+    LABELS -- a pkgrel, a build number -- and a rebuild at an unchanged pkgrel
+    is invisible to both. Build time is the thing that actually moved.
+
+    `slack` because the two clocks are not the same clock and a package
+    installed seconds after it was built must not read as behind.
+    """
+    out = []
+    for name, dev_t in sorted(installed.items()):
+        built_t = built.get(name)
+        if dev_t is None or built_t is None:
+            continue
+        if built_t - dev_t > slack:
+            out.append((name, dev_t, built_t))
+    return out
 
 
 def _install(ctx, args) -> int:
