@@ -1494,6 +1494,29 @@ _ph_verify_export() {
 		return 1; }
 }
 
+# The pmos_root_uuid the PHONE actually has, cached because it can only be
+# asked while the device is booted -- and by flash time it is in the
+# bootloader. Written on every successful read, so the guard below still has a
+# value to compare against after the reboot.
+#
+# On 2026-09-09 a `fast` flash sent this phone to a debug shell because the
+# exported image named the WORKSPACE's rootfs (6023b6d7-...) and the phone had
+# e883c7c9-.... Nothing compared them; the comment at the flash site asserted
+# they could not differ.
+_ph_device_root_uuid() {
+	local cache="$_PH_REPO/.run/device-root-uuid" got=""
+	got=$(TK_RUN_TIMEOUT=8 tk_run 'cat /proc/cmdline' 2>/dev/null \
+		| tr ' ' '\n' | sed -n 's/^pmos_root_uuid=//p' | head -1 | tr -d '\r\n')
+	if [ -n "$got" ]; then
+		mkdir -p "$_PH_REPO/.run" 2>/dev/null
+		printf '%s\n' "$got" > "$cache" 2>/dev/null
+		printf '%s' "$got"
+		return 0
+	fi
+	[ -s "$cache" ] && { tr -d '\r\n' < "$cache"; return 0; }
+	return 1
+}
+
 tkflash() {
 	# Verify FIRST. flash_rootfs writes ~640 MB and is not undoable, so a
 	# refusal after it has run leaves a half-flashed device and an error that
@@ -1545,7 +1568,23 @@ tkflash-boot() {
 	# the rootfs's fstab and mkinitfs's cmdline, so it already names a
 	# filesystem that exists -- there is nothing on the phone to read back
 	# and nothing here to patch.
-	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
+	# ...that assumption is only true when the image and the phone came from
+	# the SAME install. `fast` exports from the workspace's rootfs chroot,
+	# which can be a different install entirely -- so the UUID is compared
+	# rather than assumed. Best effort by design: an unknown UUID warns and
+	# proceeds, because refusing to flash a phone we cannot interrogate would
+	# break recovery, which is exactly when you need to flash most.
+	local want_uuid=""
+	want_uuid=$(_ph_device_root_uuid) || true
+	local uuid_arg=""
+	if [ -n "$want_uuid" ]; then
+		uuid_arg="--expect-root-uuid=$want_uuid"
+	else
+		echo ">> WARNING: could not read the phone's pmos_root_uuid; flashing unverified"
+	fi
+
+	# shellcheck disable=SC2086
+	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" $uuid_arg || {
 		echo ">> refusing to flash a stale image"; return 1; }
 
 	# Which slots exist, which one may be armed, and which dtbo to write are
