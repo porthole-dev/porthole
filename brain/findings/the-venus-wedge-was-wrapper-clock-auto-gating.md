@@ -31,7 +31,10 @@ Aport patch `0192-media-venus-disable-wrapper-clock-auto-gating-on-msm.patch`
 (r14) writes both registers at the top of `venus_run()`, gated on IS_V3. With
 it, the full probe completes on a clean boot: PAS auth, firmware boot,
 SYS_INIT answered (3 IRQs), fw identifies as VIDEO.VE.4.4-00051,
-`/dev/video6` (dec) and `/dev/video7` (enc) appear, all codecs enumerate.
+`/dev/video6` and `/dev/video7` appear, all codecs enumerate. (The dec/enc
+labels once written here were backwards: measured 2026-09-09 on 7.2.2 #32,
+video6 is `qcom-venus-encoder` and video7 is `qcom-venus-decoder`. Resolve
+the node by reading `/sys/class/video4linux/video*/name`, never by number.)
 This is upstreamable and worth sending to linux-media with the bisect story.
 
 **What this rules out**
