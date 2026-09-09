@@ -11,6 +11,7 @@ Runs with no device attached. Fast enough to be a pre-commit hook.
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
@@ -200,7 +201,17 @@ def test_host_python_tools_can_start():
                 return f"{path.name}: {proc.stderr.strip().splitlines()[-1:]}"
         return None
 
-    bad = _concurrently(check, tools())
+    # Removed, which it was not: 155 abandoned `porthole-smoke-*` trees were
+    # found in /tmp holding 242 MB, one per run of this suite since it was
+    # written. On the reference host /tmp is a 20 GiB tmpfs -- so that is RAM,
+    # and it is the same tmpfs a full `make test` needs to write. It filled,
+    # and an exhausted /tmp fails 29 tests in this suite alone with errors
+    # naming no cause. A test that leaks is a test that eventually fails
+    # itself.
+    try:
+        bad = _concurrently(check, tools())
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
     assert not bad, "python tools that cannot run at all:\n  " + "\n  ".join(bad)
 
 

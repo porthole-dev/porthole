@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: staged by ../scroll-blank/arm.sh; runs ON THE DEVICE as the session user
-# env: TK_BLANK_URL, TK_BLANK_ENV, TK_BLANK_LABEL
+# env: PORTHOLE_BLANK_URL, PORTHOLE_BLANK_ENV, PORTHOLE_BLANK_LABEL
 # exits: 0 measured (prints BLANKARMDONE) · 1 arm void
 # blankarm.sh -- how much of the screen is UNPAINTED during a fast fling.
 #
@@ -32,8 +32,8 @@ cleanup() {
 	sh /tmp/ph-wkphase.sh off >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
-L=${TK_BLANK_LABEL:-blank}
-URL=${TK_BLANK_URL:-'https://en.wikipedia.org/wiki/Linux_kernel?useformat=desktop'}
+L=${PORTHOLE_BLANK_LABEL:-blank}
+URL=${PORTHOLE_BLANK_URL:-'https://en.wikipedia.org/wiki/Linux_kernel?useformat=desktop'}
 EV=/tmp/ph-webeval.py
 
 for u in $(systemctl --user list-units "app-*Epiphany-*.scope" --no-legend | awk '{print $1}'); do
@@ -49,7 +49,7 @@ sleep 2
 # next to the measurement -- see brain/traps/uprobes-do-not-attach-to-an-already-
 # mapped-library.
 PHASE=0
-if [ -n "${TK_BLANK_PHASE:-}" ] && [ -f /tmp/wkoff.sh ]; then
+if [ -n "${PORTHOLE_BLANK_PHASE:-}" ] && [ -f /tmp/wkoff.sh ]; then
 	. /tmp/wkoff.sh
 	export TK_WKPHASE_OFFSETS
 	N=$(pgrep -fc WebKitWebProcess 2>/dev/null || echo 0)
@@ -69,7 +69,7 @@ setsid systemd-run --user --scope --quiet --slice=app.slice \
 	env WEBKIT_SKIA_ENABLE_CPU_RENDERING=1 WEBKIT_SKIA_CPU_PAINTING_THREADS=2 \
 	WEBKIT_GST_VIDEO_DECODING_LIMIT=2560x1440@60 WEBKIT_LAYERS_TILE_SIZE=1440x1024 \
 	WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 WAYLAND_DEBUG=1 \
-	${TK_BLANK_ENV:-} epiphany ${PORTHOLE_EPHY_ARGS:-} "$URL" \
+	${PORTHOLE_BLANK_ENV:-} epiphany ${PORTHOLE_EPHY_ARGS:-} "$URL" \
 	>"/tmp/eph-$L.log" 2>"/tmp/wl-$L.log" </dev/null &
 
 # Room to fling, measured in VIEWPORTS rather than pixels. An absolute 6000 px
@@ -81,7 +81,7 @@ setsid systemd-run --user --scope --quiet --slice=app.slice \
 # NUDGE is why the loop is not just a longer poll: an infinite-scroll page
 # stays one viewport tall until something scrolls it, so waiting alone never
 # reaches the threshold. One scroll to the bottom, then back to the top.
-NEED=${TK_BLANK_VIEWPORTS:-3}
+NEED=${PORTHOLE_BLANK_VIEWPORTS:-3}
 H=0; VH=0; nudged=0
 for i in $(seq 1 40); do
 	sleep 2
@@ -115,12 +115,12 @@ python3 /tmp/ph-ui.py unblank >/dev/null 2>&1 || echo "[$L] WARNING: unblank ref
 # after three minutes -- and /tmp/pre-$L.png is the thing to look at when it does.
 python3 /tmp/ph-ui.py focus org.gnome.Epiphany >/dev/null 2>&1 || echo "[$L] WARNING: could not raise the browser"
 
-# TK_BLANK_VIDEO=1: start the page's <video> and PROVE it is advancing before
+# PORTHOLE_BLANK_VIDEO=1: start the page's <video> and PROVE it is advancing before
 # anything is measured. "Does it lag while I scroll" is a different workload
 # from a pure scroll, and a paused player looks identical to a playing one in
 # every frame statistic. Nothing here reads its numbers if the video is stuck.
 VIDEO=0
-if [ -n "${TK_BLANK_VIDEO:-}" ]; then
+if [ -n "${PORTHOLE_BLANK_VIDEO:-}" ]; then
 	for _ in $(seq 1 20); do
 		rs=$(python3 $EV 'var v=document.querySelector("video"); v?v.readyState:-1' 2>/dev/null)
 		case "$rs" in ''|*[!0-9-]*) rs=-1 ;; esac
@@ -189,7 +189,7 @@ echo "[$L] --- fling, pixels sampled ---"
 python3 /tmp/ph-blankwatch.py 12 --save-worst "/tmp/worst-$L.png" > "/tmp/blank-$L.txt" 2>&1 &
 BW=$!
 sleep 1
-sudo -n python3 /tmp/ph-gesture-bench.py drag ${TK_BLANK_DRAG:-720 2400 720 700 140 6} --fling --pause 900 >/dev/null 2>&1
+sudo -n python3 /tmp/ph-gesture-bench.py drag ${PORTHOLE_BLANK_DRAG:-720 2400 720 700 140 6} --fling --pause 900 >/dev/null 2>&1
 wait $BW
 tail -1 "/tmp/blank-$L.txt"
 echo "[$L] worst samples:"; grep "^t=" "/tmp/blank-$L.txt" 2>/dev/null | sort -t= -k3 -rn | head -4
@@ -201,7 +201,7 @@ if [ "$PHASE" = 1 ]; then
 	setsid sh -c "sh /tmp/ph-wkphase.sh measure 12 > /tmp/wk-$L.out 2>&1; echo PHASEDONE >> /tmp/wk-$L.out" </dev/null >/dev/null 2>&1 &
 	sleep 1
 fi
-sudo -n python3 /tmp/ph-gesture-bench.py drag ${TK_BLANK_DRAG:-720 2400 720 700 140 6} --fling --pause 900 --client "/tmp/wl-$L.log" 2>&1 | tail -6
+sudo -n python3 /tmp/ph-gesture-bench.py drag ${PORTHOLE_BLANK_DRAG:-720 2400 720 700 140 6} --fling --pause 900 --client "/tmp/wl-$L.log" 2>&1 | tail -6
 S1=$(wc -l < "/tmp/wl-$L.log")
 echo "[$L] wl lines during timing window: $((S1-S0))"
 

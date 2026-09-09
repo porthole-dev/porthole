@@ -103,13 +103,18 @@ shot() { grim -t png "/tmp/cr-$L-$1.png" 2>/dev/null && sha256sum "/tmp/cr-$L-$1
 fd_held() {
 	[ -n "$DEC" ] || return 1
 	for p in $(pgrep -u "$(id -u)" chromium 2>/dev/null); do
-		ls -l "/proc/$p/fd" 2>/dev/null | grep -q "$DEC" && return 0
+		# An exact readlink match, not a substring of `ls -l` output: the
+		# decoder path can appear in that listing as part of a different
+		# target, and the fd number column can contain it outright.
+		for fd in "/proc/$p/fd/"*; do
+			[ "$(readlink "$fd" 2>/dev/null)" = "$DEC" ] && return 0
+		done
 	done
 	return 1
 }
 
 maxclk=0; sawfd=no
-for i in $(seq 1 "$SECS"); do
+for _ in $(seq 1 "$SECS"); do
 	sleep 1  # contract: sleep-ok this IS the sampling interval, not a wait for an event
 	fd_held && sawfd=yes
 	r=$(clk_rate); case "$r" in ''|*[!0-9]*) ;; *) [ "$r" -gt "$maxclk" ] && maxclk=$r ;; esac

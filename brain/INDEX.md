@@ -33,6 +33,7 @@ generic notes as well.
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
 | [epiphanys-frame-is-20ms-of-compositor-cpu-plus-a-10ms-gpu-tail-not-a5xx-batches](findings/epiphanys-frame-is-20ms-of-compositor-cpu-plus-a-10ms-gpu-tail-not-a5xx-batches.md) | `soc:msm8998` | Epiphany's frame on m.youtube.com is ~20 ms of TextureMapper CPU walking 315 layers plus a ~10 ms GPU/FrameDone tail, serialized -- the kernel sees two submits per frame, so a5xx batch overhead is not the limit |
 | [epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers](findings/epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers.md) | `device:google-taimen` | Epiphany's window updates at 12-30 fps on YouTube because WebKit's compositor thread spends 35-50 ms per frame on a 237-layer page -- not the video, not GTK, not the GPU clock, not damage tracking |
+| [every-command-exiting-1-with-no-output-is-a-full-disk](findings/every-command-exiting-1-with-no-output-is-a-full-disk.md) | `generic` | Every command exiting 1 with empty output is a full disk, not a broken harness |
 | [forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port](findings/forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port.md) | `soc:msm8998` | The Type-C Rp advertisement is ignored, so a 3 A source charges at 500 mA -- and AICL, not the driver, is what bounds the request |
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
@@ -234,7 +235,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 120
+- `generic` — 121
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
