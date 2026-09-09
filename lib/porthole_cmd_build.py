@@ -131,7 +131,8 @@ ACTIONS = {
     "boot": ("tkboot",
              "build the dtb, repack and RAM-boot it -- no packaging step (~40s)"),
     "fast": ("tkbuild-kernel",
-             "build the kernel and flash boot only, UUIDs untouched (~6m)"),
+             "build the kernel and flash boot only; no repartition, and the "
+             "image's pmos_root_uuid is checked against the phone (~6m)"),
     "kernel": ("tkbuild",
                "build the kernel, package it, install and verify, but NOT flash (~10m)"),
     "upgrade": ("tkupgrade-kernel",

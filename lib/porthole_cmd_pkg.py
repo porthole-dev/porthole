@@ -41,8 +41,8 @@ import subprocess
 import sys
 import time
 
-from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_UNAVAILABLE,
-                          EX_USAGE, child_env)
+from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_STATE,
+                          EX_UNAVAILABLE, EX_USAGE, child_env)
 
 # Four hours. webkit is the reason: it is measured in hours on this hardware,
 # and a timeout that kills it at the default half hour would be a tool that
@@ -1644,6 +1644,163 @@ def build_module():
     return build
 
 
+# ------------------------------------------------ putting one on the phone --
+
+def apks_for_device(installed, apks, version):
+    """[(name, path)] -- the built apks this device already has a package for.
+
+    Pure, and the "already has" is the point: an aport's subpackages include
+    things this phone does not use (mesa builds vulkan-intel, -broadcom,
+    -panfrost), and installing them because they exist would add packages
+    nobody asked for. The device's own list decides.
+
+    `version` is the aport's current `pkgver-pkgrel`, so a stale apk from an
+    older build is never picked up by accident.
+    """
+    want = set(installed)
+    out = []
+    for path in sorted(apks):
+        name = path.name
+        if not name.endswith(".apk"):
+            continue
+        stem = name[:-4]
+        suffix = "-" + version
+        if not stem.endswith(suffix):
+            continue
+        pkg = stem[:-len(suffix)]
+        if pkg in want:
+            out.append((pkg, path))
+    return out
+
+
+def install_verdict(before, after, transaction):
+    """"" if the transaction was safe, else why it was not. Pure.
+
+    The count is the signal, and apk prints it itself (`OK: <size> in N
+    packages`). A DROP means packages were removed under you -- which is how a
+    sideloaded device apk once took the whole radio stack with it (rmtfs,
+    tqftpserv, pd-mapper), leaving a modem in a 40-second fatal-error loop and
+    wifi dead with it, diagnosed for a day as a kernel fault.
+    brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md
+
+    A RISE is fine and normal: a new dependency. Installing mesa pulled in
+    xcb-util-keysyms on 2026-09-09 and that was correct.
+    """
+    if before is None or after is None:
+        return "could not count packages before and after -- verify by hand"
+    if after < before:
+        return ("package count DROPPED {} -> {}: apk removed {} package(s) to "
+                "satisfy this install. Do not trust the rootfs; read the "
+                "transaction above and see "
+                "brain/traps/a-sideloaded-device-apk-can-eat-the-radio-stack.md"
+                .format(before, after, before - after))
+    return ""
+
+
+def _install(ctx, args) -> int:
+    """Put an aport's already-built apks onto the running device.
+
+    The gap this fills: every build verb stops at the apk. Getting it onto the
+    phone was a hand-rolled `scp` + `apk add` -- done four times in one session
+    on 2026-09-09 -- which is exactly what the no-hand-rolling rule exists to
+    stop, except there was nothing to reach for.
+
+    It is deliberately NOT a reinstall. `build kernel` and `build image` mkfs
+    the rootfs; this writes nothing but the packages named, so the update loop
+    for "carry a patch until it lands upstream" costs a build and a few
+    seconds rather than a reflash and a restored home directory.
+    """
+    import porthole
+
+    aport = (args.target or "").strip()
+    if not aport:
+        raise Bail("which aport?", EX_USAGE,
+                   "porthole pkg install <aport>    # e.g. mesa")
+
+    import porthole_cmd_build as build
+    usable, _why_not = build._workspace_usable(ctx)
+    pmaports = _find_pmaports(ctx)
+    if not pmaports:
+        raise Bail("no pmaports checkout found", EX_UNAVAILABLE,
+                   "`porthole doctor` names how to get one")
+    directory = find_aport(pmaports, aport)
+    if directory is None:
+        raise Bail("no aport named {!r}".format(aport), EX_USAGE,
+                   "porthole pkg search {}".format(aport))
+    fields = apkbuild_fields((directory / "APKBUILD").read_text(errors="replace"))
+    version = "{}-r{}".format(fields.get("pkgver"), fields.get("pkgrel"))
+
+    arch = args.arch or ctx.cfg.get("PORTHOLE_ARCH") or "aarch64"
+    packages = _packages_dir(ctx, usable)
+    apks = list(packages.glob("*/{}/*.apk".format(arch))) or \
+        list(packages.glob("*.apk"))
+
+    dev = ctx.device()
+    if dev.state(max_age=30) != "BOOTED":
+        raise Bail("the device is not BOOTED", EX_STATE,
+                   "this installs onto the running system; bring it up first")
+
+    rc, out, _err = dev.run_full("apk info", timeout=60)
+    installed = out.split() if rc == 0 else []
+    if not installed:
+        raise Bail("could not list the device's packages", EX_FAIL,
+                   "check `porthole doctor`")
+
+    chosen = apks_for_device(installed, apks, version)
+    if not chosen:
+        ctx.out("nothing to install: no built {}-{} apk matches a package this "
+                "device has".format(aport, version))
+        ctx.out(ctx.out.paint("  porthole pkg build {}    # build it first"
+                              .format(aport), "cyan"))
+        return EX_OK
+
+    def render_plan():
+        ctx.out.heading("install {} {}".format(aport, version))
+        for name, path in chosen:
+            ctx.out("  {:<34} {:.1f} MiB".format(
+                name, path.stat().st_size / 1048576))
+
+    if not getattr(args, "yes", False):
+        render_plan()
+        ctx.out.blank()
+        ctx.out(ctx.out.paint(
+            "  porthole pkg install {} --yes    # install the {} package(s) "
+            "above".format(aport, len(chosen)), "cyan"))
+        return EX_OK
+
+    render_plan()
+    rc, out, _ = dev.run_full("apk info | wc -l", timeout=45)
+    before = int(out.strip()) if rc == 0 and out.strip().isdigit() else None
+
+    argv = ["scp", *porthole.ssh_opts(ctx.cfg)]
+    argv += [str(path) for _n, path in chosen]
+    argv.append("{}:/tmp/".format(dev.phone))
+    done = subprocess.run(argv, capture_output=True, text=True, timeout=600)
+    if done.returncode != 0:
+        raise Bail("could not copy the apks to the device: {}"
+                   .format((done.stderr or "").strip()[:200]), EX_FAIL,
+                   "is the device still reachable?")
+
+    remote = " ".join("/tmp/{}".format(path.name) for _n, path in chosen)
+    # ONE transaction, and the whole of it is printed. Never `tail -1` an apk
+    # transaction: the line that matters can be anywhere in it.
+    rc, out, _ = dev.run_full(
+        "sudo -n apk add --allow-untrusted {} 2>&1".format(remote), timeout=900)
+    ctx.out.blank()
+    for line in (out or "").strip().splitlines():
+        ctx.out("  " + line)
+
+    rc2, out2, _ = dev.run_full("apk info | wc -l", timeout=45)
+    after = int(out2.strip()) if rc2 == 0 and out2.strip().isdigit() else None
+    problem = install_verdict(before, after, out)
+    ctx.out.blank()
+    if problem:
+        ctx.out.warn(problem)
+        return EX_FAIL
+    ctx.out("packages {} -> {}, nothing removed".format(before, after))
+    return EX_OK if rc == 0 else EX_FAIL
+
+
 def cmd_pkg(args, ctx) -> int:
     action = args.action or "status"
     if action == "status":
@@ -1660,6 +1817,8 @@ def cmd_pkg(args, ctx) -> int:
         return _fork(ctx, args)
     if action == "resume":
         return _resume(ctx, args)
+    if action == "install":
+        return _install(ctx, args)
     return _build(ctx, args)
 
 
@@ -1693,10 +1852,11 @@ SPEC = {
         "See docs/HANDOFF-package-builds.md."),
     "args": [
         (["action"], {"nargs": "?", "metavar": "ACTION",
-                      "choices": ["build", "resume", "search", "fork",
-                                  "status", "watch", "outdated", "stop"],
-                      "help": "build | resume | search | fork | status | "
-                              "watch | outdated | stop"}),
+                      "choices": ["build", "install", "resume", "search",
+                                  "fork", "status", "watch", "outdated",
+                                  "stop"],
+                      "help": "build | install | resume | search | fork | "
+                              "status | watch | outdated | stop"}),
         (["target"], {"nargs": "?", "metavar": "APORT",
                       "help": "build/fork: the aport. search: text to look for"}),
         (["--arch"], {"metavar": "ARCH",
@@ -1728,7 +1888,10 @@ SPEC = {
                       "help": "build: queue this long for the buildroot "
                               "instead of refusing"}),
         (["--yes"], {"action": "store_true",
-                     "help": "fork: actually write into pmaports"}),
+                     "help": "fork: actually write into pmaports. "
+                             "install: actually write to the device -- "
+                             "without it, install only lists what it would "
+                             "put there"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "escapes_scope": True,
