@@ -48,7 +48,21 @@ jobs:
         with:
           python-version: "3.11"
       - name: install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+        # `|| true` on the update, deliberately. The runner image carries
+        # third-party apt repos porthole does not use, and on 2026-09-09
+        # Google's Chrome repo answered `Hash Sum mismatch`, which made
+        # apt-get update exit 100 and took this job -- and with it every
+        # branch's `make ci` -- down for a reason with nothing to do with the
+        # change under test. The Ubuntu index had fetched fine.
+        #
+        # The install is what actually has to succeed, and it is NOT masked:
+        # if the index is genuinely broken, that line fails loudly and names
+        # shellcheck. Masking the update alone cannot hide a real problem,
+        # because a lint job with no shellcheck cannot pass -- `make lint`
+        # refuses to skip silently, by its own design.
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y shellcheck
       - name: make lint
         run: make lint
 
