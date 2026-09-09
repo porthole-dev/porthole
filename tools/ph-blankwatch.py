@@ -41,7 +41,16 @@ def grab(scale):
     # this tool reports 0.000 for a screen that is visibly half blank.
     cmd = ["grim", "-t", "ppm", "-"] if not scale else \
           ["grim", "-s", str(scale), "-t", "ppm", "-"]
-    p = subprocess.run(cmd, env=ENV, capture_output=True, timeout=15)
+    try:
+        p = subprocess.run(cmd, env=ENV, capture_output=True, timeout=15)
+    except (subprocess.TimeoutExpired, OSError):
+        # grim blocks, sometimes past any deadline, on an output whose content
+        # is on a hardware plane -- measured while a YouTube video was playing,
+        # which is exactly when the plane path is doing its job. A sampler that
+        # dies there takes the whole arm with it, and the arm was measuring
+        # something else. Skip the sample and keep going; the summary reports
+        # how many were actually taken.
+        return None
     if p.returncode or not p.stdout:
         return None
     return p.stdout
@@ -183,8 +192,10 @@ def main():
         if a.save_worst and band > worst[0]:
             worst = (band, buf)
     if not series:
-        print("grim produced no frame -- is the screen on? (ph-ui.py unblank)", file=sys.stderr)
-        return 1
+        print("blankwatch: 0 samples -- grim produced no frame. The screen may be off "
+              "(ph-ui.py unblank), or its content is on a hardware plane that "
+              "screencopy cannot read.", file=sys.stderr)
+        return 0
 
     if a.save_worst and worst[1] is not None:
         # Convert with whatever is on the device; a PPM is not viewable off it.

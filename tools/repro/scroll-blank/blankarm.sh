@@ -181,7 +181,10 @@ WP=$(pgrep -n WebKitWebProc || true)
 echo "[$L] --- idle (control) ---"
 python3 /tmp/ph-blankwatch.py 4 | tail -1
 
-grim -t png "/tmp/pre-$L.png" 2>/dev/null && echo "[$L] pre-drag shot: /tmp/pre-$L.png"
+# timeout, always: grim does not return at all on an output whose content is
+# on a hardware plane -- a playing video -- and a bare call there hung this
+# arm past its 700 s deadline with everything else working.
+timeout 20 grim -t png "/tmp/pre-$L.png" 2>/dev/null && echo "[$L] pre-drag shot: /tmp/pre-$L.png"
 echo "[$L] --- fling, pixels sampled ---"
 python3 /tmp/ph-blankwatch.py 12 --save-worst "/tmp/worst-$L.png" > "/tmp/blank-$L.txt" 2>&1 &
 BW=$!
