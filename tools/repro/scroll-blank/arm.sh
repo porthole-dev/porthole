@@ -13,7 +13,7 @@ source tools/ph-lib.sh
 scp "${TK_SSH_OPTS[@]}" \
 	tools/repro/a5xx-gmem/sess.sh tools/ph-webeval.py tools/ph-webvq.py tools/ph-touch.py \
 	tools/ph-ui.py tools/ph-gesture-bench.py tools/ph-blankwatch.py tools/threadcpu.py \
-	tools/ph-wkphase.sh "$HERE/blankarm.sh" "$PHONE:/tmp/" >/dev/null || exit 1
+	tools/ph-wkphase.sh tools/ph-key.py "$HERE/blankarm.sh" "$PHONE:/tmp/" >/dev/null || exit 1
 
 # TK_BLANK_PHASE=1 adds uprobes on the main thread's rendering phases. The
 # offsets are per BUILD, so they are recomputed here rather than cached.
@@ -36,7 +36,7 @@ fi
 # in a SEPARATE file that blankarm.sh sources after it, so re-running an arm
 # replaces them instead of appending a second copy of every export.
 ENVF=$(mktemp)
-for v in TK_BLANK_URL TK_BLANK_ENV TK_BLANK_LABEL TK_BLANK_DRAG TK_BLANK_PHASE PORTHOLE_EPHY_ARGS; do
+for v in TK_BLANK_URL TK_BLANK_ENV TK_BLANK_LABEL TK_BLANK_DRAG TK_BLANK_PHASE TK_BLANK_VIDEO TK_BLANK_VIEWPORTS PORTHOLE_EPHY_ARGS; do
 	[ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}" >> "$ENVF"
 done
 scp "${TK_SSH_OPTS[@]}" "$ENVF" "$PHONE:/tmp/blankenv.sh" >/dev/null

@@ -61,6 +61,7 @@ if [ -n "${TK_BLANK_PHASE:-}" ] && [ -f /tmp/wkoff.sh ]; then
 fi
 rm -f ~/.local/share/epiphany/session_state.xml "/tmp/wl-$L.log"
 F0=$(sudo -n dmesg | grep -c "gpu fault")
+T0=$(($(cat /sys/class/thermal/thermal_zone0/temp)/1000))
 
 # shellcheck disable=SC2086
 setsid systemd-run --user --scope --quiet --slice=app.slice \
@@ -107,6 +108,37 @@ echo "[$L] nav ms: $(python3 $EV 'var t=performance.timing,n=t.navigationStart; 
 
 # The screen has to be ON or every window below measures a dark output and the
 # drag moves nothing. tk-ui says whether the screensaver refused.
+# TK_BLANK_VIDEO=1: start the page's <video> and PROVE it is advancing before
+# anything is measured. "Does it lag while I scroll" is a different workload
+# from a pure scroll, and a paused player looks identical to a playing one in
+# every frame statistic. Nothing here reads its numbers if the video is stuck.
+VIDEO=0
+if [ -n "${TK_BLANK_VIDEO:-}" ]; then
+	for _ in $(seq 1 20); do
+		rs=$(python3 $EV 'var v=document.querySelector("video"); v?v.readyState:-1' 2>/dev/null)
+		case "$rs" in ''|*[!0-9-]*) rs=-1 ;; esac
+		[ "$rs" -ge 1 ] && break
+		sleep 2
+	done
+	python3 $EV 'var v=document.querySelector("video"); v.muted=true; v.play(); "play"' >/dev/null 2>&1
+	sleep 6
+	t1=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null)
+	sleep 3
+	t2=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null)
+	if python3 -c "import sys; sys.exit(0 if float('${t2:-0}')-float('${t1:-0}') > 2 else 1)"; then
+		VIDEO=1
+	else
+		sudo -n python3 /tmp/ph-touch.py tap 720 600 >/dev/null 2>&1
+		sleep 8
+		t1=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null); sleep 3
+		t2=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null)
+		python3 -c "import sys; sys.exit(0 if float('${t2:-0}')-float('${t1:-0}') > 2 else 1)" && VIDEO=1
+	fi
+	echo "[$L] video: $(python3 $EV 'var v=document.querySelector("video"),q=v.getVideoPlaybackQuality?v.getVideoPlaybackQuality():{}; JSON.stringify({w:v.videoWidth,h:v.videoHeight,paused:v.paused,t:Math.round(v.currentTime),total:q.totalVideoFrames,dropped:q.droppedVideoFrames})' 2>/dev/null) advancing=$VIDEO"
+	[ "$VIDEO" = 1 ] || { echo "[$L] the video never advanced -- arm void, do not read its numbers"; echo BLANKARMDONE; exit 1; }
+	Q0=$(python3 $EV 'var q=document.querySelector("video").getVideoPlaybackQuality(); q.totalVideoFrames+":"+q.droppedVideoFrames' 2>/dev/null)
+fi
+
 python3 /tmp/ph-ui.py unblank >/dev/null 2>&1 || echo "[$L] WARNING: unblank refused"
 # ...and raise the browser. An arm before this one left the session in phosh's
 # app grid, which sits over every window: the page loaded, the probes armed,
@@ -160,10 +192,16 @@ if [ "$PHASE" = 1 ]; then
 	sed '/PHASEDONE/d' "/tmp/wk-$L.out" 2>/dev/null
 fi
 
-SC=$(cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/app-gnome-org.gnome.Epiphany-*.scope/memory.current 2>/dev/null | head -1)
-SH=$(cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/app-gnome-org.gnome.Epiphany-*.scope/memory.high 2>/dev/null | head -1)
+U=$(id -u)
+CG=/sys/fs/cgroup/user.slice/user-$U.slice/user@$U.service/app.slice
+SC=$(cat "$CG"/app-gnome-org.gnome.Epiphany-*.scope/memory.current 2>/dev/null | head -1)
+SH=$(cat "$CG"/app-gnome-org.gnome.Epiphany-*.scope/memory.high 2>/dev/null | head -1)
 echo "[$L] scope memory.current=$((${SC:-0}/1048576))M high=$((${SH:-0}/1048576))M"
 [ -n "$WP" ] && echo "[$L] webproc drm=$(sudo -n awk '/drm-resident-memory/{s+=$2} END{print int(s/1024)}' /proc/$WP/fdinfo/* 2>/dev/null)M rss=$(awk '/VmRSS/{print $2/1024}' /proc/$WP/status 2>/dev/null | cut -d. -f1)M"
-echo "[$L] psi_full_mem=$(awk '/^full/{print $2}' /proc/pressure/memory) die=$(($(cat /sys/class/thermal/thermal_zone0/temp)/1000))C gpu=$(($(cat /sys/class/devfreq/*gpu*/cur_freq | head -1)/1000000))MHz"
+if [ "$VIDEO" = 1 ]; then
+	Q1=$(python3 $EV 'var q=document.querySelector("video").getVideoPlaybackQuality(); q.totalVideoFrames+":"+q.droppedVideoFrames' 2>/dev/null)
+	echo "[$L] video frames total:dropped $Q0 -> $Q1  (dropped over the arm is the number that matters)"
+fi
+echo "[$L] psi_full_mem=$(awk '/^full/{print $2}' /proc/pressure/memory) die=$(($(cat /sys/class/thermal/thermal_zone0/temp)/1000))C (was ${T0}C) gpu=$(($(cat /sys/class/devfreq/*gpu*/cur_freq | head -1)/1000000))MHz"
 echo "[$L] gpu faults this arm: $(( $(sudo -n dmesg | grep -c 'gpu fault') - F0 ))"
 echo BLANKARMDONE

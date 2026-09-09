@@ -102,7 +102,12 @@ def screen_hash():
 
 
 def unblank():
-    """Turn the screen back on AND unlock it, and say whether it worked.
+    """Make the screen usable by an arm: on, unlocked, and showing the app.
+
+    Three separate things, each of which has voided arms on its own -- see the
+    inline comments. Returns False if the screen could not be turned on or
+    unlocked; dismissing the overview is best-effort, because a session that
+    was never in it must not fail here.
 
     phosh's screensaver powers the output down after a few minutes idle, and an
     INJECTED touch does NOT wake it -- uinput events reach the client but never
@@ -131,6 +136,16 @@ def unblank():
     # animates" with a perfectly healthy browser one surface down. loginctl
     # is the lever; the screensaver's own DBus API has no Unlock.
     unlocked = run("sudo", "-n", "loginctl", "unlock-sessions").returncode == 0
+    # phosh's overview/app grid is a shell layer surface: it sits over every
+    # toplevel, and activating a toplevel does NOT dismiss it. It is where the
+    # session lands whenever the last window closes -- which is the FIRST thing
+    # every arm here does -- so an arm that relaunches its app and starts
+    # dragging is dragging at the launcher. Escape closes it; measured
+    # 2026-09-09, and nothing else tried did (wlrctl activate, unblank,
+    # loginctl unlock).
+    key = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ph-key.py")
+    if os.path.exists(key):
+        run("sudo", "-n", "python3", key, "esc")
     return on and unlocked
 
 
