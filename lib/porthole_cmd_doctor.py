@@ -318,6 +318,7 @@ def check_host(ch: Checks, cfg, family: str) -> None:
     _check_pmaports(ch, cfg)
     _check_device_workdir(ch, cfg)
     _check_host_workdir(ch, cfg)
+    _check_disk(ch, cfg)
 
     # flock backs the device mutex. Without it parallel workers corrupt each
     # other's sessions, which is a subtle failure rather than a loud one.
@@ -405,6 +406,153 @@ def _check_host_workdir(ch: Checks, cfg) -> None:
         ch.add("host: work dir", "ok",
                f"{path} does not exist  (host builds only; the workspace has "
                f"its own)")
+
+
+# Below this, a kernel build's chroot plus its ccache plus one rootfs image do
+# not fit. A warning rather than a failure: probing, `brain`, `config` and a
+# module push need almost nothing, and a host doing that work is not broken.
+DISK_WARN_BYTES = 10 * 1024 ** 3
+
+
+def _write_probe(path: pathlib.Path):
+    """("", "") if a file can actually be created here, else (ERRNO, why).
+
+    The errno is handed back separately because the REMEDY differs: EDQUOT and
+    ENOSPC mean free something, EACCES and EROFS mean the directory is wrong
+    and no amount of deleting will help. A row that prints "free space" at
+    someone whose problem is a mode bit is the kind of confident wrong fix this
+    file's docstring calls worse than no check at all.
+
+    Free space is NOT the question, and asking it is how this was missed. A
+    quota'd filesystem reports terabytes free through statvfs and still refuses
+    the write with EDQUOT, because a quota is charged to you and `df` is
+    charged to the disk.
+
+    Not hypothetical. On 2026-09-09 an exhausted quota made every command in an
+    agent session return exit 1 with completely empty output -- the harness
+    could not write the file it captures command output into -- and three
+    sessions went into debugging the harness, because nothing asked the one
+    question that separates "the tool is broken" from "you are out of quota".
+    `df` looked fine throughout. The first process to report it was a `curl`
+    exiting 23, which is literally "write error", and that was read as a
+    network problem.
+
+    So: try the write. One probe catches EDQUOT, ENOSPC, a read-only remount
+    and a permissions problem, and statvfs can see exactly none of them.
+    """
+    probe = path / ".porthole-write-probe"
+    try:
+        # 4 KiB rather than an empty file: a block quota is charged on
+        # allocation, so a zero-byte create can succeed on a filesystem with no
+        # room for anything you would actually put there.
+        with open(probe, "wb") as fh:
+            fh.write(b"\0" * 4096)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError as exc:
+        name = errno.errorcode.get(exc.errno, str(exc.errno))
+        return name, "{} -- {}".format(name, exc.strerror or exc)
+    finally:
+        try:
+            probe.unlink()
+        except OSError:
+            pass
+    return "", ""
+
+
+def _sandbox_pmb_or_none(cfg):
+    """The workspace work dir, or None if that module will not import.
+
+    Same rule _envkernel_candidates duplicates ph-build.sh for: doctor must run
+    when the build path is broken, because that is exactly when it is asked.
+    """
+    try:
+        import porthole_cmd_sandbox as sandbox
+        return sandbox._sandbox_pmb(cfg)
+    except Exception:  # noqa: BLE001 -- a broken sandbox must not break doctor
+        return None
+
+
+def _check_disk(ch: Checks, cfg) -> None:
+    """Can porthole write where it builds, and is there room to build there?
+
+    doctor checked thirty-two things and not one of them was disk. It printed
+    `25 ok, 3 warn, 1 fail` on a host whose quota was already exhausted and
+    never mentioned it, while every build, every fetch and the agent's own
+    shell were failing for that one reason. A toolbox whose ordinary rungs
+    write tens of GB -- chroots, ccache, a kernel tree, a rootfs image, and a
+    chromium tree that reached 12 GB at 9% of a build -- owes this row.
+
+    One row per distinct filesystem, not per directory: on most hosts all four
+    of these are the same mount, and four identical rows is how a reader learns
+    to skim the section.
+    """
+    seen = {}
+    for label, raw in (
+        ("host work dir", cfg.get("PORTHOLE_PMB_DIR")
+         or pathlib.Path.home() / ".local/var/pmbootstrap"),
+        ("workspace work dir", _sandbox_pmb_or_none(cfg)),
+        ("working repo", cfg.get("PORTHOLE_WORKDIR")),
+        # Scratch, for pmbootstrap and for whatever harness is driving this.
+        # Listed separately because it is so often a DIFFERENT filesystem --
+        # a tmpfs, or a separately quota'd mount -- so a green home directory
+        # says nothing at all about it. That is the split that hid the 2026-09-09
+        # outage: writes to $HOME kept working the whole time.
+        ("temp dir", os.environ.get("TMPDIR") or "/tmp"),
+    ):
+        if not raw:
+            continue
+        path = pathlib.Path(raw)
+        if not path.is_dir():
+            continue
+        try:
+            seen.setdefault(path.stat().st_dev, []).append((label, path))
+        except OSError:
+            continue
+
+    if not seen:
+        ch.add("host: disk", "skip", "no work directory exists yet")
+        return
+
+    for paths in seen.values():
+        primary, path = paths[0]
+        also = ", ".join(lbl for lbl, _ in paths[1:])
+        where = "{}{}".format(path, " (also " + also + ")" if also else "")
+        code, broken = _write_probe(path)
+        if code in ("ENOSPC", "EDQUOT"):
+            ch.add("host: disk ({})".format(primary), "fail",
+                   "cannot write {}: {}".format(where, broken),
+                   fix="free space. Largest hogs first:\n"
+                       "          du -sh ~/.local/var/porthole-sandbox "
+                       "~/.local/var/pmbootstrap\n"
+                       "          porthole sandbox shell --command "
+                       "'pmbootstrap zap --help'\n"
+                       "          # a work dir under a rootless container needs"
+                       " `podman unshare rm -rf`, never plain rm",
+                   doc="EDQUOT is a quota rather than a full disk -- `df` still "
+                       "looks fine, and every tool that writes goes silent")
+            continue
+        if code:
+            # Not a space problem, so do not send anyone deleting things.
+            ch.add("host: disk ({})".format(primary), "fail",
+                   "cannot write {}: {}".format(where, broken),
+                   fix="fix the directory, not the disk: check its mode and "
+                       "owner, and that the mount is not read-only\n"
+                       "          ls -ld {}".format(path))
+            continue
+        free = shutil.disk_usage(str(path)).free
+        gib = free / 1024 ** 3
+        # The probe proves you can write AT ALL; this number is the only thing
+        # that speaks to whether a build fits. Neither answers the other's
+        # question, which is why both are here.
+        if free < DISK_WARN_BYTES:
+            ch.add("host: disk ({})".format(primary), "warn",
+                   "{:.1f} GiB free on {} -- a kernel build and one rootfs "
+                   "image do not fit".format(gib, where),
+                   doc="porthole build purge, or pmbootstrap zap")
+        else:
+            ch.add("host: disk ({})".format(primary), "ok",
+                   "{:.0f} GiB free on {}".format(gib, where))
 
 
 def _envkernel_candidates(cfg):

@@ -67,6 +67,9 @@ setup() {
 
 run() (
 	CHROMIUM_FLAGS=""
+	# The whole point is sourcing whatever conf files the caller staged,
+	# so there is no fixed path for shellcheck to follow.
+	# shellcheck source=/dev/null
 	for f in "$1"/*.conf; do [ -f "$f" ] && . "$f"; done
 	echo "$CHROMIUM_FLAGS"
 )
