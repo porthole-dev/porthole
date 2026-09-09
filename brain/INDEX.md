@@ -23,6 +23,7 @@ generic notes as well.
 | [android-interaction-boost-is-the-remaining-perf-delta](findings/android-interaction-boost-is-the-remaining-perf-delta.md) | `soc:msm8998` | Android's INTERACTION boost is the remaining perf delta -- the scaling infrastructure already has vendor parity |
 | [app-jank-is-app-shaped-once-the-stack-is-clean](findings/app-jank-is-app-shaped-once-the-stack-is-clean.md) | `device:google-taimen` | With the display/decode stack clean, the remaining jank is app-shaped -- GJS GC in Maps, main-thread layout in WebKit 2.48, init CPU in browser launches |
 | [call-audio-needs-a-voice-service-the-kernel-does-not-have](findings/call-audio-needs-a-voice-service-the-kernel-does-not-have.md) | `soc:msm8998` | Call audio is silent because mainline has no voice service — not UCM, not the sound server, not the modem |
+| [chromium-segfaults-because-a-phone-sends-no-xkb-keymap](findings/chromium-segfaults-because-a-phone-sends-no-xkb-keymap.md) | `generic` | Chromium segfaults on every launch under phoc because a phone with no physical keyboard is sent no wl_keyboard.keymap |
 | [clipping-webkit-compositing-to-damage-is-worth-8-percent](findings/clipping-webkit-compositing-to-damage-is-worth-8-percent.md) | `device:google-taimen` | Clipping WebKit's compositing to the damaged rectangles is worth ~8% and 3 C on taimen, not a step change |
 | [ap-accepts-us-intermittently](findings/ap-accepts-us-intermittently.md) | `device:google-taimen` | TEST-SSID does accept this client -- intermittently, with the stock frame |
 | [ap-refuses-us-our-assocreq-is-clean](findings/ap-refuses-us-our-assocreq-is-clean.md) | `device:google-taimen` | TEST-SSID refuses this client, and our association request is not the reason |
@@ -233,7 +234,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 119
+- `generic` — 120
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
