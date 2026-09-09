@@ -74,6 +74,7 @@ generic notes as well.
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
 | [the-wake-crash-is-devfreq-not-a-register-access](findings/the-wake-crash-is-devfreq-not-a-register-access.md) | `soc:msm8998` | The display-wake crash needs GPU runtime suspend AND devfreq polling -- and it is not a GPU register access |
 | [the-wake-crash-is-not-in-msms-devfreq-callbacks](findings/the-wake-crash-is-not-in-msms-devfreq-callbacks.md) | `soc:msm8998` | The display-wake crash is not in any of msm's devfreq callbacks -- but it is specific to the GPU's devfreq |
+| [the-webkit-session-env-was-lost-with-the-home-directory](findings/the-webkit-session-env-was-lost-with-the-home-directory.md) | `generic` | The browser's whole WebKit environment lived in ~/.config and a rootfs reflash deleted it, which reads as four separate new bugs |
 | [the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail](findings/the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail.md) | `generic` | The WebKitWebProcess SIGSEGV is Epiphany asking for a FULL_DOCUMENT snapshot of a 237522 px page: Skia refuses a raster surface over 2 GB and WebKit dereferences the null |
 | [the-workspace-caches-kernel-compiles](findings/the-workspace-caches-kernel-compiles.md) | `generic` | The workspace caches kernel compiles now: 18% dearer the first time, 2.5x faster every repeat |
 | [the-workspace-loop-is-seconds-and-still-uncached](findings/the-workspace-loop-is-seconds-and-still-uncached.md) | `generic` | The workspace edit-build loop is 6-8 s, and ccache is still hit zero times |
@@ -142,9 +143,11 @@ generic notes as well.
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [an-arm-behind-the-phosh-lockscreen-measures-a-still-page](traps/an-arm-behind-the-phosh-lockscreen-measures-a-still-page.md) | `device:google-taimen` | An arm behind the phosh lockscreen measures a still page, and it looks exactly like the change under test breaking WebKit |
 | [an-injected-touch-does-not-wake-a-blanked-screen](traps/an-injected-touch-does-not-wake-a-blanked-screen.md) | `generic` | An injected touch does not wake a blanked screen, and every gesture arm then measures a still image |
+| [an-unblanked-screen-can-still-be-locked](traps/an-unblanked-screen-can-still-be-locked.md) | `generic` | Turning the output back on does not unlock it: every injected gesture then drives the lockscreen and the app under it never moves |
 | [androidboot-bootreason-always-says-watchdog-here](traps/androidboot-bootreason-always-says-watchdog-here.md) | `device:google-taimen` | androidboot.bootreason says watchdog on every boot of taimen, including clean ones -- it is not a reset-reason oracle |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
+| [apk3-reads-only-etc-apk-keys](traps/apk3-reads-only-etc-apk-keys.md) | `generic` | apk-tools 3 trusts only /etc/apk/keys, and the keys packages install to /usr/share/apk/keys -- so a fresh rootfs can install nothing at all |
 | [apr-service-inherits-a-protection-domain-the-board-deletes](traps/apr-service-inherits-a-protection-domain-the-board-deletes.md) | `soc:qcom` | A new APR service inherits a protection domain the board deletes |
 | [base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork](traps/base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork.md) | `generic` | Base a kernel aport on pristine kernel.org or a pinned tag — never an untagged vendor fork |
 | [build-mod-against-an-aport-kernel-fails-at-the-next-boot](traps/build-mod-against-an-aport-kernel-fails-at-the-next-boot.md) | `generic` | build mod from the tree against a kernel that ships from the aport is refused by MODVERSIONS -- and on a no-reload module the refusal lands at the next boot, with the shipped module already gone |
@@ -228,7 +231,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 114
+- `generic` — 117
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1

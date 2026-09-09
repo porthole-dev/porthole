@@ -92,7 +92,10 @@ for n in sorted(spans, key=lambda x: -sum(spans[x])):
 PY
 	;;
 off)
-	sudo -n sh -c "echo 0 > $T/events/wk/enable; echo > $T/uprobe_events"
+	# Idempotent on purpose: `off` is what a cleanup trap calls, and a trap
+	# that fails noisily when there was nothing to clean up trains people to
+	# stop calling it. events/wk/ does not exist until `arm` has run once.
+	sudo -n sh -c "[ -e $T/events/wk/enable ] && echo 0 > $T/events/wk/enable; echo > $T/uprobe_events" 2>/dev/null || true
 	;;
 *)
 	echo "usage: ph-wkphase.sh arm|measure [SECONDS]|off" >&2; exit 64 ;;

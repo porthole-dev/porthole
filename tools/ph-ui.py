@@ -53,22 +53,43 @@ def run(*cmd, **kw):
         return subprocess.run(cmd, env=ENV, capture_output=True, **kw)
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(cmd, 1, b"", b"timed out (screen off?)")
+    except FileNotFoundError:
+        # A missing helper has to look like a failed command, not an exception:
+        # every caller here already handles a non-zero return, and the one that
+        # did not -- toplevels() -- took out every drag on 2026-09-09 when lswt
+        # turned out not to have survived a rootfs reflash.
+        return subprocess.CompletedProcess(cmd, 127, b"", b"%s: not installed"
+                                           % cmd[0].encode())
 
 
 def toplevels():
-    """[{"app-id":..., "title":...}] from lswt's plain output.
+    """[{"app-id":..., "title":...}] from lswt, or wlrctl where lswt is absent.
 
     Not `lswt -j`: it emits the identifier as a bare hex token rather than a
     string, so the "JSON" does not parse. The columnar output is stable and
     has no such problem.
+
+    lswt is not packaged by Alpine and has to be built by hand, so it does not
+    survive a rootfs reflash -- and its absence took out every drag on
+    2026-09-09, because a gesture arm that cannot list toplevels raises inside
+    the bench and the page simply never moves. wlrctl IS packaged and answers
+    the same question, one `app_id: title` per line, so fall back to it rather
+    than making the whole toolbox depend on a hand-built binary.
     """
     out = run("lswt")
-    if out.returncode:
-        raise SystemExit("lswt failed: %s" % out.stderr.decode().strip())
-    rows = out.stdout.decode(errors="replace").splitlines()
-    return [{"app-id": p[0].strip(), "title": p[-1].strip(), "identifier": line}
-            for line in rows[1:] if line.strip()
-            for p in [re.split(r"\s{2,}", line.strip(), maxsplit=1)]]
+    if out.returncode == 0:
+        rows = out.stdout.decode(errors="replace").splitlines()
+        return [{"app-id": p[0].strip(), "title": p[-1].strip(), "identifier": line}
+                for line in rows[1:] if line.strip()
+                for p in [re.split(r"\s{2,}", line.strip(), maxsplit=1)]]
+    alt = run("wlrctl", "toplevel", "list")
+    if alt.returncode:
+        raise SystemExit("neither lswt nor wlrctl could list toplevels: %s"
+                         % (out.stderr or alt.stderr).decode().strip())
+    return [{"app-id": line.split(":", 1)[0].strip(),
+             "title": line.split(":", 1)[1].strip() if ":" in line else "",
+             "identifier": line}
+            for line in alt.stdout.decode(errors="replace").splitlines() if line.strip()]
 
 
 def screen_hash():
@@ -81,7 +102,7 @@ def screen_hash():
 
 
 def unblank():
-    """Turn the screen back on, and say whether it worked.
+    """Turn the screen back on AND unlock it, and say whether it worked.
 
     phosh's screensaver powers the output down after a few minutes idle, and an
     INJECTED touch does NOT wake it -- uinput events reach the client but never
@@ -102,7 +123,15 @@ def unblank():
         cmd = ["sudo", "-n", "-u", "#%d" % SESSION_UID, "env",
                "XDG_RUNTIME_DIR=" + RUNTIME_DIR,
                "DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus" % RUNTIME_DIR] + cmd
-    return run(*cmd).returncode == 0
+    on = run(*cmd).returncode == 0
+    # Powering the output back on is only half of it: phosh keeps its LOCK
+    # surface on top, so every injected touch lands on the lockscreen and the
+    # app behind it never moves. That reads exactly like a dead gesture -- on
+    # 2026-09-09 three arms in a row reported "the gesture hit nothing that
+    # animates" with a perfectly healthy browser one surface down. loginctl
+    # is the lever; the screensaver's own DBus API has no Unlock.
+    unlocked = run("sudo", "-n", "loginctl", "unlock-sessions").returncode == 0
+    return on and unlocked
 
 
 def settle(timeout=10.0, quiet_for=0.6):

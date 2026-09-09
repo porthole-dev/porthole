@@ -12,11 +12,11 @@ reads as fine. So this samples the DPU's own vsync counter fast enough to
 recover *individual frame intervals* and reports their distribution: p50 is
 what the session normally does, p95/max is what the user actually notices.
 
-Needs ph-touch.py and ph-ui.py beside it, and `grim` and `lswt` installed
-ON THE DEVICE -- ph-ui.py shells out to both to identify the focused
-surface. Neither is in the pmOS image by default, and without them this
-exits with a FileNotFoundError traceback rather than saying what is
-missing: `apk add grim lswt`.
+Needs ph-touch.py and ph-ui.py beside it, and ON THE DEVICE `grim` plus one
+of `lswt` or `wlrctl` -- ph-ui.py shells out to them to identify the focused
+surface. Neither is in the pmOS image by default: `apk add grim wlrctl`.
+lswt is not packaged by Alpine at all, so it does not survive a rootfs
+reflash; ph-ui.py falls back to wlrctl, which is packaged.
 
   ph-gesture-bench.py NAME [REPEATS]
   ph-gesture-bench.py drag X1 Y1 X2 Y2 MS [REPEATS] [--fling] [--pause MS]
@@ -72,6 +72,7 @@ _touch = _sibling("ph-touch")
 Touch, drag = _touch.Touch, _touch.drag
 _ui = _sibling("ph-ui")
 screen_hash, settle, toplevels = _ui.screen_hash, _ui.settle, _ui.toplevels
+focus = _ui.focus
 unblank = _ui.unblank
 
 # 6.0 named it encoder31, 6.18 names it encoder-0. Glob, don't guess.
@@ -302,11 +303,24 @@ def measure(name, desc, repeats, fn, wl_log=None):
     # otherwise drags against a dark output and lands in the "never changed"
     # branch below -- a void arm that looks identical to a real end-stop.
     woke = unblank()
+    # And raise the app, because "the screen is on and unlocked" still is not
+    # "the gesture will reach the thing under test". phosh's app grid sits over
+    # every window and swallows the drag; on 2026-09-09 an arm flung at the app
+    # grid for six repeats and reported a void, with a perfectly healthy browser
+    # one surface down. If exactly one app is open there is no ambiguity about
+    # which one the arm meant, so raise it.
+    tops = toplevels()
+    if len(tops) == 1:
+        try:
+            focus(tops[0].get("app-id"))
+        except SystemExit as e:
+            print("note: could not raise %s (%s)" % (tops[0].get("app-id"), e),
+                  file=sys.stderr)
     # Witness the screen before and after. A run whose screen never changed
     # measured nothing, however many frames it counted, and must say so rather
     # than report a frame rate for a still image.
     before = settle()
-    apps = [t.get("app-id") for t in toplevels()] or ["(shell only)"]
+    apps = [t.get("app-id") for t in tops] or ["(shell only)"]
     wl_at = os.path.getsize(wl_log) if wl_log else 0
     t = Touch() if fn else None
     s = Sampler()

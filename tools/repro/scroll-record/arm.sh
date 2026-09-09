@@ -35,5 +35,10 @@ tk_run "printf 'export TK_WKPHASE_OFFSETS=%s\n' \"'$TK_WKPHASE_OFFSETS'\" > /tmp
 # page with no images and no script is the control that says whether the layouts
 # below are WebKit's or Wikipedia's.
 [ -n "${TK_SCROLL_URL:-}" ] && tk_run "printf 'export TK_SCROLL_URL=%s\n' \"'$TK_SCROLL_URL'\" >> /tmp/wkoff.sh" >/dev/null
+# The gesture travels too: "is it smooth" and "why is a FLING blank" want
+# different drags, and the second is the one the user reports.
+for v in PORTHOLE_SCROLL_DRAG PORTHOLE_SETTLE PORTHOLE_EPHY_ARGS; do
+	[ -n "${!v:-}" ] && tk_run "printf 'export $v=%s\n' \"'${!v}'\" >> /tmp/wkoff.sh" >/dev/null
+done
 
 exec tools/repro/phoc-planes/run-arm.sh /tmp/wkrec.sh WKRECDONE "${1:-420}"
