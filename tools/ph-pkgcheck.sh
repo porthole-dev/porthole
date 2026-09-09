@@ -118,15 +118,49 @@ for p in "${OWNED[@]}"; do
 	done
 done
 
-# The kernel's own claim, which lies after a boot-only flash (modules and the
-# apk DB are not replaced), so /proc/version is the only truth.
+# The kernel, and the one check here that used to lie.
+#
+# It read `#N` out of /proc/version and asserted `#N == pkgrel + 1`. Those are
+# different namespaces: `#N` is the kernel's own build counter, pkgrel is a
+# packaging revision, and they line up by coincidence. Worse, the coincidence
+# SURVIVES a rebuild at an unchanged pkgrel -- which is exactly how this line
+# printed
+#
+#     ok    running kernel #32 == aport r31 + 1
+#
+# on 2026-09-09 about a device running a kernel five days older than the apk
+# beside it. A check that certifies the thing it cannot see is worse than no
+# check, because it is believed.
+#
+# The sound comparison is build TIME, and it is already made once, in
+# `pkg outdated`: apk's `t:` for the installed package against `builddate` in
+# the .apk. So ask it rather than re-deriving it here -- two implementations of
+# one decision is how the two disagreed in the first place.
 kver=$(timeout 15 ssh "${TK_SSH_OPTS[@]}" "$PHONE" \
 	'grep -o "#[0-9]*" /proc/version' 2>/dev/null)
-krel=$(sed -n 's/^pkgrel=//p' "$(aport_dir "$KERNEL_APORT")/APKBUILD" | head -1)
-if [ -n "$kver" ]; then
-	want="#$((krel + 1))"
-	[ "$kver" = "$want" ] && note "ok    running kernel $kver == aport r$krel + 1" \
-		|| fail "device runs kernel $kver, aport r$krel expects $want"
+behind=$("$PORTHOLE_ROOT/bin/porthole" pkg outdated --json 2>/dev/null \
+	| python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+if not d.get("device_read"):
+    print("UNREAD")
+    sys.exit(0)
+for row in d.get("device_behind", []):
+    print(row["package"])' 2>/dev/null)
+
+if [ "$behind" = "UNREAD" ]; then
+	note "skip  device not read -- nothing here says what it is running"
+elif [ -n "$behind" ]; then
+	for b in $behind; do
+		fail "device is behind on $b (its build is older than the apk here)"
+	done
+	note "      porthole pkg install <name> --yes"
+elif [ -n "$kver" ]; then
+	# Reported as CONTEXT, never as proof: the build counter cannot tell you
+	# whether the apk was rebuilt underneath it.
+	note "ok    device runs the newest build we carry (kernel $kver)"
 fi
 
 [ $rc -eq 0 ] && note "" && note "everything that ships is what you edited."
