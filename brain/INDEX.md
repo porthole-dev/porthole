@@ -81,6 +81,7 @@ generic notes as well.
 | [the-workspace-loop-is-seconds-and-still-uncached](findings/the-workspace-loop-is-seconds-and-still-uncached.md) | `generic` | The workspace edit-build loop is 6-8 s, and ccache is still hit zero times |
 | [touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm](findings/touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm.md) | `device:google-taimen` | Finger drags on GTK4 WebKit ride the scrolling thread, and r61's two patches cut the Wikipedia drag from 289 layouts per 10 s to 10 |
 | [two-thirds-of-associations-never-get-keys](findings/two-thirds-of-associations-never-get-keys.md) | `device:google-taimen` | Two thirds of successful associations never complete the 4-way handshake, and ath10k says nothing |
+| [va-api-cannot-wrap-a-stateful-v4l2-decoder](findings/va-api-cannot-wrap-a-stateful-v4l2-decoder.md) | `generic` | VA-API cannot be put on top of venus: it is a STATEFUL V4L2 decoder and VA-API's model is stateless, which is why only GStreamer-based browsers get hardware decode here |
 | [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
 | [venus-wedges-on-the-first-vbif-write](findings/venus-wedges-on-the-first-vbif-write.md) | `device:google-taimen` | msm8998 TZ refuses venus resume with -EINVAL, mainline swallows it, and the whole block stays dark |
@@ -232,7 +233,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 118
+- `generic` — 119
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
