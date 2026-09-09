@@ -108,6 +108,13 @@ echo "[$L] nav ms: $(python3 $EV 'var t=performance.timing,n=t.navigationStart; 
 
 # The screen has to be ON or every window below measures a dark output and the
 # drag moves nothing. tk-ui says whether the screensaver refused.
+python3 /tmp/ph-ui.py unblank >/dev/null 2>&1 || echo "[$L] WARNING: unblank refused"
+# ...and raise the browser. An arm before this one left the session in phosh's
+# app grid, which sits over every window: the page loaded, the probes armed,
+# and six flings went into the launcher. The scrollY guard caught it, but only
+# after three minutes -- and /tmp/pre-$L.png is the thing to look at when it does.
+python3 /tmp/ph-ui.py focus org.gnome.Epiphany >/dev/null 2>&1 || echo "[$L] WARNING: could not raise the browser"
+
 # TK_BLANK_VIDEO=1: start the page's <video> and PROVE it is advancing before
 # anything is measured. "Does it lag while I scroll" is a different workload
 # from a pure scroll, and a paused player looks identical to a playing one in
@@ -120,6 +127,12 @@ if [ -n "${TK_BLANK_VIDEO:-}" ]; then
 		[ "$rs" -ge 1 ] && break
 		sleep 2
 	done
+	# element.play() is not enough on YouTube: it flips paused to false and the
+	# MSE player never feeds a source buffer, so videoWidth stays 0 and
+	# currentTime stays 0 while everything LOOKS like it is playing. The player
+	# starts on a real tap on its own play button -- an injected uinput touch is
+	# a trusted gesture, a synthetic click is not. So: try play(), and if the
+	# clock does not move, ask the page where its play button is and tap THAT.
 	python3 $EV 'var v=document.querySelector("video"); v.muted=true; v.play(); "play"' >/dev/null 2>&1
 	sleep 6
 	t1=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null)
@@ -128,23 +141,35 @@ if [ -n "${TK_BLANK_VIDEO:-}" ]; then
 	if python3 -c "import sys; sys.exit(0 if float('${t2:-0}')-float('${t1:-0}') > 2 else 1)"; then
 		VIDEO=1
 	else
-		sudo -n python3 /tmp/ph-touch.py tap 720 600 >/dev/null 2>&1
-		sleep 8
+		# YouTube's <video> has no src at all until its own player is told to
+		# start: readyState 0, networkState 0 (EMPTY), getPlayerState() 5 (CUED).
+		# element.play() cannot fix that -- there is nothing to play -- and
+		# neither can tapping the poster, measured 2026-09-09 across four
+		# selectors. The player API attaches the MediaSource and it works.
+		python3 $EV 'var p=document.querySelector("#movie_player"); if (p && p.playVideo) { p.mute(); p.playVideo(); "asked" } else "no player api"' >/dev/null 2>&1
+		sleep 10
 		t1=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null); sleep 3
 		t2=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null)
 		python3 -c "import sys; sys.exit(0 if float('${t2:-0}')-float('${t1:-0}') > 2 else 1)" && VIDEO=1
+	fi
+	if [ "$VIDEO" = 0 ]; then
+		for sel in '.ytp-large-play-button' 'button[aria-label*="Play"]' '#movie_player' 'video'; do
+			XY=$(python3 $EV "var b=document.querySelector('$sel'); if(!b) 'none'; else { var r=b.getBoundingClientRect(); r.width<20?'none':Math.round((r.left+r.width/2)*devicePixelRatio)+' '+Math.round((r.top+r.height/2)*devicePixelRatio); }" 2>/dev/null)
+			case "$XY" in ''|none|*[!0-9\ ]*) continue ;; esac
+			echo "[$L] tapping $sel at $XY to start the player"
+			# shellcheck disable=SC2086
+			sudo -n python3 /tmp/ph-touch.py tap $XY >/dev/null 2>&1
+			sleep 8
+			t1=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null); sleep 3
+			t2=$(python3 $EV 'document.querySelector("video").currentTime' 2>/dev/null)
+			python3 -c "import sys; sys.exit(0 if float('${t2:-0}')-float('${t1:-0}') > 2 else 1)" && { VIDEO=1; break; }
+		done
 	fi
 	echo "[$L] video: $(python3 $EV 'var v=document.querySelector("video"),q=v.getVideoPlaybackQuality?v.getVideoPlaybackQuality():{}; JSON.stringify({w:v.videoWidth,h:v.videoHeight,paused:v.paused,t:Math.round(v.currentTime),total:q.totalVideoFrames,dropped:q.droppedVideoFrames})' 2>/dev/null) advancing=$VIDEO"
 	[ "$VIDEO" = 1 ] || { echo "[$L] the video never advanced -- arm void, do not read its numbers"; echo BLANKARMDONE; exit 1; }
 	Q0=$(python3 $EV 'var q=document.querySelector("video").getVideoPlaybackQuality(); q.totalVideoFrames+":"+q.droppedVideoFrames' 2>/dev/null)
 fi
 
-python3 /tmp/ph-ui.py unblank >/dev/null 2>&1 || echo "[$L] WARNING: unblank refused"
-# ...and raise the browser. An arm before this one left the session in phosh's
-# app grid, which sits over every window: the page loaded, the probes armed,
-# and six flings went into the launcher. The scrollY guard caught it, but only
-# after three minutes -- and /tmp/pre-$L.png is the thing to look at when it does.
-python3 /tmp/ph-ui.py focus org.gnome.Epiphany >/dev/null 2>&1 || echo "[$L] WARNING: could not raise the browser"
 python3 $EV 'window.scrollTo(0,0); "top"' >/dev/null 2>&1
 sleep 2
 Y0=$(python3 $EV 'window.scrollY' 2>/dev/null)
@@ -190,6 +215,11 @@ if [ "$PHASE" = 1 ]; then
 	done
 	echo "[$L] --- main-thread phases during that drag ---"
 	sed '/PHASEDONE/d' "/tmp/wk-$L.out" 2>/dev/null
+	# A silent probe set and a phase that is never called print identically.
+	# Say which one this is, because "the rendering pipeline is not involved"
+	# has been read off an unattached probe set twice on this port.
+	grep -qE '^(layout|style|record|updateRendering) ' "/tmp/wk-$L.out" 2>/dev/null || \
+		echo "[$L] NO PHASE FIRED -- that is an unattached probe set, not a quiet browser (a uprobe does not attach to an already-mapped library)"
 fi
 
 U=$(id -u)
