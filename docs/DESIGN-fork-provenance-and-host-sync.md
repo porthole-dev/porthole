@@ -1,7 +1,15 @@
+<!-- porthole | design | 2026-09-09 -->
+<!-- porthole:design-doc -->
 # Fork provenance, upstream drift, and moving between hosts
 
 **Date:** 2026-09-09
-**Status:** approved design, not yet planned
+**Status:** approved design; Plan 1 in progress, Plans 2 and 3 not built.
+
+`porthole pkg drift`, `porthole pkg rebase` and `porthole sync` below are
+proposals. The `porthole:design-doc` marker above exempts them from
+`tests/test_documented_commands.py`. **Remove the marker once every command
+named here parses** -- at that point the exemption is hiding a real break
+rather than describing unbuilt work.
 
 Written after auditing what google-taimen actually carries, against
 `pmaports@perf/crossdirect-native-link` and `aports_upstream@master`
