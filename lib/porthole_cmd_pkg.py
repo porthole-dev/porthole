@@ -1549,9 +1549,9 @@ def _drift(ctx, args) -> int:
         # those verbatim upstream (23575.patch, llvm22-armhf.patch,
         # riscv64-tls.patch), and nobody loses those when apk picks upstream's
         # build, because upstream's build already has them.
-        up_dir = pathlib.Path(upstream) / up_rel_path if upstream else None
-        their_patches = ({p.name for p in up_dir.glob("*.patch")}
-                         if up_dir and up_dir.is_dir() else set())
+        their_patches, patch_source = (
+            upstream_patch_names(upstream, up_rel_path, ref)
+            if upstream else (set(), ""))
         patches = sorted({p.name for p in ours_dir.glob("*.patch")}
                          - their_patches)
         rows[name] = {
@@ -1559,6 +1559,7 @@ def _drift(ctx, args) -> int:
             "ours": f"{ours.get('pkgver')}-r{ours.get('pkgrel')}",
             "upstream": f"{theirs.get('pkgver')}-r{theirs.get('pkgrel')}",
             "patches": patches,
+            "patch_source": patch_source,
             "tier": fields.get("tier", "required"),
             "source": source,
         }
@@ -1888,14 +1889,58 @@ def nested_in_dir(path) -> list:
     return sorted(f.name for f in pathlib.Path(path).iterdir() if f.is_dir())
 
 
-def _nested_at(upstream, ref: str, rel: str) -> list:
-    """Paths under `rel` that `_tree_at` skipped because they are nested."""
+def _names_at(upstream, ref: str, rel: str):
+    """`(paths, ok)` for everything under `rel` at `ref`. Names only.
+
+    Separate from `_tree_at` because two callers want the listing without
+    paying `cat-file` per file, and because `ok` distinguishes "the tree is
+    empty" from "the ref could not be read" -- a distinction the callers make
+    opposite decisions on.
+    """
     out, rc = _git_read(upstream, ["ls-tree", "-r", "--name-only", ref,
                                    "--", f"{rel}/"])
     if rc != 0:
+        return [], False
+    return [p.strip() for p in out.splitlines() if p.strip()], True
+
+
+def _nested_at(upstream, ref: str, rel: str) -> list:
+    """Paths under `rel` that `_tree_at` skipped because they are nested."""
+    paths, ok = _names_at(upstream, ref, rel)
+    if not ok:
         return []
-    return sorted(p.strip() for p in out.splitlines()
-                  if p.strip() and p.strip().count("/") != rel.count("/") + 1)
+    return sorted(p for p in paths if p.count("/") != rel.count("/") + 1)
+
+
+def upstream_patch_names(upstream, rel: str, ref: str):
+    """`(names, source)` -- the patches upstream ships for `rel`, AT `ref`.
+
+    READ FROM THE REF, not from the checked-out worktree, and this is a fix
+    rather than a preference. `drift` compared VERSIONS against the ref while
+    subtracting patches globbed from the worktree, and on this host that
+    worktree is 1009 commits behind: measured 2026-09-10, `main/mesa` on disk
+    still carries `llvm22-armhf.patch` while `origin/master` has deleted it.
+
+    So `ours - theirs` subtracted a patch upstream no longer ships, and mesa's
+    alarm said "3 patches at risk" when the honest answer is four --
+    `llvm22-armhf.patch` is now carried only by us, and goes with the rest if
+    apk picks upstream's build. #84 claimed this could "overstate risk but not
+    mask it"; a STALE worktree masks, and was masking one on the single fork
+    the design was written for.
+
+    Falls back to the worktree when the ref cannot be read, and says which
+    happened -- a silent fallback to the stale thing is the bug being fixed.
+    """
+    paths, ok = _names_at(upstream, ref, rel)
+    if ok:
+        return ({p.rsplit("/", 1)[1] for p in paths
+                 if p.endswith(".patch")
+                 and p.count("/") == rel.count("/") + 1}, f"git {ref}")
+    up_dir = pathlib.Path(upstream) / rel
+    if up_dir.is_dir():
+        return ({p.name for p in up_dir.glob("*.patch")},
+                f"worktree ({ref} unreadable)")
+    return set(), ""
 
 
 def base_ref_for(upstream, rel: str, entry: dict):
@@ -2559,24 +2604,46 @@ def _fork(ctx, args) -> int:
     # why every backfilled entry says `commit: unknown`.
     import porthole_aports_manifest as man
 
-    up_fields = apkbuild_fields((hits[0] / "APKBUILD").read_text(
-        errors="replace"))
-    try:
-        commit = subprocess.run(
-            ["git", "-C", str(upstream), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=10
-        ).stdout.strip() or "unknown"
-    except (OSError, subprocess.SubprocessError):
-        commit = "unknown"
-    path = man.append(ctx.root, device, man.entry_text(
-        name, f"{hits[0].parent.name}/{name}",
-        up_fields.get("pkgver", "?"), up_fields.get("pkgrel", "?"), commit))
+    path = man.append(ctx.root, device,
+                      fork_provenance(upstream, hits[0], name))
     ctx.out.kv("recorded", str(path.relative_to(ctx.root)), 9)
     ctx.out.hint(f"edit {path.name}: say what breaks without {name}")
 
     ctx.out.hint(f"porthole pkg build {name} --detach")
     ctx.out.hint("porthole pkg watch")
     return EX_OK
+
+
+def fork_provenance(upstream, aport_dir, name: str) -> str:
+    """The manifest entry for a fork just taken from `aport_dir`.
+
+    Extracted from `_fork` so it can be RUN. #84 shipped this inline and said
+    so: "verified by matching the call against the unit-tested entry_text()
+    helper -- this is the one integration in the branch nobody has run".
+    Argument order and field names matching by inspection is exactly the
+    check that passes while the wiring is wrong.
+
+    The WORKTREE's HEAD is the right commit here, unlike everywhere else in
+    this module. `pkg drift` and `pkg rebase` read the remote-tracking ref
+    because they ask what upstream has NOW; this asks what we just copied,
+    and `pmbootstrap aportgen --fork-alpine` copies the files on disk. A fork
+    taken from a checkout 1009 commits behind came from that commit, and
+    recording origin/master would be a confident lie that `pkg rebase` would
+    later rebase against.
+    """
+    up_fields = apkbuild_fields(
+        (pathlib.Path(aport_dir) / "APKBUILD").read_text(errors="replace"))
+    commit, rc = _git_read(upstream, ["rev-parse", "--short", "HEAD"])
+    return man_module().entry_text(
+        name, f"{pathlib.Path(aport_dir).parent.name}/{name}",
+        up_fields.get("pkgver", "?"), up_fields.get("pkgrel", "?"),
+        commit.strip() if rc == 0 and commit.strip() else "unknown")
+
+
+def man_module():
+    import porthole_aports_manifest as man
+
+    return man
 
 
 def build_module():
