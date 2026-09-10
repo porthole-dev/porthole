@@ -666,6 +666,27 @@ def check_profile(ch: Checks, cfg, root: pathlib.Path) -> None:
     else:
         ch.add("profile: required keys", "ok", ", ".join(required))
 
+    # A carried fork that upstream has overtaken disappears from the next
+    # flash with no message. doctor is where someone looks before forming a
+    # theory, so it is where this belongs.
+    import porthole_aports_manifest as man
+
+    manifest = man.load(root, device)
+    if not manifest:
+        ch.add("profile: aports.conf", "warn",
+               "this device lists no aports of its own",
+               f"profiles/{device}/aports.conf -- what does this port carry "
+               f"on top of stock?")
+    else:
+        trouble = man.problems(manifest)
+        if trouble:
+            ch.add("profile: aports.conf", "warn", trouble[0],
+                   "porthole pkg owned --json")
+        else:
+            ch.add("profile: aports.conf", "ok",
+                   f"{len(man.names(manifest, 'required'))} required, "
+                   f"{len(man.names(manifest, 'optional'))} optional")
+
     if cfg.get("PORTHOLE_CODENAME") and cfg["PORTHOLE_CODENAME"] != device:
         ch.add("profile: codename", "warn",
                f"PORTHOLE_CODENAME={cfg['PORTHOLE_CODENAME']!r} but the "

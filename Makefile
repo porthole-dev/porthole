@@ -39,6 +39,7 @@ test:            ## CI job "tests": suites, brain lint, shell lib, device mutex
 	  || { echo FAIL; echo "$$out" | sed 's/^/    /'; fail=1; }; \
 	printf '%-28s ' test_shell_lib.sh; bash tests/test_shell_lib.sh || fail=1; \
 	printf '%-28s ' test_ph_build.sh; bash tests/test_ph_build.sh || fail=1; \
+	printf '%-28s ' test_pkgcheck_owned.sh; sh tests/test_pkgcheck_owned.sh || fail=1; \
 	printf '%-28s ' ph-device-test.sh; bash tools/ph-device-test.sh >/dev/null \
 	  && echo "ok" || { echo FAIL; fail=1; }; \
 	exit $$fail

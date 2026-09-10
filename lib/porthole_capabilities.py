@@ -127,23 +127,9 @@ def parse(text: str):
     then renders as `?` rather than as a failure, which is the whole point:
     "nobody wrote a probe" and "the probe said no" are different answers.
     """
-    found = collections.OrderedDict()
-    current = None
-    for raw in (text or "").splitlines():
-        line = raw.rstrip()
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if not line[0].isspace():
-            current = line.strip()
-            found.setdefault(current, {})
-            continue
-        if current is None:
-            continue
-        field, sep, command = line.strip().partition(":")
-        if not sep or field.strip() not in FIELDS or not command.strip():
-            continue
-        found[current][field.strip()] = command.strip()
-    return found
+    import porthole
+
+    return porthole.parse_blocks(text, FIELDS)
 
 
 # ASCII record and unit separators. They exist for this and no ordinary
