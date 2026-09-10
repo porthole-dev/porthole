@@ -553,6 +553,92 @@ def test_a_quiet_log_is_not_a_running_build():
     assert snap is None, f"a log quiet for an hour was read as a live build: {snap}"
 
 
+def test_a_cancelled_build_is_not_resurrected_from_the_shared_log():
+    """`pkg stop` pkills pmbootstrap, so the log gets no DONE! and no outcome
+    line -- and both of the other facts the fallback reads survive the kill
+    untouched. The staged APKBUILD still names the package, and the mtime is
+    fresh precisely BECAUSE the build was killed a moment ago. So the row went
+    on showing a build that had just been cancelled, with an ETA extrapolated
+    from samples that had stopped moving:
+
+        device-google-taimen [<bar>] 1% quiet 1m41s 87h54m build 1008/55856
+
+    reported 2026-09-10. This checkout had published `failed` for that very
+    build seconds earlier, and that verdict is better evidence than a log the
+    whole workspace shares.
+    """
+    import time
+    now = time.time()
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-"))
+    build = work / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+    build.mkdir(parents=True)
+    (build / "APKBUILD").write_text("pkgname=chromium\n")
+    # A real build tail: ninja steps, no DONE!, no outcome for chromium.
+    (work / "log.txt").write_text(
+        "[1006/55856] Building CXX object obj/a.o\n"
+        "[1007/55856] Building CXX object obj/b.o\n"
+        "[1008/55856] Building CXX object obj/c.o\n")
+    killed = now - 101          # inside LOG_FRESH_S, which is why it lingered
+    os.utime(work / "log.txt", (killed, killed))
+
+    repo = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-repo-"))
+    (repo / ".run").mkdir()
+    (repo / ".run" / "pkg-status.json").write_text(json.dumps(
+        {"state": "failed", "rung": "pkg:chromium", "pid": 1,
+         "last_at": killed, "started": now - 3000}))
+
+    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
+    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
+    try:
+        snap, _ = sl.build_snapshot(repo, now)
+    finally:
+        if saved is None:
+            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
+        else:
+            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
+
+    assert snap is not None, "the cancelled build should still linger as failed"
+    assert (snap.get("state") or "running") != "running", (
+        f"a cancelled build was re-invented as running: {snap}")
+    assert snap.get("rung") == "pkg:chromium", snap
+
+
+def test_an_untracked_build_still_gets_a_row_after_an_unrelated_verdict():
+    """The guard above must key on the NAME this checkout published a verdict
+    for. A finished kernel rung says nothing about a webkit build somebody
+    started with `sandbox shell --command`, and that one still has no other
+    way onto the screen."""
+    import time
+    now = time.time()
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-"))
+    build = work / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+    build.mkdir(parents=True)
+    (build / "APKBUILD").write_text("pkgname=webkit2gtk-6.0\n")
+    (work / "log.txt").write_text(
+        "[7947/9429] Building CXX object x.o\n")
+    fresh = now - 3
+    os.utime(work / "log.txt", (fresh, fresh))
+
+    repo = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-repo-"))
+    (repo / ".run").mkdir()
+    (repo / ".run" / "pkg-status.json").write_text(json.dumps(
+        {"state": "failed", "rung": "pkg:chromium", "pid": 1,
+         "last_at": now - 20, "started": now - 3000}))
+
+    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
+    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
+    try:
+        snap, reattached = sl.build_snapshot(repo, now)
+    finally:
+        if saved is None:
+            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
+        else:
+            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
+
+    assert snap is not None, "an untracked webkit build lost its row"
+    assert "webkit" in (snap.get("rung") or ""), snap
+
+
 # ------------------------------------- can you tell it is still alive? --
 
 def test_a_running_row_carries_evidence_that_it_is_moving():

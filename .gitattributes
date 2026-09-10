@@ -9,3 +9,19 @@ bin/*   text eol=lf
 
 *.img   binary
 *.bin   binary
+
+# brain/INDEX.md is GENERATED, and git must not try to merge it.
+#
+# Its content is a function of the whole note set, but a three-way merge is
+# line-wise, so two branches that each add a note merge cleanly into a file
+# that is wrong: both rows survive, and the `By scope` totals -- which each
+# branch incremented from 123 to 124 independently, producing identical text
+# -- do not. The result claims 124 where the merged tree holds 125.
+#
+# Nobody can debug that from the branch, because the branch is consistent.
+# It appears only in the merge commit CI builds for a pull request, so it
+# reads as "passes here, fails on CI" and it cost four CI rounds once.
+#
+# `-merge` makes any concurrent change a conflict instead. The resolution is
+# not to edit it: run `make brain-index` and commit what it writes.
+brain/INDEX.md  -merge
