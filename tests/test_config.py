@@ -384,5 +384,34 @@ def test_the_cross_file_knobs_answer_to_both_names():
         os.environ.update(real)
 
 
+BLOCKS = """\
+# a comment
+mesa
+  upstream: main/mesa
+  tier:     required
+  bogus:    ignored
+
+libcamera
+  upstream: main/libcamera
+"""
+
+
+def test_parse_blocks_reads_allowed_fields_in_file_order():
+    got = porthole.parse_blocks(BLOCKS, ("upstream", "tier"))
+    assert list(got) == ["mesa", "libcamera"]
+    assert got["mesa"]["upstream"] == "main/mesa"
+    assert got["mesa"]["tier"] == "required"
+
+
+def test_parse_blocks_drops_unknown_fields_rather_than_failing():
+    got = porthole.parse_blocks(BLOCKS, ("upstream", "tier"))
+    assert "bogus" not in got["mesa"], got["mesa"]
+
+
+def test_parse_blocks_keeps_a_block_with_only_one_field():
+    got = porthole.parse_blocks(BLOCKS, ("upstream", "tier"))
+    assert got["libcamera"] == {"upstream": "main/libcamera"}
+
+
 if __name__ == "__main__":
     sys.exit(main())

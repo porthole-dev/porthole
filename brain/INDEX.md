@@ -124,6 +124,7 @@ generic notes as well.
 | [a-browser-arm-runs-on-a-throttled-phone-that-is-discharging-on-the-pc-port](traps/a-browser-arm-runs-on-a-throttled-phone-that-is-discharging-on-the-pc-port.md) | `device:google-taimen` | Every browser arm runs at 75-78 C with the big cores capped to 1.0-1.5 GHz, and a phone on a PC's USB port discharges under that load until it browns out |
 | [a-build-outlives-the-porthole-run-that-tracks-it](traps/a-build-outlives-the-porthole-run-that-tracks-it.md) | `generic` | A build survives the porthole run that started it, and takes the buildroot lock to the grave |
 | [a-fresh-kernel-cannot-ram-boot-against-installed-modules](traps/a-fresh-kernel-cannot-ram-boot-against-installed-modules.md) | `generic` | A freshly built kernel cannot RAM-boot against the modules already on the device |
+| [a-freshness-indicator-must-measure-the-thing-you-actually-read](traps/a-freshness-indicator-must-measure-the-thing-you-actually-read.md) | `generic` | A freshness indicator that measures a different object than the one you compared turns "nobody looked" into confidence |
 | [a-full-zap-inside-the-workspace-unmounts-it](traps/a-full-zap-inside-the-workspace-unmounts-it.md) | `generic` | pmbootstrap zap inside the workspace tears down porthole's own bind mounts, and the build then refuses about a version |
 | [a-hard-hang-writes-nothing-to-disk](traps/a-hard-hang-writes-nothing-to-disk.md) | `generic` | A hard hang writes nothing to disk — capture on the host, before you trigger |
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
@@ -235,7 +236,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 121
+- `generic` — 122
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1

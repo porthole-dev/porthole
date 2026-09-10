@@ -1377,6 +1377,248 @@ def _outdated(ctx) -> int:
     return ctx.emit(payload, render)
 
 
+def _owned(ctx, args) -> int:
+    """What this port carries on top of stock.
+
+    Bare names on stdout, because tools/ph-pkgcheck.sh reads it with $(...)
+    and a decorated line would become an argument. The reasoning belongs to
+    --json and to the manifest itself.
+    """
+    import porthole_aports_manifest as man
+
+    device = ctx.cfg.get("PORTHOLE_DEVICE", "")
+    manifest = man.load(ctx.root, device)
+    if not manifest:
+        raise Bail(f"{device} has no aports.conf", EX_UNAVAILABLE,
+                   f"expected at {man.path_for(ctx.root, device)}")
+
+    complaints = man.problems(manifest)
+    tier = getattr(args, "tier", None)
+    selected = man.names(manifest, tier)
+
+    def render():
+        for name in selected:
+            ctx.out(name)
+        for problem in complaints:
+            ctx.out.warn(problem)
+
+    # problems() reports on the WHOLE manifest, not the tier-filtered
+    # subset -- a malformed optional entry is still worth flagging (and
+    # failing the exit code for) even when someone only asked for required.
+    aports = {n: manifest[n] for n in selected}
+
+    # ctx.emit prints JSON when --json was passed and returns EX_OK either
+    # way, so the exit code is ours to decide afterwards.
+    ctx.emit({"aports": aports, "problems": complaints}, render)
+    return EX_FAIL if complaints else EX_OK
+
+
+def _git_read(cwd, args, timeout=10):
+    """One read-only `git` call against `cwd`: (stdout, returncode).
+
+    Every caller below passes a query against a ref or the index that is
+    already local -- `show`, `log`, `symbolic-ref`, `rev-list` -- so this
+    never touches the network. `drift` must stay offline: reading a ref is
+    free, fetching one is a side effect this command does not get to have.
+    """
+    try:
+        proc = subprocess.run(["git", "-C", str(cwd)] + list(args),
+                              capture_output=True, text=True, timeout=timeout)
+        return proc.stdout, proc.returncode
+    except (OSError, subprocess.SubprocessError):
+        return "", 1
+
+
+def upstream_remote_ref(upstream) -> str:
+    """`origin/<default-branch>` for the aports_upstream checkout.
+
+    Discovered rather than hardcoded: `git symbolic-ref refs/remotes/
+    origin/HEAD` is what `git remote show origin` and a fresh clone both set,
+    so a repo whose default branch is not `master` is still read correctly.
+    Falls back to `origin/master` both when that symref has never been set
+    and when there is no `origin` remote at all -- the second case is what
+    `read_upstream_apkbuild`'s own worktree fallback exists for.
+    """
+    out, rc = _git_read(upstream, ["symbolic-ref", "refs/remotes/origin/HEAD"])
+    out = out.strip()
+    if rc == 0 and out.startswith("refs/remotes/"):
+        return out[len("refs/remotes/"):]
+    return "origin/master"
+
+
+def read_upstream_apkbuild(upstream, up_rel_path: str, ref: str):
+    """`(text, source)` for one upstream aport's APKBUILD.
+
+    Reads the REMOTE-TRACKING ref, not the checked-out worktree. The two are
+    different things: verified on this host, the worktree sat at a commit
+    from 2026-08-20 ("behind 1009" against origin/master) while
+    `.git/FETCH_HEAD`'s mtime said "fetched today" -- so a drift check that
+    read the worktree and reported that mtime was comparing stale data while
+    claiming fresh data. Reading `ref` directly is what makes the date this
+    module reports actually describe what was compared.
+
+    Falls back to the worktree file when the ref can't be read (no `origin`
+    remote, a shallow clone missing the object, ...), so a checkout without
+    one still works -- and `source` says which happened, because a silent
+    fallback to the stale thing is the bug being fixed here.
+    """
+    out, rc = _git_read(upstream, ["show", f"{ref}:{up_rel_path}/APKBUILD"])
+    if rc == 0 and out.strip():
+        return out, f"git {ref}"
+    try:
+        text = (pathlib.Path(upstream) / up_rel_path / "APKBUILD").read_text(
+            errors="replace")
+        return text, f"worktree ({ref} unreadable)"
+    except OSError:
+        return "", ""
+
+
+def _drift(ctx, args) -> int:
+    """Has upstream moved past a fork we carry?
+
+    Answers the question that actually bites -- would apk prefer upstream's
+    build over ours -- rather than "is there a newer version". A fork at
+    -r14 reads as safe against 26.1.6-r0 and as at-risk against 26.2.0-r0,
+    because apk compares pkgver first.
+    """
+    import porthole_aports_manifest as man
+    import porthole_pmaports as pmap
+
+    device = ctx.cfg.get("PORTHOLE_DEVICE", "")
+    manifest = man.load(ctx.root, device)
+    if not manifest:
+        raise Bail(f"{device} has no aports.conf", EX_UNAVAILABLE,
+                   f"expected at {man.path_for(ctx.root, device)}")
+
+    pmaports = _find_pmaports(ctx)
+    upstream = pmap.find_aports_upstream(pmaports)
+    ref = upstream_remote_ref(upstream) if upstream else "origin/master"
+
+    rows = {}
+    for name, fields in manifest.items():
+        up_rel_path = fields.get("upstream", "")
+        # Ours outright -- there is no upstream to drift from. A missing
+        # `upstream:` field (parse_blocks never sets the key at all) reads
+        # identically to the empty string here, same as the `(none -- ...)`
+        # sentinel below -- both mean "not a fork", not "unresolved".
+        if not up_rel_path or up_rel_path.startswith("("):
+            rows[name] = {"verdict": "unknown", "why": "ours, not a fork"}
+            continue
+        ours_dir = find_aport(pmaports, name)
+        theirs_text, source = (
+            read_upstream_apkbuild(upstream, up_rel_path, ref)
+            if upstream else ("", ""))
+        if not ours_dir or not theirs_text:
+            # Distinct from "unknown" (ours outright, above): this is a
+            # fork the manifest CLAIMS to track, that could not actually be
+            # compared -- a wrong upstream path or a missing aport. Saying
+            # "unknown" here reads identically to "no upstream exists" and
+            # a required fork silently goes unchecked; "unresolved" does not.
+            why = (f"{name} not found in pmaports" if not ours_dir else
+                   f"upstream path {up_rel_path!r} not found in "
+                   f"aports_upstream (looked in {ref} and the worktree)")
+            rows[name] = {"verdict": "unresolved", "why": why,
+                          "tier": fields.get("tier", "required")}
+            continue
+        ours = apkbuild_fields((ours_dir / "APKBUILD").read_text(
+            errors="replace"))
+        theirs = apkbuild_fields(theirs_text)
+        call = man.verdict(ours.get("pkgver", ""), ours.get("pkgrel", ""),
+                           theirs.get("pkgver", ""), theirs.get("pkgrel", ""))
+        # Only OUR patches are at risk. Globbing everything beside our
+        # APKBUILD counts Alpine's own patches too -- mesa carries three of
+        # those verbatim upstream (23575.patch, llvm22-armhf.patch,
+        # riscv64-tls.patch), and nobody loses those when apk picks upstream's
+        # build, because upstream's build already has them.
+        up_dir = pathlib.Path(upstream) / up_rel_path if upstream else None
+        their_patches = ({p.name for p in up_dir.glob("*.patch")}
+                         if up_dir and up_dir.is_dir() else set())
+        patches = sorted({p.name for p in ours_dir.glob("*.patch")}
+                         - their_patches)
+        rows[name] = {
+            "verdict": call,
+            "ours": f"{ours.get('pkgver')}-r{ours.get('pkgrel')}",
+            "upstream": f"{theirs.get('pkgver')}-r{theirs.get('pkgrel')}",
+            "patches": patches,
+            "tier": fields.get("tier", "required"),
+            "source": source,
+        }
+
+    # "unresolved" joins "loses"/"at-risk" here: not being able to check a
+    # required fork is exactly as actionable as it losing, and reporting
+    # success in that case is the bug this fix exists for. Optional-tier
+    # unresolved stays quiet, same as optional-tier at-risk already does.
+    bad = [n for n, r in rows.items()
+           if r["verdict"] in ("loses", "at-risk", "unresolved")
+           and r.get("tier", "required") == "required"]
+
+    # How stale is the comparison itself? Derived from the SAME ref the
+    # comparison above actually read, not from FETCH_HEAD's mtime -- those
+    # can disagree (a `git fetch` with no merge bumps FETCH_HEAD's mtime
+    # without moving the worktree, and vice versa a stale FETCH_HEAD says
+    # nothing about how current `ref` itself is).
+    synced = "unknown"
+    behind = 0
+    if upstream:
+        date_out, rc = _git_read(upstream, ["log", "-1", "--format=%cs", ref])
+        if rc == 0 and date_out.strip():
+            synced = date_out.strip()
+        behind_out, rc = _git_read(upstream, ["rev-list", "--count",
+                                              f"HEAD..{ref}"])
+        if rc == 0 and behind_out.strip().isdigit():
+            behind = int(behind_out.strip())
+
+    unresolved = [n for n, r in rows.items() if r["verdict"] == "unresolved"]
+
+    def render():
+        ctx.out.kv(f"upstream ({ref}) last synced", synced, 28)
+        if behind:
+            # Visible even though it does not affect the comparison above
+            # (that reads `ref` directly, never the worktree) -- unless a
+            # row's `source` says it fell back to the worktree, in which
+            # case this IS the staleness that row is exposed to.
+            ctx.out.warn(f"the aports_upstream WORKTREE is {behind} "
+                         f"commit(s) behind {ref} -- fine unless a row below "
+                         f"says its APKBUILD came from the worktree")
+        ctx.out.blank()
+        for name, row in rows.items():
+            if row["verdict"] == "unknown":
+                continue
+            if row["verdict"] == "unresolved":
+                # Visible, not skipped: silently dropping this row is the
+                # exact failure this feature exists to end (finding 2).
+                ctx.out(f"  {name:<28} COULD NOT BE CHECKED -- {row['why']}")
+                continue
+            ctx.out(f"  {name:<28} {row['ours']:<14} "
+                    f"upstream {row['upstream']:<14} {row['verdict'].upper()}")
+            if row.get("source", "").startswith("worktree"):
+                ctx.out(f"      upstream read from the WORKTREE, not "
+                        f"{ref}: {row['source']}")
+            if row["verdict"] != "safe" and row["patches"]:
+                ctx.out(f"      {len(row['patches'])} patches at risk: "
+                        f"{', '.join(row['patches'])}")
+        if bad:
+            ctx.out.blank()
+            ctx.out.warn(f"{len(bad)} carried fork(s) upstream may outrank "
+                         f"or could not be checked: {', '.join(bad)}")
+            ctx.out.hint("docs/DESIGN-fork-provenance-and-host-sync.md "
+                         "section 7 -- rebasing is Plan 3 and not built yet")
+        elif unresolved:
+            # None of these are required-tier (those are already in `bad`
+            # above), so this is informational, not a failure.
+            ctx.out(f"{len(unresolved)} optional-tier fork(s) could not be "
+                    f"checked: {', '.join(unresolved)}")
+        else:
+            # Only true when every carried fork was actually compared:
+            # reached only when `bad` and `unresolved` are both empty.
+            ctx.out("every carried fork still outranks upstream")
+
+    ctx.emit({"aports": rows, "at_risk": bad, "upstream_ref": ref,
+              "upstream_synced": synced, "upstream_worktree_behind": behind},
+             render)
+    return EX_FAIL if bad else EX_OK
+
+
 def _status(ctx) -> int:
     """Where the package build is -- the same contract `porthole build status`
     publishes, so an agent polls one shape for both."""
@@ -1654,6 +1896,17 @@ def _fork(ctx, args) -> int:
         ctx.out.hint(f"porthole pkg fork {name} --yes", "to actually do it")
         return EX_OK
 
+    # Checked before doing any real work, not just before recording it: with
+    # no device resolved, `man.append` below would write into
+    # `profiles/aports.conf` -- a path with no device segment, that
+    # `man.load` never reads back. Failing after aportgen already ran would
+    # leave a real fork nobody's manifest knows about.
+    device = ctx.cfg.get("PORTHOLE_DEVICE", "")
+    if not device:
+        raise Bail("no device selected -- there is nowhere to record this "
+                   "fork's provenance", EX_USAGE,
+                   f"porthole -d <device> pkg fork {name} --yes")
+
     usable, why_not = build_module()._workspace_usable(ctx)
     if usable and not container_has_upstream():
         # 69, not 1: nothing here could fork, which is not a statement about
@@ -1703,6 +1956,28 @@ def _fork(ctx, args) -> int:
                    EX_FAIL, "porthole aports status   to see what it did")
 
     ctx.out.kv("landed", str(landed.relative_to(pmaports)), 9)
+
+    # Record where it came from, now, while we still know. A fork whose
+    # origin is not written down cannot be rebased later: temp/mesa says
+    # nothing about which tree or version it was taken from, and that is
+    # why every backfilled entry says `commit: unknown`.
+    import porthole_aports_manifest as man
+
+    up_fields = apkbuild_fields((hits[0] / "APKBUILD").read_text(
+        errors="replace"))
+    try:
+        commit = subprocess.run(
+            ["git", "-C", str(upstream), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        ).stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        commit = "unknown"
+    path = man.append(ctx.root, device, man.entry_text(
+        name, f"{hits[0].parent.name}/{name}",
+        up_fields.get("pkgver", "?"), up_fields.get("pkgrel", "?"), commit))
+    ctx.out.kv("recorded", str(path.relative_to(ctx.root)), 9)
+    ctx.out.hint(f"edit {path.name}: say what breaks without {name}")
+
     ctx.out.hint(f"porthole pkg build {name} --detach")
     ctx.out.hint("porthole pkg watch")
     return EX_OK
@@ -1926,6 +2201,10 @@ def cmd_pkg(args, ctx) -> int:
         return _watch(ctx, args)
     if action == "outdated":
         return _outdated(ctx)
+    if action == "owned":
+        return _owned(ctx, args)
+    if action == "drift":
+        return _drift(ctx, args)
     if action == "stop":
         return _stop(ctx)
     if action == "search":
@@ -1971,9 +2250,10 @@ SPEC = {
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": ["build", "install", "resume", "search",
                                   "fork", "status", "watch", "outdated",
-                                  "stop"],
+                                  "stop", "owned", "drift"],
                       "help": "build | install | resume | search | fork | "
-                              "status | watch | outdated | stop"}),
+                              "status | watch | outdated | stop | owned | "
+                              "drift"}),
         (["target"], {"nargs": "?", "metavar": "APORT",
                       "help": "build/fork: the aport. search: text to look for"}),
         (["--arch"], {"metavar": "ARCH",
@@ -2009,6 +2289,8 @@ SPEC = {
                              "install: actually write to the device -- "
                              "without it, install only lists what it would "
                              "put there"}),
+        (["--tier"], {"choices": ("required", "optional"),
+                     "help": "owned: only this tier (default: all)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "escapes_scope": True,
@@ -2024,5 +2306,7 @@ SPEC = {
         "porthole pkg outdated",
         "porthole pkg status --json",
         "porthole pkg stop",
+        "porthole pkg owned --tier required",
+        "porthole pkg drift --json",
     ],
 }

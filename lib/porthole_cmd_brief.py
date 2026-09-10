@@ -253,6 +253,7 @@ def cmd_brief(args, ctx) -> int:
         # agent to make first also answers "where am I". A second call for the
         # most important question would be a second call most sessions skip.
         "port": _port_state(ctx, device),
+        "aports": _carried_aports(ctx, device),
     }
 
     def render():
@@ -271,6 +272,10 @@ def cmd_brief(args, ctx) -> int:
             ctx.out.kv("kernel", payload["device"]["kernel"]["evidence"], w)
         ctx.out.kv("tools", str(len(tools)), w)
         ctx.out.kv("builds", builds_line, w)
+        carried = payload["aports"]
+        if carried["required"]:
+            ctx.out.kv("carries", f"{len(carried['required'])} aports "
+                                  f"carried (porthole pkg drift)", w)
         if payload["device"]["traps"]:
             ctx.out.blank()
             ctx.out.heading("device traps encoded in the profile")
@@ -415,6 +420,22 @@ def _device_traps(cfg) -> list[str]:
                    "mismatch bounces to fastboot in ~3s and looks like a bad "
                    "kernel.")
     return out
+
+
+def _carried_aports(ctx, device):
+    """What this port carries on top of stock, for the session brief.
+
+    Cheap on purpose: reads the manifest and nothing else. Whether upstream
+    has overtaken any of them is `porthole pkg drift`, which compares every
+    carried aport against its upstream tree -- more work than a session's
+    opening brief should do before anyone has asked for it.
+    """
+    import porthole_aports_manifest as man
+
+    manifest = man.load(ctx.root, device)
+    return {"required": man.names(manifest, "required"),
+            "optional": man.names(manifest, "optional"),
+            "problems": man.problems(manifest)}
 
 
 def _port_state(ctx, device: str) -> dict:

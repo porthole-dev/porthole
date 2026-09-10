@@ -55,7 +55,6 @@ PHONE=${PHONE:-$PORTHOLE_USER@$HOST}
 # that silently is not installed.
 APORT_DIRS=("$REPO/pmaports/device/testing" "$REPO/pmaports/temp")
 KERNEL_APORT=linux-postmarketos-qcom-msm8998-7.2
-OWNED=(device-google-taimen "$KERNEL_APORT" phoc gst-plugins-good)
 
 # First directory that has it. Keeps the caller from caring which tree an
 # aport lives in.
@@ -70,6 +69,28 @@ rc=0; touch "$STATE"
 
 note() { printf '%s\n' "$*"; }
 fail() { printf 'FAIL  %s\n' "$*"; rc=1; }
+
+# The list is a DEVICE fact and lives in profiles/<codename>/aports.conf, not
+# here: this tool is scope: soc:msm8998 and the aports differ per device. It
+# was four names frozen into this script until 2026-09-09, and temp/mesa --
+# which carries the three a5xx patches -- was not one of them.
+#
+# fallback: a device with no manifest (google-cheetah has none yet) keeps the
+# previous behaviour rather than checking nothing, because checking nothing
+# is the failure this tool exists to prevent.
+# PORTHOLE_PKGCHECK_TIER=all also checks the optional tier -- webkit and
+# epiphany, which are real but multi-hour builds and so are not checked on
+# every run.
+_tier=${PORTHOLE_PKGCHECK_TIER:-required}
+if [ "$_tier" = all ]; then
+	mapfile -t OWNED < <("$PORTHOLE_ROOT/bin/porthole" pkg owned 2>/dev/null) || true
+else
+	mapfile -t OWNED < <("$PORTHOLE_ROOT/bin/porthole" pkg owned --tier "$_tier" 2>/dev/null) || true
+fi
+if [ "${#OWNED[@]}" -eq 0 ]; then
+	OWNED=(device-google-taimen "$KERNEL_APORT" phoc gst-plugins-good)
+	note "no aports.conf for this device -- using the built-in list"
+fi
 
 # --- A. content vs pkgrel ---------------------------------------------------
 for p in "${OWNED[@]}"; do

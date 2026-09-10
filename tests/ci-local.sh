@@ -131,6 +131,7 @@ echo
 echo "== shell lib =="
 bash tests/test_shell_lib.sh >/dev/null 2>&1 && say ok "shell lib" || { say FAIL "shell lib"; fail=1; }
 bash tests/test_ph_build.sh >/dev/null 2>&1 && say ok "ph-build rungs" || { say FAIL "ph-build rungs"; fail=1; }
+sh tests/test_pkgcheck_owned.sh >/dev/null 2>&1 && say ok "pkgcheck owned" || { say FAIL "pkgcheck owned"; fail=1; }
 
 echo
 echo "== smoke (nothing configured) =="

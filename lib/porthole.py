@@ -17,6 +17,7 @@ held together by tests/test_shell_lib.sh, which diffs their output.
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import pathlib
@@ -267,6 +268,33 @@ def parse_env(text: str) -> dict[str, str]:
             value = value.split(" #", 1)[0].rstrip()   # strip inline comment
         out[key] = value
     return out
+
+
+def parse_blocks(text: str, fields):
+    """`name` then indented `key: value` -> ordered {name: {field: value}}.
+
+    The grammar profiles/<codename>/{capabilities,probes}.conf already use,
+    in one place rather than three. Callers pass the fields they accept;
+    anything else is skipped rather than raising, because a profile written
+    for a newer porthole must not break an older one.
+    """
+    found = collections.OrderedDict()
+    current = None
+    for raw in (text or "").splitlines():
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line[0].isspace():
+            current = line.strip()
+            found.setdefault(current, {})
+            continue
+        if current is None:
+            continue
+        field, sep, value = line.strip().partition(":")
+        if not sep or field.strip() not in fields or not value.strip():
+            continue
+        found[current][field.strip()] = value.strip()
+    return found
 
 
 def _read(path: pathlib.Path) -> dict[str, str]:
