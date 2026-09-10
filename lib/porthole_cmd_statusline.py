@@ -79,6 +79,11 @@ from porthole_cli import Bail, EX_FAIL, EX_OK
 # than the line vanishing at the instant the result becomes interesting.
 LINGER_S = 300.0
 
+# How long after a build is killed the shared log may still move because of
+# the death itself -- a half-written line, a signal handler's last word.
+# Past that, something else is writing it.
+KILL_GRACE_S = 10.0
+
 # `refreshInterval` is the load-bearing field, not a nicety. Without it the
 # status line re-runs only on session events -- a new assistant message, a
 # permission-mode change -- and a detached build advancing in the background
@@ -244,6 +249,43 @@ def _samples(rundir: pathlib.Path, mtime: float, done, now: float):
     return kept
 
 
+def _ended_here(best, name: str, log_mtime: float, now: float) -> bool:
+    """Did THIS checkout just publish a terminal verdict for `name`, with
+    nothing written to the shared log since? PURE.
+
+    THE CANCELLED CASE. `pkg stop` ends a build with `pkill -f pmbootstrap`,
+    so pmbootstrap never prints DONE! and abuild never prints an outcome --
+    the two endings `live_build_from_log` knows how to read. Its other two
+    facts survive the kill untouched: the staged APKBUILD still names the
+    package, and the log's mtime is fresh *precisely because* the build was
+    killed a moment ago. So the fallback re-invented the build that `_stop`
+    had just cancelled and published `failed` for, and it stayed on screen for
+    LOG_FRESH_S with an ETA extrapolated from samples that had stopped moving.
+    Reported 2026-09-10 as a row reading `1% quiet 1m41s 87h54m 1008/55856`
+    for a build that was no longer running.
+
+    A verdict this checkout wrote is better evidence than a log every
+    pmbootstrap invocation in the workspace shares. Two things keep the rule
+    narrow, because the fallback exists for real builds nothing published for:
+
+      the NAME must match     a finished kernel rung says nothing about a
+                              `sandbox shell --command` webkit build, and that
+                              one has no other way onto the screen.
+      the LOG must be quiet   since the verdict. A log that moved on is a new
+                              build starting, not the old one's corpse.
+    """
+    if not best:
+        return False
+    if (best.get("state") or "running") == "running":
+        return False
+    if str(best.get("rung") or "").split(":", 1)[-1] != name:
+        return False
+    last_at = best.get("last_at") or 0
+    if now - last_at > LINGER_S:
+        return False            # too old to still be the answer to anything
+    return log_mtime <= last_at + KILL_GRACE_S
+
+
 def build_snapshot(repo: pathlib.Path, now: float):
     """`(snapshot, reattached)` for the build worth showing, or `(None, ...)`.
 
@@ -311,7 +353,7 @@ def build_snapshot(repo: pathlib.Path, now: float):
     if live:
         import porthole_buildroot as buildroot
         name, started = buildroot.staged_build_name(live[0].parent)
-        if name:
+        if name and not _ended_here(best, name, live[1], now):
             text, _ = pp.log_tail(live[0])
             samples = _samples(repo / ".run", live[1],
                                pp.log_steps(text or "")[0], now)

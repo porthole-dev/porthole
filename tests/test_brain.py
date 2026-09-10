@@ -315,6 +315,92 @@ def test_the_index_is_current():
     missing = [n.id for n in indexed if f"[{n.id}](" not in have]
     detail = ("\n%d note(s) are not in it: %s"
               % (len(missing), ", ".join(sorted(missing)[:8]))) if missing else ""
+    # THE DIFF, ALWAYS. The hint above only looks one way -- an indexed note
+    # absent from the file -- and every other way of being stale left the
+    # message reading exactly "brain/INDEX.md is stale" with nothing after it.
+    # That is the failure this repo keeps paying for: it reproduces on nobody's
+    # laptop, so each occurrence becomes an investigation instead of a fix.
+    # A `By scope` count that moved because a note landed outside SECTIONS, a
+    # row for a note that was deleted, a changed title -- none of them are
+    # `missing`, and all of them are one line of diff.
+    #
+    # Bounded, because a wholesale reorder would otherwise paste 200 rows into
+    # a CI log nobody scrolls.
+    import difflib
+    diff = list(difflib.unified_diff(
+        have.splitlines(), want.splitlines(),
+        "brain/INDEX.md as committed", "brain/INDEX.md regenerated",
+        lineterm="", n=1))
+    shown, cut = diff[:40], max(0, len(diff) - 40)
+    detail += "\n" + "\n".join(shown)
+    if cut:
+        detail += f"\n... {cut} more diff line(s)"
+    # A note outside SECTIONS is counted by `By scope` and rendered in no
+    # table, so it is the only way the totals can move with no row to show for
+    # it -- and `missing`, which only looks at rendered sections, cannot see
+    # it either. That combination is exactly what a `- generic - 124` vs
+    # `- 125` diff with a single hunk means, so name the candidates rather
+    # than leaving the reader to work out which files can even do that.
+    # render_index()'s OWN rule, not Note.section. They disagree: a note at
+    # brain/devices/<codename>/x.md has section "<codename>" and is still
+    # rendered, because render_index also matches the grandparent. Using
+    # Note.section here listed a note that is on screen as one that is not --
+    # a diagnostic that lies is worse than none.
+    def _rendered(note):
+        return any(note.path.parent.name == s or note.path.parent.parent.name == s
+                   for s in B.SECTIONS)
+    unrendered = sorted(str(n.path.relative_to(ROOT)) for n in notes
+                        if not _rendered(n))
+    detail += ("\n%d note(s) count toward `By scope` but appear in no table: %s"
+               % (len(unrendered), ", ".join(unrendered[:10])))
+    detail += f"\n{len(notes)} note(s) loaded from {ROOT / 'brain'}"
+    # AND THE ONE FACT THAT ENDS THE ARGUMENT. A count that disagrees with the
+    # committed index, with the same rendered rows on both sides, means a file
+    # under brain/ that is not part of this commit -- something the run itself
+    # created. Ask git, which is the only authority on "should this be here",
+    # and name it. Three CI rounds went into deducing what this prints.
+    try:
+        import subprocess
+        tracked = set(subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "brain"],
+            capture_output=True, text=True, timeout=30, check=True
+        ).stdout.split())
+        strays = sorted(str(n.path.relative_to(ROOT)) for n in notes
+                        if str(n.path.relative_to(ROOT)) not in tracked)
+        detail += ("\n%d note(s) under brain/ are untracked by git: %s"
+                   % (len(strays), ", ".join(strays[:10]) or "(none)"))
+    except Exception as exc:                      # git absent, or not a clone
+        detail += f"\ncould not ask git which notes are tracked: {exc!r}"
+    # The arithmetic, stated, because three rounds of it were done by hand from
+    # a count alone. load_notes() walks every *.md under brain/ and skips
+    # exactly INDEX.md and README.md at the top level, so files - 2 == notes.
+    # A run where that does not hold is the whole answer, and which side it
+    # fails on says whether a file appeared or a skip stopped working.
+    import re as _re
+    walked = sorted(pathlib.Path(ROOT / "brain").rglob("*.md"))
+    detail += ("\n%d *.md walked under brain/, %d loaded as notes (expected %d)"
+               % (len(walked), len(notes), len(walked) - 2))
+    # And the names. Every loaded note should appear as a link target in the
+    # committed index, except the ones no table renders. Whatever is left over
+    # is the file this failure is about, named rather than deduced.
+    linked = set(_re.findall(r"\]\(([^)]+)\)", have))
+    over = sorted(str(n.path.relative_to(ROOT / "brain")) for n in notes
+                  if str(n.path.relative_to(ROOT / "brain")) not in linked)
+    detail += ("\n%d loaded note(s) are not linked from the committed index: %s"
+               % (len(over), ", ".join(over[:10]) or "(none)"))
+    # The shape this takes on CI and nowhere else. A pull_request build tests
+    # the MERGE of the branch into main, so when both added a note the merged
+    # tree holds one more than either branch -- while brain/INDEX.md merged
+    # line-wise into a file that is right for neither, because both sides
+    # incremented the same `By scope` total to the same number and git saw no
+    # conflict. The branch is self-consistent, so it reproduces on no laptop.
+    # .gitattributes now marks the file `-merge` so that conflicts instead;
+    # this line stays for any clone whose attributes are not in effect.
+    if len(walked) - 2 == len(notes):
+        detail += ("\nthe walk is consistent, so this tree's notes simply are "
+                   "not what the committed index describes. On CI that means "
+                   "the pull request's MERGE with main: both sides added a "
+                   "note. Merge or rebase main, run `make brain-index`, commit.")
     assert False, ("brain/INDEX.md is stale -- run `make brain-index` and "
                    "commit the result." + detail)
 
