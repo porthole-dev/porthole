@@ -428,5 +428,190 @@ def test_a_leftover_branch_stops_the_rebase_instead_of_overwriting_it():
         assert _before_after(pm) == before
 
 
+# ------------------------------------------------- the verb, end to end --
+#
+# THE GAP THIS CLOSES. Everything above tests `plan_rebase` and
+# `_write_rebase` directly, and `_rebase` -- the function the CLI actually
+# calls -- had no test at all. That is not theoretical: when files became
+# `Entry`, a stale `apkbuild_fields(theirs.get("APKBUILD", ""))` survived
+# every one of the 24 tests above and was caught only by running the verb
+# against the real tree. A suite that covers the parts and not the wiring
+# reports green on a command that raises TypeError on its first line of work.
+
+
+class _VerbOut:
+    def __init__(self):
+        self.lines = []
+
+    def __call__(self, text=""):
+        self.lines.append(text)
+
+    def kv(self, key, value, width=0, note=""):
+        self.lines.append(f"{key} {value} {note}")
+
+    def blank(self):
+        self.lines.append("")
+
+    def warn(self, text, stream=None):
+        self.lines.append(f"warning: {text}")
+
+    def hint(self, text, note="", stream=None):
+        self.lines.append(f"hint: {text}")
+
+    def paint(self, text, _tone):
+        return text
+
+
+class _VerbArgs:
+    def __init__(self, target, yes=False):
+        self.target, self.yes, self.json = target, yes, False
+
+
+class _VerbCtx:
+    def __init__(self, root, cfg, args):
+        self.root, self.cfg, self.args = str(root), cfg, args
+        self.out, self.captured = _VerbOut(), None
+
+    def emit(self, payload, render=None):
+        self.captured = payload
+        if render:
+            render()
+        return 0
+
+
+def _whole_world(tmp: pathlib.Path):
+    """A porthole root with a manifest, a pmaports with our fork, and an
+    aports_upstream that has moved on. Everything `_rebase` reaches for."""
+    up = tmp / "aports_upstream"
+    subprocess.run(("git", "init", "-qb", "master", str(up)), check=True,
+                   capture_output=True)
+    git(up, "config", "user.email", "t@example.invalid")
+    git(up, "config", "user.name", "t")
+    ap = up / "main" / "mesa"
+    ap.mkdir(parents=True)
+    (ap / "APKBUILD").write_text(
+        'pkgname=mesa\npkgver=1.0\npkgrel=0\nsource="a.tar.gz\n\tup.patch\n"\n')
+    (ap / "up.patch").write_text("upstream's\n")
+    git(up, "add", "-A")
+    git(up, "commit", "-qm", "mesa 1.0-r0")
+    forked_at = git(up, "rev-parse", "HEAD").stdout.strip()
+    (ap / "APKBUILD").write_text(
+        'pkgname=mesa\npkgver=2.0\npkgrel=0\nsource="a.tar.gz\n\tup.patch\n"\n')
+    git(up, "add", "-A")
+    git(up, "commit", "-qm", "mesa 2.0-r0")
+    # `upstream_remote_ref` resolves to origin/<default>, and the verb reads
+    # THAT rather than the checkout -- so the fixture needs a real remote or
+    # it is testing the fallback instead of the path the verb takes.
+    origin = tmp / "origin.git"
+    subprocess.run(("git", "init", "-qb", "master", "--bare", str(origin)),
+                   check=True)
+    git(up, "remote", "add", "origin", str(origin))
+    git(up, "push", "-q", "origin", "master")
+
+    pm = tmp / "pmaports"
+    ours = pm / "temp" / "mesa"
+    ours.mkdir(parents=True)
+    (ours / "APKBUILD").write_text(
+        'pkgname=mesa\npkgver=1.0\npkgrel=14\n'
+        'source="a.tar.gz\n\tup.patch\n\tmine.patch\n"\n')
+    (ours / "up.patch").write_text("upstream's\n")
+    (ours / "mine.patch").write_text("ours, and it must survive\n")
+    (pm / "device").mkdir()
+    subprocess.run(("git", "init", "-qb", "main", str(pm)), check=True,
+                   capture_output=True)
+    git(pm, "config", "user.email", "t@example.invalid")
+    git(pm, "config", "user.name", "t")
+    git(pm, "add", "-A")
+    git(pm, "commit", "-qm", "seed")
+
+    root = tmp / "root"
+    (root / "profiles" / "test-device").mkdir(parents=True)
+    (root / "profiles" / "test-device" / "aports.conf").write_text(
+        "mesa\n"
+        "  upstream: main/mesa\n"
+        "  tier:     required\n"
+        "  why:      the end-to-end fixture\n"
+        "  forked:   1.0-r0\n"
+        "  commit:   unknown\n")
+
+    cfg = {"PORTHOLE_DEVICE": "test-device", "PORTHOLE_PMAPORTS": str(pm),
+           "PORTHOLE_RUNDIR": str(tmp / "run")}
+    return root, pm, up, cfg, forked_at
+
+
+def test_the_verb_runs_end_to_end_and_carries_our_patch_onto_the_new_version():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        root, pm, _up, cfg, forked_at = _whole_world(tmp)
+        args = _VerbArgs("mesa", yes=True)
+        ctx = _VerbCtx(root, cfg, args)
+
+        rc = pkg._rebase(ctx, args)
+
+        payload = ctx.captured
+        assert payload["onto"] == "2.0-r0", payload
+        assert payload["base_ref"] == forked_at, payload
+        assert payload["files"]["mine.patch"]["verdict"] == "ours", payload
+        assert payload["needs_checksum"] is True, payload
+
+        dest = pathlib.Path(payload["worktree"]) / "temp" / "mesa"
+        assert (dest / "mine.patch").read_text() == \
+            "ours, and it must survive\n"
+        assert "pkgver=2.0" in (dest / "APKBUILD").read_text() or \
+            "<<<<<<<" in (dest / "APKBUILD").read_text()
+        # pmaports itself never moved.
+        assert git(pm, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() \
+            == "main"
+        assert git(pm, "status", "--porcelain").stdout == ""
+        assert rc in (0, 1), rc
+
+
+def test_the_verb_refuses_an_aport_owned_outright():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        root, _pm, _up, cfg, _f = _whole_world(tmp)
+        (root / "profiles" / "test-device" / "aports.conf").write_text(
+            "ours-outright\n"
+            "  upstream: (none -- ours, not a fork)\n"
+            "  tier:     required\n"
+            "  why:      fixture\n"
+            "  forked:   n/a\n"
+            "  commit:   n/a\n")
+        args = _VerbArgs("ours-outright")
+        try:
+            pkg._rebase(_VerbCtx(root, cfg, args), args)
+        except Exception as exc:                              # noqa: BLE001
+            assert "owned outright" in str(exc), exc
+        else:
+            raise AssertionError("rebased something with no upstream")
+
+
+def test_the_verb_refuses_a_name_that_is_not_in_the_manifest():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        root, _pm, _up, cfg, _f = _whole_world(tmp)
+        args = _VerbArgs("not-carried")
+        try:
+            pkg._rebase(_VerbCtx(root, cfg, args), args)
+        except Exception as exc:                              # noqa: BLE001
+            assert "not in" in str(exc), exc
+        else:
+            raise AssertionError("rebased something not in the manifest")
+
+
+def test_without_yes_the_verb_reports_and_writes_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        root, pm, _up, cfg, _f = _whole_world(tmp)
+        args = _VerbArgs("mesa", yes=False)
+        ctx = _VerbCtx(root, cfg, args)
+        pkg._rebase(ctx, args)
+
+        assert ctx.captured["worktree"] == "", ctx.captured
+        assert ctx.captured["files"], "it reported nothing at all"
+        assert not (tmp / "run" / "rebase").exists(), "it wrote a worktree"
+        assert pkg.existing_rebases(pm) == []
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

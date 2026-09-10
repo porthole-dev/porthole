@@ -213,5 +213,162 @@ def test_a_fork_upstream_moved_past_is_at_risk_and_the_alarm_fires():
                    for ln in ctx.out.lines), ctx.out.lines
 
 
+# ------------------------------- the ref, not the worktree beside it --
+#
+# The synthetic fixtures above build plain directories, so they exercise the
+# worktree fallback. This one is a real git repo whose CHECKOUT and whose
+# origin/master deliberately disagree, because that disagreement is the bug:
+# on this host aports_upstream's worktree is 1009 commits behind, and drift
+# compared versions against the ref while subtracting patches from disk.
+
+
+def _git(repo, *args):
+    return subprocess.run(("git", "-C", str(repo)) + args,
+                          capture_output=True, text=True, check=True)
+
+
+def _upstream_where_disk_and_ref_disagree(tmp: pathlib.Path):
+    """origin/master has deleted a patch the checkout still has.
+
+    mesa's exact shape as of 2026-09-10: `main/mesa/llvm22-armhf.patch` is on
+    disk and gone from origin/master.
+    """
+    origin = tmp / "origin.git"
+    up = tmp / "aports_upstream"
+    subprocess.run(("git", "init", "-qb", "master", "--bare", str(origin)),
+                   check=True)
+    subprocess.run(("git", "init", "-qb", "master", str(up)), check=True,
+                   capture_output=True)
+    _git(up, "config", "user.email", "t@example.invalid")
+    _git(up, "config", "user.name", "t")
+    ap = up / "main" / "mesa"
+    ap.mkdir(parents=True)
+    (ap / "APKBUILD").write_text("pkgname=mesa\npkgver=1.0\npkgrel=0\n")
+    (ap / "llvm22-armhf.patch").write_text("upstream's, for now\n")
+    (ap / "23575.patch").write_text("upstream's, still\n")
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "mesa 1.0-r0 with two upstream patches")
+    _git(up, "remote", "add", "origin", str(origin))
+    _git(up, "push", "-q", "origin", "master")
+
+    # Upstream moves on: the patch is deleted and the version bumps. The
+    # WORKTREE is deliberately left where it was, which is the whole point.
+    _git(up, "rm", "-q", "main/mesa/llvm22-armhf.patch")
+    (ap / "APKBUILD").write_text("pkgname=mesa\npkgver=2.0\npkgrel=0\n")
+    _git(up, "add", "-A")
+    _git(up, "commit", "-qm", "mesa 2.0-r0, llvm22-armhf.patch dropped")
+    _git(up, "push", "-q", "origin", "master")
+    _git(up, "reset", "-q", "--hard", "HEAD~1")      # checkout goes stale
+    assert (ap / "llvm22-armhf.patch").exists(), "fixture is not stale"
+    return up
+
+
+def test_a_patch_upstream_deleted_is_ours_now_and_must_be_counted():
+    """The masking case. `ours - theirs` subtracted a patch upstream no
+    longer ships, so mesa's alarm said "3 patches at risk" when the honest
+    answer was four. #84 claimed this could overstate but not mask; a stale
+    worktree masks, and was masking one on the fork the design was written
+    for."""
+    with tempfile.TemporaryDirectory() as d:
+        up = _upstream_where_disk_and_ref_disagree(pathlib.Path(d))
+
+        from_disk = {p.name for p in (up / "main" / "mesa").glob("*.patch")}
+        assert "llvm22-armhf.patch" in from_disk, from_disk
+
+        names, source = pkg.upstream_patch_names(up, "main/mesa",
+                                                 "origin/master")
+        assert names == {"23575.patch"}, names
+        assert "llvm22-armhf.patch" not in names, \
+            "the stale checkout is still being believed"
+        assert source == "git origin/master", source
+
+
+def test_an_unreadable_ref_falls_back_to_the_worktree_and_says_so():
+    """A checkout with no origin still has to work -- but a silent fallback
+    to the stale thing is the bug being fixed, so the source is reported."""
+    with tempfile.TemporaryDirectory() as d:
+        up = _upstream_where_disk_and_ref_disagree(pathlib.Path(d))
+        names, source = pkg.upstream_patch_names(up, "main/mesa",
+                                                 "origin/no-such-branch")
+        assert names == {"23575.patch", "llvm22-armhf.patch"}, names
+        assert "worktree" in source and "unreadable" in source, source
+
+
+def test_a_patch_in_a_subdirectory_upstream_is_not_counted_as_a_sibling():
+    """`ls-tree -r` is recursive, so a nested .patch would be flattened into
+    the sibling set and silently subtract a name that is not a sibling."""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        up = tmp / "aports_upstream"
+        ap = up / "main" / "mesa" / "series"
+        ap.mkdir(parents=True)
+        subprocess.run(("git", "init", "-qb", "master", str(up)), check=True,
+                       capture_output=True)
+        _git(up, "config", "user.email", "t@example.invalid")
+        _git(up, "config", "user.name", "t")
+        (up / "main" / "mesa" / "flat.patch").write_text("x\n")
+        (ap / "deep.patch").write_text("x\n")
+        _git(up, "add", "-A")
+        _git(up, "commit", "-qm", "one flat patch and one nested")
+
+        names, _source = pkg.upstream_patch_names(up, "main/mesa", "HEAD")
+        assert names == {"flat.patch"}, names
+
+
+# ------------------------------------------ what `pkg fork` writes down --
+
+
+def test_fork_provenance_records_the_tree_the_version_and_the_commit():
+    """#84 shipped this inline and unrun -- "verified by matching the call
+    against the unit-tested entry_text() helper". Argument order matching by
+    inspection is the check that passes while the wiring is wrong, and every
+    later `pkg rebase` depends on these three fields being the right three."""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        up = tmp / "aports_upstream"
+        ap = up / "community" / "phoc"
+        ap.mkdir(parents=True)
+        subprocess.run(("git", "init", "-qb", "master", str(up)), check=True,
+                       capture_output=True)
+        _git(up, "config", "user.email", "t@example.invalid")
+        _git(up, "config", "user.name", "t")
+        (ap / "APKBUILD").write_text("pkgname=phoc\npkgver=0.57.0\npkgrel=3\n")
+        _git(up, "add", "-A")
+        _git(up, "commit", "-qm", "phoc")
+        head = _git(up, "rev-parse", "--short", "HEAD").stdout.strip()
+
+        text = pkg.fork_provenance(up, ap, "phoc")
+        fields = dict(
+            line.strip().split(":", 1) for line in text.splitlines()
+            if ":" in line and line.startswith("  "))
+        assert fields["upstream"].strip() == "community/phoc", text
+        assert fields["forked"].strip() == "0.57.0-r3", text
+        assert fields["commit"].strip() == head, text
+        # It leads with a blank line: the entry is APPENDED to an existing
+        # manifest and the grammar separates blocks by one.
+        assert text.startswith("\n"), repr(text[:20])
+        assert text.split("\n", 2)[1] == "phoc", text
+
+        # It parses back as a manifest entry -- the file it is appended to is
+        # read by `pkg owned`, `pkg drift` and `doctor`.
+        import porthole_aports_manifest as man
+        parsed = man.parse(text)
+        assert list(parsed) == ["phoc"], parsed
+        assert parsed["phoc"]["upstream"] == "community/phoc", parsed
+
+
+def test_fork_provenance_says_unknown_rather_than_guessing_a_commit():
+    """A checkout that is not a git repo at all still forks; it just cannot
+    say where from. `unknown` is what every backfilled entry says, and
+    `pkg rebase` knows how to recover from it."""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        ap = tmp / "not-git" / "main" / "mesa"
+        ap.mkdir(parents=True)
+        (ap / "APKBUILD").write_text("pkgname=mesa\npkgver=1.0\npkgrel=0\n")
+        text = pkg.fork_provenance(tmp / "not-git", ap, "mesa")
+        assert "commit:   unknown" in text or "commit: unknown" in text, text
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

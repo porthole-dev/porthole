@@ -164,6 +164,7 @@ generic notes as well.
 | [dtbo-must-match-the-kernel](traps/dtbo-must-match-the-kernel.md) | `generic` | The dtbo must match the kernel, and the bootloader reads it from the active slot |
 | [every-manifest-commit-predating-pkg-fork-says-unknown](traps/every-manifest-commit-predating-pkg-fork-says-unknown.md) | `device:google-taimen` | Every manifest commit predating pkg fork says unknown |
 | [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
+| [fixing-one-read-leaves-the-other-reads-stale](traps/fixing-one-read-leaves-the-other-reads-stale.md) | `generic` | Fixing one stale read leaves the other reads in the same function stale |
 | [frozen-is-not-hung](traps/frozen-is-not-hung.md) | `generic` | FROZEN (kernel alive, userspace gone) is a distinct state and the watchdog will not save you |
 | [git-apply-silently-skips-diff-git-patches](traps/git-apply-silently-skips-diff-git-patches.md) | `generic` | git apply silently skips 'diff --git' patches and exits 0, so a source tree ends up half-patched |
 | [initramfs-is-not-frozen](traps/initramfs-is-not-frozen.md) | `generic` | A device stopped in the initramfs looks exactly like a frozen one, and is nothing like it |
@@ -238,7 +239,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 44
-- `generic` — 123
+- `generic` — 124
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
