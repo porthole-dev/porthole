@@ -53,7 +53,8 @@ import time
 import gi
 
 gi.require_version("Gio", "2.0")
-from gi.repository import Gio, GLib
+gi.require_version("GObject", "2.0")
+from gi.repository import Gio, GLib, GObject
 
 NEARD = "org.neard"
 ADAPTER_PATH = "/org/neard/nfc0"
@@ -258,6 +259,23 @@ def open_remote():
             Gio.DBusCallFlags.NONE, -1, None, None)
 
         fd = fd_list.steal_fds()[reply.unpack()[0]]
+        # NOT "unix:fd=%d" % fd via new_for_address_sync(): that address form
+        # is for a GDBusServer to LISTEN on an already-open fd (socket
+        # activation), not for a client to treat one as an already-connected
+        # peer -- confirmed on device, GLib 2.88.3: "the unix transport
+        # requires exactly one of the keys 'path' or 'abstract' to be set".
+        # A client needs an actual GSocketConnection wrapping the fd, and
+        # a bare `GObject.new(Gio.SocketConnection, socket=sock)` is not
+        # enough either: that always builds the plain base class, which
+        # cannot answer the SASL EXTERNAL auth's credentials-passing
+        # (observed: "CLIENT: didn't send any credentials" over
+        # G_DBUS_DEBUG=authentication, then "Exhausted all available
+        # authentication mechanisms"). factory_lookup_type() is what
+        # resolves AF_UNIX/SOCK_STREAM to GUnixConnection, which can.
+        sock = Gio.Socket.new_from_fd(fd)
+        conn_type = Gio.SocketConnection.factory_lookup_type(
+            sock.get_family(), sock.get_socket_type(), sock.get_protocol())
+        iostream = GObject.new(conn_type, socket=sock)
         # MESSAGE_BUS_CONNECTION, not just AUTHENTICATION_CLIENT: the far
         # end of this fd is xdg-dbus-proxy relaying to a real dbus-daemon,
         # and a real dbus-daemon refuses every message from a peer that has
@@ -267,8 +285,21 @@ def open_remote():
         # never sends it.
         flags = (Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
                  | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION)
-        conn = Gio.DBusConnection.new_for_address_sync(
-            "unix:fd=%d" % fd, flags, None, None)
+        conn = Gio.DBusConnection.new_sync(iostream, None, flags, None, None)
+        # The proxy's lifetime is tied to THIS connection's bus name, not to
+        # the returned fd (nfc.c's on_peer_disconnect: "Removing the proxy
+        # closes its sync fd, which makes xdg-dbus-proxy exit" -- Task 3).
+        # `bus` and `portal` are otherwise local and go out of scope the
+        # moment this function returns; measured on device, the underlying
+        # session connection is then actually torn down (not just
+        # unreffed-but-cached) within ~150-200ms, xdp sees the sender leave
+        # the bus, and tears the proxy down under us -- `conn` starts
+        # returning "The connection is closed" for every call, looking
+        # exactly like a filter regression when it is a probe lifetime bug.
+        # Confirmed by reproduction: an identical open_remote() that instead
+        # holds bus/portal alive never sees the connection close. Keep them
+        # alive for as long as `conn` might be used.
+        conn._ph_nfc_probe_keepalive = (bus, portal)
     except Exception as e:  # noqa: BLE001 -- deliberate: see docstring above
         return None, str(e)
     return conn, None
