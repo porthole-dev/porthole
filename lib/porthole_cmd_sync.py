@@ -179,6 +179,14 @@ def _render(ctx, rows: list[dict], action: str) -> None:
         for name in (row["dirty"] if row.get("blocked_by") else [])[:20]:
             out(f"        {name}")
 
+    # Section 11 question 2 of the design asks whether `sync` covers the
+    # kernel tree and answers "no, LOUDLY -- a sync verb that silently skips
+    # a tree is worse than one that refuses it". This is the loudly. It is
+    # printed in every mode, not only `status`, because the mode where
+    # somebody assumes their kernel went with the rest is `out`.
+    out.kv("kernel", "not synced, by design", width,
+           note="not mirrored between hosts; see docs/NEW-HOST.md")
+
     if action == "status":
         out.blank()
         out.hint("porthole sync out --yes", "push what is committed in each")
@@ -214,7 +222,8 @@ def cmd_sync(args, ctx) -> int:
         row["result"] = _act(row, action, ctx.cfg)
         bad = bad or row["result"]["action"] in ("failed", "blocked")
 
-    ctx.emit({"action": action, "repos": rows, "ok": not bad},
+    ctx.emit({"action": action, "repos": rows, "ok": not bad,
+              "kernel_tree": "not synced -- not mirrored between hosts"},
              lambda: _render(ctx, rows, action))
     return EX_FAIL if bad else EX_OK
 
