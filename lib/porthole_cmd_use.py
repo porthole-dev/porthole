@@ -166,40 +166,45 @@ def cmd_use(args, ctx) -> int:
 TARGETS = ("workdir", "kernel", "pmaports", "profile", "porthole")
 
 
-def cmd_cd(args, ctx) -> int:
-    """Print ONE bare path on stdout. No decoration, ever -- it is substituted."""
-    what = args.target or "workdir"
+def resolve_target(what: str, cfg, root) -> pathlib.Path:
+    """Where one named target lives. Raises Bail if config cannot say.
+
+    Extracted from `cmd_cd` so `porthole sync` resolves the same three repos
+    the same way. Two answers to "where is pmaports" is how they drift apart,
+    and this one already knows that the per-device override is collapsed into
+    PORTHOLE_PMAPORTS before it is asked.
+
+    Existence is NOT checked here -- `cd` must refuse a missing path, while
+    `sync` wants to report one as missing rather than bail on the whole run.
+    """
     if what not in TARGETS:
         raise Bail(f"unknown target {what!r}", EX_USAGE,
                    f"targets: {', '.join(TARGETS)}")
-    cfg = ctx.cfg
-    root = pathlib.Path(ctx.root)
+    root = pathlib.Path(root)
 
     if what == "porthole":
-        path = root
-    elif what == "profile":
-        path = root / "profiles" / cfg.get("PORTHOLE_DEVICE", "")
-    elif what == "pmaports":
+        return root
+    if what == "profile":
+        return root / "profiles" / cfg.get("PORTHOLE_DEVICE", "")
+    if what == "pmaports":
         found = pmap.find_pmaports(cfg)
         if not found:
             raise Bail("no pmaports checkout found", EX_FAIL,
                        "porthole init    adopts a checkout or clones one")
-        path = found
-    elif what == "kernel":
-        workdir = cfg.get("PORTHOLE_WORKDIR", "")
-        if not workdir:
-            raise Bail("no working repo for this device", EX_FAIL,
-                       "porthole init    finds or creates one, or "
-                       "`porthole use <codename> --workdir <path>`")
-        path = pathlib.Path(workdir) / "linux"
-    else:
-        workdir = cfg.get("PORTHOLE_WORKDIR", "")
-        if not workdir:
-            raise Bail("no working repo for this device", EX_FAIL,
-                       "porthole init    finds or creates one, or "
-                       "`porthole use <codename> --workdir <path>`")
-        path = pathlib.Path(workdir)
+        return found
 
+    workdir = cfg.get("PORTHOLE_WORKDIR", "")
+    if not workdir:
+        raise Bail("no working repo for this device", EX_FAIL,
+                   "porthole init    finds or creates one, or "
+                   "`porthole use <codename> --workdir <path>`")
+    return (pathlib.Path(workdir) / "linux" if what == "kernel"
+            else pathlib.Path(workdir))
+
+
+def cmd_cd(args, ctx) -> int:
+    """Print ONE bare path on stdout. No decoration, ever -- it is substituted."""
+    path = resolve_target(args.target or "workdir", ctx.cfg, ctx.root)
     if not path.exists():
         raise Bail(f"{path} does not exist", EX_FAIL,
                    "porthole use <codename> --workdir <path>   to correct it")

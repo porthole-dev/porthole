@@ -3,13 +3,16 @@
 # Fork provenance, upstream drift, and moving between hosts
 
 **Date:** 2026-09-09
-**Status:** approved design; Plan 1 in progress, Plans 2 and 3 not built.
+**Status:** approved design; Plans 1 and 2 built, Plan 3 not.
 
-`porthole pkg drift`, `porthole pkg rebase` and `porthole sync` below are
-proposals. The `porthole:design-doc` marker above exempts them from
+`porthole pkg rebase` (§7) is the one command below that is still a proposal.
+The `porthole:design-doc` marker above exempts it from
 `tests/test_documented_commands.py`. **Remove the marker once every command
 named here parses** -- at that point the exemption is hiding a real break
 rather than describing unbuilt work.
+
+§9 shipped with one deliberate deviation, recorded in §9 itself: the branch
+expectation reports rather than asserts.
 
 Written after auditing what google-taimen actually carries, against
 `pmaports@perf/crossdirect-native-link` and `aports_upstream@master`
@@ -218,10 +221,24 @@ pmaports.
 - `porthole sync --in` — fast-forward each. Refuses a diverged or dirty repo
   and says which.
 
-It also asserts each repo is on the branch the **profile** says it should be,
-which retires the stale-runbook class: the expected pmaports branch becomes
-`PORTHOLE_PMAPORTS_BRANCH` in `device.env`, and `BUILD-RUNBOOK.md` stops
-carrying a branch name that rots.
+It also reads the branch the **profile** expects, as
+`PORTHOLE_PMAPORTS_BRANCH` in `device.env`.
+
+**Built as a report, not an assertion** (2026-09-10). Measured before writing
+it: pmaports on the reference host sits on `perf/crossdirect-native-link` --
+not `edge`, and not the `taimen-bringup` that `porthole_cmd_channel.py`'s
+comments still name. A feature branch there IS the normal working state, so
+an assertion would fire on a healthy tree, and a check that fires on a healthy
+tree is one people mute. The expected branch is printed beside the actual one
+and never touches the exit code. The stale-runbook half of the justification
+turned out to be already satisfied: there is no `BUILD-RUNBOOK.md`, and
+`NEW-HOST.md` carries no branch name to rot.
+
+`sync`'s actions are the positional `status`/`out`/`in` rather than the
+`--out`/`--in` flags written below, because `tests/test_cli_rules.py` enforces
+positional actions with `choices` across the whole CLI -- and because
+`porthole sync status` is a prefix a permission rule can grant without also
+granting `porthole sync out --yes`.
 
 Never invents a commit, never rewrites history, never force-pushes. The failure
 mode is "it stopped and told you".

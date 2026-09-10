@@ -71,6 +71,10 @@ DEFAULTS = {
     "PORTHOLE_DTC_BASELINE": "",
     "PORTHOLE_DTC_IGNORE": "",
     "PORTHOLE_KERNEL_TREE": "",
+    # The pmaports branch this port is developed against. REPORTED by
+    # `porthole sync`, never enforced -- see that module on why an assertion
+    # here would fire on a healthy tree. Empty means "no expectation".
+    "PORTHOLE_PMAPORTS_BRANCH": "",
     "PORTHOLE_PMBOOTSTRAP_SRC": "",
     "PORTHOLE_HAS_AB_SLOTS": "0",
     "PORTHOLE_ACTIVE_SLOT": "",
