@@ -187,3 +187,34 @@ and every escalation after that is one you were present for. `porthole sandbox
 status` reports it, and on the reference host that check had itself been dead:
 sudoers joins options with commas, the parser split on whitespace, and a
 167-hour cache read as clean.
+
+## Building and testing an upstream project in here
+
+The image carries `meson`, `ninja`, `py3-pytest` and `py3-dbusmock`, so an
+upstream tarball unpacked under `/work` can be configured, built and have its
+own test suite run without installing a toolchain on the host:
+
+```sh
+porthole sandbox shell --command \
+  "sh -lc 'cd /work/xdg-desktop-portal-src && meson setup build && meson test -C build -v'"
+```
+
+A project's **own** build dependencies are deliberately not in the image —
+xdg-desktop-portal alone wants `flatpak-dev`, `pipewire-dev`,
+`gst-plugins-base-dev`, `geoclue-dev` and `fuse3-dev`, which is a lot of image
+for one project. Install them on demand from the aport that already lists them,
+which is also the list that is guaranteed to be right:
+
+```sh
+porthole sandbox shell --command \
+  "sh -lc 'apk add \$(. /pmb/cache_git/pmaports/temp/xdg-desktop-portal/APKBUILD; echo \$makedepends)'"
+```
+
+The container is persistent, so that install survives until the image is
+rebuilt (`porthole sandbox build --force`), at which point re-run it.
+
+This exists because on 2026-09-10 the NFC portal's pytest suite had nowhere to
+run: neither the host nor this image had meson, and the work had to go to a
+distrobox. Compiling a package through `porthole pkg build` is not the same
+thing — that runs abuild in pmbootstrap's chroot and never runs the project's
+own tests.

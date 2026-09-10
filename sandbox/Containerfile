@@ -36,9 +36,26 @@ FROM docker.io/library/alpine:3.24
 # in a comment -- that `mkfs.ext4 -d` carries security.capability into the
 # image the same way it carries setuid and ownership. Untested, that claim
 # was resting on a manual spike nobody could re-run.
+# meson/ninja/pytest/dbusmock are for building and TESTING an upstream project
+# in place -- xdg-desktop-portal, gnome-control-center, neard -- which is a
+# different job from building an aport and is why they are not makedepends of
+# anything here. Note this is NOT the ccache mistake above: that package could
+# never be reached because kernel compiles run in pmbootstrap's chroot_native,
+# whereas `meson setup && meson test` on an unpacked tarball runs in THIS
+# image, under /work. Verified 2026-09-10, when the NFC portal's pytest suite
+# had nowhere to run: neither the host nor this image had meson, and the work
+# went to a distrobox instead.
+#
+# A project's own build deps are NOT here and should not be: xdg-desktop-portal
+# alone wants flatpak-dev, pipewire-dev, gst-plugins-base-dev, geoclue-dev and
+# fuse3-dev, which is a lot of image for one project. Install those on demand
+# from the aport that already lists them:
+#   porthole sandbox shell --command \
+#     "sh -lc 'apk add \$(. /pmb/cache_git/pmaports/temp/<pkg>/APKBUILD; echo \$makedepends)'"
 RUN apk add --no-cache \
       pmbootstrap \
       android-tools \
+      meson ninja py3-pytest py3-dbusmock \
       e2fsprogs e2fsprogs-extra fuse2fs fuse libcap-utils \
       util-linux parted multipath-tools \
       openssh-client rsync git \
