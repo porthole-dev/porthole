@@ -270,6 +270,17 @@ def test_the_expected_branch_is_reported_and_changes_no_exit_code():
         assert any("taimen-bringup" in ln for ln in ctx.out.lines), ctx.out.lines
 
 
+def test_the_kernel_tree_is_declared_uncovered_rather_than_silently_skipped():
+    """Section 11 q2 of the design: "no, LOUDLY -- a sync verb that silently
+    skips a tree is worse than one that refuses it". A reader who is not told
+    assumes their kernel went with the rest."""
+    with tempfile.TemporaryDirectory() as d:
+        made, ctx, rc = run(pathlib.Path(d))
+        assert "not synced" in ctx.captured["kernel_tree"], ctx.captured
+        assert any("kernel" in ln and "not synced" in ln
+                   for ln in ctx.out.lines), ctx.out.lines
+
+
 def test_a_missing_repo_is_reported_not_crashed_on():
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)

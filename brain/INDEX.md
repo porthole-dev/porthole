@@ -162,6 +162,7 @@ generic notes as well.
 | [crossdirect-replaces-the-environment-on-exec](traps/crossdirect-replaces-the-environment-on-exec.md) | `generic` | No CCACHE_ export reaches a cross compile, because crossdirect execs with a literal environment |
 | [dmesg-can-be-empty-about-boot](traps/dmesg-can-be-empty-about-boot.md) | `generic` | dmesg can be empty about boot while the journal still has everything |
 | [dtbo-must-match-the-kernel](traps/dtbo-must-match-the-kernel.md) | `generic` | The dtbo must match the kernel, and the bootloader reads it from the active slot |
+| [every-manifest-commit-predating-pkg-fork-says-unknown](traps/every-manifest-commit-predating-pkg-fork-says-unknown.md) | `device:google-taimen` | Every manifest commit predating pkg fork says unknown |
 | [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
 | [frozen-is-not-hung](traps/frozen-is-not-hung.md) | `generic` | FROZEN (kernel alive, userspace gone) is a distinct state and the watchdog will not save you |
 | [git-apply-silently-skips-diff-git-patches](traps/git-apply-silently-skips-diff-git-patches.md) | `generic` | git apply silently skips 'diff --git' patches and exits 0, so a source tree ends up half-patched |
@@ -236,7 +237,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 43
+- `device:google-taimen` — 44
 - `generic` — 123
 - `soc:gs201` — 1
 - `soc:msm8998` — 31

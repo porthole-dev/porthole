@@ -39,6 +39,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_STATE,
@@ -1759,6 +1760,350 @@ def _stop(ctx) -> int:
     return ctx.emit({"stopped": pid if action == "kill" else None}, render)
 
 
+# --------------------------------------------------------------- rebase --
+#
+# A fork's delta is three-way by nature: upstream AT FORK TIME is the base,
+# our tree is ours, upstream NOW is theirs. `git merge-file` does exactly that
+# per file and knows how to mark a conflict, so nothing here re-implements a
+# merge. The first draft of this hand-wrote eight comparison branches for the
+# cases where two sides happen to be equal; every one of them is a case
+# merge-file already gets right, and each was a chance to get it wrong.
+
+
+def _tree_at(upstream, ref: str, rel: str) -> dict:
+    """`{filename: text}` for one aport directory at one git ref.
+
+    One directory deep, deliberately. An aport is a flat directory of an
+    APKBUILD and its patches; anything nested would be new, and silently
+    flattening it is how a rebase drops a file. A nested path is reported by
+    `_nested_at` rather than merged.
+    """
+    out, rc = _git_read(upstream, ["ls-tree", "-r", "--name-only", ref,
+                                   "--", f"{rel}/"])
+    if rc != 0:
+        return {}
+    files = {}
+    for path in out.splitlines():
+        path = path.strip()
+        if not path or path.count("/") != rel.count("/") + 1:
+            continue
+        text, rc = _git_read(upstream, ["show", f"{ref}:{path}"])
+        if rc == 0:
+            files[path.rsplit("/", 1)[1]] = text
+    return files
+
+
+def _nested_at(upstream, ref: str, rel: str) -> list:
+    """Paths under `rel` that `_tree_at` skipped because they are nested."""
+    out, rc = _git_read(upstream, ["ls-tree", "-r", "--name-only", ref,
+                                   "--", f"{rel}/"])
+    if rc != 0:
+        return []
+    return sorted(p.strip() for p in out.splitlines()
+                  if p.strip() and p.strip().count("/") != rel.count("/") + 1)
+
+
+def base_ref_for(upstream, rel: str, entry: dict):
+    """The aports_upstream commit this fork was taken from, and how we know it.
+
+    `commit:` is authoritative when it is a real sha -- `pkg fork` records one
+    at fork time. Every entry that predates that says `unknown`, so the
+    fallback walks the APKBUILD's own history for the commit whose
+    pkgver-pkgrel is the `forked:` value. Verified on the one real case:
+    mesa's `26.1.6-r0` resolves to e744e23b, two upstream bumps back.
+
+    Returns `(ref, how)` on success and `(None, why_not)` otherwise -- never a
+    guess. Rebasing onto the wrong base silently reclassifies upstream's own
+    changes as our delta, which is worse than refusing to start.
+    """
+    raw = (entry.get("commit", "") or "").strip()
+    commit = raw.split()[0] if raw else ""
+    if re.fullmatch(r"[0-9a-f]{7,40}", commit):
+        _out, rc = _git_read(upstream, ["cat-file", "-e", f"{commit}^{{commit}}"])
+        if rc == 0:
+            return commit, "recorded in the manifest"
+
+    forked = (entry.get("forked", "") or "").strip()
+    if not forked or "-r" not in forked:
+        return None, (f"nothing to find a base from: commit: is "
+                      f"{commit or 'unset'}, forked: is {forked or 'unset'}")
+    want_ver, want_rel = forked.rsplit("-r", 1)
+    out, rc = _git_read(upstream, ["log", "--format=%H", "-n", "400",
+                                   "--", f"{rel}/APKBUILD"], timeout=60)
+    if rc != 0 or not out.strip():
+        return None, f"cannot read {rel}/APKBUILD's history in aports_upstream"
+    for sha in out.split():
+        text, rc = _git_read(upstream, ["show", f"{sha}:{rel}/APKBUILD"])
+        if rc != 0:
+            continue
+        got = apkbuild_fields(text)
+        if got.get("pkgver") == want_ver and got.get("pkgrel") == want_rel:
+            return sha, f"found by walking {rel}/APKBUILD back to {forked}"
+    return None, (f"no commit in the last 400 touching {rel}/APKBUILD builds "
+                  f"{forked} -- was it forked from somewhere else?")
+
+
+def _merge_one(base: str, ours: str, theirs: str):
+    """3-way merge one file. Returns `(text, conflicted)`.
+
+    `git merge-file -p` prints the result and exits with the conflict count,
+    so a non-zero exit is data rather than a failure. An exit at or above 128
+    IS a failure, and is reported as a conflict keeping our side: a merge that
+    could not run must never read as one that ran cleanly.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        p = pathlib.Path(d)
+        (p / "ours").write_text(ours)
+        (p / "base").write_text(base)
+        (p / "theirs").write_text(theirs)
+        proc = subprocess.run(
+            ["git", "merge-file", "-p", "--diff3",
+             "-L", "ours", "-L", "upstream at fork time", "-L", "upstream now",
+             str(p / "ours"), str(p / "base"), str(p / "theirs")],
+            capture_output=True, text=True)
+    if proc.returncode >= 128:
+        return ours, True
+    return proc.stdout, proc.returncode != 0
+
+
+def plan_rebase(base: dict, ours: dict, theirs: dict) -> dict:
+    """What the rebased aport should contain, file by file, and why.
+
+    Pure -- three `{filename: text}` mappings in, a plan out -- so every case
+    is testable with no git repo, no pmaports and no network.
+
+    Only three branches are written here. Everything else, including every
+    case where two of the three sides are identical, is handed to
+    `git merge-file`, which is already right about all of them.
+    """
+    plan = {}
+    for name in sorted(set(base) | set(ours) | set(theirs)):
+        b, o, t = base.get(name), ours.get(name), theirs.get(name)
+        if o is None:
+            if b is None:
+                plan[name] = {"verdict": "upstream-new", "text": t,
+                              "note": "upstream added it since we forked"}
+            else:
+                plan[name] = {"verdict": "dropped", "text": None,
+                              "note": "we deleted it" + (
+                                  "; upstream has since changed it"
+                                  if t is not None and t != b else "")}
+        elif t is None:
+            plan[name] = {
+                "verdict": "ours" if b is None else "upstream-deleted",
+                "text": o,
+                "note": ("our addition" if b is None
+                         else "upstream deleted it; ours is kept")}
+        else:
+            merged, bad = _merge_one(b or "", o, t)
+            plan[name] = {
+                "verdict": ("conflict" if bad else
+                            "unchanged" if merged == o else "merged"),
+                "text": merged,
+                "note": ("both sides changed it" if bad else "")}
+    return plan
+
+
+def _needs_checksum(plan: dict, theirs: dict) -> bool:
+    """Does the rebased `source=` differ from upstream's?
+
+    If it does, the checksums in the APKBUILD are upstream's and do not cover
+    our patches, so the tree does not build until `abuild checksum` runs.
+    Reported only when true: a step printed unconditionally is a step people
+    learn to skip.
+    """
+    got = plan.get("APKBUILD", {}).get("text") or ""
+    up = theirs.get("APKBUILD", "") or ""
+    return sorted(_bodies(got, "source")) != sorted(_bodies(up, "source"))
+
+
+def _rebase(ctx, args) -> int:
+    """Replay our delta onto the current upstream aport, in a scratch worktree.
+
+    Plan 3 of docs/DESIGN-fork-provenance-and-host-sync.md (section 7). It
+    answers `pkg drift`'s alarm: drift says mesa is about to lose three
+    patches, this is the thing that moves them onto the version that outranks
+    us. It stops there. Deciding the result is correct is a person's job, and
+    the design says so.
+
+    NEVER TOUCHES THE WORKING BRANCH -- and not as a promise, as a mechanism.
+    Everything is written into a `git worktree` on a fresh branch, which is a
+    separate directory: pmaports' own checkout, its branch and its index are
+    not read for this and cannot be modified by it. The failure this rules out
+    is the one the design flags as the reason Plan 3 ships last -- a rebase
+    that half-works and leaves the tree it half-worked on in place.
+    """
+    import porthole_aports_manifest as man
+    import porthole_pmaports as pmap
+
+    name = args.target
+    if not name:
+        raise Bail("rebase what?", EX_USAGE, "porthole pkg rebase mesa")
+
+    device = ctx.cfg.get("PORTHOLE_DEVICE", "")
+    if not device:
+        raise Bail("no device selected -- the manifest says what each fork "
+                   "was forked FROM, and there is no manifest without one",
+                   EX_USAGE, f"porthole -d <device> pkg rebase {name}")
+    manifest = man.load(ctx.root, device)
+    if not manifest:
+        raise Bail(f"{device} has no aports.conf", EX_UNAVAILABLE,
+                   f"expected at {man.path_for(ctx.root, device)}")
+    entry = manifest.get(name)
+    if entry is None:
+        raise Bail(f"{name} is not in {device}'s aports.conf", EX_FAIL,
+                   "porthole pkg owned    what this port carries")
+
+    rel = (entry.get("upstream", "") or "").strip()
+    if not rel or rel.startswith("("):
+        raise Bail(f"{name} is owned outright, not forked from upstream -- "
+                   f"there is nothing to rebase onto", EX_FAIL,
+                   f"its manifest entry says upstream: {rel or '(unset)'}")
+
+    pmaports = _find_pmaports(ctx)
+    ours_dir = find_aport(pmaports, name)
+    if not ours_dir:
+        raise Bail(f"{name} is in the manifest but not in pmaports", EX_FAIL,
+                   f"porthole pkg fork {name} --yes")
+    upstream = pmap.find_aports_upstream(pmaports)
+    if not upstream:
+        raise Bail("Alpine's aports checkout is not beside pmaports",
+                   EX_UNAVAILABLE,
+                   "`pmbootstrap pull` clones it into the same cache_git/")
+
+    new_ref = upstream_remote_ref(upstream)
+    base_ref, how = base_ref_for(upstream, rel, entry)
+    if not base_ref:
+        raise Bail(f"cannot tell which upstream commit {name} was forked "
+                   f"from: {how}", EX_STATE,
+                   f"record it by hand in profiles/{device}/aports.conf, or "
+                   f"re-fork with `porthole pkg fork {name} --yes`, which "
+                   f"writes commit: from now on")
+
+    base = _tree_at(upstream, base_ref, rel)
+    theirs = _tree_at(upstream, new_ref, rel)
+    if not theirs:
+        raise Bail(f"{rel} does not exist at {new_ref} -- upstream may have "
+                   f"moved or deleted it", EX_STATE,
+                   f"git -C {upstream} log --diff-filter=D -- {rel}")
+    ours = {f.name: f.read_text(errors="replace")
+            for f in sorted(ours_dir.iterdir()) if f.is_file()}
+
+    plan = plan_rebase(base, ours, theirs)
+    nested = _nested_at(upstream, new_ref, rel)
+    up_fields = apkbuild_fields(theirs.get("APKBUILD", ""))
+    new_ver = f"{up_fields.get('pkgver', '?')}-r{up_fields.get('pkgrel', '?')}"
+    conflicts = [f for f, v in plan.items() if v["verdict"] == "conflict"]
+
+    payload = {
+        "aport": name, "upstream": rel, "onto": new_ver,
+        "base_ref": base_ref, "base_how": how, "new_ref": new_ref,
+        "files": {f: {k: v for k, v in info.items() if k != "text"}
+                  for f, info in plan.items()},
+        "conflicts": conflicts,
+        "needs_checksum": _needs_checksum(plan, theirs),
+        "nested_upstream_paths": nested,
+        "worktree": "", "branch": "",
+    }
+
+    if args.yes:
+        branch = f"porthole/rebase-{name}-{new_ver}"
+        payload["branch"] = branch
+        payload["worktree"] = str(_write_rebase(ctx, pmaports, branch,
+                                                ours_dir, plan))
+
+    def render():
+        out = ctx.out
+        out.kv("aport", f"{name}   ({rel})", 11)
+        out.kv("from", f"{entry.get('forked', '?')}   {base_ref[:12]}", 11,
+               note=how)
+        out.kv("onto", f"{new_ver}   {new_ref}", 11)
+        out.blank()
+        width = max(len(f) for f in plan) if plan else 0
+        for fname, info in plan.items():
+            out.kv(fname, info["verdict"], width, note=info["note"])
+        out.blank()
+        if nested:
+            out.warn(f"{rel} has files in subdirectories upstream, which this "
+                     f"does not merge: {', '.join(nested)}")
+        if conflicts:
+            out(f"  {len(conflicts)} file(s) conflicted: "
+                f"{', '.join(conflicts)}")
+            out("  conflict markers are in the file, three-way "
+                "(ours / upstream at fork time / upstream now).")
+        if payload["needs_checksum"]:
+            out("  source= differs from upstream's, so the checksums do not "
+                "cover our patches.")
+        if not args.yes:
+            out.blank()
+            out.hint(f"porthole pkg rebase {name} --yes",
+                     "write it to a scratch worktree")
+            return
+        out.blank()
+        out.kv("worktree", payload["worktree"], 11, note=f"branch {branch}")
+        out.hint(f"git -C {payload['worktree']} diff", "read what changed")
+        if payload["needs_checksum"]:
+            out.hint(f"cd {payload['worktree']} && abuild checksum",
+                     "before it will build")
+        out.hint(f"git -C {pmaports} worktree remove {payload['worktree']}",
+                 "when you are done with it")
+
+    ctx.emit(payload, render)
+    # Conflicts are a real answer, not a crash -- but they are not success
+    # either, and a script that rebases a batch must be able to tell.
+    return EX_FAIL if conflicts else EX_OK
+
+
+def _write_rebase(ctx, pmaports, branch: str, ours_dir, plan: dict):
+    """Materialise the plan in a fresh git worktree on `branch`.
+
+    The worktree is created BEFORE anything is written and removed again if
+    writing fails, so the two outcomes are "a complete scratch tree" and
+    "nothing" -- never a half-written one, which is exactly the half-working
+    rebase the design says to avoid.
+    """
+    out, rc = _git_read(pmaports, ["rev-parse", "--verify", branch])
+    if rc == 0:
+        raise Bail(f"branch {branch} already exists in pmaports", EX_STATE,
+                   f"a previous rebase left it. Read it, then "
+                   f"`git -C {pmaports} branch -D {branch}`")
+
+    # Deliberately NOT inside pmaports. A worktree there is an untracked
+    # directory in pmaports' own working tree, which `porthole sync` then
+    # correctly refuses to sync -- a rebase that blocks the next sync is a
+    # rebase nobody runs twice. PORTHOLE_RUNDIR is gitignored run state and
+    # already the home for exactly this kind of thing.
+    rundir = ctx.cfg.get("PORTHOLE_RUNDIR") or str(pathlib.Path(ctx.root) / ".run")
+    dest = pathlib.Path(rundir) / "rebase" / branch.rsplit("/", 1)[1]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        raise Bail(f"{dest} is already there from a previous rebase", EX_STATE,
+                   f"git -C {pmaports} worktree remove {dest}")
+    proc = subprocess.run(
+        ["git", "-C", str(pmaports), "worktree", "add", "-q", "-b", branch,
+         str(dest)], capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise Bail(f"could not create a scratch worktree in pmaports: "
+                   f"{proc.stderr.strip() or proc.stdout.strip()}", EX_FAIL)
+
+    try:
+        target = dest / ours_dir.relative_to(pmaports)
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
+        for fname, info in plan.items():
+            if info["text"] is None:
+                continue
+            (target / fname).write_text(info["text"])
+    except (OSError, ValueError):
+        subprocess.run(["git", "-C", str(pmaports), "worktree", "remove",
+                        "--force", str(dest)], capture_output=True)
+        subprocess.run(["git", "-C", str(pmaports), "branch", "-D", branch],
+                       capture_output=True)
+        raise
+    return dest
+
+
 def _fork_names(ctx, pmaports) -> set:
     """Which pmaports packages this branch has actually changed."""
     import porthole_cmd_aports as aports
@@ -2205,6 +2550,8 @@ def cmd_pkg(args, ctx) -> int:
         return _owned(ctx, args)
     if action == "drift":
         return _drift(ctx, args)
+    if action == "rebase":
+        return _rebase(ctx, args)
     if action == "stop":
         return _stop(ctx)
     if action == "search":
@@ -2250,10 +2597,10 @@ SPEC = {
         (["action"], {"nargs": "?", "metavar": "ACTION",
                       "choices": ["build", "install", "resume", "search",
                                   "fork", "status", "watch", "outdated",
-                                  "stop", "owned", "drift"],
+                                  "stop", "owned", "drift", "rebase"],
                       "help": "build | install | resume | search | fork | "
                               "status | watch | outdated | stop | owned | "
-                              "drift"}),
+                              "drift | rebase"}),
         (["target"], {"nargs": "?", "metavar": "APORT",
                       "help": "build/fork: the aport. search: text to look for"}),
         (["--arch"], {"metavar": "ARCH",
@@ -2288,7 +2635,9 @@ SPEC = {
                      "help": "fork: actually write into pmaports. "
                              "install: actually write to the device -- "
                              "without it, install only lists what it would "
-                             "put there"}),
+                             "put there. rebase: actually create the "
+                             "scratch worktree -- without it, rebase only "
+                             "reports what the merge would do"}),
         (["--tier"], {"choices": ("required", "optional"),
                      "help": "owned: only this tier (default: all)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
@@ -2308,5 +2657,7 @@ SPEC = {
         "porthole pkg stop",
         "porthole pkg owned --tier required",
         "porthole pkg drift --json",
+        "porthole pkg rebase mesa",
+        "porthole pkg rebase mesa --yes",
     ],
 }

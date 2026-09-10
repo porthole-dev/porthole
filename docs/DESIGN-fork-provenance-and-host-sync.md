@@ -1,18 +1,18 @@
 <!-- porthole | design | 2026-09-09 -->
-<!-- porthole:design-doc -->
 # Fork provenance, upstream drift, and moving between hosts
 
 **Date:** 2026-09-09
-**Status:** approved design; Plans 1 and 2 built, Plan 3 not.
+**Status:** built. Plans 1, 2 and 3 are all landed.
 
-`porthole pkg rebase` (§7) is the one command below that is still a proposal.
-The `porthole:design-doc` marker above exempts it from
-`tests/test_documented_commands.py`. **Remove the marker once every command
-named here parses** -- at that point the exemption is hiding a real break
-rather than describing unbuilt work.
+The `porthole:design-doc` marker is GONE from this file as of 2026-09-10:
+every command named below now parses, so the exemption it granted from
+`tests/test_documented_commands.py` would from here on hide a real break
+rather than describe unbuilt work. That was the condition written here for
+removing it.
 
-§9 shipped with one deliberate deviation, recorded in §9 itself: the branch
-expectation reports rather than asserts.
+Two deliberate deviations, each recorded in its own section: §9's branch
+expectation reports rather than asserts, and §9's actions are positional
+rather than `--in`/`--out`.
 
 Written after auditing what google-taimen actually carries, against
 `pmaports@perf/crossdirect-native-link` and `aports_upstream@master`
@@ -200,6 +200,30 @@ Explicit, on request, and it never touches the working branch.
 3. Report what applied, what conflicted, and what needs a checksum refresh.
 4. Stop. The human finishes it.
 
+**Built 2026-09-10**, as `porthole pkg rebase <aport>`. Three notes on what
+the implementation learned:
+
+- Step 1 does not re-fork. `aportgen` clones and needs the workspace; the
+  upstream tree is already on disk in `aports_upstream`, so the three trees
+  come from `git show` at two refs plus our directory, and `git merge-file`
+  does the replay. No container, no network, seconds rather than minutes.
+- **Every manifest entry that exists today says `commit: unknown`** -- they
+  were backfilled, and §8 only starts recording real ones now. So the base is
+  recovered by walking the upstream APKBUILD's history for the `forked:`
+  version. Verified: mesa's `26.1.6-r0` is `e744e23b`. Where that fails,
+  rebase REFUSES rather than picking a base, because rebasing onto the wrong
+  one silently reclassifies upstream's changes as our delta.
+- "Never touches the working branch" is a `git worktree` on a fresh branch,
+  written into `PORTHOLE_RUNDIR` rather than into pmaports -- a worktree
+  inside pmaports is an untracked directory that `porthole sync` (§9) then
+  correctly refuses to sync past.
+
+First real run, mesa 26.1.6-r14 onto 26.2.2-r0: the three a5xx patches carry
+across untouched, `llvm22-armhf.patch` is flagged as deleted upstream while
+our `source=` still lists it, and the APKBUILD conflicts in exactly three
+places -- the version, the source list, and `_gallium_drivers`. All three are
+decisions, which is why step 4 is "stop".
+
 The delta is already mostly a patch series — `temp/mesa` is three `.patch`
 files plus a thin APKBUILD diff — which is why this works without adopting a
 full quilt-style build system (§10).
@@ -261,9 +285,12 @@ benefit is already available (§7), because our forks are already patch files.
    Is that deliberate pinning because the camera is unfinished, or drift? If
    deliberate, it is `optional` with the reason recorded; if drift, `required`
    and the device is behind. Not a machine's call.
-2. **Does `sync` cover the kernel tree?** Recommendation: no, loudly. It is not
-   mirrored by design, and a sync verb that silently skips a tree is worse than
-   one that refuses it.
+2. **Does `sync` cover the kernel tree?** ~~Recommendation: no, loudly.~~
+   **Settled 2026-09-10: no, loudly.** `porthole sync` prints
+   `kernel  not synced, by design` in every mode, and `kernel_tree` says the
+   same in `--json`. Printed in every mode rather than only in `status`,
+   because the mode where somebody assumes their kernel went with the rest is
+   `out`.
 
 ## 12. Failure modes this must not introduce
 
