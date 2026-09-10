@@ -294,6 +294,68 @@ def test_a_package_build_does_not_overwrite_the_kernel_builds_status():
         assert names == ["build-status.json", "pkg-status.json"]
 
 
+def test_a_gn_build_reports_a_rate_and_an_eta():
+    """chromium's ninja says `CXX`, not `Building CXX object`.
+
+    Every pattern in _STEP_KIND looks for cmake's and meson's gerunds, so a
+    GN build classified every one of its 56135 steps as `other`, recorded no
+    rate sample, and showed `rate --` and `eta --` for five hours. Reported
+    2026-09-10 while cross-building chromium 152.
+    """
+    import porthole_progress as progress
+    clock = [1_000_000.0]
+    real = progress.time.time
+    progress.time.time = lambda: clock[0]
+    try:
+        with tempfile.TemporaryDirectory() as run:
+            tracker = progress.PkgTracker(run, "pkg:chromium")
+            tracker.started = clock[0] - 4000        # past ETA_WARMUP
+            # The mix this build actually has: roughly half compiles, half
+            # ACTION, and one step every two seconds.
+            for i in range(1, 201):
+                verb = "CXX" if i % 2 else "ACTION"
+                tracker.feed(f"[{i}/1000] {verb} obj/x/{i}.o")
+                clock[0] += 2.0
+            snap = tracker.snapshot()
+    finally:
+        progress.time.time = real
+
+    assert snap["steps"] == "200/1000", snap
+    assert snap["rate"] is not None, f"no rate from a GN build: {snap}"
+    # 100 compiles over ~400s is 0.25/s; the check is that it is a real
+    # number in the right neighbourhood, not the exact float.
+    assert 0.1 < snap["rate"] < 0.5, snap
+    assert snap["eta"] is not None, f"no eta from a GN build: {snap}"
+
+
+def test_the_eta_counts_remaining_steps_in_the_unit_the_rate_measures():
+    """`remaining` is ninja steps of every kind; the rate is compiles per
+    second. Dividing one by the other overstates the ETA by however much of
+    the build is not compiling -- 1.9x on chromium, where ACTION and COPY are
+    51% of the steps."""
+    import porthole_progress as progress
+    clock = [2_000_000.0]
+    real = progress.time.time
+    progress.time.time = lambda: clock[0]
+    try:
+        with tempfile.TemporaryDirectory() as run:
+            tracker = progress.PkgTracker(run, "pkg:chromium")
+            tracker.started = clock[0] - 4000
+            for i in range(1, 201):                  # half compile, half not
+                verb = "CXX" if i % 2 else "ACTION"
+                tracker.feed(f"[{i}/1000] {verb} obj/x/{i}.o")
+                clock[0] += 2.0
+            snap = tracker.snapshot()
+    finally:
+        progress.time.time = real
+
+    # 800 steps remain, half of which will be compiles: 400 compiles at
+    # ~0.25/s is ~1600s. Counting all 800 against the compile rate would say
+    # ~3200s, which is the bug.
+    assert 1200 < snap["eta"] < 2200, (
+        f"eta {snap['eta']} is not remaining COMPILES over the compile rate")
+
+
 # ------------------------------------------------------------ liveness ---
 
 def test_a_run_whose_process_is_gone_is_stale_not_running():
