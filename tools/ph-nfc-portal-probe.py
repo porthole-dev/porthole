@@ -544,7 +544,7 @@ def selftest():
 
 
 def _selftest_against(bus_address):
-    # Not the full 8-rule production set (docs/superpowers/specs/2026-09-10-
+    # Not the full 9-rule production set (docs/superpowers/specs/2026-09-10-
     # nfc-toggle-and-portal-design.md) -- just the subset that check_filter()
     # actually exercises (Get, StartPollLoop, StopPollLoop; no Set rule,
     # which is the load-bearing omission). GetManagedObjects and the
