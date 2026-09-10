@@ -65,7 +65,18 @@ GENERIC = [
                "works": "mmcli -m any 2>/dev/null | grep -q 'state: registered'"}),
     ("gps", {"present": "test -e /dev/gnss0 || "
                         "mmcli -m any --location-status 2>/dev/null | grep -q gps"}),
-    ("nfc", {"present": "test -d /sys/class/nfc/nfc0"}),
+    # `works` is nfctool, not neard, and not a poll. nfctool reads the
+    # kernel's NFC netlink API directly, so it answers with the daemon
+    # stopped and does not D-Bus-activate anything; and a non-empty
+    # Protocols list only appears once the NCI stack has actually
+    # enumerated the chip, which is the same class of answer as
+    # bluetooth's `UP RUNNING`. Verified read-only on taimen 2026-09-10:
+    # Powered read `No` either side of it, and it printed the full
+    # protocol list while neard was stopped. Do NOT reach for `-p` here --
+    # that starts a poll loop, which is inducing.
+    ("nfc", {"present": "test -d /sys/class/nfc/nfc0",
+             "works": "nfctool -l 2>/dev/null | "
+                      "grep -qE 'Protocols: \\[ .+ \\]'"}),
     # No `works:` here on purpose. A DRM connector's status reads
     # `connected` as soon as the driver registers it, before display
     # bring-up has painted a single pixel -- brain/laws/never-judge-a-boot-
