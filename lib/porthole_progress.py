@@ -119,11 +119,44 @@ _STEP_KIND = (
 )
 
 
+# GN says the same things in a different vocabulary. cmake and meson write a
+# sentence -- "Building CXX object foo.o" -- and every pattern above looks for
+# its verb. GN writes a terse rule name in that position instead, and none of
+# them match, so EVERY step of a chromium build classified as `other`, no rate
+# sample was ever recorded, and `rate` and `eta` stayed None for the whole
+# five hours. Measured on chromium 152.0.7977.82 for aarch64, 56135 steps:
+# CXX 2809, ACTION 2658, CC 1355, COPY 334, ASM 125, AR 82, SOLINK 5, LINK 4.
+#
+# ACTION and COPY are deliberately NOT compiles, for exactly the reason
+# `Generating` is not: an ACTION is one python or node process holding one
+# core while the rest sit idle, and counting those toward a rate is what
+# produced the 74-hour ETA this module already exists to avoid. They are 51%
+# of this build's steps, so the distinction is not academic.
+_GN_VERB = re.compile(r"\[\d+/\d+\]\s+([A-Z][A-Z0-9_]+)\b")
+_GN_KIND = {
+    "CC": "compile", "CXX": "compile", "ASM": "compile",
+    "OBJC": "compile", "OBJCXX": "compile", "SWIFT": "compile",
+    "AR": "link", "LINK": "link", "SOLINK": "link",
+    "SOLINK_MODULE": "link",
+    "ACTION": "generate", "COPY": "generate", "STAMP": "generate",
+}
+
+
 def step_kind(line: str) -> str:
     """`compile` | `link` | `generate` | `other` for one ninja step line."""
+    line = _STAMP.sub("", line.lstrip())
     for name, pattern in _STEP_KIND:
         if pattern.search(line):
             return name
+    verb = _GN_VERB.search(line)
+    if verb:
+        kind = _GN_KIND.get(verb.group(1))
+        if kind:
+            return kind
+        # RUST_BIN, RUST_RLIB, RUST_CDYLIB, RUST_MACRO -- all of them compile
+        # a crate, and naming each one is a list that goes stale.
+        if verb.group(1).startswith("RUST"):
+            return "compile"
     return "other"
 
 
@@ -642,6 +675,12 @@ class PkgTracker(Tracker):
         self.ninja_total = 0
         self.step = ""
         self.compiles = 0
+        # ninja's step number when this tracker saw its first compile. The
+        # compile share has to be measured over what was OBSERVED: a tracker
+        # that attached at step 2600, or resumed one, has a `compiles` count
+        # that describes its own window and a `compile_seen` that describes
+        # the whole build, and dividing those two mixes them.
+        self._first_step = None
 
     def feed(self, line: str) -> None:
         line = line.rstrip("\n")
@@ -654,6 +693,8 @@ class PkgTracker(Tracker):
             self.step = step_kind(line)
             if self.step == "compile":
                 self.compiles += 1
+                if self._first_step is None:
+                    self._first_step = self.compile_seen
                 self._samples.append((time.time(), self.compiles))
         self.last = line[:200]
         self.last_at = time.time()
@@ -696,6 +737,20 @@ class PkgTracker(Tracker):
                 if sustained > 0:
                     best = min(recent, sustained)
         remaining = max(0, self.ninja_total - self.compile_seen)
+        # ...converted into the unit `best` is measured in. The rate counts
+        # COMPILE steps per second while `remaining` counts ninja steps of
+        # every kind, and dividing one by the other overstates the ETA by
+        # however much of the build is not compiling -- 1.9x on chromium,
+        # where ACTION and COPY are 51% of the steps.
+        #
+        # The share is measured over the steps this tracker actually watched,
+        # which is not the same as the whole build: one that attached at step
+        # 2600 has seen every compile since then and none before, and
+        # compiles/compile_seen would read that as a 13% compile build.
+        if self._first_step is not None:
+            watched = self.compile_seen - self._first_step
+            if watched > 0 and self.compiles > 0:
+                remaining *= min(1.0, self.compiles / float(watched))
         return remaining / best if best > 0 else None
 
     def snapshot(self) -> dict:
