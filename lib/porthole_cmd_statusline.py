@@ -66,6 +66,7 @@ NEVER RAISES WHILE RENDERING
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import pathlib
@@ -315,6 +316,21 @@ def build_snapshot(repo: pathlib.Path, now: float):
         if best is None or (snap.get("last_at") or 0) > (best.get("last_at") or 0):
             best = snap
     if best and pp.liveness(best) == "running":
+        # A live tracker that published no rate still has a counter that is
+        # moving, and the reader can see it climbing beside `rate --`. Derive
+        # one from the counter itself, in ninja steps per second. The samples
+        # have to persist: every status line refresh is a fresh process, so
+        # there is no deque in memory to measure against.
+        #
+        # Timestamped with the snapshot's own `last_at` -- when the BUILD last
+        # spoke -- not with this process's clock. A build that has said
+        # nothing for a minute has not advanced, and dating the reading now
+        # would report a slowdown that is really just silence.
+        done, _total = pp.steps_of(best)
+        if done is not None and best.get("rate") is None:
+            when = best.get("last_at") or now
+            best = pp.observed_rate(
+                best, collections.deque(_samples(rundir, when, done, now)), now)
         return best, False
     # ONLY when this checkout's own snapshot froze mid-build. The log belongs
     # to the machine's workspace, not to this repo, so a fresh one on its own

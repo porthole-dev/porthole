@@ -356,6 +356,67 @@ def test_the_eta_counts_remaining_steps_in_the_unit_the_rate_measures():
         f"eta {snap['eta']} is not remaining COMPILES over the compile rate")
 
 
+def test_a_watcher_derives_a_rate_when_the_tracker_published_none():
+    """A build already running when porthole is upgraded keeps the modules it
+    imported at start, so a classifier fix cannot reach it and every step
+    stays `other`. The counter in front of the reader is still climbing.
+    Measured 2026-09-10 on a live chromium build: `15% 8792/56135` with
+    `rate --  eta --` for over an hour."""
+    import collections
+    now = 10_000.0
+    samples = collections.deque()
+    snap = None
+    for i in range(10):                      # 200 steps over 200s
+        snap = progress.observed_rate(
+            {"state": "running", "steps": f"{1000 + i * 20}/5000",
+             "started": now - 2000, "rate": None, "eta": None},
+            samples, now)
+        now += 20.0
+    assert snap["rate"] is not None, snap
+    assert 0.5 < snap["rate"] < 1.5, snap        # ~1 step/s
+    assert snap["eta"] is not None, snap
+
+
+def test_a_derived_rate_never_overwrites_the_trackers_own():
+    import collections
+    snap = progress.observed_rate(
+        {"state": "running", "steps": "100/1000", "rate": 4.2, "eta": 99.0},
+        collections.deque([(1.0, 1), (200.0, 190)]), 200.0)
+    assert snap["rate"] == 4.2 and snap["eta"] == 99.0, snap
+
+
+def test_a_stalled_counter_gets_no_derived_eta():
+    """window_rate still owns the refusal: a build parked inside one generator
+    step must report `--`, not a number somebody acts on."""
+    import collections
+    samples = collections.deque([(0.0, 500), (240.0, 503)])   # 3 steps in 4min
+    snap = progress.observed_rate(
+        {"state": "running", "steps": "503/5000", "started": -3000,
+         "rate": None, "eta": None}, samples, 240.0)
+    assert snap.get("rate") is None and snap.get("eta") is None, snap
+
+
+def test_the_derived_eta_is_the_whole_run_not_the_last_three_minutes():
+    """The window answers "how fast right now" and is the wrong horizon for a
+    six-hour build. Measured: a chromium build in a generator phase at a
+    quarter of its own average reported 11h30m and climbed to 13h17m over two
+    minutes, with about six hours left. The remainder holds the same mix of
+    phases the run has already been through, so the whole-run rate predicts
+    it better."""
+    import collections
+    now = 100_000.0
+    # 9000 steps in 5000s so far -- 1.8/s sustained -- but the last window
+    # is crawling at a tenth of that.
+    samples = collections.deque([(now - 180, 8982), (now, 9000)])
+    snap = progress.observed_rate(
+        {"state": "running", "steps": "9000/50000", "started": now - 5000,
+         "rate": None, "eta": None}, samples, now)
+    windowed = (50000 - 9000) / 0.1              # what the window alone says
+    sustained = (50000 - 9000) / (9000 / 5000.0)
+    assert abs(snap["eta"] - sustained) < sustained * 0.02, snap
+    assert snap["eta"] < windowed / 4, (snap["eta"], windowed)
+
+
 # ------------------------------------------------------------ liveness ---
 
 def test_a_run_whose_process_is_gone_is_stale_not_running():

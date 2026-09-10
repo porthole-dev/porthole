@@ -657,6 +657,80 @@ def window_rate(samples, now: float, window: float = RATE_WINDOW):
     return steps / span
 
 
+_STEPS = re.compile(r"^\s*(\d+)\s*/\s*(\d+)\s*$")
+
+
+def steps_of(snap):
+    """`(done, total)` from a snapshot's `steps` field, else `(None, None)`."""
+    match = _STEPS.match(str((snap or {}).get("steps") or ""))
+    if not match:
+        return (None, None)
+    done, total = int(match.group(1)), int(match.group(2))
+    return (done, total) if total > 0 and done <= total else (None, None)
+
+
+def observed_rate(snap, samples, now: float):
+    """A snapshot with `rate` and `eta` filled in from the counter MOVING.
+
+    The tracker owns those fields and this never overwrites them. It exists
+    for the case where it published neither and the counter in front of the
+    reader is visibly advancing anyway:
+
+      * a build already running when porthole was upgraded -- its tracker
+        holds the modules it imported at start, so a classifier fix cannot
+        reach it and every step stays `other` until the process exits;
+      * any tracker whose step kinds this version does not recognise.
+
+    Both left `rate --  eta --` beside a percentage that was climbing, which
+    reads as a refusal to estimate rather than as a gap.
+
+    The unit here is NINJA STEPS per second, which is what the counter beside
+    it counts -- not the tracker's compiles per second. A watcher cannot see
+    step kinds, only the number, and inventing a compile share it has no way
+    to measure would be a guess wearing the tracker's units.
+
+    `window_rate` still owns the refusal: too short a span or too few steps
+    and this returns the snapshot untouched, so a build parked inside one
+    generator step reports `--` rather than a number nobody should act on.
+    """
+    if not snap or (snap.get("state") or "running") != "running":
+        return snap
+    if snap.get("rate") is not None:
+        return snap
+    done, total = steps_of(snap)
+    if done is None:
+        return snap
+    sample = (now, done)
+    if not samples or samples[-1][1] != done:
+        samples.append(sample)
+    rate = window_rate(samples, now)
+    if not rate:
+        return snap
+    out = dict(snap)
+    out["rate"] = round(rate, 2)
+    if out.get("eta") is None and total > done:
+        # TWO ESTIMATORS, ON PURPOSE, because they answer different questions.
+        # `rate` is the trailing window: "how fast is it going right now",
+        # which is what somebody watching wants to see. An ETA over six hours
+        # is a different question, and the window is a bad answer to it -- it
+        # predicts the next three minutes. Measured on a chromium build parked
+        # in a generator phase at a quarter of its own average speed, the
+        # windowed ETA read 11h30m and climbed to 13h17m over two minutes,
+        # while the run had about six hours left. An ETA that grows while you
+        # watch it is what teaches people to ignore the field.
+        #
+        # The remainder will contain the same mix of fast and slow phases the
+        # run has already been through, so the rate ACROSS THE WHOLE RUN is
+        # the better predictor of it. It reads slightly slow -- `started`
+        # includes fetch and prepare, which produce no steps -- and that errs
+        # long, which is the safe direction.
+        started = snap.get("started")
+        span = None if not started else now - started
+        sustained = (done / span) if span and span > 0 else None
+        out["eta"] = (total - done) / (sustained or rate)
+    return out
+
+
 class PkgTracker(Tracker):
     """A package build, whose percentage is stated rather than inferred.
 
@@ -2063,15 +2137,21 @@ def watch(rundir, status_name: str, interval: float, out, ndjson: bool = False,
     if tty is None:
         tty = os.isatty(1)
 
+    # Every read goes through here, so this is the one place a derived rate
+    # has to be added for the waiting loop, the live loop and the final
+    # report to agree about one build's speed.
+    observed = collections.deque(maxlen=4096)
+
     def snapshot():
         # Absent, or read mid-rename: both are "nothing to attach to yet",
         # not an error -- the writer is atomic, so the next read succeeds.
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text())
+            snap = json.loads(path.read_text())
         except (OSError, ValueError):
             return None
+        return observed_rate(snap, observed, time.time())
 
     # `watch` paints a BLOCK now -- the numbers, then what the run is doing --
     # so a redraw has to walk back up to the top of it. A bare `\r` would
