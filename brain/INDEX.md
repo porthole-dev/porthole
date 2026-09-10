@@ -218,6 +218,7 @@ generic notes as well.
 | [30-display](playbooks/30-display.md) | `generic` | Playbook: display |
 | [40-suspend](playbooks/40-suspend.md) | `generic` | Playbook: suspend and deep sleep |
 | [50-wifi-bt-modem](playbooks/50-wifi-bt-modem.md) | `generic` | Playbook: wifi, bluetooth and modem |
+| [55-nfc](playbooks/55-nfc.md) | `generic` | Playbook: NFC |
 | [60-daily-driver](playbooks/60-daily-driver.md) | `generic` | Playbook: the daily-driver push |
 | [90-upstreaming](playbooks/90-upstreaming.md) | `generic` | Playbook: getting the work upstream |
 
@@ -240,7 +241,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 44
-- `generic` — 125
+- `generic` — 126
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
