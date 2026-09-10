@@ -446,23 +446,34 @@ def test_a_kernel_rung_falls_back_to_history_when_the_window_is_too_thin():
     """The fallback must survive. A first run has no samples at all, and
     removing the history path would leave it with no ETA -- which is the
     black box this whole module replaced. 300/0.2 - 300 = 1200."""
-    import time as _t
-
-    with tempfile.TemporaryDirectory() as run:
-        tracker = progress.Tracker(run, "kernel")
-        tracker.history = {"kernel": {"total": 600.0, "compile_lines": 5000}}
-        tracker.started = _t.time() - 300
-        tracker.compile_seen = 1000
-        now = _t.time()
-        tracker._samples.clear()
-        # Four samples across four minutes: span is long enough but only three
-        # steps, below RATE_MIN_STEPS, so the window is discarded.
-        tracker._samples.extend([(now - 240, 997), (now - 160, 998),
-                                 (now - 80, 999), (now, 1000)])
-        # Exact equality is flaky here: elapsed is live wall-clock time,
-        # and microseconds pass between setting `started` and calling
-        # `_eta`, so the raw value is 1200.00003... not 1200.0 exactly.
-        assert abs(tracker._eta(0.2) - 1200.0) < 0.01, tracker._eta(0.2)
+    # THE CLOCK IS FROZEN, not tolerated. `Tracker.elapsed` is
+    # `time.time() - self.started`, so the value under test moved between
+    # setting `started` and calling `_eta`. The previous version allowed 0.01s
+    # for that, which held locally and failed on a CI runner in 2026-09:
+    # the suite runs one worker per core, and a scheduling stall longer than
+    # 10 ms is ordinary under that load, not exceptional. Widening the
+    # tolerance would only move the threshold; pinning `time.time` removes
+    # the wall clock from the assertion altogether, and `window_rate` reads
+    # the same frozen clock so the samples below stay consistent with it.
+    frozen = 1_000_000.0
+    real_time = progress.time.time
+    progress.time.time = lambda: frozen
+    try:
+        with tempfile.TemporaryDirectory() as run:
+            tracker = progress.Tracker(run, "kernel")
+            tracker.history = {"kernel": {"total": 600.0,
+                                          "compile_lines": 5000}}
+            tracker.started = frozen - 300
+            tracker.compile_seen = 1000
+            tracker._samples.clear()
+            # Four samples across four minutes: the span is long enough but
+            # there are only three steps, below RATE_MIN_STEPS, so the window
+            # is discarded and the history path must answer.
+            tracker._samples.extend([(frozen - 240, 997), (frozen - 160, 998),
+                                     (frozen - 80, 999), (frozen, 1000)])
+            assert tracker._eta(0.2) == 1200.0, tracker._eta(0.2)
+    finally:
+        progress.time.time = real_time
 
 
 def test_a_build_with_nothing_to_do_says_so():

@@ -41,6 +41,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import NamedTuple
 
 from porthole_cli import (Bail, EX_FAIL, EX_LOCK, EX_OK, EX_STATE,
                           EX_UNAVAILABLE, EX_USAGE, child_env)
@@ -1430,6 +1431,23 @@ def _git_read(cwd, args, timeout=10):
         return "", 1
 
 
+def _git_bytes(cwd, args, timeout=10):
+    """`_git_read`, but the blob comes back as bytes: (stdout, returncode).
+
+    An aport can hold a binary -- `device-sony-taoshan/logo.rle`,
+    `device-xiaomi-latte/MOK.cer` -- and `text=True` does not merely mangle
+    those, it raises UnicodeDecodeError partway through reading a tree. Every
+    caller that reads FILE CONTENT uses this; the ones reading shas and refs
+    keep the text version, because those really are text.
+    """
+    try:
+        proc = subprocess.run(["git", "-C", str(cwd)] + list(args),
+                              capture_output=True, timeout=timeout)
+        return proc.stdout, proc.returncode
+    except (OSError, subprocess.SubprocessError):
+        return b"", 1
+
+
 def upstream_remote_ref(upstream) -> str:
     """`origin/<default-branch>` for the aports_upstream checkout.
 
@@ -1770,27 +1788,104 @@ def _stop(ctx) -> int:
 # merge-file already gets right, and each was a chance to get it wrong.
 
 
+# How far back to walk an APKBUILD's history looking for the fork point.
+# 400 covers roughly two years for a package bumped as often as mesa; the
+# refusal says when it was reached, so 'older than this' is distinguishable
+# from 'not there at all'.
+BASE_SEARCH_DEPTH = 400
+
+
+class Entry(NamedTuple):
+    """One file in an aport, as git records it: a mode and the raw bytes.
+
+    Content alone is not enough and that was the defect. `git show` on a
+    symlink returns the LINK TARGET as blob content, so a reader that keeps
+    only content turns `link -> run.sh` into a regular file containing the
+    six characters `run.sh`. Same shape for the executable bit and for a
+    binary. 382 of pmaports' 1664 aports carry at least one such file.
+    """
+
+    mode: str
+    blob: bytes
+
+    @property
+    def mergeable(self) -> bool:
+        """Can `git merge-file` be asked about this, or is it opaque?
+
+        A regular file whose bytes are UTF-8 with no NUL. Everything else --
+        symlinks, binaries, anything the terminal would not survive -- is
+        carried whole or reported as a conflict, never line-merged. A
+        three-way merge of a JPEG produces a JPEG-shaped thing that is not a
+        JPEG, and does it without complaining.
+        """
+        if self.mode not in ("100644", "100755"):
+            return False
+        if b"\x00" in self.blob:
+            return False
+        try:
+            self.blob.decode()
+        except UnicodeDecodeError:
+            return False
+        return True
+
+    def text(self) -> str:
+        return self.blob.decode()
+
+
 def _tree_at(upstream, ref: str, rel: str) -> dict:
-    """`{filename: text}` for one aport directory at one git ref.
+    """`{filename: Entry}` for one aport directory at one git ref.
 
     One directory deep, deliberately. An aport is a flat directory of an
     APKBUILD and its patches; anything nested would be new, and silently
-    flattening it is how a rebase drops a file. A nested path is reported by
-    `_nested_at` rather than merged.
+    flattening it is how a rebase drops a file. Nested paths are reported by
+    `_nested_at` rather than merged -- 43 aports have them.
     """
-    out, rc = _git_read(upstream, ["ls-tree", "-r", "--name-only", ref,
-                                   "--", f"{rel}/"])
+    out, rc = _git_read(upstream, ["ls-tree", "-r", ref, "--", f"{rel}/"])
     if rc != 0:
         return {}
     files = {}
-    for path in out.splitlines():
-        path = path.strip()
-        if not path or path.count("/") != rel.count("/") + 1:
+    for line in out.splitlines():
+        # `<mode> <type> <sha>\t<path>`
+        head, _, path = line.partition("\t")
+        parts = head.split()
+        if len(parts) != 3 or not path:
             continue
-        text, rc = _git_read(upstream, ["show", f"{ref}:{path}"])
+        mode, _kind, sha = parts
+        if path.count("/") != rel.count("/") + 1:
+            continue
+        blob, rc = _git_bytes(upstream, ["cat-file", "blob", sha])
         if rc == 0:
-            files[path.rsplit("/", 1)[1]] = text
+            files[path.rsplit("/", 1)[1]] = Entry(mode, blob)
     return files
+
+
+def read_aport_dir(path) -> dict:
+    """`{filename: Entry}` for an aport on disk, one directory deep.
+
+    Reads the LINK rather than through it. `Path.is_file()` follows a symlink
+    and `read_text()` returns the target's content, so our side of a symlink
+    looked nothing like git's side of the same symlink -- which produced a
+    conflict on a file neither side had touched.
+    """
+    files = {}
+    for f in sorted(pathlib.Path(path).iterdir()):
+        if f.is_symlink():
+            files[f.name] = Entry("120000", os.readlink(f).encode())
+        elif f.is_file():
+            mode = "100755" if f.stat().st_mode & 0o111 else "100644"
+            files[f.name] = Entry(mode, f.read_bytes())
+    return files
+
+
+def nested_in_dir(path) -> list:
+    """Subdirectories of an aport on disk. The mirror of `_nested_at`.
+
+    Warned about for OUR tree too, not just upstream's. The first version
+    checked upstream only, so a file nested in our own fork was dropped from
+    the plan without a word -- the exact failure the upstream check exists to
+    prevent, on the side that would actually lose work.
+    """
+    return sorted(f.name for f in pathlib.Path(path).iterdir() if f.is_dir())
 
 
 def _nested_at(upstream, ref: str, rel: str) -> list:
@@ -1812,6 +1907,13 @@ def base_ref_for(upstream, rel: str, entry: dict):
     pkgver-pkgrel is the `forked:` value. Verified on the one real case:
     mesa's `26.1.6-r0` resolves to e744e23b, two upstream bumps back.
 
+    `--follow`, because three of the four forks this port carries have
+    histories that cross a `testing/ -> community/` promotion: measured
+    2026-09-10, phoc 103 commits without it and 107 with, epiphany 96 and
+    108. Without `--follow` a fork taken before its package was promoted is
+    simply not findable, and the refusal reads as "wrong version" rather than
+    "the file moved".
+
     Returns `(ref, how)` on success and `(None, why_not)` otherwise -- never a
     guess. Rebasing onto the wrong base silently reclassifies upstream's own
     changes as our delta, which is worse than refusing to start.
@@ -1828,80 +1930,166 @@ def base_ref_for(upstream, rel: str, entry: dict):
         return None, (f"nothing to find a base from: commit: is "
                       f"{commit or 'unset'}, forked: is {forked or 'unset'}")
     want_ver, want_rel = forked.rsplit("-r", 1)
-    out, rc = _git_read(upstream, ["log", "--format=%H", "-n", "400",
+    # `--name-only` alongside `--follow` is what makes the rename usable: it
+    # reports the path the file had IN THAT COMMIT. Asking for the file at
+    # today's path across a rename fails on every commit before the move, so
+    # `--follow` alone finds the commits and then reads nothing from them --
+    # which is a refusal that looks exactly like "the version is not there".
+    out, rc = _git_read(upstream, ["log", "--format=%H", "--name-only",
+                                   "--follow", "-n", str(BASE_SEARCH_DEPTH),
                                    "--", f"{rel}/APKBUILD"], timeout=60)
     if rc != 0 or not out.strip():
         return None, f"cannot read {rel}/APKBUILD's history in aports_upstream"
-    for sha in out.split():
-        text, rc = _git_read(upstream, ["show", f"{sha}:{rel}/APKBUILD"])
+    seen, sha = [], ""
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if re.fullmatch(r"[0-9a-f]{40}", line):
+            sha = line
+        elif sha:
+            seen.append((sha, line))
+            sha = ""
+    for sha, path in seen:
+        text, rc = _git_read(upstream, ["show", f"{sha}:{path}"])
         if rc != 0:
             continue
         got = apkbuild_fields(text)
         if got.get("pkgver") == want_ver and got.get("pkgrel") == want_rel:
-            return sha, f"found by walking {rel}/APKBUILD back to {forked}"
-    return None, (f"no commit in the last 400 touching {rel}/APKBUILD builds "
-                  f"{forked} -- was it forked from somewhere else?")
+            moved = "" if path == f"{rel}/APKBUILD" else f" (then at {path})"
+            return sha, (f"found by walking {rel}/APKBUILD back to "
+                         f"{forked}{moved}")
+    # Saying WHICH of the two happened matters: "not in the last 400" is a
+    # reason to look further back, "not in all 96" is a reason to doubt the
+    # manifest. Reporting both as "not found" sends you to the wrong one.
+    capped = len(seen) >= BASE_SEARCH_DEPTH
+    return None, (
+        f"no commit builds {forked}" + (
+            f" in the last {BASE_SEARCH_DEPTH} touching {rel}/APKBUILD -- "
+            f"the search hit its depth limit, so it may simply be older"
+            if capped else
+            f" anywhere in {rel}/APKBUILD's {len(seen)} commits -- "
+            f"was it forked from somewhere else?"))
 
 
-def _merge_one(base: str, ours: str, theirs: str):
-    """3-way merge one file. Returns `(text, conflicted)`.
+def _merge_one(base: bytes, ours: bytes, theirs: bytes):
+    """3-way merge one file. Bytes in, bytes out, `(blob, conflicted)`.
 
     `git merge-file -p` prints the result and exits with the conflict count,
     so a non-zero exit is data rather than a failure. An exit at or above 128
     IS a failure, and is reported as a conflict keeping our side: a merge that
     could not run must never read as one that ran cleanly.
+
+    BYTES, NOT TEXT, all the way through. With `text=True` Python applies
+    universal-newline translation to what git prints, so a patch carrying
+    CRLF came back with every line ending rewritten to LF -- a change to
+    every line of a file neither side had touched, produced by the reader
+    rather than by the merge. git itself was innocent.
     """
     with tempfile.TemporaryDirectory() as d:
         p = pathlib.Path(d)
-        (p / "ours").write_text(ours)
-        (p / "base").write_text(base)
-        (p / "theirs").write_text(theirs)
+        (p / "ours").write_bytes(ours)
+        (p / "base").write_bytes(base)
+        (p / "theirs").write_bytes(theirs)
         proc = subprocess.run(
             ["git", "merge-file", "-p", "--diff3",
              "-L", "ours", "-L", "upstream at fork time", "-L", "upstream now",
              str(p / "ours"), str(p / "base"), str(p / "theirs")],
-            capture_output=True, text=True)
+            capture_output=True)
     if proc.returncode >= 128:
         return ours, True
     return proc.stdout, proc.returncode != 0
 
 
+def _merge_opaque(b, o, t):
+    """3-way for a file nothing can line-merge: symlink, binary, mode change.
+
+    Identity only -- whichever side moved wins, and both moving is a conflict
+    that keeps ours and says so. This is what `git merge-file` would do if it
+    could see modes, and it is the only honest answer for a blob.
+    """
+    if b is not None and o == b:
+        return t, False, "upstream changed it"
+    if b is None or t == b or t is None:
+        return o, False, "ours"
+    if o == t:
+        return t, False, "upstream made the same change"
+    return o, True, "both changed it, and it cannot be line-merged"
+
+
 def plan_rebase(base: dict, ours: dict, theirs: dict) -> dict:
     """What the rebased aport should contain, file by file, and why.
 
-    Pure -- three `{filename: text}` mappings in, a plan out -- so every case
+    Pure -- three `{filename: Entry}` mappings in, a plan out -- so every case
     is testable with no git repo, no pmaports and no network.
 
     Only three branches are written here. Everything else, including every
     case where two of the three sides are identical, is handed to
-    `git merge-file`, which is already right about all of them.
+    `git merge-file` (text) or to identity (`_merge_opaque`), both of which
+    are already right about all of them.
     """
     plan = {}
     for name in sorted(set(base) | set(ours) | set(theirs)):
         b, o, t = base.get(name), ours.get(name), theirs.get(name)
         if o is None:
             if b is None:
-                plan[name] = {"verdict": "upstream-new", "text": t,
+                plan[name] = {"verdict": "upstream-new", "entry": t,
                               "note": "upstream added it since we forked"}
             else:
-                plan[name] = {"verdict": "dropped", "text": None,
+                plan[name] = {"verdict": "dropped", "entry": None,
                               "note": "we deleted it" + (
                                   "; upstream has since changed it"
                                   if t is not None and t != b else "")}
         elif t is None:
             plan[name] = {
                 "verdict": "ours" if b is None else "upstream-deleted",
-                "text": o,
+                "entry": o,
                 "note": ("our addition" if b is None
                          else "upstream deleted it; ours is kept")}
+        elif not (o.mergeable and t.mergeable
+                  and (b is None or b.mergeable)):
+            entry, bad, why = _merge_opaque(b, o, t)
+            plan[name] = {
+                "verdict": "conflict" if bad else (
+                    "unchanged" if entry == o else "merged"),
+                "entry": entry,
+                "note": f"{why} (not line-mergeable: mode {entry.mode})"}
         else:
-            merged, bad = _merge_one(b or "", o, t)
+            merged, bad = _merge_one(b.blob if b else b"", o.blob, t.blob)
+            # The MODE follows the same three-way rule as the content: ours
+            # unless we never changed it. A rebase that keeps our patch and
+            # drops our +x has not kept our patch.
+            mode = o.mode if (b is None or o.mode != b.mode) else t.mode
             plan[name] = {
                 "verdict": ("conflict" if bad else
-                            "unchanged" if merged == o else "merged"),
-                "text": merged,
+                            "unchanged" if merged == o.blob and mode == o.mode
+                            else "merged"),
+                "entry": Entry(mode, merged),
                 "note": ("both sides changed it" if bad else "")}
     return plan
+
+
+def write_plan(dest, plan: dict) -> None:
+    """Materialise a plan into `dest`, preserving mode and symlink-ness.
+
+    The counterpart to `read_aport_dir`. `tests/test_pkg_rebase_fidelity.py`
+    asserts the pair round-trips a real aport byte for byte, because a rebase
+    that cannot reproduce an unchanged tree cannot be trusted to report a
+    changed one.
+    """
+    dest = pathlib.Path(dest)
+    for name, info in plan.items():
+        entry = info["entry"]
+        if entry is None:
+            continue
+        target = dest / name
+        if entry.mode == "120000":
+            if target.is_symlink() or target.exists():
+                target.unlink()
+            os.symlink(entry.blob.decode(), target)
+            continue
+        target.write_bytes(entry.blob)
+        os.chmod(target, 0o755 if entry.mode == "100755" else 0o644)
 
 
 def _needs_checksum(plan: dict, theirs: dict) -> bool:
@@ -1912,9 +2100,11 @@ def _needs_checksum(plan: dict, theirs: dict) -> bool:
     Reported only when true: a step printed unconditionally is a step people
     learn to skip.
     """
-    got = plan.get("APKBUILD", {}).get("text") or ""
-    up = theirs.get("APKBUILD", "") or ""
-    return sorted(_bodies(got, "source")) != sorted(_bodies(up, "source"))
+    mine = plan.get("APKBUILD", {}).get("entry")
+    up = theirs.get("APKBUILD")
+    got = mine.text() if mine and mine.mergeable else ""
+    theirs_text = up.text() if up and up.mergeable else ""
+    return sorted(_bodies(got, "source")) != sorted(_bodies(theirs_text, "source"))
 
 
 def _rebase(ctx, args) -> int:
@@ -1986,12 +2176,14 @@ def _rebase(ctx, args) -> int:
         raise Bail(f"{rel} does not exist at {new_ref} -- upstream may have "
                    f"moved or deleted it", EX_STATE,
                    f"git -C {upstream} log --diff-filter=D -- {rel}")
-    ours = {f.name: f.read_text(errors="replace")
-            for f in sorted(ours_dir.iterdir()) if f.is_file()}
+    ours = read_aport_dir(ours_dir)
 
     plan = plan_rebase(base, ours, theirs)
     nested = _nested_at(upstream, new_ref, rel)
-    up_fields = apkbuild_fields(theirs.get("APKBUILD", ""))
+    ours_nested = nested_in_dir(ours_dir)
+    up_apk = theirs.get("APKBUILD")
+    up_fields = apkbuild_fields(up_apk.text() if up_apk and up_apk.mergeable
+                                else "")
     new_ver = f"{up_fields.get('pkgver', '?')}-r{up_fields.get('pkgrel', '?')}"
     conflicts = [f for f, v in plan.items() if v["verdict"] == "conflict"]
 
@@ -2003,7 +2195,9 @@ def _rebase(ctx, args) -> int:
         "conflicts": conflicts,
         "needs_checksum": _needs_checksum(plan, theirs),
         "nested_upstream_paths": nested,
+        "nested_ours_dirs": ours_nested,
         "worktree": "", "branch": "",
+        "existing_worktrees": existing_rebases(pmaports),
     }
 
     if args.yes:
@@ -2026,6 +2220,10 @@ def _rebase(ctx, args) -> int:
         if nested:
             out.warn(f"{rel} has files in subdirectories upstream, which this "
                      f"does not merge: {', '.join(nested)}")
+        if ours_nested:
+            out.warn(f"OUR {ours_dir.name}/ has subdirectories, which this "
+                     f"does not merge and does not copy: "
+                     f"{', '.join(ours_nested)} -- carry them across by hand")
         if conflicts:
             out(f"  {len(conflicts)} file(s) conflicted: "
                 f"{', '.join(conflicts)}")
@@ -2034,6 +2232,17 @@ def _rebase(ctx, args) -> int:
         if payload["needs_checksum"]:
             out("  source= differs from upstream's, so the checksums do not "
                 "cover our patches.")
+        stale = payload["existing_worktrees"]
+        if stale:
+            out.blank()
+            total = sum(w["bytes"] for w in stale) / (1024 ** 3)
+            out.warn(f"{len(stale)} scratch worktree(s) from earlier rebases "
+                     f"are still here, {total:.1f} GiB in total")
+            for w in stale:
+                out.kv(w["branch"], w["path"], 0,
+                       note=f"{w['bytes'] / (1024 ** 3):.1f} GiB")
+                out.hint(f"git -C {pmaports} worktree remove {w['path']}")
+
         if not args.yes:
             out.blank()
             out.hint(f"porthole pkg rebase {name} --yes",
@@ -2052,6 +2261,51 @@ def _rebase(ctx, args) -> int:
     # Conflicts are a real answer, not a crash -- but they are not success
     # either, and a script that rebases a batch must be able to tell.
     return EX_FAIL if conflicts else EX_OK
+
+
+def existing_rebases(pmaports) -> list:
+    """Scratch worktrees a previous `pkg rebase --yes` left behind.
+
+    Reported on EVERY run of the verb, not just after one. Each is a full
+    pmaports checkout -- 107 MB measured on 2026-09-10 -- nothing prunes
+    them, and `porthole disk` accounts for apk work dirs rather than
+    worktrees, so four forgotten rebases is 428 MB that nothing on the host
+    mentions. Telling you where you already are beats a report you have to
+    know to run.
+
+    Never removes anything. A scratch tree with half a conflict resolved in
+    it is work, and this verb does not get to decide that it is not.
+    """
+    out, rc = _git_read(pmaports, ["worktree", "list", "--porcelain"])
+    if rc != 0:
+        return []
+    found, path = [], ""
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):].strip()
+        elif line.startswith("branch ") and path:
+            branch = line[len("branch "):].strip()
+            if branch.startswith("refs/heads/porthole/rebase-"):
+                found.append({"path": path,
+                              "branch": branch[len("refs/heads/"):],
+                              "bytes": _dir_bytes(path)})
+            path = ""
+    return found
+
+
+def _dir_bytes(path) -> int:
+    """Bytes under `path`, or 0 if it cannot be walked. Never raises: this is
+    decoration on a report, and a report that dies counting is worse than one
+    that says nothing."""
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(path):
+            for f in files:
+                with contextlib.suppress(OSError):
+                    total += os.lstat(os.path.join(root, f)).st_size
+    except OSError:
+        return 0
+    return total
 
 
 def _write_rebase(ctx, pmaports, branch: str, ours_dir, plan: dict):
@@ -2091,10 +2345,7 @@ def _write_rebase(ctx, pmaports, branch: str, ours_dir, plan: dict):
         if target.exists():
             shutil.rmtree(target)
         target.mkdir(parents=True, exist_ok=True)
-        for fname, info in plan.items():
-            if info["text"] is None:
-                continue
-            (target / fname).write_text(info["text"])
+        write_plan(target, plan)
     except (OSError, ValueError):
         subprocess.run(["git", "-C", str(pmaports), "worktree", "remove",
                         "--force", str(dest)], capture_output=True)

@@ -270,6 +270,49 @@ def test_the_expected_branch_is_reported_and_changes_no_exit_code():
         assert any("taimen-bringup" in ln for ln in ctx.out.lines), ctx.out.lines
 
 
+def test_out_names_the_remote_and_branch_instead_of_trusting_push_default():
+    """Bare `git push` obeys the host's push.default. `simple` pushes the
+    current branch; `matching` pushes EVERY branch whose name exists on the
+    remote. A sync verb must not do something different on someone else's
+    machine, so the refspec is spelled out."""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        made, cfg = scenario(tmp)
+        work, bare = made["workdir"][1], made["workdir"][0]
+        git(work, "config", "push.default", "matching")
+        # A second branch that also exists on the remote: `matching` would
+        # push this one too, `simple` and an explicit refspec would not.
+        git(work, "branch", "side")
+        git(work, "push", "-q", "origin", "side")
+        commit(work, "on-main.txt")
+        git(work, "checkout", "-q", "side")
+        commit(work, "on-side.txt")
+        git(work, "checkout", "-q", "main")
+
+        args = _Args("out", yes=True)
+        ctx = _Ctx(str(made["porthole"][1]), cfg, args)
+        assert sync.cmd_sync(args, ctx) == EX_OK
+
+        main_log = git(bare, "log", "--oneline", "main").stdout
+        side_log = git(bare, "log", "--oneline", "side").stdout
+        assert "on-main.txt" in main_log, main_log
+        assert "on-side.txt" not in side_log, \
+            "push.default=matching pushed a branch sync was not asked to push"
+
+
+def test_a_network_git_that_never_answers_is_given_up_on():
+    """No timeout at all was the first version, so an unreachable remote left
+    `porthole sync` with a blank screen and no way to tell waiting from
+    hung."""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        made, cfg = scenario(tmp)
+        rc, _out, err = sync.git(made["workdir"][1], "fetch", "origin",
+                                 timeout=0.001)
+        assert rc != 0
+        assert "gave up after" in err, err
+
+
 def test_the_kernel_tree_is_declared_uncovered_rather_than_silently_skipped():
     """Section 11 q2 of the design: "no, LOUDLY -- a sync verb that silently
     skips a tree is worse than one that refuses it". A reader who is not told
