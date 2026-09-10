@@ -49,15 +49,40 @@ REPOS = (
 EXPECTED_BRANCH_KEY = {"pmaports": "PORTHOLE_PMAPORTS_BRANCH"}
 
 
-def git(repo: pathlib.Path, *args, cfg=None):
+# Reading a ref is local and instant; `push` and `fetch` cross the network.
+# Both get a ceiling, because the alternative is what the first version did:
+# no timeout at all, so an unreachable remote left `porthole sync` sitting
+# with a blank screen and no way to tell waiting from hung. `_git_read` one
+# module over has carried a 10s ceiling for exactly this reason since it was
+# written; this is that rule applied to the verb that actually goes out.
+LOCAL_TIMEOUT = 15
+NETWORK_TIMEOUT = 300
+
+
+def git(repo: pathlib.Path, *args, cfg=None, timeout=LOCAL_TIMEOUT):
     """Run one git command in `repo`. Returns (rc, stdout, stderr), stripped.
 
     Never raises on a non-zero git: every caller here has something more
     useful to say about a failure than a traceback, and several EXPECT one
-    (`@{upstream}` on a branch that has none).
+    (`@{upstream}` on a branch that has none). A timeout is reported the same
+    way, as a non-zero with a message, so no caller has to grow a handler for
+    "it did not finish" separate from "it did not work".
+
+    GIT_TERMINAL_PROMPT=0 because stdout and stderr are captured here. In a
+    terminal git prompts on /dev/tty and a person can answer; with no tty --
+    an agent, a cron, a CI job -- git without this either fails with a
+    baffling `No such device or address` or, worse, waits. Refusing to prompt
+    turns both into one clear "authentication needed".
     """
-    p = subprocess.run(("git", "-C", str(repo)) + args,
-                       capture_output=True, text=True, env=child_env(cfg=cfg))
+    env = child_env(cfg=cfg)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    try:
+        p = subprocess.run(("git", "-C", str(repo)) + args,
+                           capture_output=True, text=True, env=env,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 1, "", f"git {args[0]} gave up after {timeout}s"
     return p.returncode, p.stdout.strip(), p.stderr.strip()
 
 
@@ -127,15 +152,24 @@ def _blockers(row: dict, action: str) -> list[str]:
 def _act(row: dict, action: str, cfg) -> dict:
     """Push or fast-forward one repo. Assumes _blockers() already passed."""
     path = pathlib.Path(row["path"])
+    # The remote and branch are SPELLED OUT rather than left to bare `git
+    # push`. Bare push obeys the host's push.default: `simple` (git's default
+    # since 2.0, and what all three repos resolve to here) pushes the current
+    # branch and nothing else, but a host configured `matching` pushes every
+    # branch whose name exists on the remote. A sync verb must not do
+    # something different on someone else's machine.
+    remote, _, up_branch = row["upstream"].partition("/")
     if action == "out":
         if not row["ahead"]:
             return {"action": "none", "detail": "already pushed"}
-        rc, out, err = git(path, "push", cfg=cfg)
+        rc, out, err = git(path, "push", remote,
+                           f"{row['branch']}:{up_branch}", cfg=cfg,
+                           timeout=NETWORK_TIMEOUT)
         return ({"action": "pushed", "detail": f"{row['ahead']} commit(s) "
                                                f"-> {row['upstream']}"}
                 if rc == 0 else {"action": "failed", "detail": err or out})
 
-    rc, out, err = git(path, "fetch", cfg=cfg)
+    rc, out, err = git(path, "fetch", remote, cfg=cfg, timeout=NETWORK_TIMEOUT)
     if rc != 0:
         return {"action": "failed", "detail": err or out}
     # Re-read after the fetch: `behind` was measured against the old ref, and
