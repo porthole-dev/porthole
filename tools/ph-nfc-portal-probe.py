@@ -7,6 +7,14 @@
 #        exactly the claim this probe checks
 # env: -
 # exits: 0 filter holds · 1 filter is wrong · 2 could not reach a verdict
+#
+# Touched check_filter() (or open_remote(), or anything it calls)? Run
+# `--selftest` before trusting the next real run. Nothing else covers this
+# file -- it has no test in `make ci`, and a real run against hardware only
+# tells you the CURRENT filter is right, never that the ASSERTION LOGIC
+# itself would still catch a wrong one. `--selftest` is that check: it runs
+# check_filter() against a CLOSED, an OPEN and a NOTHING-permitted proxy on
+# a private bus and asserts it tells them apart.
 """Assert what an app on the NFC portal's fd can and cannot do.
 
 The portal's whole security claim is one xdg-dbus-proxy filter: a permitted
