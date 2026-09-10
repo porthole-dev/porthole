@@ -125,6 +125,8 @@ DENIED_VERBS = {
                   "which deletes files, the same way `disk` used to before "
                   "it was reshaped. No safe subset to carve out without that "
                   "same reshape, so the whole verb stays a question",
+    "sync":       "`sync out` pushes to three remotes and `sync in` moves "
+                  "three working trees; `sync status` is granted below",
     "brain":      "`brain submit` opens a pull request; search is granted below",
     "docs":       "generates the site into the working tree",
     "permissions":
@@ -147,6 +149,12 @@ ALLOWED_SUBCOMMANDS = {
     # `disk` used to take (a rule for `porthole disk` matched --prune too).
     "porthole disk report":  "reports work-dir sizes and what is prunable; "
                              "prune/retire-host delete things",
+    # `status` is a spelled-out choice rather than only the bare default for
+    # exactly this reason: `porthole sync` as a prefix would also match
+    # `porthole sync out --yes`, so the grantable string has to be one the
+    # other two actions cannot be reached from.
+    "porthole sync status":  "reports each repo's branch, dirty files and "
+                             "distance from its upstream; writes nothing",
 }
 
 # Host commands that are reads, and that a session runs constantly. `git

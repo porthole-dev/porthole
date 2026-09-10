@@ -634,6 +634,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `log` | list, follow and rotate the build logs .run/ has been accumulating | yes | no |
 | `disk` | report the disk two divergent pmbootstrap work dirs are spending, and what is prunable | yes | needs --yes |
 | `devices` | list device profiles | yes | no |
+| `sync` | move the three repos between hosts: report, push, or fast-forward | yes | needs --yes |
 | `aports` | work on pmaports: status, feature branches, diffs, patches | yes | needs --yes |
 | `channel` | see and switch the postmarketOS release channel | yes | no |
 | `experiment` | run something with the device state captured either side | yes | no |

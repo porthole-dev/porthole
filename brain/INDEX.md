@@ -104,6 +104,7 @@ generic notes as well.
 
 | id | scope | title |
 |---|---|---|
+| [a-check-that-fires-on-a-healthy-tree-gets-muted](laws/a-check-that-fires-on-a-healthy-tree-gets-muted.md) | `generic` | A check that fires on a healthy tree gets muted |
 | [a-null-from-an-unexecuted-path-is-not-a-refutation](laws/a-null-from-an-unexecuted-path-is-not-a-refutation.md) | `generic` | A null from a path that never executed is not a refutation |
 | [empty-must-mean-unknown-never-changed](laws/empty-must-mean-unknown-never-changed.md) | `generic` | An empty reading means unknown, never changed |
 | [every-test-needs-a-positive-control](laws/every-test-needs-a-positive-control.md) | `generic` | Decide which of your numbers is the control before you run the arm |
@@ -236,7 +237,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 43
-- `generic` — 122
+- `generic` — 123
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
