@@ -14,7 +14,9 @@ which is not the same as being correct.
 Needs no device, no root and no vendor image.
 """
 import pathlib
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 
@@ -24,7 +26,7 @@ import _runner  # noqa: E402
 sys.path.insert(0, str(ROOT / "lib"))
 
 from porthole_cmd_blobs import (  # noqa: E402
-    SPARSE_MAGIC, classify, sparse_to_raw, FIRMWARE_MAP)
+    LS_RE, SPARSE_MAGIC, classify, sparse_to_raw, FIRMWARE_MAP)
 from porthole_cli import Bail  # noqa: E402
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="porthole-blobs-test-"))
@@ -219,6 +221,58 @@ def test_modem_is_flagged_as_living_elsewhere():
     """Modem firmware is not in vendor.img -- it is on its own partition."""
     hit = classify("modem.mdt")
     assert hit and "NOT in vendor.img" in hit["note"]
+
+
+class Skip(Exception):
+    pass
+
+
+def _ext4_image():
+    """A real 32 MiB ext4 image with a known layout, read back with the real
+    debugfs.
+
+    Asserting LS_RE against a hand-typed line is what let it rot: the pattern
+    it carried expected `(filetype)` directly after the inode and matched
+    nothing any e2fsprogs has ever printed, so `blobs ls`, `blobs extract` and
+    `blobs inventory` all answered "nothing under <dir>" for every image
+    (#106) with no test noticing. The only honest fixture is mke2fs's output.
+    """
+    if not (shutil.which("mkfs.ext4") and shutil.which("debugfs")):
+        raise Skip("mkfs.ext4/debugfs not both on PATH")
+    # Its own directory per call: the suite runs these in parallel and two
+    # workers building one path is a flake, not a finding.
+    root = pathlib.Path(tempfile.mkdtemp(prefix="ext4-", dir=str(TMP)))
+    (root / "tree" / "firmware").mkdir(parents=True)
+    (root / "tree" / "firmware" / "a.mbn").write_bytes(b"x" * 6)
+    (root / "tree" / "app").mkdir()
+    image = root / "v.img"
+    subprocess.run(["mkfs.ext4", "-q", "-F", "-d", str(root / "tree"),
+                    str(image), "32M"], check=True, capture_output=True)
+    return image
+
+
+def _ls(image, directory):
+    out = subprocess.run(["debugfs", "-R", "ls -l " + directory, str(image)],
+                         capture_output=True, text=True).stdout
+    return [m.group(3).strip() for m in
+            (LS_RE.match(line) for line in out.splitlines()) if m]
+
+
+def test_the_debugfs_listing_parser_reads_the_root_directory():
+    """`--dir /` is what you reach for on an unfamiliar image, and it is the
+    listing that returned nothing."""
+    image = _ext4_image()
+    names = _ls(image, "/")
+    assert "firmware" in names and "app" in names, names
+
+
+def test_the_debugfs_listing_parser_reads_a_subdirectory_and_its_size():
+    image = _ext4_image()
+    out = subprocess.run(["debugfs", "-R", "ls -l /firmware", str(image)],
+                         capture_output=True, text=True).stdout
+    rows = {m.group(3).strip(): int(m.group(2))
+            for m in (LS_RE.match(line) for line in out.splitlines()) if m}
+    assert rows.get("a.mbn") == 6, rows
 
 
 def main():
