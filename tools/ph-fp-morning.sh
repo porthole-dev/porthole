@@ -69,6 +69,16 @@ scp -o ConnectTimeout=5 "$MODDIR/qseecom_app_load.ko" "$PHONE:$REMOTE_KO" \
 	|| { echo "PUSH FAILED"; exit 1; }
 
 BEFORE=$(ssh "$PHONE" "grep fingerprint /proc/interrupts" || echo "n/a")
+
+# Round 40: the trustlet may already be resident from an earlier run
+# this boot. app_load() then refuses with -EINVAL and TrustZone hands
+# back no id on that path -- confirmed with the qcom_scm dynamic-debug
+# trace, not guessed -- and app_get_id() cannot look this app up by
+# name on this platform either, loaded or not. The only place a usable
+# id can come from is a PRIOR successful "app_load(...) ret=0
+# app_id=N" line still sitting in this boot's dmesg ring buffer.
+# Recover it BEFORE clearing dmesg for the real run.
+PRIOR_ID=$(ssh "$PHONE" "sudo -n dmesg" | grep -o 'app_load("fpctzappfingerprint") ret=0 app_id=[0-9]*' | tail -1 | grep -o '[0-9]*$' || true)
 ssh "$PHONE" "sudo -n dmesg -c >/dev/null"
 
 echo ""
@@ -80,11 +90,31 @@ echo " press. This will return on its own; no further input needed."
 echo "=================================================================="
 echo ""
 
+FRESH_LOAD_TESTED=1
 # insmod always returns nonzero by design (the probe never stays
 # resident); that is expected, not a failure.
 ssh "$PHONE" "sudo -n insmod $REMOTE_KO" || true
-
 LOG=$(ssh "$PHONE" "sudo -n dmesg")
+
+if echo "$LOG" | grep -q "app_load refused (-EINVAL)"; then
+	FRESH_LOAD_TESTED=0
+	if [ -n "$PRIOR_ID" ]; then
+		echo ">> Trustlet already resident this boot (fresh load path not exercised this"
+		echo "   run) -- recovered app_id=$PRIOR_ID from an earlier load line in dmesg,"
+		echo "   retrying with it..."
+		ssh "$PHONE" "sudo -n dmesg -c >/dev/null"
+		ssh "$PHONE" "sudo -n insmod $REMOTE_KO app_id=$PRIOR_ID" || true
+		LOG=$(ssh "$PHONE" "sudo -n dmesg")
+	else
+		echo "VERDICT: trustlet already resident this boot, and no prior successful"
+		echo "'app_load(...) ret=0 app_id=N' line survives in dmesg to recover its id from"
+		echo "(buffer likely rotated past it). This platform has no way to query an"
+		echo "already-loaded app's id by name -- reboot the device, then rerun this script."
+		ssh "$PHONE" "sudo -n rm -f $REMOTE_KO" || true
+		exit 1
+	fi
+fi
+
 AFTER=$(ssh "$PHONE" "grep fingerprint /proc/interrupts" || echo "n/a")
 ssh "$PHONE" "sudo -n rm -f $REMOTE_KO" || true
 
@@ -98,6 +128,12 @@ echo "/proc/interrupts before: $BEFORE"
 echo "/proc/interrupts after:  $AFTER"
 echo "$INIT_LINE"
 echo "$SUMMARY"
+if [ "$FRESH_LOAD_TESTED" = 0 ]; then
+	echo "NOTE: the trustlet was already resident this run -- the genuine fresh-boot"
+	echo "load path (no prior app_id known) was NOT exercised. If this is the first"
+	echo "time this script runs after a reboot and it still hit this path, that is"
+	echo "new information and should be reported, not assumed equivalent to tonight's runs."
+fi
 echo "------------------------------------------------------------------"
 
 if [ -n "$NONRETRY" ]; then
