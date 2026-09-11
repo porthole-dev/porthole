@@ -731,7 +731,7 @@ def _build(ctx, args) -> int:
         import porthole_pmaports as pmap
 
         message, hint = missing_aport_hint(
-            pmaports, pmap.find_aports_upstream(pmaports), aport)
+            pmaports, pmap.find_aports_upstream(pmaports, ctx.cfg), aport)
         raise Bail(message, EX_FAIL, hint)
 
     text = (directory / "APKBUILD").read_text(errors="replace")
@@ -905,7 +905,7 @@ def _resume(ctx, args) -> int:
         import porthole_pmaports as pmap
 
         message, hint = missing_aport_hint(
-            pmaports, pmap.find_aports_upstream(pmaports), aport)
+            pmaports, pmap.find_aports_upstream(pmaports, ctx.cfg), aport)
         raise Bail(message, EX_FAIL, hint)
 
     usable, why_not = build._workspace_usable(ctx)
@@ -1510,7 +1510,7 @@ def _drift(ctx, args) -> int:
                    f"expected at {man.path_for(ctx.root, device)}")
 
     pmaports = _find_pmaports(ctx)
-    upstream = pmap.find_aports_upstream(pmaports)
+    upstream = pmap.find_aports_upstream(pmaports, ctx.cfg)
     ref = upstream_remote_ref(upstream) if upstream else "origin/master"
 
     rows = {}
@@ -2200,11 +2200,11 @@ def _rebase(ctx, args) -> int:
     if not ours_dir:
         raise Bail(f"{name} is in the manifest but not in pmaports", EX_FAIL,
                    f"porthole pkg fork {name} --yes")
-    upstream = pmap.find_aports_upstream(pmaports)
+    upstream = pmap.find_aports_upstream(pmaports, ctx.cfg)
     if not upstream:
-        raise Bail("Alpine's aports checkout is not beside pmaports",
+        raise Bail("no Alpine aports checkout on this host",
                    EX_UNAVAILABLE,
-                   "`pmbootstrap pull` clones it into the same cache_git/")
+                   pmap.missing_aports_upstream_hint(pmaports, ctx.cfg))
 
     new_ref = upstream_remote_ref(upstream)
     base_ref, how = base_ref_for(upstream, rel, entry)
@@ -2427,7 +2427,7 @@ def _search(ctx, args) -> int:
                    "porthole pkg search calculator")
 
     pmaports = _find_pmaports(ctx)
-    upstream = pmap.find_aports_upstream(pmaports)
+    upstream = pmap.find_aports_upstream(pmaports, ctx.cfg)
     hits, guessed = search(pmaports, upstream, text)
     forks = _fork_names(ctx, pmaports) if hits else set()
 
@@ -2516,13 +2516,13 @@ def _fork(ctx, args) -> int:
         ctx.out.hint(f"porthole pkg build {name}")
         return EX_OK
 
-    upstream = pmap.find_aports_upstream(pmaports)
+    upstream = pmap.find_aports_upstream(pmaports, ctx.cfg)
     if not upstream:
         # 69: there is nothing here that could fork, which is not a statement
         # about the package.
-        raise Bail("Alpine's aports checkout is not beside pmaports",
+        raise Bail("no Alpine aports checkout on this host",
                    EX_UNAVAILABLE,
-                   "`pmbootstrap pull` clones it into the same cache_git/")
+                   pmap.missing_aports_upstream_hint(pmaports, ctx.cfg))
 
     hits = sorted(upstream.glob(f"*/{name}"))
     if not hits:

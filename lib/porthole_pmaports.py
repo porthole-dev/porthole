@@ -243,21 +243,78 @@ def device_kernels(pmaports, codename: str) -> dict:
     return out
 
 
-def find_aports_upstream(pmaports) -> pathlib.Path | None:
-    """Alpine's aports checkout, which pmbootstrap clones beside pmaports.
+def aports_upstream_candidates(pmaports, cfg=None) -> list:
+    """Every place Alpine's aports can be, in the order to believe them. Pure.
 
-    Not a config key of its own: pmbootstrap puts both trees in the same
-    cache_git/ directory and nothing downstream would work if they were
-    apart, so a knob here would only be a second place to be wrong.
+    Beside pmaports is pmbootstrap's own layout and stays first. It is NOT the
+    only one: with an ADOPTED checkout -- `porthole init --pmaports PATH`, or
+    `PORTHOLE_PMAPORTS_<DEVICE>` -- the sandbox binds pmaports in
+    individually, so `/pmb/cache_git` inside the container is the WORK DIR and
+    `pmaports.parent` is somewhere else entirely on the host. The two lookups
+    then disagree and no single directory satisfies both: the container check
+    passes on a tree `pkg search` and `pkg fork` report as missing, which is
+    #102, worked around with a symlink.
+
+    So the host asks the same question the container does -- what is at
+    `<work dir>/cache_git/aports_upstream` -- as well as the pmbootstrap-
+    layout one.
+    """
+    out = [pathlib.Path(pmaports).parent / "aports_upstream"]
+    for work in _work_dirs(cfg):
+        out.append(work / "cache_git" / "aports_upstream")
+    return out
+
+
+def _work_dirs(cfg) -> list:
+    """The pmbootstrap work dirs whose cache_git/ is worth looking in.
+
+    The workspace's own comes first: it is what `/pmb` is bound to, so it is
+    the one the container's `/pmb/cache_git/aports_upstream` names.
+    """
+    cfg = cfg or {}
+    dirs = []
+    try:
+        import porthole_cmd_sandbox as sandbox
+        dirs.append(sandbox._sandbox_pmb(cfg))
+    except Exception:  # noqa: BLE001 -- a lookup must not need the sandbox
+        pass
+    host = cfg.get("PORTHOLE_PMB_DIR") or os.environ.get("PORTHOLE_PMB_DIR")
+    dirs.append(pathlib.Path(host).expanduser() if host
+                else pathlib.Path.home() / ".local/var/pmbootstrap")
+    return dirs
+
+
+def find_aports_upstream(pmaports, cfg=None) -> pathlib.Path | None:
+    """Alpine's aports checkout, wherever the host actually keeps it.
 
     Worth having at all because the two trees are not interchangeable.
     `pmbootstrap build` reads pmaports and nothing else, so Alpine's twelve
     thousand packages are present, useful, and unbuildable until
     `aportgen --fork-alpine` copies one across. Which tree a name is in IS
     the answer to "why did my build say the package does not exist".
+
+    `main/` is the marker rather than the directory existing: an empty or
+    half-cloned `aports_upstream` must not shadow a real one further down the
+    list.
     """
-    path = pathlib.Path(pmaports).parent / "aports_upstream"
-    return path if (path / "main").is_dir() else None
+    for path in aports_upstream_candidates(pmaports, cfg):
+        if (path / "main").is_dir():
+            return path
+    return None
+
+
+def missing_aports_upstream_hint(pmaports, cfg=None) -> str:
+    """Where to put Alpine's aports so BOTH sides find it.
+
+    `pmbootstrap pull` is the advice this used to give everywhere and it
+    cannot help an adopted checkout: it clones into pmbootstrap's own
+    cache_git, which is not `pmaports.parent` then. Naming the path the
+    workspace already looks in is advice that works either way.
+    """
+    candidates = aports_upstream_candidates(pmaports, cfg)
+    return ("`pmbootstrap pull` clones it, or clone Alpine's aports to "
+            "{} -- the path the workspace itself looks in".format(
+                candidates[-1] if len(candidates) == 1 else candidates[1]))
 
 
 class Device:
