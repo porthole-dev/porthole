@@ -3,32 +3,38 @@
 # scope: soc:msm8998
 # needs: BOOTED
 # env: HOST, PHONE
-# exits: 0 verdict printed (payload, clean -206, or other status) · 1 build/push/load failed
+# exits: 0 verdict printed (payload, clean 0x105, or other status) · 1 build/push/load failed
 #
 # One-command fingerprint capture test: run this, touch the sensor
 # repeatedly while it says to, read the single verdict line at the end.
 # No log-reading required.
 #
 # Loads bringup/qseecom-app-load/qseecom_app_load.c's real taimen-native
-# arm/wait/capture loop (round 36-37 of the 2026-09-11 fingerprint
-# bring-up: group 0x0a, cmd 3 = arm-and-wait, cmd 4 = capture, waited on
-# via the fpc1020 kernel driver's own sysfs "irq" latch, not a raw GPIO
-# poll -- a raw poll was shown to miss real edges, see that day's
-# report). The loop runs for ~90s, retrying CAPTURE {0x0a,4} while its
-# status reads the "not enough data yet" code 0x107 and treating
-# anything else as terminal.
+# sequence (round 38-39 of the 2026-09-11 fingerprint bring-up): INIT
+# {0x0a,0} once up front -- decompilation plus this round's own control
+# showed EVERY capture all night that skipped INIT read -206 (an HAL
+# init/state error, not "no image"), while capture preceded by INIT
+# read 0x105 instead, reproducibly, 8/8 with nobody touching the
+# sensor -- then loops PRE-WAIT {0x0a,1}, ARM {0x0a,3}, a wait on the
+# fpc1020 kernel driver's own sysfs "irq" latch (a raw GPIO poll was
+# shown to miss real edges, see that day's report), POST-WAIT
+# {0x0a,2}, CAPTURE {0x0a,4}. CAPTURE is retried while its status reads
+# 0x107 OR 0x108 -- decompiled from the real HAL's own capture loop
+# (do_authenticate/do_enroll: "if (1 < (unsigned)(status-0x107)) break"
+# -- both codes retry with an ACQUIRED_INSUFFICIENT notify, only this
+# script skips the notify since nothing here implements the HIDL
+# interface) -- and anything else is terminal.
 #
-# CAVEAT, load-bearing: overnight, on an idle sensor with nobody
-# touching it, {0x0a,4} returned status -206 on all ~1500 attempts,
-# every time preceded by a wait that "succeeded" (the arm command
-# itself produces a real, kernel-counted edge -- confirmed against
-# /proc/interrupts independently, not just this module's own count).
-# This script reads a repeat of -206 as "no image was produced" and a
-# real payload as success. If -206 turns out to mean something other
-# than "no image" (a trustlet RE pass may recover its real meaning),
-# that reading is wrong and this script's verdict needs revisiting --
-# it is the best evidence available the night this was written, not a
-# confirmed meaning.
+# BASELINE, load-bearing: with INIT sent and nobody touching the
+# sensor, CAPTURE reads status 0x105 every time (8/8 in this round).
+# Decompiled fact (do_authenticate/do_enroll, same functions as above):
+# the HAL's own loop treats 0x105 as "no image yet" -- it notifies
+# ACQUIRED_TOO_FAST(5) and immediately calls capture again, it is not
+# an error path and not treated as a result. This script reads a
+# repeat of 0x105 as the clean no-finger baseline and anything else as
+# a possible real result. This baseline replaces the OLD one (-206,
+# from before INIT was known to be required); a run of this script
+# from before round 38 that never sent INIT is not comparable.
 #
 # Never touches gpio 81-84 (the SPI pads, fenced). Never disables a
 # regulator. mod rung only -- no flash, no reboot.
@@ -83,22 +89,24 @@ AFTER=$(ssh "$PHONE" "grep fingerprint /proc/interrupts" || echo "n/a")
 ssh "$PHONE" "sudo -n rm -f $REMOTE_KO" || true
 
 SUMMARY=$(echo "$LOG" | grep "taimen loop: window ended" || echo "no summary line found")
-NONRETRY=$(echo "$LOG" | grep "CAPTURE terminal status=" | grep -v "status=-206" || true)
+INIT_LINE=$(echo "$LOG" | grep "taimen loop: INIT status=" || echo "no INIT line found")
+NONRETRY=$(echo "$LOG" | grep "CAPTURE terminal status=" | grep -v "status=261 " || true)
 
 echo ""
 echo "------------------------------------------------------------------"
 echo "/proc/interrupts before: $BEFORE"
 echo "/proc/interrupts after:  $AFTER"
+echo "$INIT_LINE"
 echo "$SUMMARY"
 echo "------------------------------------------------------------------"
 
 if [ -n "$NONRETRY" ]; then
-	echo "VERDICT: a CAPTURE returned something other than -206 -- possible real result."
+	echo "VERDICT: a CAPTURE returned something other than the 0x105 baseline -- possible real result."
 	echo "$NONRETRY"
 	echo ">> Full response dump (grep the log for 'CAPTURE {0x0a,4}' near the line above):"
-	echo "$LOG" | grep -A70 "CAPTURE terminal status=" | grep -v "status=-206" | head -80
-elif echo "$LOG" | grep -q "CAPTURE terminal status=-206"; then
-	echo "VERDICT: every CAPTURE returned -206 (no image produced) -- clean negative, per this run."
+	echo "$LOG" | grep -A70 "CAPTURE terminal status=" | grep -v "status=261 " | head -80
+elif echo "$LOG" | grep -q "CAPTURE terminal status=261 "; then
+	echo "VERDICT: every CAPTURE returned 0x105 (no image, clean baseline) -- clean negative, per this run."
 else
 	echo "VERDICT: no CAPTURE was ever attempted (arm/wait never succeeded) -- check the summary line above."
 fi
