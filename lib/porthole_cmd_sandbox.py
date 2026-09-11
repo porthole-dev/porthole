@@ -618,6 +618,34 @@ def aports_gap(cfg, mounts, host_pmaports=None) -> str:
             "`porthole sandbox down` and `up`")
 
 
+def aports_readable_in_container() -> bool | None:
+    """Is pmaports actually THERE, asked of the running container?
+
+    True / False / None-for-could-not-ask.
+
+    `status` is the command you reach for when the workspace looks wrong, and
+    it was asserting the healthy state from the container's SPEC while the
+    live namespace disagreed. A kernel build had just died on `Invalid
+    pmaports repository, could not find the config:
+    /pmb/cache_git/pmaports/pmaports.cfg` -- inside the container that
+    directory was empty and `mount` listed nothing for it -- and status said
+    `pmaports mounted at /pmb/cache_git/pmaports` at that same moment. The
+    failure then reads as a corrupt checkout on the host, which was fine, and
+    a session goes into the wrong half of the problem. #104.
+
+    `pmaports.cfg` is the marker because it is the file pmbootstrap itself
+    demands: a check that passes where the build fails is not a check.
+    """
+    try:
+        done = subprocess.run(
+            ["podman", "exec", CONTAINER, "test", "-f",
+             APORTS_IN + "/pmaports.cfg"],
+            capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.returncode == 0
+
+
 def workdir_drift(cfg, mounts) -> str:
     """Why the running workspace cannot build for this device, or "". PURE.
 
@@ -980,6 +1008,9 @@ def _container_state(root: pathlib.Path, cfg=None, probe_device: bool = True) ->
     # fixes, and only the second is the workspace's fault.
     out["workdir_mounted"] = None
     out["aports_visible"] = None
+    # None = not asked, or asked and could not tell. Only True is a green
+    # tick; see aports_readable_in_container.
+    out["aports_verified"] = None
     if out["container_running"]:
         # One inspect answers both questions.
         mounts = _container_mounts()
@@ -987,6 +1018,19 @@ def _container_state(root: pathlib.Path, cfg=None, probe_device: bool = True) ->
         out["aports_visible"] = not gap
         if gap:
             out["issues"].append(gap)
+        else:
+            # The spec says it is mounted. Ask the live namespace whether it
+            # still is -- a bind can be gone from under a running container,
+            # and the spec cannot tell you that. None stays "configured, not
+            # verified" rather than becoming a green tick.
+            out["aports_verified"] = aports_readable_in_container()
+            if out["aports_verified"] is False:
+                out["aports_visible"] = False
+                out["issues"].append(
+                    f"{APORTS_IN} is configured but EMPTY in the running "
+                    f"container -- the bind mount is gone, and every build "
+                    f"will fail on `Invalid pmaports repository`. "
+                    f"`porthole sandbox down` then `up`")
         if out["workdir"]:
             drift = workdir_drift(cfg or {}, mounts)
             out["workdir_mounted"] = not drift
@@ -1075,7 +1119,11 @@ def _status(ctx) -> int:
         # so a workspace missing it is up and useless -- which is exactly what
         # it looked like, because nothing reported it.
         if c.get("aports_visible") is True:
-            line("pmaports", True, f"mounted at {APORTS_IN}")
+            verified = c.get("aports_verified")
+            line("pmaports", True,
+                 f"mounted at {APORTS_IN}" if verified is True else
+                 f"{APORTS_IN} " + o.paint("(configured, not verified)",
+                                           "grey"))
         elif c.get("aports_visible") is False:
             line("pmaports", False,
                  o.paint("not visible in the workspace -- nothing can build",
