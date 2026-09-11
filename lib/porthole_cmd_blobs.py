@@ -265,8 +265,20 @@ def _debugfs(image: pathlib.Path, command: str, timeout=120):
     return proc.stdout
 
 
-LS_RE = re.compile(r"^\s*(\d+)\s+\(\d+\)\s+\d+\s+\d+\s+"
-                   r"(\d+)\s+\S+\s+\S+\s+\S+\s+(.*)$")
+# `debugfs -R "ls -l <dir>"`, one entry per line:
+#
+#     15   40755 (2)   1000   1000    1024 12-Sep-2026 00:38 firmware
+#     16  100644 (1)   1000   1000       6 12-Sep-2026 00:38 a.mbn
+#
+#   inode  mode (filetype)  uid  gid  size  date time  name
+#
+# The previous pattern expected `(filetype)` to follow the inode directly and
+# so matched NOTHING on any tree, root or not -- `blobs ls` answered "nothing
+# under <dir>" for every image it was ever pointed at (#106). It is written
+# against real e2fsprogs output now, and test_blobs_ls builds an image and
+# reads it back rather than asserting against a hand-typed line.
+LS_RE = re.compile(r"^\s*(\d+)\s+\d+\s+\(\d+\)\s+\d+\s+\d+\s+"
+                   r"(\d+)\s+\S+\s+\S+\s+(.*)$")
 
 
 def cmd_ls(args, ctx) -> int:
@@ -293,7 +305,15 @@ def cmd_ls(args, ctx) -> int:
         o = ctx.out
         if not entries:
             o(f"nothing under {directory} in {image.name}")
-            o.hint("try --dir /", "to see what is at the root")
+            # Never suggest the flag that was just passed: `--dir /` is what
+            # you reach for when you do not know the layout, and being told to
+            # try it again is a circle (#106).
+            if directory.strip("/"):
+                o.hint(f"porthole blobs ls {image} --dir /",
+                       "to see what is at the root")
+            else:
+                o.hint(f"debugfs -R 'ls -l /' {image}",
+                       "if that lists files, this is a parser bug -- file it")
             return
         o.heading(f"{image.name}:{directory} — {len(entries)} entries")
         o.blank()
