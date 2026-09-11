@@ -266,7 +266,7 @@ def cmd_brief(args, ctx) -> int:
         ctx.out.kv("ssh", cfg.get("PHONE", ""), w)
         colour = {"BOOTED": "green", "FASTBOOT": "yellow",
                   "FROZEN": "yellow", "INITRAMFS": "yellow",
-                  "ABSENT": "grey"}.get(state, "grey")
+                  "NOAUTH": "yellow", "ABSENT": "grey"}.get(state, "grey")
         ctx.out.kv("state", ctx.out.paint(state, colour), w)
         if payload["device"].get("kernel", {}).get("evidence"):
             ctx.out.kv("kernel", payload["device"]["kernel"]["evidence"], w)
@@ -522,6 +522,10 @@ def _next_steps(cfg, device: str, state: str, gaps: list[str]) -> list[str]:
         steps.append("tools/ph-reboot.sh   # leave the bootloader, re-arming the slot")
     elif state == "INITRAMFS":
         steps.append("tools/tsh.py 'dmesg | grep pmOS-rd'   # why root did not mount")
+    elif state == "NOAUTH":
+        steps.append(f"ssh-copy-id -i ~/.porthole/device_key "
+                     f"{cfg.get('PHONE', '')}   # userspace is up, the key "
+                     f"is not installed")
     elif state == "FROZEN":
         steps.append("tools/ph-recover.sh   # kernel alive, userspace gone")
     elif state == "BOOTED":

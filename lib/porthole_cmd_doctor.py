@@ -826,6 +826,14 @@ def check_device(ch: Checks, ctx, cfg, elapsed: float) -> None:
         ch.add("device: state", "warn",
                f"{detail} -- stopped in the pmOS initramfs debug shell",
                doc="tools/tsh.py 'dmesg | grep pmOS-rd'   # it will say why root did not mount")
+    elif state == "NOAUTH":
+        user = cfg["PHONE"].partition("@")[0]
+        ch.add("device: state", "warn",
+               f"{detail} -- userspace is UP; sshd refused our key",
+               fix=f"ssh-copy-id -i ~/.porthole/device_key {cfg['PHONE']}"
+                   f"    # asks for {user}'s password once",
+               doc="a fresh rootfs has an empty authorized_keys -- expected "
+                   "immediately after `flash full --replace-rootfs`")
     elif state == "FROZEN":
         ch.add("device: state", "warn",
                f"{detail} -- kernel alive, userspace gone",
@@ -1499,14 +1507,19 @@ def cmd_doctor(args, ctx) -> int:
         start = time.monotonic()
         device_state = ctx.device().state()
         device_state_elapsed = (time.monotonic() - start) * 1000
+    # NOAUTH is probed, not skipped. The key check was skipped BECAUSE the
+    # state probe failed, and an unauthorised key is a leading cause of that
+    # probe failing -- so the two checks reinforced each other into a wrong
+    # conclusion, and the one row that would have explained it was the one
+    # suppressed. porthole#105.
+    ask_device = device_state in ("BOOTED", "NOAUTH")
     if args.no_device:
         key_skip_reason = "--no-device"
-    elif device_state and device_state != "BOOTED":
+    elif device_state and not ask_device:
         key_skip_reason = f"the device is {device_state}"
     else:
         key_skip_reason = ""
-    check_workspace(ch, ctx, family,
-                    probe_device=(device_state == "BOOTED"),
+    check_workspace(ch, ctx, family, probe_device=ask_device,
                     skip_reason=key_skip_reason, deep=args.all)
     check_drift(ch, cfg)
     check_profile(ch, cfg, ctx.root)
