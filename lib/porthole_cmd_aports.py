@@ -1109,6 +1109,49 @@ def dropped_patches(listed, new) -> list:
     return [name for name in listed if name not in fresh]
 
 
+# How large an export `--yes` will do on its own say-so. NOT a limit -- there
+# is no honest upper bound on a legitimate series, taimen's is 215 -- but the
+# point past which the number has to be TYPED, with --expect N.
+#
+# A wrong --base is silent, fast, and looks exactly like success. On
+# linux-postmarketos-qcom-msm8998-7.2 it happened three times in one
+# afternoon: `--base v7.2.2` (the version the package builds, not the tree tip
+# the series encodes) re-exported the whole 215-patch series on top of itself,
+# and a base further back wrote 61,164 .patch files into the package and
+# 61,164 lines into source=. Recovery needs `git clean -f` plus a checkout of
+# the APKBUILD, and `ls` in the package directory has stopped working by then
+# ("Argument list too long"), so the usual look-at-what-happened reflex fails
+# too. The preview that catches all of this is the one thing --yes skips, and
+# --yes is what a script, a CI job or an agent passes. #103.
+UNTYPED_EXPORT_MAX = 40
+
+
+def export_size_refusal(n, existing, append, expect) -> str:
+    """Why exporting `n` commits must not proceed unattended, or "". Pure.
+
+    `--expect N` is the override and the assertion at once: it passes any
+    size, and it fails a base that resolves to a different number than the one
+    you were expecting -- which is the check the workaround in #103 was being
+    done by hand.
+
+    Without it, `--append` is "N new commits on top", so a number anywhere
+    near the size of the series already there is a base predating that series
+    rather than new work. A rewrite regenerates the whole series, so there the
+    plausible number is `existing` plus whatever is genuinely new.
+    """
+    if expect is not None:
+        if n == expect:
+            return ""
+        return f"--expect {expect}, but --base resolves to {n} commit(s)"
+    ceiling = UNTYPED_EXPORT_MAX + (0 if append else existing)
+    if n <= ceiling:
+        return ""
+    verb = "append" if append else "export"
+    return (f"{n} commit(s) is too many to {verb} unattended (over "
+            f"{ceiling}, with {existing} patch(es) already in the series) -- "
+            f"this is what a wrong --base looks like")
+
+
 def next_patch_number(existing) -> int:
     """One past the highest 4-digit prefix in the series. Pure."""
     numbers = []
@@ -1177,6 +1220,11 @@ def cmd_patches(args, ctx, pmaports) -> int:
 
     old = sorted(p.name for p in pkgdir.glob("*.patch"))
 
+    # BEFORE format-patch, and regardless of --yes: the damage lands in two
+    # places at once (the .patch files and source=) and is not cheap to undo.
+    expect = getattr(args, "expect", None)
+    refusal = export_size_refusal(n, len(old), args.append, expect)
+
     if not args.yes:
         _, subjects, _ = git(tree, "log", "--format=%s", "--reverse",
                              f"{base}..HEAD")
@@ -1194,9 +1242,22 @@ def cmd_patches(args, ctx, pmaports) -> int:
                 o(o.paint(f"  replacing {len(old)} existing patch(es)", "yellow"))
         o.blank()
         extra = " --append" if args.append else ""
+        # The preview is where a wrong base is caught, so the command it hands
+        # back is one that will actually run -- not one that refuses.
+        if refusal:
+            o.blank()
+            o.warn(refusal)
+            extra += f" --expect {n}"
         o.hint(f"porthole aports patches --base {base} --pkg {pkgname}"
                f"{extra} --yes")
         return EX_OK
+
+    if refusal:
+        raise Bail(refusal, EX_USAGE,
+                   f"check --base: it should be the tree commit the existing "
+                   f"series was generated from, not the version the package "
+                   f"builds.  If {n} really is right, say so: "
+                   f"--expect {n}")
 
     format_patch_args = ["format-patch", f"{base}..HEAD", "-o", str(pkgdir),
                          "--no-signature", "--zero-commit", "--no-numbered"]
@@ -1475,6 +1536,9 @@ SPEC = {
         (["--drop"], {"action": "store_true", "group": "patches",
                       "help": "allow the rewrite to delete patches "
                               "the tree does not reproduce"}),
+        (["--expect"], {"type": int, "metavar": "N", "group": "patches",
+                        "help": "assert --base resolves to exactly N "
+                                "commits; the only way past the size guard"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "escapes_scope": True,
