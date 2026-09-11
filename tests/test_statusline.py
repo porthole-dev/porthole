@@ -25,6 +25,30 @@ sys.path.insert(0, str(ROOT / "lib"))
 import porthole_cmd_statusline as sl  # noqa: E402
 
 
+@contextlib.contextmanager
+def only_work_dir(work):
+    """Pin BOTH pmbootstrap work dirs at `work` for the duration.
+
+    `_live_log` picks the FRESHER of the two, and a test that overrode only
+    the sandbox one still read `~/.local/var/pmbootstrap/log.txt` -- so the
+    result depended on whether the person running the suite happened to have
+    a pmbootstrap build going. It reliably reported the wrong rung while one
+    was, which is a test that fails for a reason nothing in it names.
+    """
+    names = ("PORTHOLE_SANDBOX_PMB_DIR", "PORTHOLE_PMB_DIR")
+    saved = {name: os.environ.get(name) for name in names}
+    for name in names:
+        os.environ[name] = str(work)
+    try:
+        yield
+    finally:
+        for name, was in saved.items():
+            if was is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = was
+
+
 class _FakeOut:
     def __init__(self):
         self.lines = []
@@ -446,15 +470,8 @@ def test_a_build_nobody_tracked_still_reaches_the_status_line():
         {"state": "done", "rung": "pkg:something-else",
          "last_at": time.time() - 9000, "pid": 1}))
 
-    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
-    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
-    try:
+    with only_work_dir(work):
         snap, reattached = sl.build_snapshot(repo, time.time())
-    finally:
-        if saved is None:
-            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
-        else:
-            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
 
     assert snap is not None, "a live build was invisible to the status line"
     assert snap["rung"] == "pkg:webkit2gtk-6.0", snap["rung"]
@@ -507,15 +524,8 @@ def test_a_failed_rung_does_not_resurrect_the_buildroot_s_last_package():
         {"state": "failed", "rung": "fast", "pid": 1, "elapsed": 30.3,
          "last_at": now - 5, "started": now - 35}))
 
-    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
-    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
-    try:
+    with only_work_dir(work):
         snap, _ = sl.build_snapshot(repo, now)
-    finally:
-        if saved is None:
-            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
-        else:
-            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
 
     assert snap is not None
     assert "webkit" not in (snap.get("rung") or ""), snap
@@ -541,15 +551,8 @@ def test_a_quiet_log_is_not_a_running_build():
     (repo / ".run" / "pkg-status.json").write_text(json.dumps(
         {"state": "done", "rung": "pkg:x", "last_at": old, "pid": 1}))
 
-    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
-    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
-    try:
+    with only_work_dir(work):
         snap, _ = sl.build_snapshot(repo, time.time())
-    finally:
-        if saved is None:
-            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
-        else:
-            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
     assert snap is None, f"a log quiet for an hour was read as a live build: {snap}"
 
 
@@ -587,15 +590,8 @@ def test_a_cancelled_build_is_not_resurrected_from_the_shared_log():
         {"state": "failed", "rung": "pkg:chromium", "pid": 1,
          "last_at": killed, "started": now - 3000}))
 
-    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
-    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
-    try:
+    with only_work_dir(work):
         snap, _ = sl.build_snapshot(repo, now)
-    finally:
-        if saved is None:
-            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
-        else:
-            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
 
     assert snap is not None, "the cancelled build should still linger as failed"
     assert (snap.get("state") or "running") != "running", (
@@ -625,15 +621,8 @@ def test_an_untracked_build_still_gets_a_row_after_an_unrelated_verdict():
         {"state": "failed", "rung": "pkg:chromium", "pid": 1,
          "last_at": now - 20, "started": now - 3000}))
 
-    saved = os.environ.get("PORTHOLE_SANDBOX_PMB_DIR")
-    os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = str(work)
-    try:
+    with only_work_dir(work):
         snap, reattached = sl.build_snapshot(repo, now)
-    finally:
-        if saved is None:
-            os.environ.pop("PORTHOLE_SANDBOX_PMB_DIR", None)
-        else:
-            os.environ["PORTHOLE_SANDBOX_PMB_DIR"] = saved
 
     assert snap is not None, "an untracked webkit build lost its row"
     assert "webkit" in (snap.get("rung") or ""), snap
