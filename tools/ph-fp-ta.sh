@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MIT
 # scope: soc:msm8998
-# needs: device
+# needs: on-device
 # env: -
 # exits: 0 ok · 1 no qseecom · 2 lookup path broken
 # ph-fp-ta.sh -- what does the TrustZone say about the fingerprint trustlet?
