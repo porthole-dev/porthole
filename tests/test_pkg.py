@@ -574,13 +574,51 @@ def test_a_name_in_neither_tree_still_points_somewhere_real():
 
 
 def test_the_upstream_tree_is_found_beside_pmaports():
-    """Derived, not configured: pmbootstrap puts both in one cache_git/."""
+    """pmbootstrap's own layout puts both in one cache_git/, and that stays
+    the first place looked."""
     import porthole_pmaports as pmap
 
     with tempfile.TemporaryDirectory() as d:
         pm, up = _two_trees(pathlib.Path(d))
-        assert pmap.find_aports_upstream(pm) == up
-        assert pmap.find_aports_upstream(pathlib.Path(d) / "nowhere") is None
+        # An empty work dir, so the host's real one cannot answer for this
+        # test -- the candidates below it are host-global on purpose.
+        cfg = {"PORTHOLE_SANDBOX_PMB_DIR": d + "/empty-work",
+               "PORTHOLE_PMB_DIR": d + "/empty-work"}
+        assert pmap.find_aports_upstream(pm, cfg) == up
+        assert pmap.find_aports_upstream(pathlib.Path(d) / "nowhere",
+                                         cfg) is None
+
+
+def test_the_upstream_tree_is_found_where_the_container_looks_for_it():
+    """#102: with an ADOPTED pmaports checkout the sandbox binds pmaports in
+    individually, so `/pmb/cache_git` is the WORK DIR and `pmaports.parent` is
+    somewhere else on the host. Deriving the path from pmaports' parent alone
+    meant `pkg search` and `pkg fork` reported Alpine's tree as missing no
+    matter where it was put -- it was worked around with a symlink."""
+    import porthole_pmaports as pmap
+
+    with tempfile.TemporaryDirectory() as d:
+        adopted = pathlib.Path(d) / "ws" / "pmos" / "pmaports"
+        (adopted / "device").mkdir(parents=True)
+        work = pathlib.Path(d) / "porthole-sandbox"
+        upstream = work / "cache_git" / "aports_upstream"
+        (upstream / "main").mkdir(parents=True)
+        cfg = {"PORTHOLE_SANDBOX_PMB_DIR": str(work)}
+        assert pmap.find_aports_upstream(adopted, cfg) == upstream
+
+
+def test_the_missing_upstream_hint_names_a_path_that_actually_helps():
+    """`pmbootstrap pull` clones into pmbootstrap's own cache_git, which is
+    not `pmaports.parent` when pmaports is adopted -- so advice that only says
+    that cannot be followed out of the failure it is printed for."""
+    import porthole_pmaports as pmap
+
+    with tempfile.TemporaryDirectory() as d:
+        work = pathlib.Path(d) / "porthole-sandbox"
+        hint = pmap.missing_aports_upstream_hint(
+            pathlib.Path(d) / "ws" / "pmos" / "pmaports",
+            {"PORTHOLE_SANDBOX_PMB_DIR": str(work)})
+        assert str(work / "cache_git" / "aports_upstream") in hint
 
 
 # ------------------------------------------------------- where fork runs --
