@@ -542,6 +542,84 @@ def test_version_is_read_from_the_apkbuild_of_a_hit():
         assert pkg.apkbuild_version(pm / "temp" / "nope") == ""
 
 
+# ------------------------------------------------------- subpackages --
+
+def _firmware_aport(tmp: pathlib.Path):
+    """The shape #107 was reported against: an optional TrustZone blob kept
+    out of the device package's dependencies, shipped as a subpackage."""
+    pm = tmp / "pmaports"
+    aport = pm / "firmware" / "firmware-google-taimen"
+    aport.mkdir(parents=True)
+    (pm / "device").mkdir()
+    (aport / "APKBUILD").write_text(
+        'pkgname=firmware-google-taimen\n'
+        'pkgver=20250505\n'
+        'pkgrel=6\n'
+        'subpackages="\n'
+        '\t$pkgname-fingerprint\n'
+        '\t${pkgname}-adsp:adsp\n'
+        '\t"\n')
+    return pm
+
+
+def test_a_subpackage_resolves_to_the_aport_that_builds_it():
+    """`firmware-google-taimen-fingerprint` is a real, built, installable
+    package; `pkg install` said no aport had that name."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        directory, parent = pkg.find_subpackage(
+            pm, "firmware-google-taimen-fingerprint")
+        assert parent == "firmware-google-taimen"
+        assert directory == pm / "firmware" / "firmware-google-taimen"
+
+
+def test_a_subpackage_declared_with_a_split_function_resolves_too():
+    """`${pkgname}-adsp:adsp` -- the name is before the colon."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        _dir, parent = pkg.find_subpackage(pm, "firmware-google-taimen-adsp")
+        assert parent == "firmware-google-taimen"
+
+
+def test_a_name_that_merely_looks_like_a_subpackage_is_not_claimed():
+    """The prefix walk finds the owning APKBUILD and then CHECKS it. A name
+    that shares a prefix but is not declared has to stay a miss, or the error
+    for a typo becomes a confident wrong answer."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        assert pkg.find_subpackage(
+            pm, "firmware-google-taimen-nosuchthing") == (None, "")
+
+
+def test_the_error_for_a_subpackage_names_what_provides_it():
+    """"no aport named X" was not merely unhelpful, it was untrue."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        message, hint = pkg.missing_aport_hint(
+            pm, None, "firmware-google-taimen-fingerprint")
+        assert "subpackage of firmware-google-taimen" in message
+        assert "porthole pkg install" in hint
+
+
+def test_an_explicitly_named_package_is_installed_even_if_absent():
+    """A subpackage is FOR the optional thing the device does not already
+    have -- filtering on `apk info` alone made it permanently unreachable."""
+    apks = [pathlib.Path("/p/firmware-google-taimen-fingerprint-20250505-r6.apk"),
+            pathlib.Path("/p/firmware-google-taimen-adsp-20250505-r6.apk")]
+    chosen = pkg.apks_for_device(
+        ["firmware-google-taimen"], apks, "20250505-r6",
+        "firmware-google-taimen-fingerprint")
+    assert [n for n, _p in chosen] == ["firmware-google-taimen-fingerprint"]
+
+
+def test_nothing_the_device_lacks_is_installed_by_accident():
+    """The exception is the NAMED package and nothing else: -adsp is built
+    and sitting right there, and must stay uninstalled."""
+    apks = [pathlib.Path("/p/firmware-google-taimen-adsp-20250505-r6.apk")]
+    assert pkg.apks_for_device(["firmware-google-taimen"], apks,
+                               "20250505-r6", "") == []
+
+
 # ------------------------------------------------- the failure message --
 
 def test_an_alpine_package_is_named_as_alpines_not_as_absent():

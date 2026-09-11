@@ -106,6 +106,57 @@ def find_aport(pmaports: pathlib.Path, name: str):
     return None
 
 
+def subpackage_names(text: str) -> list:
+    """The names in an APKBUILD's `subpackages=`, `$pkgname` expanded. Pure.
+
+    A name that still holds a `$` is dropped rather than returned literally,
+    for the reason `apkbuild_fields` gives: everything downstream matches it
+    against a package name, and a wrong one reports a package that exists as
+    absent.
+    """
+    assignments = {k: v.strip() for k, v in _ASSIGN.findall(text)}
+    out = []
+    for body in _bodies(text, "subpackages"):
+        for token in body.split():
+            name = expand_vars(token.split(":", 1)[0], assignments).strip()
+            if name and "$" not in name:
+                out.append(name)
+    return out
+
+
+def find_subpackage(pmaports, name):
+    """(aport directory, its pkgname) for a SUBPACKAGE name, or (None, "").
+
+    A subpackage is the normal way to ship something optional -- a
+    proprietary TrustZone blob kept out of the device package's dependencies
+    so that it is installed explicitly or not at all -- which is exactly the
+    case where `pkg install <the-thing>` has to work. It is also the name
+    the user knows, because it is the name apk uses. Resolving only top-level
+    directory names made every one of them unreachable (#107).
+
+    ponytail: walks the name's own `-` segments rather than indexing every
+    subpackage in the tree. `firmware-google-taimen-fingerprint` is built by
+    `firmware-google-taimen`, and prefixing a subpackage with its origin is
+    abuild's own convention -- so this costs a handful of globs on a path
+    that was about to fail anyway, instead of reading 14,000 APKBUILDs. A
+    subpackage that does NOT carry its parent's prefix (`py3-foo` from `foo`)
+    is still a miss; scan the tree here if one ever costs more than the scan.
+    """
+    parts = name.split("-")
+    for cut in range(len(parts) - 1, 0, -1):
+        parent = "-".join(parts[:cut])
+        directory = find_aport(pmaports, parent)
+        if directory is None:
+            continue
+        try:
+            text = (directory / "APKBUILD").read_text(errors="replace")
+        except OSError:
+            continue
+        if name in subpackage_names(text):
+            return directory, parent
+    return None, ""
+
+
 # How many hits a listing prints before it stops being a listing. `pkg search
 # lib` matches two thousand packages, and a screen of those is not an answer.
 LIST_CAP = 40
@@ -231,6 +282,13 @@ def missing_aport_hint(pmaports, upstream, name):
             return (f"{name} is Alpine's ({hits[0].parent.name}/), not "
                     f"pmaports' -- `pmbootstrap build` reads pmaports only",
                     f"porthole pkg fork {name} --yes   then build it")
+    directory, parent = find_subpackage(pmaports, name)
+    if directory is not None:
+        # "no aport named X" is not merely unhelpful here, it is untrue: the
+        # package exists and is built. Name what provides it.
+        return (f"{name} is a subpackage of {parent}, not an aport of its own",
+                f"porthole pkg install {name}   installs it; "
+                f"`porthole pkg build {parent}` builds it")
     pool = sorted(set(scan_tree(pmaports)) | set(scan_tree(upstream)))
     close = difflib.get_close_matches(name, pool, n=1)
     if close:
@@ -2654,18 +2712,23 @@ def build_module():
 
 # ------------------------------------------------ putting one on the phone --
 
-def apks_for_device(installed, apks, version):
-    """[(name, path)] -- the built apks this device already has a package for.
+def apks_for_device(installed, apks, version, requested=""):
+    """[(name, path)] -- the built apks this device should be given.
 
-    Pure, and the "already has" is the point: an aport's subpackages include
-    things this phone does not use (mesa builds vulkan-intel, -broadcom,
-    -panfrost), and installing them because they exist would add packages
-    nobody asked for. The device's own list decides.
+    Pure. "Already has" is the rule: an aport's subpackages include things
+    this phone does not use (mesa builds vulkan-intel, -broadcom, -panfrost),
+    and installing them because they exist would add packages nobody asked
+    for. The device's own list decides.
+
+    `requested` is the exception, and the only one: a package named on the
+    command line was asked for by definition. Without it a subpackage
+    deliberately kept off the device -- which is what a subpackage is FOR --
+    could never be installed by the tooling at all (#107).
 
     `version` is the aport's current `pkgver-pkgrel`, so a stale apk from an
     older build is never picked up by accident.
     """
-    want = set(installed)
+    want = set(installed) | ({requested} if requested else set())
     out = []
     for path in sorted(apks):
         name = path.name
@@ -2773,15 +2836,24 @@ def _install(ctx, args) -> int:
                    "porthole pkg install <aport>    # e.g. mesa")
 
     import porthole_cmd_build as build
+    import porthole_pmaports as pmap
     usable, _why_not = build._workspace_usable(ctx)
     pmaports = _find_pmaports(ctx)
     if not pmaports:
         raise Bail("no pmaports checkout found", EX_UNAVAILABLE,
                    "`porthole doctor` names how to get one")
+    requested = aport
     directory = find_aport(pmaports, aport)
     if directory is None:
-        raise Bail("no aport named {!r}".format(aport), EX_USAGE,
-                   "porthole pkg search {}".format(aport))
+        # The name apk installs under is a subpackage name as often as not,
+        # and that is the name the caller knows.
+        directory, parent = find_subpackage(pmaports, aport)
+        if directory is None:
+            message, hint = missing_aport_hint(
+                pmaports, pmap.find_aports_upstream(pmaports, ctx.cfg), aport)
+            raise Bail(message, EX_USAGE, hint)
+        ctx.out("{} is a subpackage of {}".format(requested, parent))
+        aport = parent
     fields = apkbuild_fields((directory / "APKBUILD").read_text(errors="replace"))
     version = "{}-r{}".format(fields.get("pkgver"), fields.get("pkgrel"))
 
@@ -2801,10 +2873,10 @@ def _install(ctx, args) -> int:
         raise Bail("could not list the device's packages", EX_FAIL,
                    "check `porthole doctor`")
 
-    chosen = apks_for_device(installed, apks, version)
+    chosen = apks_for_device(installed, apks, version, requested)
     if not chosen:
         ctx.out("nothing to install: no built {}-{} apk matches a package this "
-                "device has".format(aport, version))
+                "device has".format(requested, version))
         ctx.out(ctx.out.paint("  porthole pkg build {}    # build it first"
                               .format(aport), "cyan"))
         return EX_OK
@@ -2820,7 +2892,7 @@ def _install(ctx, args) -> int:
         ctx.out.blank()
         ctx.out(ctx.out.paint(
             "  porthole pkg install {} --yes    # install the {} package(s) "
-            "above".format(aport, len(chosen)), "cyan"))
+            "above".format(requested, len(chosen)), "cyan"))
         return EX_OK
 
     render_plan()
