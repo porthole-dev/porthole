@@ -18,6 +18,7 @@ generic notes as well.
 | [a-phone-in-the-bootloader-can-be-off-the-bus](findings/a-phone-in-the-bootloader-can-be-off-the-bus.md) | `generic` | A phone can reach the bootloader and never enumerate, and porthole read that as never reaching it |
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
+| [a-trustzone-command-can-succeed-and-do-nothing](findings/a-trustzone-command-can-succeed-and-do-nothing.md) | `device:google-taimen` | A TrustZone command can return status 0 and do nothing -- the tell is how long it took |
 | [a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever](findings/a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever.md) | `soc:msm8998` | A venus firmware assert wedges the video GDSC, and the driver's recovery then retries every 10 ms forever |
 | [a5xx-gmem-never-resolves-multisample-buffers](findings/a5xx-gmem-never-resolves-multisample-buffers.md) | `soc:msm8998` | GPU rasterisation is visibly wrong on a540 because the a5xx GMEM store never resolves multisample buffers |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
@@ -239,7 +240,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 44
+- `device:google-taimen` — 45
 - `generic` — 127
 - `soc:gs201` — 1
 - `soc:msm8998` — 29
