@@ -542,6 +542,84 @@ def test_version_is_read_from_the_apkbuild_of_a_hit():
         assert pkg.apkbuild_version(pm / "temp" / "nope") == ""
 
 
+# ------------------------------------------------------- subpackages --
+
+def _firmware_aport(tmp: pathlib.Path):
+    """The shape #107 was reported against: an optional TrustZone blob kept
+    out of the device package's dependencies, shipped as a subpackage."""
+    pm = tmp / "pmaports"
+    aport = pm / "firmware" / "firmware-google-taimen"
+    aport.mkdir(parents=True)
+    (pm / "device").mkdir()
+    (aport / "APKBUILD").write_text(
+        'pkgname=firmware-google-taimen\n'
+        'pkgver=20250505\n'
+        'pkgrel=6\n'
+        'subpackages="\n'
+        '\t$pkgname-fingerprint\n'
+        '\t${pkgname}-adsp:adsp\n'
+        '\t"\n')
+    return pm
+
+
+def test_a_subpackage_resolves_to_the_aport_that_builds_it():
+    """`firmware-google-taimen-fingerprint` is a real, built, installable
+    package; `pkg install` said no aport had that name."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        directory, parent = pkg.find_subpackage(
+            pm, "firmware-google-taimen-fingerprint")
+        assert parent == "firmware-google-taimen"
+        assert directory == pm / "firmware" / "firmware-google-taimen"
+
+
+def test_a_subpackage_declared_with_a_split_function_resolves_too():
+    """`${pkgname}-adsp:adsp` -- the name is before the colon."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        _dir, parent = pkg.find_subpackage(pm, "firmware-google-taimen-adsp")
+        assert parent == "firmware-google-taimen"
+
+
+def test_a_name_that_merely_looks_like_a_subpackage_is_not_claimed():
+    """The prefix walk finds the owning APKBUILD and then CHECKS it. A name
+    that shares a prefix but is not declared has to stay a miss, or the error
+    for a typo becomes a confident wrong answer."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        assert pkg.find_subpackage(
+            pm, "firmware-google-taimen-nosuchthing") == (None, "")
+
+
+def test_the_error_for_a_subpackage_names_what_provides_it():
+    """"no aport named X" was not merely unhelpful, it was untrue."""
+    with tempfile.TemporaryDirectory() as d:
+        pm = _firmware_aport(pathlib.Path(d))
+        message, hint = pkg.missing_aport_hint(
+            pm, None, "firmware-google-taimen-fingerprint")
+        assert "subpackage of firmware-google-taimen" in message
+        assert "porthole pkg install" in hint
+
+
+def test_an_explicitly_named_package_is_installed_even_if_absent():
+    """A subpackage is FOR the optional thing the device does not already
+    have -- filtering on `apk info` alone made it permanently unreachable."""
+    apks = [pathlib.Path("/p/firmware-google-taimen-fingerprint-20250505-r6.apk"),
+            pathlib.Path("/p/firmware-google-taimen-adsp-20250505-r6.apk")]
+    chosen = pkg.apks_for_device(
+        ["firmware-google-taimen"], apks, "20250505-r6",
+        "firmware-google-taimen-fingerprint")
+    assert [n for n, _p in chosen] == ["firmware-google-taimen-fingerprint"]
+
+
+def test_nothing_the_device_lacks_is_installed_by_accident():
+    """The exception is the NAMED package and nothing else: -adsp is built
+    and sitting right there, and must stay uninstalled."""
+    apks = [pathlib.Path("/p/firmware-google-taimen-adsp-20250505-r6.apk")]
+    assert pkg.apks_for_device(["firmware-google-taimen"], apks,
+                               "20250505-r6", "") == []
+
+
 # ------------------------------------------------- the failure message --
 
 def test_an_alpine_package_is_named_as_alpines_not_as_absent():
@@ -574,13 +652,51 @@ def test_a_name_in_neither_tree_still_points_somewhere_real():
 
 
 def test_the_upstream_tree_is_found_beside_pmaports():
-    """Derived, not configured: pmbootstrap puts both in one cache_git/."""
+    """pmbootstrap's own layout puts both in one cache_git/, and that stays
+    the first place looked."""
     import porthole_pmaports as pmap
 
     with tempfile.TemporaryDirectory() as d:
         pm, up = _two_trees(pathlib.Path(d))
-        assert pmap.find_aports_upstream(pm) == up
-        assert pmap.find_aports_upstream(pathlib.Path(d) / "nowhere") is None
+        # An empty work dir, so the host's real one cannot answer for this
+        # test -- the candidates below it are host-global on purpose.
+        cfg = {"PORTHOLE_SANDBOX_PMB_DIR": d + "/empty-work",
+               "PORTHOLE_PMB_DIR": d + "/empty-work"}
+        assert pmap.find_aports_upstream(pm, cfg) == up
+        assert pmap.find_aports_upstream(pathlib.Path(d) / "nowhere",
+                                         cfg) is None
+
+
+def test_the_upstream_tree_is_found_where_the_container_looks_for_it():
+    """#102: with an ADOPTED pmaports checkout the sandbox binds pmaports in
+    individually, so `/pmb/cache_git` is the WORK DIR and `pmaports.parent` is
+    somewhere else on the host. Deriving the path from pmaports' parent alone
+    meant `pkg search` and `pkg fork` reported Alpine's tree as missing no
+    matter where it was put -- it was worked around with a symlink."""
+    import porthole_pmaports as pmap
+
+    with tempfile.TemporaryDirectory() as d:
+        adopted = pathlib.Path(d) / "ws" / "pmos" / "pmaports"
+        (adopted / "device").mkdir(parents=True)
+        work = pathlib.Path(d) / "porthole-sandbox"
+        upstream = work / "cache_git" / "aports_upstream"
+        (upstream / "main").mkdir(parents=True)
+        cfg = {"PORTHOLE_SANDBOX_PMB_DIR": str(work)}
+        assert pmap.find_aports_upstream(adopted, cfg) == upstream
+
+
+def test_the_missing_upstream_hint_names_a_path_that_actually_helps():
+    """`pmbootstrap pull` clones into pmbootstrap's own cache_git, which is
+    not `pmaports.parent` when pmaports is adopted -- so advice that only says
+    that cannot be followed out of the failure it is printed for."""
+    import porthole_pmaports as pmap
+
+    with tempfile.TemporaryDirectory() as d:
+        work = pathlib.Path(d) / "porthole-sandbox"
+        hint = pmap.missing_aports_upstream_hint(
+            pathlib.Path(d) / "ws" / "pmos" / "pmaports",
+            {"PORTHOLE_SANDBOX_PMB_DIR": str(work)})
+        assert str(work / "cache_git" / "aports_upstream") in hint
 
 
 # ------------------------------------------------------- where fork runs --

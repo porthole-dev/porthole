@@ -490,6 +490,29 @@ def slot_suffix(cmdline: str) -> str:
     return match.group(1) if match else ""
 
 
+# What sshd says when it answered and then refused us. A decision that must
+# not be wrong, so it is a pure function that can be wrong in a test instead
+# of on a device -- and it is matched on TEXT because there is nothing else:
+# ssh exits 255 for a refused key, a refused connection and a dead route
+# alike.
+SSH_AUTH_REFUSALS = (
+    "Permission denied",
+    "Too many authentication failures",
+    "No supported authentication methods",
+)
+
+
+def ssh_auth_refused(stderr: str) -> bool:
+    """Did sshd answer and refuse our key, rather than nothing answering?
+
+    The distinction is the whole of porthole#105: a fresh rootfs has an empty
+    authorized_keys, so the device is healthy and simply has not been told
+    about our key. Reporting that as "userspace gone" sends someone after a
+    power cycle and a reflash.
+    """
+    return any(marker in (stderr or "") for marker in SSH_AUTH_REFUSALS)
+
+
 def ssh_opts(cfg: dict) -> list[str]:
     """The ssh flags every tool must use.
 
@@ -663,7 +686,13 @@ class Device:
         timeout = 12
         for attempt in range(2):
             began = time.monotonic()
-            out = self.run("cat /proc/sys/kernel/random/boot_id", timeout=timeout)
+            _rc, out, err = self.run_full(
+                "cat /proc/sys/kernel/random/boot_id", timeout=timeout)
+            # Kept so `state()` can tell "sshd refused our key" from "nothing
+            # answered", which is the difference between a healthy phone one
+            # ssh-copy-id from working and one that needs a cable. See
+            # ssh_auth_refused.
+            self._last_ssh_err = err
             if out:
                 return out
             if retry == "stall-only" and attempt == 0:
@@ -671,8 +700,13 @@ class Device:
                     return ""       # a fast no is a real no
         return ""
 
+    def _ssh_refused_auth(self) -> bool:
+        """Did sshd ANSWER and refuse our key on the last probe? Pure-ish:
+        it reads what `_boot_id` recorded and decides nothing itself."""
+        return ssh_auth_refused(getattr(self, "_last_ssh_err", ""))
+
     def state(self, max_age: float = 0.0) -> str:
-        """BOOTED | INITRAMFS | FROZEN | FASTBOOT | ABSENT.
+        """BOOTED | INITRAMFS | NOAUTH | FROZEN | FASTBOOT | ABSENT.
 
         The device lock says WHO is using the device, never WHAT it is doing.
         This is the probe that answers the second question.
@@ -681,6 +715,16 @@ class Device:
         network at all, so fastboot is authoritative; ssh distinguishes BOOTED;
         ping alone distinguishes FROZEN (kernel alive, userspace gone) from
         ABSENT (needs a human).
+
+        NOAUTH sits between BOOTED and FROZEN too, and for the same reason.
+        A fresh rootfs has an empty `~/.ssh/authorized_keys`, so the first
+        probe after `flash full --replace-rootfs` is made against a device
+        that is completely healthy and has never been told about our key. ssh
+        fails, ping answers, and the verdict was FROZEN -- "kernel alive,
+        userspace gone", which describes a phone needing a power cycle and
+        possibly a reflash rather than one `ssh-copy-id` from working. The
+        moment the false positive is likeliest is the moment it misleads most.
+        porthole#105.
 
         INITRAMFS sits between BOOTED and FROZEN: the boot stopped in the pmOS
         initramfs debug shell, which is a busybox telnetd nobody has to guess
@@ -739,6 +783,10 @@ class Device:
             verdict = "BOOTED"
         elif results.get("initramfs"):
             verdict = "INITRAMFS"
+        elif results.get("ping") and self._ssh_refused_auth():
+            # sshd answered. Userspace is up by definition -- the only thing
+            # missing is our key in authorized_keys.
+            verdict = "NOAUTH"
         elif results.get("ping"):
             verdict = "FROZEN"
         else:
