@@ -37,6 +37,9 @@ def device(**probes):
     dev._pings = lambda: probes.get("ping", False)
     dev._in_initramfs = lambda: probes.get("initramfs", False)
     dev._remember_state = lambda verdict: None
+    # What the ssh that failed said, which is the only thing separating
+    # "refused our key" from "nothing answered".
+    dev._last_ssh_err = probes.get("ssh_err", "")
     return dev
 
 
@@ -57,6 +60,53 @@ def test_boot_id_means_booted():
 def test_ping_without_ssh_is_frozen():
     """FROZEN is kernel alive, userspace gone -- a real and distinct state."""
     assert device(ping=True).state() == "FROZEN"
+
+
+def test_a_refused_key_is_not_userspace_gone():
+    """porthole#105. Immediately after `flash full --replace-rootfs` the phone
+    is healthy and `~/.ssh/authorized_keys` is empty, so ssh fails and ping
+    answers -- and the verdict was FROZEN, "kernel alive, userspace gone",
+    which describes a device needing a power cycle and possibly a reflash.
+    sshd answering at all is proof userspace is up."""
+    dev = device(ping=True, ssh_err="user@172.16.42.1: Permission denied "
+                                    "(publickey,password).")
+    assert dev.state() == "NOAUTH"
+
+
+def test_a_connection_that_never_reached_sshd_is_still_frozen():
+    """The distinction has to hold in both directions, or FROZEN stops
+    meaning anything: no route, a refused port and a timeout are not sshd
+    saying no."""
+    for err in ("ssh: connect to host 172.16.42.1 port 22: No route to host",
+                "ssh: connect to host 172.16.42.1 port 22: Connection refused",
+                "timed out after 12s", ""):
+        assert device(ping=True, ssh_err=err).state() == "FROZEN", err
+
+
+def test_a_refused_key_never_outranks_a_device_that_answers():
+    """Precedence is unchanged: this sits below BOOTED, FASTBOOT and the
+    initramfs shell, all of which are stronger statements."""
+    refused = "Permission denied (publickey)."
+    assert device(boot_id="abc", ping=True, ssh_err=refused).state() == "BOOTED"
+    assert device(fastboot=True, ping=True, ssh_err=refused).state() == "FASTBOOT"
+    assert device(ping=True, initramfs=True,
+                  ssh_err=refused).state() == "INITRAMFS"
+
+
+def test_a_refused_key_without_ping_is_still_absent():
+    """Without ping we cannot separate the two, and ABSENT is the
+    conservative answer -- the same rule _pings already documents."""
+    assert device(ssh_err="Permission denied (publickey).").state() == "ABSENT"
+
+
+def test_the_refusal_classifier_reads_what_sshd_says():
+    """Pure, so it can be wrong in a test instead of on a device. ssh exits
+    255 for a refused key, a refused connection and a dead route alike, so
+    the text is the only signal there is."""
+    assert porthole.ssh_auth_refused("Permission denied (publickey).")
+    assert porthole.ssh_auth_refused("Too many authentication failures")
+    assert not porthole.ssh_auth_refused("Connection timed out")
+    assert not porthole.ssh_auth_refused("")
 
 
 def test_the_initramfs_shell_is_not_frozen():
@@ -180,12 +230,14 @@ def test_the_stall_retry_still_fires_when_something_stalls():
     dev = porthole.Device(cfg)
     calls = []
 
-    def slow(cmd, timeout=None):
+    # run_full, not run: _boot_id needs the stderr to tell a refused key from
+    # nothing answering, and `run` throws that away by contract.
+    def slow(cmd, timeout=None, check=False):
         calls.append(timeout)
         time.sleep(0.02)
-        return "" if len(calls) == 1 else "boot-id-here"
+        return (1, "", "") if len(calls) == 1 else (0, "boot-id-here", "")
 
-    dev.run = slow
+    dev.run_full = slow
     # Patch the clock so attempt one looks like it consumed its timeout.
     real = time.monotonic
     seq = iter([0.0, 11.0, 11.0, 22.0])
@@ -204,7 +256,8 @@ def test_a_fast_failure_is_not_retried():
     cfg = porthole.load_config(root=ROOT, env={"PORTHOLE_DEVICE": "google-taimen"})
     dev = porthole.Device(cfg)
     calls = []
-    dev.run = lambda cmd, timeout=None: calls.append(1) or ""
+    dev.run_full = lambda cmd, timeout=None, check=False: (
+        calls.append(1) or (255, "", "Connection refused"))
     assert dev._boot_id(retry="stall-only") == ""
     assert len(calls) == 1, "a fast failure was retried anyway"
 
@@ -215,7 +268,8 @@ def test_the_default_still_retries_unconditionally():
     cfg = porthole.load_config(root=ROOT, env={"PORTHOLE_DEVICE": "google-taimen"})
     dev = porthole.Device(cfg)
     calls = []
-    dev.run = lambda cmd, timeout=None: calls.append(1) or ""
+    dev.run_full = lambda cmd, timeout=None, check=False: (
+        calls.append(1) or (255, "", ""))
     assert dev.boot_id() == ""
     assert len(calls) == 2, "the baseline retry was weakened"
 

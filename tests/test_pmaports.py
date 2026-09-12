@@ -423,6 +423,59 @@ def test_switch_warning_is_silent_when_nothing_is_left_behind():
     assert aports._switch_warning("origin/main", "taimen-bringup", 0) == ""
 
 
+def test_a_wrong_base_is_refused_even_under_yes():
+    """#103: `--base v7.2.2` on a 215-patch series re-exported the whole
+    series, and a base further back wrote 61,164 .patch files. --yes was what
+    skipped the preview that caught both."""
+    import porthole_cmd_aports as aports
+
+    assert aports.export_size_refusal(61164, 215, True, None)
+    assert aports.export_size_refusal(215, 215, True, None)
+
+
+def test_the_ordinary_append_and_rewrite_are_not_refused():
+    """A guard that fires on normal work is a guard people learn to pass
+    --expect to reflexively, which is the same as not having one."""
+    import porthole_cmd_aports as aports
+
+    assert aports.export_size_refusal(1, 215, True, None) == ""
+    assert aports.export_size_refusal(216, 215, False, None) == ""
+    assert aports.export_size_refusal(215, 215, False, None) == ""
+
+
+def test_expect_passes_any_size_and_fails_a_different_one():
+    """The override is an assertion too: a deliberate large export states its
+    number, and a base that resolves to a different one is refused."""
+    import porthole_cmd_aports as aports
+
+    assert aports.export_size_refusal(61164, 215, True, 61164) == ""
+    refusal = aports.export_size_refusal(5, 215, True, 1)
+    assert "--expect 1" in refusal and "5" in refusal
+
+
+def test_patches_refuses_the_export_before_format_patch_writes_anything():
+    """The order is the whole guard. format-patch writing 61,164 files and
+    then being told the base was wrong is the bug, not the fix -- recovery
+    needs `git clean -f` plus a checkout of the APKBUILD, by which point `ls`
+    in the package directory fails with "Argument list too long"."""
+    import ast
+    import inspect
+    import textwrap
+    import porthole_cmd_aports as aports
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(aports.cmd_patches)))
+    guard = [n.lineno for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == "export_size_refusal"]
+    writes = [n.lineno for n in ast.walk(tree)
+              if isinstance(n, ast.Name) and n.id == "format_patch_args"]
+    assert guard, "cmd_patches must call export_size_refusal()"
+    assert writes, "cmd_patches must still build format_patch_args"
+    assert min(guard) < min(writes), (
+        f"export_size_refusal() at line {min(guard)} must be computed before "
+        f"format-patch is assembled at line {min(writes)}")
+
+
 def test_patches_checks_dropped_patches_before_it_unlinks_anything():
     """The order is load-bearing, not tidiness.
 

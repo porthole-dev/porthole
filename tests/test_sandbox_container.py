@@ -370,6 +370,58 @@ def test_a_healthy_chroot_is_left_alone():
     assert warned == "", warned
 
 
+def test_status_probes_the_live_namespace_not_the_container_spec():
+    """#104: a kernel build died on `Invalid pmaports repository, could not
+    find the config: /pmb/cache_git/pmaports/pmaports.cfg` -- the bind was
+    gone inside the container -- while `sandbox status` said `pmaports
+    mounted` at that same moment. The spec cannot see a mount that went away,
+    so status has to ask for the file pmbootstrap itself demands."""
+    calls = []
+
+    class Done:
+        returncode = 1
+
+    class FakeSubprocess:
+        # The module attribute, not subprocess.run itself: patching the real
+        # module would leak into everything else this worker runs.
+        SubprocessError = sb.subprocess.SubprocessError
+
+        @staticmethod
+        def run(argv, **kw):
+            calls.append(argv)
+            return Done()
+
+    real = sb.subprocess
+    sb.subprocess = FakeSubprocess
+    try:
+        assert sb.aports_readable_in_container() is False
+    finally:
+        sb.subprocess = real
+    assert calls and calls[0][:3] == ["podman", "exec", sb.CONTAINER], calls
+    assert calls[0][-1] == sb.APORTS_IN + "/pmaports.cfg", (
+        "pmaports.cfg is the marker because it is the file the build fails "
+        "on; a check that passes where the build fails is not a check: "
+        + repr(calls[0]))
+
+
+def test_a_probe_that_cannot_run_is_unknown_rather_than_healthy():
+    """None, not True. A green tick that means "could not ask" is the exact
+    shape of the bug."""
+    class FakeSubprocess:
+        SubprocessError = sb.subprocess.SubprocessError
+
+        @staticmethod
+        def run(argv, **kw):
+            raise OSError("podman went away")
+
+    real = sb.subprocess
+    sb.subprocess = FakeSubprocess
+    try:
+        assert sb.aports_readable_in_container() is None
+    finally:
+        sb.subprocess = real
+
+
 def test_the_guard_runs_where_every_build_routes_through():
     """One guard, and it has to be the wrapper: a chroot is broken by an
     unmount that happens mid-session, long after `sandbox up` armed it."""
