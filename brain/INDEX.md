@@ -54,6 +54,7 @@ generic notes as well.
 | [pmbootstrap-shutdown-unmounts-portholes-own-binds](findings/pmbootstrap-shutdown-unmounts-portholes-own-binds.md) | `generic` | pmbootstrap shutdown unmounts porthole's own container binds, not just pmbootstrap's chroot mounts |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
+| [request-firmware-from-open-shares-the-openers-symlink-budget](findings/request-firmware-from-open-shares-the-openers-symlink-budget.md) | `generic` | request_firmware() from a file's ->open() shares that open()'s symlink budget, and a split firmware runs out |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
@@ -186,6 +187,7 @@ generic notes as well.
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
 | [stale-dev-package-outranks-your-build](traps/stale-dev-package-outranks-your-build.md) | `generic` | A _p<timestamp> dev snapshot outranks a release, so apk installs a kernel from days ago |
+| [systemd-sorts-statedirectory-so-the-first-one-is-not-yours](traps/systemd-sorts-statedirectory-so-the-first-one-is-not-yours.md) | `generic` | A drop-in that adds a StateDirectory= reorders $STATE_DIRECTORY, and the daemon writes to whichever sorts first |
 | [the-av1-demotion-deleted-the-v4l2-ranks](traps/the-av1-demotion-deleted-the-v4l2-ranks.md) | `generic` | A second environment.d file setting the same variable deletes the first one's value |
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [the-bootloader-reboot-can-drop-the-phone-off-usb-entirely](traps/the-bootloader-reboot-can-drop-the-phone-off-usb-entirely.md) | `device:google-taimen` | The bootloader reboot can drop the phone off USB entirely |
@@ -241,7 +243,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 45
-- `generic` — 127
+- `generic` — 129
 - `soc:gs201` — 1
 - `soc:msm8998` — 29
 - `soc:qcom` — 1
