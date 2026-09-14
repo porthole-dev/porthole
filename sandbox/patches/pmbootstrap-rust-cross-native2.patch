@@ -1,8 +1,8 @@
 diff --git a/pmb/build/backend.py b/pmb/build/backend.py
-index 113df2a..f16de6f 100644
+index 113df2a..2e680d2 100644
 --- a/pmb/build/backend.py
 +++ b/pmb/build/backend.py
-@@ -185,6 +185,30 @@ def handle_csum_failure(apkbuild: Apkbuild, chroot: Chroot) -> None:
+@@ -185,6 +185,32 @@ def handle_csum_failure(apkbuild: Apkbuild, chroot: Chroot) -> None:
          raise RuntimeError(f"Remote checksum mismatch for {apkbuild['pkgname']}")
  
  
@@ -12,18 +12,20 @@ index 113df2a..f16de6f 100644
 +    cargo and rustc run natively. The target's standard library comes from the
 +    rust package in the sysroot, which is the same toolchain release as the
 +    native one -- crossdirect relies on that match too (cross/crossdirect).
-+    The target-scoped variables leave build scripts and proc-macros as native
-+    artifacts, so e.g. bindgen in a build script loads the native libclang
-+    and is only told which target and sysroot to parse headers for.
++
++    The sysroot goes in RUSTFLAGS, not target.<triple>.rustflags: abuild's
++    default.conf exports RUSTFLAGS, and cargo lets RUSTFLAGS replace any
++    target-scoped rustflags. abuild appends to the value passed in, and with
++    a build target set cargo passes RUSTFLAGS to target artifacts only, so
++    build scripts and proc-macros stay native: bindgen in a build script
++    loads the native libclang and is only told the target and sysroot.
 +    """
 +    triple = arch.alpine_triple()
 +    cargo_triple = triple.upper().replace("-", "_")
 +    return {
 +        "CARGO_BUILD_TARGET": triple,
 +        f"CARGO_TARGET_{cargo_triple}_LINKER": f"{triple}-gcc",
-+        f"CARGO_TARGET_{cargo_triple}_RUSTFLAGS": (
-+            f"--sysroot={sysroot}/usr -Clink-arg=--sysroot={sysroot}"
-+        ),
++        "RUSTFLAGS": f"--sysroot={sysroot}/usr -Clink-arg=--sysroot={sysroot}",
 +        f"BINDGEN_EXTRA_CLANG_ARGS_{triple.replace('-', '_')}": (
 +            f"--target={triple} --sysroot={sysroot}"
 +        ),
@@ -33,7 +35,7 @@ index 113df2a..f16de6f 100644
  def run_abuild(
      context: Context,
      apkbuild: Apkbuild,
-@@ -265,6 +289,7 @@ def run_abuild(
+@@ -265,6 +291,7 @@ def run_abuild(
              env["GOARCH"] = arch.go()
          except ValueError:
              logging.debug(f"Not setting $GOARCH for {arch}")
