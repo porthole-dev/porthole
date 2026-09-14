@@ -37,6 +37,7 @@ generic notes as well.
 | [epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers](findings/epiphanys-window-updates-at-15-fps-because-texturemapper-composites-237-layers.md) | `device:google-taimen` | Epiphany's window updates at 12-30 fps on YouTube because WebKit's compositor thread spends 35-50 ms per frame on a 237-layer page -- not the video, not GTK, not the GPU clock, not damage tracking |
 | [every-command-exiting-1-with-no-output-is-a-full-disk](findings/every-command-exiting-1-with-no-output-is-a-full-disk.md) | `generic` | Every command exiting 1 with empty output is a full disk, not a broken harness |
 | [forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port](findings/forcing-3a-input-current-collapses-vbus-and-resets-the-usb-port.md) | `soc:msm8998` | The Type-C Rp advertisement is ignored, so a 3 A source charges at 500 mA -- and AICL, not the driver, is what bounds the request |
+| [fpc-enrolment-is-gated-behind-a-keymaster-signed-auth-token](findings/fpc-enrolment-is-gated-behind-a-keymaster-signed-auth-token.md) | `soc:msm8998` | The FPC trustlet commits an enrolment only with a Gatekeeper/keymaster-signed auth token, which postmarketOS cannot produce |
 | [fresh-install-media-stack-is-self-sufficient](findings/fresh-install-media-stack-is-self-sufficient.md) | `device:google-taimen` | A from-scratch taimen install brings venus, GStreamer and the radios up with no hand-edits |
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
@@ -245,5 +246,5 @@ generic notes as well.
 - `device:google-taimen` — 45
 - `generic` — 129
 - `soc:gs201` — 1
-- `soc:msm8998` — 29
+- `soc:msm8998` — 30
 - `soc:qcom` — 1
