@@ -37,14 +37,38 @@ finger against an *already-enrolled* template needs no token. But templates
 can only be created by an authorized enrolment, so on a device that never
 enrolled under Android there is nothing to match against.
 
-The only real path to enrolment is to satisfy the auth flow: drive the
-device's own `keymaster64` and a Gatekeeper trustlet to mint a signed HAT --
-i.e. stand up the hardware-auth stack Android provides. That is a large,
-separate effort, not a fingerprint-driver change. A smaller experiment that
-would sharpen (not lift) the finding: install the keymaster key with
-`FPC_SET_KEY_DATA` and confirm `AUTHORIZE_ENROL` still rejects an unsigned
-token -- our kernel driver would first need to load `keymaster64`, which it
-does not today.
+**Update 2026-09-14 -- most of the feared work turned out unnecessary, and
+the path is now blocked on one thing: RPMB.** Measured on the device:
+
+- `keymaster64` is ALREADY RESIDENT (the bootloader loads it):
+  `app_get_id("keymaster64")` = id 65537, and it answers
+  `KEYMASTER_GET_AUTH_TOKEN_KEY` (cmd 0x205) with a 152-byte sealed blob
+  (per-call IV + counter, labelled "keymaster64" -> "fingerprint"). So no
+  loading the 64-bit trustlet out of the bootloader `keymaster` partition,
+  and no keymaster RPMB bring-up on our side, is needed for the key.
+- Handing that blob to the FPC trustlet as `SET_KEY_DATA {0x03,0x05}` --
+  the vendor init step this stack never did -- answers status 0. The
+  verifier is then armed: `AUTHORIZE_ENROL` with an unsigned token still
+  answers -201, now for the right reason (bad signature, not absent key).
+- There is no separate Gatekeeper trustlet: the vendor
+  `gatekeeper.msm8998.so` (decompiled) drives the same keymaster64 app.
+  Protocol: enrol `{0x1001, uid, cur_handle, cur_pwd, pwd}` -> a password
+  handle; verify `{0x1002, uid, u64 challenge, handle, pwd}` -> the 69-byte
+  HAT. `req_len = (payload + 0x5f) & ~0x3f`, response `{status, off, len}`.
+- Gatekeeper enrol answers -30 (nothing written): it stores its handle and
+  throttle counters in RPMB, QSEE refuses a request for an unregistered
+  listener, and no one registers RPMB. librpmb.so registers it with a
+  0x6400 buffer over UFS SG_IO. The running kernel has `CONFIG_RPMB` and
+  `CONFIG_SCSI_UFS_BSG` both off; the UFS RPMB well-known LUN (0:0:0:49476)
+  is present but unexposed.
+
+So the remaining work is an RPMB relay: expose the UFS RPMB LUN
+(`CONFIG_SCSI_UFS_BSG` and/or `CONFIG_RPMB`), register listener 0x2000, and
+relay the trustlet's RPMB frames (SECURITY PROTOCOL IN/OUT) to it -- the
+supplicant pattern again, and shared infrastructure with disk encryption.
+Then: keymaster key -> FPC SET_KEY_DATA, gatekeeper enrol+verify a PIN ->
+HAT, FPC AUTHORIZE_ENROL(HAT) -> enrol. Probes:
+taimen `bringup/qsee-km-probe/`.
 
 Related: [[a-qsee-trustlet-stores-files-through-two-listeners]],
 [[a-trustzone-command-can-succeed-and-do-nothing]].
