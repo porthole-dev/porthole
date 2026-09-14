@@ -378,10 +378,15 @@ def static_deps(text: str, var: str) -> set:
 def appended_deps(text: str, var: str) -> list:
     """Packages appended to `var`, in file order. The invisible ones."""
     found = []
+    # `$makedepends` or `${makedepends}`, but not `$makedepends_build`: the
+    # Alpine split `makedepends="$makedepends_build $makedepends_host"` names
+    # two other variables, not an append with a package called `_build`.
+    own = re.compile(rf"\$(?:{re.escape(var)}(?![A-Za-z0-9_])|\{{{re.escape(var)}\}})")
     for body in _bodies(text, var):
         head = body.lstrip()
-        if head.startswith("$" + var):
-            found += head[len(var) + 1:].split()
+        match = own.match(head)
+        if match:
+            found += head[match.end():].split()
     return found
 
 

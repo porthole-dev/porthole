@@ -78,6 +78,15 @@ def test_a_quoted_field_reads_the_same_as_a_bare_one():
 
 # ------------------------------------------------- the pmbootstrap trap --
 
+def test_the_alpine_makedepends_split_is_not_an_append():
+    text = APKBUILD + ('makedepends_build="meson cargo"\n'
+                       'makedepends_host="gtk4.0-dev"\n'
+                       'makedepends="$makedepends_build $makedepends_host"\n')
+    assert pkg.conditional_dep_warning(text) == ""
+    assert pkg.appended_deps('makedepends="${makedepends} libfoo-dev"\n',
+                             "makedepends") == ["libfoo-dev"]
+
+
 def test_a_conditionally_appended_dependency_is_warned_about():
     """The trap that cost a full webkit configure: pmbootstrap parses an
     APKBUILD line by line, so a dependency added inside a case/esac is never
