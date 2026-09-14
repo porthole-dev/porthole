@@ -133,6 +133,7 @@ generic notes as well.
 | [a-hard-hang-writes-nothing-to-disk](traps/a-hard-hang-writes-nothing-to-disk.md) | `generic` | A hard hang writes nothing to disk — capture on the host, before you trigger |
 | [a-journal-grep-matches-your-own-command-line](traps/a-journal-grep-matches-your-own-command-line.md) | `generic` | A journal grep counts the grep that is asking |
 | [a-launch-that-skips-the-user-manager-loses-environment-d](traps/a-launch-that-skips-the-user-manager-loses-environment-d.md) | `generic` | A browser launched from ssh, systemd-run --scope, or set-environment does not get environment.d -- and on taimen that means Skia-GPU |
+| [a-lax-workspace-never-installs-sccache-for-rust](traps/a-lax-workspace-never-installs-sccache-for-rust.md) | `generic` | A --lax workspace never installs sccache, so a QEMU-only Rust build dies in prepare |
 | [a-long-sudo-cache-is-unlimited-root](traps/a-long-sudo-cache-is-unlimited-root.md) | `generic` | A long sudo credential cache is unlimited root for every process you run |
 | [a-module-parameter-that-does-not-exist-is-ignored](traps/a-module-parameter-that-does-not-exist-is-ignored.md) | `generic` | A module parameter that does not exist is silently ignored |
 | [a-module-reload-does-not-reset-this-cards-audio-state](traps/a-module-reload-does-not-reset-this-cards-audio-state.md) | `device:google-taimen` | A module reload re-registers the card and leaves capture broken — audio needs a reboot |
@@ -245,7 +246,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 46
-- `generic` — 129
+- `generic` — 130
 - `soc:gs201` — 1
 - `soc:msm8998` — 30
 - `soc:qcom` — 1
