@@ -869,6 +869,39 @@ def test_a_resume_enters_the_buildroot_chroot_as_the_build_user():
     assert cmd[-3:] == ["sh", "-c", "true"], cmd
 
 
+def test_a_cross_native2_aport_is_recognised_from_its_options():
+    """pmbootstrap moves the whole build to the native chroot for these, so
+    the resume has to know before it looks for a tree."""
+    assert pkg.cross_native2('pkgname=x\noptions="suid pmb:cross-native2"\n')
+    assert not pkg.cross_native2('pkgname=x\noptions="!check"\n')
+    assert not pkg.cross_native2('pkgname=x\noptions="!pmb:crossdirect"\n')
+
+
+def test_a_cross_native2_resume_gets_pmbootstraps_cross_environment():
+    """CHOST and CBUILDROOT are what make abuild cross compile into the
+    sysroot; without them it builds an x86_64 package from the aarch64 tree."""
+    env = pkg.abuild_env("aarch64", native2=True)
+    assert "CARCH" not in env, env
+    assert env["CHOST"] == "aarch64" and env["CBUILDROOT"] == "/mnt/sysroot"
+    assert env["PMB_CROSS"] == "cross-native2"
+    assert env["CARGO_BUILD_TARGET"] == "aarch64-alpine-linux-musl"
+    assert env["RUSTFLAGS"] == (
+        "--sysroot=/mnt/sysroot/usr -Clink-arg=--sysroot=/mnt/sysroot")
+    line = pkg.resume_line("aarch64", native2=True)
+    assert "CHOST=aarch64" in line and "CARCH" not in line, line
+
+
+def test_a_cross_native2_resume_runs_in_the_native_chroot_on_its_sysroot():
+    """The tree is in the native chroot, and pmbootstrap unmounted the
+    sysroot when the failed build exited."""
+    cmd = pkg.resume_cmd("aarch64", "true", native2=True)
+    assert "-b" not in cmd and "--user" in cmd, cmd
+    mount = pkg.sysroot_mount("aarch64")
+    assert "mount --bind /pmb/chroot_buildroot_aarch64 " \
+        "/pmb/chroot_native/mnt/sysroot" in mount, mount
+    assert "mountpoint -q" in mount, "must be safe to run twice"
+
+
 def test_a_tree_belonging_to_another_package_is_named_not_resumed(tmp=None):
     """One buildroot, one tree: whatever built last owns it. Resuming over it
     is two-pmbootstrap-builds-destroy-each-other with one build."""
