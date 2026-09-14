@@ -114,7 +114,7 @@ RUN sed -i 's|CCACHE_DISABLE=1|CCACHE_DIR=/mnt/pmbootstrap/ccache|' \
 # the image build instead of silently leaving Rust on the slow path.
 COPY patches/pmbootstrap-rust-cross-native2.patch /tmp/
 RUN site=$(python3 -c 'import os, pmb; print(os.path.dirname(os.path.dirname(pmb.__file__)))') \
- && patch -p1 -d "$site" < /tmp/pmbootstrap-rust-cross-native2.patch \
+ && git -C "$site" apply /tmp/pmbootstrap-rust-cross-native2.patch \
  && grep -q 'def rust_cross_native2_env' "$site/pmb/build/backend.py" \
  && rm /tmp/pmbootstrap-rust-cross-native2.patch \
  || (echo "FATAL: the Rust cross-native2 patch no longer applies to this pmbootstrap; check whether the release already carries it" >&2; exit 1)
