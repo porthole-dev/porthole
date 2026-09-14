@@ -43,6 +43,17 @@ def _tree(tmp: pathlib.Path):
 
 # ------------------------------------------------------------ resolution --
 
+def test_a_qemu_only_rust_aport_needs_sccache_in_the_buildroot():
+    rust = ('pkgname=obscura\nmakedepends="\n\tcargo-auditable\n\tclang-libclang\n\t"\n'
+            'options="net !pmb:crossdirect"\n')
+    assert pkg.needs_buildroot_sccache(rust)
+    # crossdirect builds get sccache in the native chroot from pmbootstrap
+    assert not pkg.needs_buildroot_sccache(rust.replace(" !pmb:crossdirect", ""))
+    # and a C aport without crossdirect never asks for it
+    assert not pkg.needs_buildroot_sccache(
+        'pkgname=phosh\nmakedepends="meson"\noptions="!check !pmb:crossdirect"\n')
+
+
 def test_an_aport_is_found_at_either_depth():
     with tempfile.TemporaryDirectory() as d:
         root = _tree(pathlib.Path(d))

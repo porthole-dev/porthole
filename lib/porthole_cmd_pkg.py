@@ -863,6 +863,8 @@ def _build(ctx, args) -> int:
         # qemu for hashing its preprocessed source. The kernel path has done
         # this since the chroot_native fix; packages never inherited it.
         _arm_ccache(ctx)
+        if needs_buildroot_sccache(text):
+            _arm_buildroot_sccache(arch)
 
     # pmbootstrap keeps the real build output in its own log.txt and puts
     # only high-level `=> step` lines on stdout. Following that file is what
@@ -1117,6 +1119,47 @@ def _arm_ccache(ctx) -> None:
              sandbox.CONTAINER, "/bin/bash", "-lc",
              "cd /porthole && source tools/ph-build.sh"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def needs_buildroot_sccache(text: str) -> bool:
+    """True when pmbootstrap will run rustc through sccache INSIDE the target
+    buildroot for this APKBUILD. Pure.
+
+    pmbootstrap sets RUSTC_WRAPPER=/usr/bin/sccache for every build that is
+    not crossdirect while ccache is on (pmb/build/backend.py), but installs
+    sccache into the buildroot only during that chroot's one-time build init,
+    and only when "rust" or "cargo" is literally a dependency
+    (pmb/build/_package.py). Upstream, a strict build zaps the buildroot
+    first, so the init runs again. The workspace builds --lax, so it never
+    does: the first `!pmb:crossdirect` Rust aport after anything else dies in
+    prepare() with "could not execute process `/usr/bin/sccache rustc -vV`".
+    """
+    deps = set()
+    for var in ("depends", "makedepends", "makedepends_build",
+                "makedepends_host"):
+        for body in _bodies(text, var):
+            deps.update(body.split())
+    options = " ".join(_bodies(text, "options")).split()
+    return bool(deps & {"rust", "cargo", "cargo-auditable"}) and \
+        "!pmb:crossdirect" in options
+
+
+def _arm_buildroot_sccache(arch: str) -> None:
+    """Install sccache into the `arch` buildroot, where pmbootstrap will look
+    for it (see needs_buildroot_sccache). Best effort, like _arm_ccache: if
+    this fails the build fails exactly as it would have, and says why."""
+    import subprocess
+
+    import porthole_cmd_sandbox as sandbox
+
+    try:
+        subprocess.run(
+            ["podman", "exec", sandbox.CONTAINER, "/bin/bash", "-lc",
+             f"cd /porthole && pmbootstrap -q chroot -b {shlex.quote(arch)}"
+             " --add sccache -- true"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
     except (OSError, subprocess.SubprocessError):
         pass
 
