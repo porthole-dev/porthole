@@ -631,22 +631,90 @@ RESUME_ACTIONS = "build rootpkg update_abuildrepo_index"
 LINUX32 = ("armhf", "armv7", "x86")
 
 
-def abuild_env(arch: str) -> dict:
+# Where pmbootstrap bind-mounts the target chroot for a cross-native2 build,
+# and the arch facts it derives from it (pmb/core/arch.py: alpine_triple()
+# and go()). Only the arches a port actually cross-builds for.
+SYSROOT = "/mnt/sysroot"
+CROSS_ARCH = {
+    "aarch64": ("aarch64-alpine-linux-musl", "arm64"),
+    "armhf": ("armv6-alpine-linux-musleabihf", "arm"),
+    "armv7": ("armv7-alpine-linux-musleabihf", "arm"),
+    "riscv64": ("riscv64-alpine-linux-musl", "riscv64"),
+    "x86": ("i586-alpine-linux-musl", "386"),
+    "x86_64": ("x86_64-alpine-linux-musl", "amd64"),
+}
+
+
+def cross_native2(text: str) -> bool:
+    """Whether pmbootstrap builds this APKBUILD with cross-native2. Pure.
+
+    pmb/build/autodetect.py decides it from `options`, and it moves the whole
+    build: the tree is in the NATIVE chroot and abuild runs there with the
+    target chroot as its sysroot, so a resume that looked in the buildroot
+    would find somebody else's tree or none.
+    """
+    return any("pmb:cross-native2" in body.split()
+               for body in _bodies(text, "options"))
+
+
+def abuild_env(arch: str, native2: bool = False) -> dict:
     """What pmbootstrap exports before it runs abuild (pmb/build/backend.py).
 
     Not "what abuild happens to need": SUDO_APK is how abuild installs into
     the buildroot with no root at all, and CARCH is what makes it produce a
     package for the target rather than for whatever qemu is emulating on.
+
+    cross-native2 replaces CARCH with CHOST and CBUILDROOT, from which abuild
+    derives the cross compiler, --sysroot and pkg-config's sysroot, plus the
+    Go and Rust (cargo, bindgen) settings pmbootstrap adds for that mode.
     """
-    return {"CARCH": arch, "SUDO_APK": "abuild-apk --no-progress"}
+    env = {"SUDO_APK": "abuild-apk --no-progress"}
+    if not native2:
+        env["CARCH"] = arch
+        return env
+    if arch not in CROSS_ARCH:
+        raise Bail(f"cannot resume a cross-native2 build for {arch}", EX_FAIL,
+                   f"known: {', '.join(sorted(CROSS_ARCH))}")
+    triple, goarch = CROSS_ARCH[arch]
+    env.update({
+        "PMB_CROSS": "cross-native2",
+        "CHOST": arch,
+        "CBUILDROOT": SYSROOT,
+        "CFLAGS": f"-Wl,-rpath-link={SYSROOT}/usr/lib",
+        "CGO_CFLAGS": f"--sysroot={SYSROOT}",
+        "CGO_LDFLAGS": f"--sysroot={SYSROOT}",
+        "GOARCH": goarch,
+        "CARGO_BUILD_TARGET": triple,
+        f"CARGO_TARGET_{triple.upper().replace('-', '_')}_LINKER":
+            f"{triple}-gcc",
+        "RUSTFLAGS": f"--sysroot={SYSROOT}/usr -Clink-arg=--sysroot={SYSROOT}",
+        f"BINDGEN_EXTRA_CLANG_ARGS_{triple.replace('-', '_')}":
+            f"--target={triple} --sysroot={SYSROOT}",
+    })
+    return env
+
+
+def sysroot_mount(arch: str) -> str:
+    """The shell line that gives a cross-native2 resume its sysroot. Pure.
+
+    pmbootstrap bind-mounts the target chroot at /mnt/sysroot for the build
+    and unmounts it when it exits, so the tree a failed build leaves behind
+    has no sysroot under it. `pmbootstrap chroot` does not mount one; root in
+    the workspace container can. Idempotent, and pmbootstrap's own bind
+    replaces it on the next build (pmb/helpers/mount.py bind(umount=True)).
+    """
+    target = f"/pmb/chroot_native{SYSROOT}"
+    return (f"mkdir -p {target} && {{ mountpoint -q {target} || "
+            f"mount --bind /pmb/chroot_buildroot_{shlex.quote(arch)} {target}; }}")
 
 
 def resume_line(arch: str, actions: str = RESUME_ACTIONS,
-                patches: bool = False, pkgrel=None) -> str:
+                patches: bool = False, pkgrel=None,
+                native2: bool = False) -> str:
     """The one shell line a resume runs inside the buildroot. Pure, so every
     gotcha it encodes is a test rather than another hour on a device."""
     env = " ".join("%s=%s" % (k, shlex.quote(v))
-                   for k, v in sorted(abuild_env(arch).items()))
+                   for k, v in sorted(abuild_env(arch, native2).items()))
     steps = ["cd /home/pmos/build"]
     if pkgrel is not None:
         # The BUILD COPY of the APKBUILD is the one abuild reads; bumping only
@@ -673,16 +741,18 @@ def resume_line(arch: str, actions: str = RESUME_ACTIONS,
     return " && ".join(steps)
 
 
-def resume_cmd(arch: str, line: str) -> list[str]:
+def resume_cmd(arch: str, line: str, native2: bool = False) -> list[str]:
     """`pmbootstrap chroot` into the buildroot, as the build user.
 
     --output log and not the default: the default hands the terminal to the
     child, and this output has to reach the tracker through pmbootstrap's
     log.txt the same way `pkg build`'s does. -b names the BUILDROOT chroot --
     without it this would run in the native one, where the tree is not.
+    A cross-native2 tree IS in the native one, so there it is left out.
     """
-    return ["pmbootstrap", "chroot", "--output", "log", "-b", arch, "--user",
-            "--", "sh", "-c", line]
+    where = [] if native2 else ["-b", arch]
+    return (["pmbootstrap", "chroot", "--output", "log"] + where
+            + ["--user", "--", "sh", "-c", line])
 
 
 def in_container(call: str, stdin: bool = False) -> list[str]:
@@ -909,7 +979,8 @@ def _build(ctx, args) -> int:
     return EX_OK
 
 
-def _put_in_tree(ctx, usable: bool, arch: str, local: pathlib.Path) -> int:
+def _put_in_tree(ctx, usable: bool, arch: str, local: pathlib.Path,
+                 native2: bool = False) -> int:
     """Copy one file from the aport into the buildroot's build tree.
 
     Through `cat` in the chroot rather than a host copy: the tree belongs to
@@ -918,9 +989,10 @@ def _put_in_tree(ctx, usable: bool, arch: str, local: pathlib.Path) -> int:
     route that works in both, and the file lands owned by the user abuild
     runs as, which is what a host copy gets wrong even when it is permitted.
     """
-    cmd = ["pmbootstrap", "chroot", "--output", "interactive", "-b", arch,
-           "--user", "--", "sh", "-c",
-           "cat > /home/pmos/build/%s" % shlex.quote(local.name)]
+    where = [] if native2 else ["-b", arch]
+    cmd = (["pmbootstrap", "chroot", "--output", "interactive"] + where
+           + ["--user", "--", "sh", "-c",
+              "cat > /home/pmos/build/%s" % shlex.quote(local.name)])
     if usable:
         cmd = in_container(" ".join(shlex.quote(a) for a in cmd), stdin=True)
     with open(local, "rb") as handle:
@@ -978,7 +1050,14 @@ def _resume(ctx, args) -> int:
         raise Bail(f"no workspace and no pmbootstrap on PATH ({why_not})",
                    EX_UNAVAILABLE, "run `porthole sandbox up` first")
     workdir = _pmb_workdir(ctx, usable)
-    tree = workdir / f"chroot_buildroot_{arch}" / "home" / "pmos" / "build"
+    native2 = cross_native2(
+        (directory / "APKBUILD").read_text(errors="replace"))
+    if native2 and not usable:
+        raise Bail(f"{aport} builds with cross-native2, which needs its "
+                   "sysroot mounted", EX_UNAVAILABLE,
+                   "the workspace can mount it: `porthole sandbox up`")
+    chroot = "chroot_native" if native2 else f"chroot_buildroot_{arch}"
+    tree = workdir / chroot / "home" / "pmos" / "build"
 
     holder = tree_holds(tree, aport)
     if not holder:
@@ -1014,10 +1093,13 @@ def _resume(ctx, args) -> int:
                           f"{fields.get('pkgrel','?')}", 10)
 
     line = resume_line(arch, args.actions or RESUME_ACTIONS,
-                       patches=args.apply_new_patches, pkgrel=args.pkgrel)
-    cmd = resume_cmd(arch, line)
+                       patches=args.apply_new_patches, pkgrel=args.pkgrel,
+                       native2=native2)
+    cmd = resume_cmd(arch, line, native2)
     if usable:
-        cmd = in_container(" ".join(shlex.quote(a) for a in cmd))
+        call = " ".join(shlex.quote(a) for a in cmd)
+        cmd = in_container(f"{sysroot_mount(arch)} && {call}" if native2
+                           else call)
         ctx.out(ctx.out.paint("  resuming IN THE WORKSPACE (container)",
                               "cyan"))
     else:
@@ -1044,7 +1126,7 @@ def _resume(ctx, args) -> int:
 
     if args.apply_new_patches:
         for patch in sorted(directory.glob("*.patch")):
-            if _put_in_tree(ctx, usable, arch, patch):
+            if _put_in_tree(ctx, usable, arch, patch, native2):
                 raise Bail(f"could not copy {patch.name} into the tree",
                            EX_FAIL, "is the workspace up? `porthole doctor`")
             ctx.out.kv("patch", patch.name, 10)
