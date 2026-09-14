@@ -671,6 +671,21 @@ def test_the_recipe_hash_changes_when_the_recipe_does(tmp=None):
     assert sb._containerfile_sha(scratch) != first, "a changed recipe hashed the same"
 
 
+def test_the_recipe_hash_changes_when_a_copied_in_file_does():
+    """sandbox/patches/* is COPYed into the image. Editing one without
+    touching the Containerfile must still read as a changed recipe, or
+    `build` keeps the image built from the old patch."""
+    import tempfile
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix="porthole-cf-"))
+    (scratch / "sandbox" / "patches").mkdir(parents=True)
+    (scratch / "sandbox" / "Containerfile").write_text("FROM alpine\nCOPY patches/x.patch /tmp/\n")
+    patch = scratch / "sandbox" / "patches" / "x.patch"
+    patch.write_text("one\n")
+    first = sb._containerfile_sha(scratch)
+    patch.write_text("two\n")
+    assert sb._containerfile_sha(scratch) != first, "a changed COPY source hashed the same"
+
+
 def test_a_missing_containerfile_hashes_to_nothing_rather_than_raising():
     assert sb._containerfile_sha(pathlib.Path("/nonexistent/porthole")) == ""
 
