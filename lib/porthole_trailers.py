@@ -1,41 +1,52 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Attribution trailers, written as patterns instead of as a sentence.
+"""Attribution trailers: which lines are banned, and who has signed off.
 
-AGENTS.md section 5 bans them. This is the half of it that runs, and it exists
-because the other halves each covered only part of the surface:
+AGENTS.md section 5 and AI.md state the convention. This is the half of it
+that runs:
 
-    prose in AGENTS.md          covered everything, enforced nothing
-    .githooks/commit-msg        enforced it, on commit messages, opt-in
-    nothing at all              pull request bodies
-    nothing at all              issue bodies
+    REQUIRED ON A PULL REQUEST
+      Signed-off-by: <author>    the author's Developer Certificate of Origin,
+                                 added by that human, never by an assistant
+    OPTIONAL, AND ACCEPTED
+      Assisted-by: / Generated-by:  disclosure, expected when an AI helped.
+                                 Never required: a commit written without AI,
+                                 with only its sign-off, passes every check.
+    BANNED, ON EVERY SURFACE (wrong attribution)
+      Co-Authored-By / Co-developed-by naming an AI (both are human-only tags
+      in the kernel and in Mesa, and GitHub renders them as a co-author);
+      a Signed-off-by naming an AI (only a person can certify the DCO);
+      Claude-Session: lines and bare claude.ai session URLs (private links);
+      "Generated with [Claude Code]" lines and robot-emoji lines.
 
-The history has been rewritten twice over trailers (35 trailers, 35 session
-URLs and 59 sign-offs the first time; 49, 49 and 32 the second). The third
-escape did not touch a commit at all: the hook stripped `Claude-Session:` from
-the message exactly as designed, and the same two lines went out in the pull
-request body of #51 and #52, where no check had ever looked.
+The surfaces, and what reads each one:
 
-    A rule holds on the surfaces its enforcer reads. Adding a surface to the
-    ban means adding it here, not to the prose.
+    .githooks/commit-msg        a commit message, before it is written: REJECT
+    `make trailers` / CI        every message in the log, and the pull request
+                                body; on a pull request, also the DCO check
+    issue-trailers workflow     an issue body: strip the banned lines, edit it
+
+Hooks never add or strip anything from a commit message. They only reject a
+banned line, so what lands in the log is what a person typed.
+
+THE DCO CHECK
+    On a pull request every non-merge commit in base..head must carry a
+    `Signed-off-by:` with its author's address -- the same check the kernel's
+    and most DCO bots make. An assistant commits without one; the human
+    certifies before merge with `git rebase --signoff <base>`.
 
 THIS FILE NEVER SCANS THE TRACKED TREE
-    lib/porthole_secrets.py does, and must -- a serial in a committed file is
-    the leak. A trailer is different: the ban is on *publishing* one, and this
-    repo legitimately quotes every banned string while documenting the ban.
-    AGENTS.md section 5, docs/CONTRIBUTING.md, the pull request templates and
-    this file all name `Co-Authored-By:` on purpose. A tree scan would have to
-    exempt them, and every exemption is a hole someone later files a leak
-    through. So the scanned surfaces are exactly the two that get published as
-    authored text: commit messages and pull request bodies.
+    lib/porthole_secrets.py does. A banned line is only a problem where it is
+    published as authored text, and this repo legitimately quotes every banned
+    string while documenting the ban (AGENTS.md, AI.md, the templates, this
+    file). A tree scan would need exemptions, and every exemption is a hole.
 
 EVERY RULE CARRIES BOTH CONTROLS
-    brain/laws/every-test-needs-a-positive-control.md. A scanner that matches
-    nothing passes silently, which is the exact failure mode it exists to
-    prevent -- so `control` must match and `allowed` must not, and
-    tests/test_trailers.py asserts both directions for every rule. `allowed` is
-    not decoration here: "generated with qca-swiss-army-knife" is a real string
-    in lib/porthole_cmd_blobs.py, and a lazier `generated with` pattern eats it.
+    brain/laws/every-test-needs-a-positive-control.md. `control` must match
+    and `allowed` must not; tests/test_trailers.py asserts both directions.
+    `allowed` is not decoration: "generated with qca-swiss-army-knife" is a real
+    string in lib/porthole_cmd_blobs.py, and `Assisted-by: Claude` is the line
+    the convention asks for.
 """
 from __future__ import annotations
 
@@ -52,35 +63,47 @@ class Rule:
         self.name = name
         self.re = re.compile(pattern)
         self.why = why
-        self.control = control      # MUST match -- the trailer this is for
-        self.allowed = allowed      # MUST NOT match -- prose it must not eat
+        self.control = control      # MUST match -- the line this is for
+        self.allowed = allowed      # MUST NOT match -- what it must not eat
 
+
+# Case-insensitive except "AI" itself, so a person named Ai is not an assistant.
+_AI = r"(?:claude|anthropic|openai|chatgpt|copilot|gemini|\bgpt|\bllm\b|(?-i:\bAI\b))"
 
 RULES = [
     # Anchored at line start, because that is what a trailer is. Prose that
-    # discusses the ban mid-sentence -- "no Co-Authored-By, no Signed-off-by"
-    # -- is how AGENTS.md states the rule, and must survive stating it.
-    Rule("attribution-trailer",
-         r"(?im)^[ \t]*(?:co-authored-by|signed-off-by|claude-session"
-         r"|assisted-by|generated-by|co-developed-by|ai-assisted-by)[ \t]*:",
-         "a trailer is injected by a harness default rather than typed by "
-         "anyone, and a sign-off is an assertion only a person can make",
+    # discusses the ban mid-sentence must survive stating it.
+    Rule("ai-co-author",
+         r"(?im)^[ \t]*co-(?:authored|developed)-by[ \t]*:.*" + _AI,
+         "Co-authored-by and Co-developed-by are human-only tags; an AI is "
+         "credited with Assisted-by instead",
          control="Co-Authored-By: Claude Opus 5 (1M context) "
                  "<noreply@anthropic.com>",
-         allowed="the ban covers Co-Authored-By: and Signed-off-by: alike"),
+         allowed="Co-authored-by: Alice Person <alice@example.com>"),
+
+    Rule("ai-sign-off",
+         r"(?im)^[ \t]*signed-off-by[ \t]*:.*" + _AI,
+         "a sign-off is the Developer Certificate of Origin, which only a "
+         "person can give; an assistant is credited with Assisted-by",
+         control="Signed-off-by: Claude <noreply@anthropic.com>",
+         allowed="Signed-off-by: Ai Nakamura <ai@example.com>"),
+
+    Rule("session-trailer",
+         r"(?im)^[ \t]*claude-session[ \t]*:",
+         "a session trailer is a private link, dead for every reader",
+         control="Claude-Session: https://claude.ai/code/session_01EXAMPLE",
+         allowed="Assisted-by: Claude"),
 
     Rule("generated-with",
          r"(?i)generated with[ \t]*\[?claude",
-         "the 'generated with' line the harness appends to a pull request "
-         "body; #51 and #52 both shipped one",
+         "the 'generated with' line a harness appends to a pull request body",
          control="\U0001f916 Generated with [Claude Code]"
                  "(https://claude.com/claude-code)",
          allowed="usually generated with qca-swiss-army-knife, not vendor.img"),
 
     Rule("session-url",
          r"(?i)https?://claude\.ai/code/session_\w+",
-         "a session URL is a bare link to a transcript, and it identifies the "
-         "session rather than the change",
+         "a session URL is a bare link to a private transcript",
          control="https://claude.ai/code/session_01EXAMPLEEXAMPLEEXAMPLE1",
          allowed="the product page, https://claude.ai/code, names no session"),
 
@@ -93,11 +116,19 @@ RULES = [
 
     Rule("assistant-noreply",
          r"(?i)noreply@anthropic\.com",
-         "the address a Co-Authored-By trailer carries; it survives someone "
+         "the address an AI co-author trailer carries; it survives someone "
          "renaming the trailer key",
          control="Co-authored-by: Claude <noreply@anthropic.com>",
          allowed="report a vulnerability to security@anthropic.com"),
+
+    Rule("robot-line",
+         "\U0001f916",
+         "the robot emoji only ever arrives as part of a generated-with line",
+         control="\U0001f916 Generated with Claude Code",
+         allowed="Assisted-by: Claude"),
 ]
+
+SIGNED_OFF = re.compile(r"(?im)^[ \t]*signed-off-by[ \t]*:.*<([^>\s]+)>[ \t]*$")
 
 
 def scan(text: str, where: str = "-"):
@@ -111,12 +142,11 @@ def scan(text: str, where: str = "-"):
 
 
 def strip(text: str) -> str:
-    """Drop every offending line, then the blank run they leave behind.
+    """Drop every banned line, then the blank run they leave behind.
 
-    Strip rather than reject, for a commit message only: the lines are a
-    harness default, not an argument anyone is having, and a rejection just
-    gets retried with the same body. A pull request body is not stripped --
-    nothing owns it at the moment it is written, so there it is a hard failure.
+    For an issue body only. A commit message is rejected instead: the person
+    committing is right there to fix it, and a hook that rewrites a message is
+    how sign-offs used to vanish without anyone deciding they should.
     """
     kept = [ln for ln in text.splitlines()
             if not any(r.re.search(ln) for r in RULES)]
@@ -125,61 +155,94 @@ def strip(text: str) -> str:
     return "\n".join(kept) + ("\n" if kept else "")
 
 
+def unsigned(commits):
+    """The commits whose author did not sign off.
+
+    `commits` is [(sha, author_email, body)]. Pure, so both directions are
+    testable without a repository: a sign-off by someone else is not the
+    author's certificate.
+    """
+    out = []
+    for sha, email, body in commits:
+        signers = {m.lower() for m in SIGNED_OFF.findall(body)}
+        if email.lower() not in signers:
+            out.append((sha, email))
+    return out
+
+
 def _git(root, *args):
     return subprocess.run(["git", "-C", str(root), *args],
                           capture_output=True, text=True, check=True).stdout
 
 
-def scan_history(root):
-    """Every commit message reachable from HEAD.
-
-    Deliberately the whole history, not a range against a base. A range needs
-    a base SHA plumbed in from the workflow, and the two rewrites mean the
-    standing claim worth checking is "the log is clean", not "this push is".
-    Where the checkout is shallow this sees fewer commits and says so; it is
-    the depth-0 job in ci.yml that makes the claim whole.
-    """
-    hits = []
-    out = _git(root, "log", "--format=%H%x00%B%x00%x00")
+def _log(root, *rev):
+    out = _git(root, "log", "--format=%H%x00%ae%x00%B%x00%x00", *rev)
     for entry in out.split("\0\0"):
-        sha, _, body = entry.strip("\n").partition("\0")
-        if sha:
-            hits += scan(body, sha[:12])
+        parts = entry.strip("\n").split("\0", 2)
+        if len(parts) == 3 and parts[0]:
+            yield parts
+
+
+def scan_history(root):
+    """Every commit message reachable from HEAD, not a range: the standing
+    claim worth checking is "the log is clean", not "this push is". A shallow
+    checkout sees fewer commits; the full-depth CI job makes the claim whole."""
+    hits = []
+    for sha, _, body in _log(root):
+        hits += scan(body, sha[:12])
     return hits
 
 
+def dco(root, rng):
+    """unsigned() over the non-merge commits of a revision range."""
+    return unsigned(_log(root, "--no-merges", rng))
+
+
 def report(hits, out=None):
-    # Bound at call time, not at def time: a default of sys.stderr is captured
-    # at import and cannot be redirected, which makes the finding untestable
-    # without printing it into the middle of a passing suite.
+    # Bound at call time, not def time: a default of sys.stderr is captured at
+    # import and cannot be redirected by a test.
     out = out or sys.stderr
     for where, line, rule, hit in hits:
         print(f"{where}:{line}: {rule.name}: {hit!r}\n    {rule.why}", file=out)
     if hits:
-        print(f"\n{len(hits)} finding(s). AGENTS.md section 5: no trailers and "
-              "no signatures of any kind, on a commit message, a pull request "
-              "body or an issue body. "
-              "Remove the lines; do not reword them.", file=out)
+        print(f"\n{len(hits)} finding(s). AGENTS.md section 5: credit an "
+              "assistant with `Assisted-by:`, never with a co-author, session or "
+              "generated-with line. Remove the lines; do not reword them.",
+              file=out)
     return 1 if hits else 0
+
+
+def report_dco(missing, out=None):
+    out = out or sys.stderr
+    for sha, email in missing:
+        print(f"{sha[:12]}: no Signed-off-by for its author <{email}>", file=out)
+    if missing:
+        print(f"\n{len(missing)} commit(s) without their author's sign-off. The "
+              "author certifies the DCO before merge: "
+              "`git rebase --signoff <base>`. An assistant never adds it.",
+              file=out)
+    return 1 if missing else 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--scan", metavar="FILE",
-                    help="scan one body; 0 clean, 1 carries a trailer")
+                    help="scan one body; 0 clean, 1 carries a banned line "
+                         "(the commit-msg hook and the issue workflow)")
     ap.add_argument("--strip", metavar="FILE",
-                    help="rewrite a commit message file in place")
+                    help="drop banned lines from a file in place (issue bodies)")
+    ap.add_argument("--dco", metavar="RANGE",
+                    help="check every non-merge commit in RANGE is signed off "
+                         "by its author, e.g. origin/main..HEAD")
     ap.add_argument("--ci", action="store_true",
-                    help="scan every reachable commit message, and $PR_BODY "
-                         "when the workflow set it")
+                    help="scan every reachable message and $PR_BODY; on a pull "
+                         "request also the DCO check over $PR_BASE..$PR_HEAD")
     args = ap.parse_args(argv)
 
     if args.scan:
-        # No history, no environment: one blob, and an exit code the caller
-        # branches on. .github/workflows/issue-trailers.yml asks this before
-        # it edits, because "the file changed" is not the same question --
-        # strip() normalises line endings, and GitHub hands out CRLF, so a
-        # clean body would compare unequal forever and edit itself in a loop.
+        # An exit code the caller branches on. The issue workflow asks this
+        # before it edits, because "the file changed" is not the same question:
+        # strip() normalises line endings and GitHub hands out CRLF.
         p = pathlib.Path(args.scan)
         return report(scan(p.read_text(errors="replace"), args.scan))
 
@@ -194,22 +257,38 @@ def main(argv=None):
     except (subprocess.CalledProcessError, OSError):
         root = pathlib.Path(__file__).resolve().parent.parent
 
-    hits = []
+    if args.dco:
+        try:
+            return report_dco(dco(root, args.dco))
+        except (subprocess.CalledProcessError, OSError) as exc:
+            print(f"cannot read {args.dco}: {exc}", file=sys.stderr)
+            return 69                  # EX_UNAVAILABLE, never 0
+
+    hits, rc = [], 0
     body = os.environ.get("PR_BODY")
+    is_pr = args.ci and os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
     if body:
         hits += scan(body, "pull request body")
-    elif args.ci and os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+    elif is_pr:
         # An empty body is legitimate; a body the workflow forgot to pass is
         # not, and the two look identical from here. Say which this was.
         print("note: PR_BODY is unset or empty -- the body was not scanned",
               file=sys.stderr)
     try:
         hits += scan_history(root)
+        if is_pr:
+            base, head = os.environ.get("PR_BASE"), os.environ.get("PR_HEAD")
+            if not (base and head):
+                # brain/laws/exit-codes-are-an-api.md: "could not run" is not
+                # "passed". A pull request with no range is a workflow bug.
+                print("PR_BASE/PR_HEAD unset on a pull request: the DCO check "
+                      "cannot run", file=sys.stderr)
+                return 69
+            rc = report_dco(dco(root, f"{base}..{head}"))
     except (subprocess.CalledProcessError, OSError) as exc:
-        # brain/laws/exit-codes-are-an-api.md: "could not run" is not "passed".
         print(f"cannot read the commit log: {exc}", file=sys.stderr)
         return 69                      # EX_UNAVAILABLE, never 0
-    return report(hits)
+    return report(hits) or rc
 
 
 if __name__ == "__main__":

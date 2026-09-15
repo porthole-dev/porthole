@@ -24,9 +24,8 @@ them.
   add a sign-off on someone else's behalf, and if you are an assistant, never
   add one at all.
 
-  A project's *own* repository may want no trailers whatsoever; porthole is one
-  such, see its `AGENTS.md`. That is a separate question from what an upstream
-  submission needs, and the two are easy to conflate.
+  porthole's own repository requires it on every pull request commit as well,
+  and CI checks that the author signed their own commits (AGENTS.md section 5).
 - One logical change per commit. The body explains **why**, not what.
 - **Never take credit for someone else's work.** A cherry-picked commit keeps
   its author: `git cherry-pick -x` and leave the authorship alone. On a
@@ -62,18 +61,25 @@ For what a kernel aport should be *based on*, see
 
 ## On AI attribution
 
-Whether to add a `Co-Authored-By` trailer for an AI assistant varies by
-project. **In this repository it is banned outright** — on a commit message and
-on a pull request body alike, along with `Signed-off-by:`, `Claude-Session:`,
-any generated-with line and any bare session URL. See AGENTS.md section 5;
-`lib/porthole_trailers.py` is what enforces it.
+Credit an AI assistant with an `Assisted-by:` trailer, placed immediately
+before the human's `Signed-off-by:`. The form is the destination's: the Linux
+kernel documents `Assisted-by: LLM` (Documentation/process/coding-assistants.rst)
+and says AI agents must not add `Signed-off-by`; Mesa documents `Assisted-by:`
+and `Generated-by:`, reserves `Co-authored-by` for humans, and asks for
+commit messages and code comments in the submitter's own words. In porthole it
+is `Assisted-by: Claude`, and AI.md says why.
 
-This paragraph used to say the trailer was "the human's call", which
-contradicted AGENTS.md and gave an agent reading only this note a rule that
-said yes. That drift is the point of the note, not a footnote to it.
+Never credit an AI with `Co-Authored-By:` or `Co-developed-by:`, both
+human-only tags, and never publish a `Claude-Session:` line, a session URL or a
+generated-with line, on a commit or on a pull request body.
+`lib/porthole_trailers.py` is what enforces it here.
 
-What does not vary anywhere: **omit it on commits bound for upstream kernel or
-distribution trees**, where it can make review harder — which defeats the point
-of upstreaming.
+A project with no written AI policy is asked first. A project that does not
+accept AI-assisted contributions (postmarketOS is one) gets nothing from this
+work, disclosed or not: `Assisted-by:` does not make it acceptable there.
+
+This note used to say AI attribution was banned outright and should be omitted
+upstream. The convention changed on 2026-09-15; undisclosed AI is the thing
+upstreams object to, and the kernel and Mesa now document the disclosure.
 
 Related: [[90-upstreaming]].

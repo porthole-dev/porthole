@@ -4,7 +4,8 @@ name: issue trailers
 # job in ci.yml holds pull request bodies, and issue #54 was filed with
 # "Generated with [Claude Code]" and a session URL through the one surface
 # neither of them reads. AGENTS.md section 5: a rule holds on the surfaces its
-# enforcer reads.
+# enforcer reads. Only banned lines are removed; Assisted-by and Signed-off-by
+# are the convention and stay.
 #
 # `edited` for the same reason ci.yml gives: without it a body is checked once
 # at open and a trailer pasted in afterwards stays.
@@ -13,14 +14,14 @@ on:
     types: [opened, edited]
 
 # The one workflow in this repo that writes. It writes exactly one thing: the
-# body of the issue that triggered it, with the offending lines deleted.
+# body of the issue that triggered it, with the banned lines deleted.
 permissions:
   contents: read
   issues: write
 
 jobs:
   issue-trailers:
-    name: no attribution trailers
+    name: attribution trailers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
