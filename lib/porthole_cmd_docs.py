@@ -480,6 +480,8 @@ README_LINK_MAP = {
     "AGENTS.md": "agents.md",
     "skills/porthole-bringup/": "https://github.com/porthole-dev/porthole/tree/main/skills/porthole-bringup",
     "LICENSE": "https://github.com/porthole-dev/porthole/blob/main/LICENSE",
+    "AI.md": "https://github.com/porthole-dev/porthole/blob/main/AI.md",
+    "SECURITY.md": "https://github.com/porthole-dev/porthole/blob/main/SECURITY.md",
 }
 
 
