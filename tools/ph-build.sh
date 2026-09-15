@@ -794,6 +794,11 @@ _ph_install_kernel_release() {
 	local ver=$_PH_KREL
 
 	pmbootstrap chroot -r -- apk add -U --allow-untrusted "$_PH_KPKG=$ver" || return 1
+	# Drop the "=$ver" the line above leaves in /etc/apk/world (re-adding an
+	# installed package by bare name only rewrites world). Left there, the next
+	# `build image` asks for the aport's newer kernel against a world still
+	# demanding this one, and apk refuses the whole install.
+	pmbootstrap chroot -r -- apk add --allow-untrusted "$_PH_KPKG" || return 1
 	pmbootstrap chroot -r -- apk info -W /boot/vmlinuz 2>/dev/null | sed -n 's/.*owned by //p' |
 		grep -q -- "-r${ver##*-r}$" || {
 		echo ">> /boot/vmlinuz is STILL not $ver after install -- refusing" >&2; return 1; }
