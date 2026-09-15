@@ -143,7 +143,11 @@ body explains **why**.
 - **Every commit is signed off by its author** (`git commit -s`, or
   `git rebase --signoff <base>` before merge). The sign-off is your Developer
   Certificate of Origin; CI fails a pull request commit whose author has no
-  matching `Signed-off-by:`. An AI assistant never adds one.
+  matching `Signed-off-by:`. An AI assistant never adds one. A pull request
+  whose branch only exists on GitHub, such as one an assistant opened, is
+  certified without a clone: `tools/ph-pr-signoff.py OWNER/REPO N --merge`
+  signs off your own commits, waits for the checks and rebase-merges
+  (`--dry-run` first shows what it would change).
 - **If an AI assistant helped, say so** with an `Assisted-by:` trailer (for
   example `Assisted-by: Claude`), or `Generated-by:` when it wrote nearly all
   of it. Nothing requires the trailer: a commit written without AI needs only
