@@ -105,7 +105,7 @@ ci: check smoke floor trailers ## every job CI runs, plus the python floor
 	@echo
 	@echo "== green here means green on GitHub: the jobs run these same targets =="
 
-trailers:        ## CI job "attribution trailers": banned lines in the log/PR body; DCO on a PR
+trailers:        ## CI job "Attribution trailers": banned lines in the log/PR body; DCO on a PR
 	@# The pull request body and range are only reachable when the workflow
 	@# exports PR_BODY, PR_BASE and PR_HEAD; locally this is the commit-log half.
 	@# Check your own branch's sign-offs with:
@@ -113,7 +113,7 @@ trailers:        ## CI job "attribution trailers": banned lines in the log/PR bo
 	@# AGENTS.md section 5.
 	@$(PY) lib/porthole_trailers.py --ci && echo "trailers                     ok"
 
-issue-trailers:  ## CI job "attribution trailers" (issues): strip banned lines from issue $$ISSUE's body
+issue-trailers:  ## CI job "Attribution trailers" (issues): strip banned lines from issue $$ISSUE's body
 	@# The third publishing surface, and the one issue #54 went out through.
 	@# An issue body is stripped rather than rejected: a red run on an issue
 	@# event appears nowhere anybody is looking. Only banned lines go

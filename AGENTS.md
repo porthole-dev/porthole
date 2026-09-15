@@ -559,7 +559,7 @@ by `tests/test_tools.py`, not by review diligence.
   surfaces its enforcer reads, and nowhere else.
 - One pattern list, `lib/porthole_trailers.py`, serves all three: the hook
   rejects a commit message with a banned line (it never adds or strips
-  anything), the `attribution trailers` job in CI fails a pull request whose
+  anything), the `Attribution trailers` job in CI fails a pull request whose
   body or log carries one or whose commits lack their author's sign-off, and
   the issue workflow strips banned lines from an issue body. `make trailers`
   is the commit-log half on a laptop;
