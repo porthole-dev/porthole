@@ -159,7 +159,7 @@ attributes the work wrongly: a `Co-Authored-By:`, `Co-developed-by:` or
 `Signed-off-by:` naming an AI, a `Claude-Session:` line,
 a session URL, a generated-with line. `lib/porthole_trailers.py` holds the one
 pattern list; the commit hook rejects a message with it (it never rewrites
-one), and the `Attribution trailers` CI job fails a pull request whose body or
+one), and the `Commit check` CI job fails a pull request whose body or
 log matches it. `make trailers` runs the log check locally, and
 `python3 lib/porthole_trailers.py --dco origin/main..HEAD` the sign-off check.
 

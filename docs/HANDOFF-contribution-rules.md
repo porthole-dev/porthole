@@ -1,3 +1,9 @@
+
+> **Superseded (2026-09-15).** The hook no longer strips trailers and the
+> repository was republished. The current attribution rules are in
+> `AGENTS.md` §5 and `docs/CONTRIBUTING.md`; this handoff records the state
+> on its date.
+
 <!-- porthole | handoff | 2026-08-31 -->
 # Handoff: the contribution rules are prose, and prose does not hold
 
