@@ -411,11 +411,26 @@ def test_verification_passes_a_root_that_actually_has_both_right():
     def ls(cmd):
         if cmd == "ls -l /":
             return "    13  40755 (2)  0  0  1024  1-Jan-2026 0:00 boot\n"
+        if cmd == "ls -l /etc/apk/keys":
+            return "    60  100644 (1)  0  0  451  1-Jan-2026 0:00 build.rsa.pub\n"
         return "    50  100600 (2)  10000  10000  188  1-Jan-2026 0:00 authorized_keys\n"
     lay = image.layout(32, 64, "aarch64")
     problems = image.verify(_uuids_runner(ls),
                             "/out.img", lay, "uu", "uu", user="user")
     assert problems == [], problems
+
+
+# etc/apk/keys/ inside a pmbootstrap chroot is a bind mount, empty on disk; an
+# image assembled from it flashed a phone that trusted no repository at all.
+def test_verification_flags_a_root_with_no_apk_keys():
+    def ls(cmd):
+        if cmd == "ls -l /etc/apk/keys":
+            return ""
+        return "    50  100600 (2)  10000  10000  188  1-Jan-2026 0:00 authorized_keys\n"
+    lay = image.layout(32, 64, "aarch64")
+    problems = image.verify(_uuids_runner(ls),
+                            "/out.img", lay, "uu", "uu", user="user")
+    assert any("apk/keys" in p for p in problems), problems
 
 
 class Skip(Exception):
@@ -513,6 +528,8 @@ def test_a_real_assembled_image_carries_the_uuid_the_fstab_names():
                  "echo 'ssh-ed25519 AAAAtest x' "
                  "> /tmp/asm/root/home/user/.ssh/authorized_keys && "
                  "chown -R 1000:1000 /tmp/asm/root/home/user && "
+                 "mkdir -p /tmp/asm/root/etc/apk/keys && "
+                 "echo k > /tmp/asm/root/etc/apk/keys/build.rsa.pub && "
                  "install -m 755 /bin/busybox "
                  "/tmp/asm/root/usr/bin/captest && "
                  "setcap cap_net_raw+ep /tmp/asm/root/usr/bin/captest"])

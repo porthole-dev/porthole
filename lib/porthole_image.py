@@ -347,6 +347,11 @@ def verify(runner, out, lay: dict, boot_uuid, root_uuid, user=None) -> list:
                 problems.append(
                     f"root: no authorized_keys for {user} -- the phone "
                     f"would install and boot with no way to log in")
+            keys_ls = runner(["debugfs", "-R", "ls -l /etc/apk/keys", part])
+            if not any(n.endswith(".pub") for n in _names(keys_ls)):
+                problems.append(
+                    "root: /etc/apk/keys has no keys -- the phone would read "
+                    "every repository UNTRUSTED and could install nothing")
             root_ls = runner(["debugfs", "-R", "ls -l /", part])
             if "in-pmbootstrap" in _names(root_ls):
                 problems.append(

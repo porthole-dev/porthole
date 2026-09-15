@@ -1068,16 +1068,22 @@ _ph_assemble_image() {
 	    except OSError:
 	        pass
 
-	# configure_apk, the one part of it that is a correctness bug rather than
-	# a build-time convenience: /etc/apk/repositories names the build
-	# machine's local package repo, bind-mounted at /mnt/pmbootstrap/packages,
-	# which will not exist on the device. The official+local apk keys and an
-	# offline APKINDEX cache are NOT reproduced here -- every package this
-	# chroot installed already needed working keys in etc/apk/keys/ to
-	# verify, so pmbootstrap's own copy of them is redundant (confirmed
-	# against a real chroot 2026-09-08), and a primed index cache is a
-	# build-time nicety, not something a phone that can reach the network
-	# needs to boot or be logged into.
+	# configure_apk. The keys: inside a chroot etc/apk/keys/ is only a bind
+	# mount of the work dir's config_apk_keys, so on disk it is EMPTY, and a
+	# phone flashed from it reads every repository UNTRUSTED and can install
+	# nothing (measured on hardware 2026-09-15). Copied the way pmbootstrap's
+	# configure_apk() does. An offline APKINDEX cache is still not reproduced:
+	# a phone that can reach the network does not need one.
+	keys_dir = chroot / "etc/apk/keys"
+	keys_dir.mkdir(parents=True, exist_ok=True)
+	for key in (chroot.parent / "config_apk_keys").glob("*.pub"):
+	    shutil.copy2(key, keys_dir / key.name)
+	if not any(keys_dir.glob("*.pub")):
+	    raise SystemExit(f">> no apk keys to put in {keys_dir} -- the device "
+	                     f"could verify no repository")
+	# /etc/apk/repositories names the build machine's local package repo,
+	# bind-mounted at /mnt/pmbootstrap/packages, which will not exist on the
+	# device.
 	repos = chroot / "etc/apk/repositories"
 	if repos.exists():
 	    repos.write_text("\n".join(
