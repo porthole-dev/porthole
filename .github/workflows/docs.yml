@@ -42,18 +42,18 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
-      - name: generate the site sources
+      - name: Generate the site sources
         # Generation needs no dependencies -- it reads the command registry,
         # the tool headers, the profile template and brain/. Only rendering
         # needs mkdocs, which is why this step comes first and separately.
         run: ./bin/porthole docs build --org "${GITHUB_REPOSITORY%/*}" --repo "${GITHUB_REPOSITORY#*/}"
 
-      - name: assert the site is actually generated, not committed
+      - name: Assert the site is actually generated, not committed
         # site-src/ is gitignored on purpose. If a stale copy ever gets
         # committed it will silently shadow the generated one and the published
         # docs will drift from the code.
@@ -63,24 +63,24 @@ jobs:
           test -f site-src/tools.md
           grep -q "porthole" site-src/index.md
 
-      - name: enable GitHub Pages if it is not already
+      - name: Enable GitHub Pages if it is not already
         # enablement: true flips Settings -> Pages -> Source to "GitHub
         # Actions" over the API, so setting PUBLISH_DOCS is all that is needed.
         #
         # No continue-on-error: this only runs when you have asked for
         # publishing, and a failure then is real information rather than noise.
         if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
         with:
           enablement: true
 
-      - name: install mkdocs
+      - name: Install mkdocs
         run: pip install mkdocs-material
 
-      - name: build (strict -- a broken link fails the build)
+      - name: Build (strict, a broken link fails the build)
         run: mkdocs build --strict
 
-      - name: say whether this will publish
+      - name: Say whether this will publish
         run: |
           if [ "${{ vars.PUBLISH_DOCS }}" = "true" ]; then
             echo "PUBLISH_DOCS=true — deploying to GitHub Pages."
@@ -91,9 +91,9 @@ jobs:
             echo "            -> Variables -> PUBLISH_DOCS = true"
           fi
 
-      - name: upload
+      - name: Upload
         if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: site
 
@@ -109,4 +109,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

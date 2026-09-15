@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   test:
-    name: tests (python ${{ matrix.python }})
+    name: Tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -31,8 +31,8 @@ jobs:
         # someone on an older distro. `make floor` is the laptop equivalent.
         python: ["3.8", "3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       # Suites (globbed, never listed), brain lint, the shell lib, the device
@@ -41,13 +41,14 @@ jobs:
         run: make test
 
   lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - name: install shellcheck
+      - name: Install shellcheck
         # `|| true` on the update, deliberately. The runner image carries
         # third-party apt repos porthole does not use, and on 2026-09-09
         # Google's Chrome repo answered `Hash Sum mismatch`, which made
@@ -67,11 +68,11 @@ jobs:
         run: make lint
 
   smoke:
-    name: fresh-clone smoke test
+    name: Fresh-clone smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       # tests/ci-local.sh: a fresh `git archive` of HEAD plus your uncommitted
@@ -81,17 +82,17 @@ jobs:
         run: make smoke
 
   trailers:
-    name: attribution trailers
+    name: Attribution trailers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The one job that needs the whole log. It asserts that no commit
           # message in the history carries a banned attribution line, and at
           # depth 1 that claim would cover a single commit and still report
           # green. The DCO check also needs the pull request's base commit.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       # Everything goes through the environment, never through the shell
