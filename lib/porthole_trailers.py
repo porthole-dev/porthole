@@ -95,8 +95,9 @@ RULES = [
          allowed="Assisted-by: Claude"),
 
     Rule("generated-with",
-         r"(?i)generated with[ \t]*\[?claude",
-         "the 'generated with' line a harness appends to a pull request body",
+         r"(?i)generated with\b.{0,24}?" + _AI,
+         "the 'generated with' line an AI tool appends to a commit or pull "
+         "request body",
          control="\U0001f916 Generated with [Claude Code]"
                  "(https://claude.com/claude-code)",
          allowed="usually generated with qca-swiss-army-knife, not vendor.img"),

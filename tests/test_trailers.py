@@ -42,6 +42,10 @@ OBSERVED = [
     "\U0001f916 Generated with Claude Code",
     "Signed-off-by: Claude <noreply@anthropic.com>",
     "Signed-off-by: GitHub Copilot <copilot@example.com>",
+    # Not verbatim: the same boilerplate from other tools must not slip past a
+    # pattern written for one vendor.
+    "Generated with [ChatGPT](https://chatgpt.com)",
+    "Generated with GitHub Copilot",
 ]
 
 # The convention itself. A pattern set that eats these rejects every commit
