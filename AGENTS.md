@@ -550,8 +550,11 @@ by `tests/test_tools.py`, not by review diligence.
 - **Only the human signs off.** `Signed-off-by:` is the author's Developer
   Certificate of Origin. An assistant commits without one and never adds it on
   anyone's behalf; the human certifies before merge with
-  `git rebase --signoff <base>` (or `git commit -s`). CI fails a pull request
-  commit whose author has no matching `Signed-off-by:`.
+  `git rebase --signoff <base>` (or `git commit -s`), or with
+  `tools/ph-pr-signoff.py OWNER/REPO N --merge` on a pull request with no local
+  clone. CI fails a pull request commit whose author has no matching
+  `Signed-off-by:`. Never run that tool yourself except with `--dry-run`:
+  running it is the human's certificate.
 - **The ban covers every surface you publish text on** -- the commit message,
   the pull request body, and the issue body. Each one cost an escape of its
   own: #51 and #52 published the lines in the body while the hook held the
