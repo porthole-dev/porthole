@@ -1,36 +1,66 @@
+> **Unofficial.** Not affiliated with or endorsed by postmarketOS, Google, or
+> Qualcomm. Do not report problems with this port to postmarketOS; open an
+> issue here.
+>
+> **Experimental.** Flashing can brick the device or erase data. No warranty,
+> see LICENSE.
+>
+> **AI-assisted.** See [AI.md](AI.md).
+
 # porthole
 
-**A device bring-up toolkit for postmarketOS, plus the knowledge it encodes.**
+**A device bring-up toolkit for porting phones to mainline Linux and
+postmarketOS, plus the knowledge that bring-up produced.**
 
 Porting a phone to mainline Linux is mostly not writing drivers. It is moving a
 device between states without bricking it, proving which kernel actually
 answered, and not spending a night on an experiment that never ran.
 
 porthole is the tooling and the accumulated traps from doing that on a Google
-Pixel 2 XL, made generic — so the next device starts from month three instead of
-day one.
+Pixel 2 XL (`google-taimen`, MSM8998), made generic, so the next device starts
+from month three instead of day one.
 
 ```
-150 tools · 184 knowledge notes · 35 commands · zero third-party dependencies in the CLI
+184 tools · 203 knowledge notes · 37 CLI verbs · no third-party dependencies in the CLI
 ```
 
-> **Work in progress.** This is under active development against real hardware,
-> and it has rough edges — verbs that do not yet cover every case, tools proven
-> on one device and not the next, bugs still being found in ordinary use. It is
-> used daily for real bring-up work, which is exactly why the sharp bits are
-> documented rather than hidden: `brain/` is largely a record of what went
-> wrong. Expect breaking changes before 1.0, read what a command says it will
-> do before passing `--yes`, and please report anything that bites you.
+## Who it is for
+
+- **People porting a phone** to postmarketOS or mainline Linux who already
+  know their way around fastboot, pmbootstrap and a kernel tree, and want the
+  device protocol, the build ladder and the known traps handled for them.
+- **AI coding agents working alongside them.** Every read verb has `--json`,
+  exit codes are an API, and [`AGENTS.md`](AGENTS.md) is the front door.
+- **Not** end users looking for a finished phone OS. Nothing here is a
+  supported release, and none of it is a postmarketOS project.
+
+> **Work in progress.** porthole is used daily against real hardware and has
+> rough edges: verbs that do not yet cover every case, tools proven on one
+> device and not the next. `brain/` is largely a record of what went wrong.
+> Expect breaking changes before 1.0, read what a command says it will do
+> before passing `--yes`, and report anything that bites you.
+
+## Table of contents
+
+- [Quick start](#quick-start)
+- [What you need](#what-you-need)
+- [Daily use](#daily-use)
+- [Porting a device](#porting-a-device)
+- [How it works](#how-it-works)
+- [For agents and LLMs](#for-agents-and-llms)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
+- [Project](#project)
 
 ---
 
-## Start here
+## Quick start
 
-Three steps, and only the third is specific to you: install porthole, tell it
-who you are, then give your device passwordless sudo. `porthole doctor` checks
-all of it and names the fix for anything missing.
+On a fresh Linux machine with `git`, `python3` (3.8 or newer), an ssh client,
+`fastboot` and `podman`. Nothing else has to be installed first, and nothing
+here needs root on the host.
 
-### Install
+### 1. Install
 
 There is nothing to build. Clone it and put `bin/` on your `PATH`:
 
@@ -38,10 +68,11 @@ There is nothing to build. Clone it and put `bin/` on your `PATH`:
 git clone https://github.com/porthole-dev/porthole.git
 cd porthole
 export PATH="$PWD/bin:$PATH"          # add to ~/.bashrc or ~/.zshrc to persist
+git config core.hooksPath .githooks   # the commit hooks, if you will contribute
 porthole version
 ```
 
-Shell completion is optional but pleasant:
+Shell completion is optional:
 
 ```sh
 porthole completion bash > ~/.local/share/bash-completion/completions/porthole
@@ -49,63 +80,41 @@ porthole completion zsh  > "${fpath[1]}/_porthole"
 porthole completion fish > ~/.config/fish/completions/porthole.fish
 ```
 
-### Set this host up
+### 2. Tell it about this host and your device
 
 ```sh
 porthole init                     # interactive, or:
 porthole init google-taimen --user myname --host 172.16.42.1
-porthole doctor
+porthole doctor                   # what is still missing, and the command that fixes it
+porthole next                     # where this port is, and the one next thing
 ```
 
 `init` is **safe to re-run**. It reads what is already there, offers it back as
-the default for every question, and rewrites only the lines you change —
-comments and keys it does not know about are left alone, so a half-configured
-machine converges rather than gets clobbered. It writes
+the default for every question, and rewrites only the lines you change, so a
+half-configured machine converges rather than gets clobbered. It writes
 `~/.config/porthole/config.env`, which is **yours** and is never committed.
 
 It asks five things, and each one is a decision you would otherwise make by
 losing an afternoon to it:
 
-- **who you are on the device** — the ssh login every tool uses.
-- **how to reach it** — over the USB gadget (`172.16.42.1`, the same on every
+- **who you are on the device**: the ssh login every tool uses.
+- **how to reach it**: over the USB gadget (`172.16.42.1`, the same on every
   postmarketOS device and up before wifi is configured) or over wifi. `init`
-  explains both, checks whether the gadget is enumerated on this host right
-  now, and pings whatever you answer.
-- **where builds run** — the workspace, or this host. In the workspace, the
-  default, the container image carries pmbootstrap and its helpers pinned to
-  each other, so *you do not install pmbootstrap on this host*. On the host
-  tier `init` finds or clones the checkout itself.
-- **pmaports** — adopt what is already here, point at a checkout, or clone one.
-- **the working repo for this device** — your notes, your logs, and the kernel
+  checks whether the gadget is enumerated on this host right now, and pings
+  whatever you answer.
+- **where builds run**: the workspace (the default) or this host. The
+  workspace container carries pmbootstrap and its helpers pinned to each
+  other, so *you do not install pmbootstrap on this host*.
+- **pmaports**: adopt what is already here, point at a checkout, or clone one.
+- **the working repo for this device**: your notes, your logs, and the kernel
   tree if you build one. `porthole build`, `verify`, `dts` and half of
-  `porthole next` cannot answer anything without it, and it is the key nothing
-  used to ask for.
+  `porthole next` need it.
 
-Then you can build. **You do not need a kernel tree to build a system image**:
+### 3. Give your development device passwordless sudo
 
-```sh
-porthole sandbox up                        # start the workspace, once
-porthole build                             # the rung ladder — what each one costs
-porthole build image --yes                 # the whole OS from pmaports, no tree needed
-porthole flash full --yes --replace-rootfs # rootfs and boot
-```
-
-Every rung except `image` compiles a kernel tree. `porthole build` says which
-rungs it can run here, where the build will go (workspace or host) and what is
-missing, before it starts.
-
-Full walkthrough, including moving to a second machine:
-**[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.
-
-### The one device step everyone hits
-
-This is the single most common "all the tools are broken" report.
-
-Nearly every tool calls `sudo -n` on the device. The `-n` means *never prompt* —
-so without passwordless sudo it does not ask for a password, it just **fails
-silently**. Every tool appears to do nothing, with no error anywhere.
-
-**On the device**, once per install:
+This is the single most common "all the tools are broken" report. Nearly every
+tool calls `sudo -n` on the device; without passwordless sudo it does not ask,
+it **fails silently**. **On the device**, once per install:
 
 ```sh
 echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/99-porthole-dev
@@ -116,18 +125,37 @@ sudo chmod 0440 /etc/sudoers.d/99-porthole-dev
 detects when it is missing.
 
 > **This must not ship in a device package other people install.** It belongs on
-> your development device only. That is precisely why porthole prints it instead
-> of applying it — and why an agent should hand it to you rather than retrying.
+> your development device only. That is why porthole prints it instead of
+> applying it, and why an agent should hand it to you rather than retrying.
 
-### What you need
+### 4. Build and flash
+
+**You do not need a kernel tree to build a system image:**
+
+```sh
+porthole sandbox up                          # start the rootless workspace, once
+export PORTHOLE_PMOS_PASSWORD=...            # the rootfs user's password
+porthole build                               # the rung ladder, and what each rung costs
+porthole build image --yes                   # the whole OS from pmaports, no tree needed
+porthole flash full --yes --replace-rootfs   # rootfs and boot
+```
+
+Every rung except `image` compiles a kernel tree. `porthole build` says which
+rungs it can run here, where the build will go and what is missing, before it
+starts. Read what a flash verb says it will do before you add `--yes`.
+
+The full walkthrough, including moving to a second machine, is
+**[`docs/NEW-HOST.md`](docs/NEW-HOST.md)**.
+
+## What you need
 
 **porthole's CLI has no third-party dependencies.** No pip install, no npm, no
-virtualenv — every verb starts on a bare Python 3.8. What some of them then need
+virtualenv: every verb starts on a bare Python 3.8. What some of them then need
 to finish the job is below, and **you do not need all of it to start**.
 
 | | needed for | if missing |
 |---|---|---|
-| **python3 ≥ 3.8** | the CLI and half the tools | nothing works — install it first |
+| **python3 ≥ 3.8** | the CLI and half the tools | nothing works; install it first |
 | **openssh client** | every command that talks to a booted device | device tools fail; host-only tools still work |
 | **fastboot** | reaching and leaving the bootloader | flashing and recovery unavailable |
 | **podman** | building images in the rootless workspace | builds unavailable; probing and debugging still work |
@@ -135,8 +163,8 @@ to finish the job is below, and **you do not need all of it to start**.
 | adb | talking to a stock or recovery system | optional, rarely needed |
 
 `porthole doctor` reads `/etc/os-release` and prints the install command **for
-your distribution**, so you never have to match this table to a package name
-yourself. Only `FAIL` lines are fatal; warnings are things you can work without.
+your distribution**. Only `FAIL` lines are fatal; warnings are things you can
+work without.
 
 ```console
 $ porthole doctor
@@ -370,11 +398,11 @@ lib/
   porthole.sh           the same semantics for shell tools
   porthole_cli.py       command registry and output helpers
   porthole_cmd_*.py     one module per verb — drop one in to add a verb
-tools/                  150 tk-* tools: boot, flash, probe, benchmark, soak
+tools/                  generic tools: boot, flash, probe, benchmark, soak
 profiles/
   _template/            every device key, documented
   google-taimen/        the reference device: facts as data + its own tools
-brain/                  184 scoped knowledge notes
+brain/                  scoped knowledge notes
 docs/                   new-host, sandbox, config, performance, contributing
 tests/                  everything runs with no device attached
 ```
@@ -422,7 +450,7 @@ Four design rules make that work:
 
 **"Every tool does nothing."**
 Passwordless sudo on the device — see
-[the one device step everyone hits](#the-one-device-step-everyone-hits), or run
+[step 3 of the quick start](#3-give-your-development-device-passwordless-sudo), or run
 `porthole doctor`.
 
 **A tool hangs where it used to work.**
@@ -453,6 +481,26 @@ is clearly running, that is a bug worth reporting.
 
 ---
 
+## Documentation
+
+| read this | for |
+|---|---|
+| [`docs/NEW-HOST.md`](docs/NEW-HOST.md) | setting up a machine, package names per distribution, moving hosts |
+| [`docs/CONFIG.md`](docs/CONFIG.md) | every configuration key and the layer it comes from |
+| [`docs/SANDBOX.md`](docs/SANDBOX.md) | the rootless build workspace: mounts, rules, and what it does not stop |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how the CLI, the libraries and the tools fit together |
+| [`docs/TOOLS.md`](docs/TOOLS.md) | the tool catalogue, generated from the tool headers |
+| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | where the time goes and how it was measured |
+| [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | tests, commit conventions, adding a tool, a verb or a device |
+| [`brain/`](brain/) (`porthole brain <query>`) | the knowledge notes: laws, traps, findings, playbooks |
+| [`AGENTS.md`](AGENTS.md) | the rules and protocol for AI agents |
+| [`AI.md`](AI.md) | how AI assistance is used and disclosed here |
+| [`SECURITY.md`](SECURITY.md) | reporting a vulnerability |
+
+`make docs-serve` renders the same material as a local site.
+
+---
+
 ## Project
 
 ### Contributing
@@ -469,8 +517,8 @@ make ci          # every job GitHub runs -- green here is green there
 Adding a tool, a device, a CLI verb or a brain note each takes one file. The
 tests enforce the contracts so that stays true.
 
-Every push to `main` publishes the documentation to GitHub Pages; `make
-docs-serve` renders the same site locally.
+The documentation site is generated from these files (`make docs`); publishing
+it to GitHub Pages is gated by a repository variable, see `docs/CONTRIBUTING.md`.
 
 ### Status
 
@@ -493,12 +541,11 @@ Connolly**, **Yassine Oudjana**, **Joel Selvaraj**, **Jami Kettunen**,
 pmbootstrap are the ground everything here stands on.
 
 Much of this codebase was written with **Claude** (Anthropic) as a pair
-programmer, over sessions that also produced most of `brain/` — the traps in
-there are the record of what went wrong while doing it. The commit log is kept
-free of assistant trailers deliberately: the work is the author's, the mistakes
-are the author's, and a log full of tool attribution helps nobody reading it in
-two years.
+programmer, over sessions that also produced most of `brain/`; the traps in
+there are the record of what went wrong while doing it. Every such commit
+carries `Assisted-by: Claude`, and [`AI.md`](AI.md) says what that means and
+who is responsible for it.
 
 ### Licence
 
-MIT — see [`LICENSE`](LICENSE).
+MIT, see [`LICENSE`](LICENSE). Provided as is, without warranty of any kind.
