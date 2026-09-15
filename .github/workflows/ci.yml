@@ -9,9 +9,18 @@ on:
   # title or body edit, which on this repo's volume is cheaper than the hole.
   pull_request:
     types: [opened, edited, synchronize, reopened]
+  # A merge queue's candidate commits get the same jobs. The DCO range is a
+  # pull request's; a merge group only carries commits that passed it.
+  merge_group:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Superseded pull request runs (a push, or a body edit) are cancelled; every
+  # push to main keeps its result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every job below runs one make target and nothing else. The step list lives in
 # the Makefile, so `make ci` on a laptop and this workflow cannot disagree --
@@ -22,7 +31,8 @@ permissions:
 jobs:
   test:
     name: Tests (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +42,8 @@ jobs:
         python: ["3.8", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -42,9 +54,12 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -69,9 +84,12 @@ jobs:
 
   smoke:
     name: Fresh-clone smoke test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -83,7 +101,8 @@ jobs:
 
   trailers:
     name: Commit check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,6 +111,7 @@ jobs:
           # depth 1 that claim would cover a single commit and still report
           # green. The DCO check also needs the pull request's base commit.
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -106,3 +126,27 @@ jobs:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: make trailers
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actionlint and zizmor, versions pinned in porthole-dev/.github.
+      - uses: porthole-dev/.github/actions/workflow-lint@2d4d1186816e5bc3997e08b490f464082f70e85f # main
+
+  ci-passed:
+    # The one check for a ruleset to require: fails if any job above failed or
+    # was cancelled.
+    name: CI passed
+    if: ${{ !cancelled() }}
+    needs: [test, lint, smoke, trailers, workflow-lint]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: porthole-dev/.github/actions/ci-passed@2d4d1186816e5bc3997e08b490f464082f70e85f # main
+        with:
+          results: ${{ join(needs.*.result, ' ') }}

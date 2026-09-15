@@ -20,30 +20,29 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Builds run per pull request or branch; only deploys are serialized (see the
+# deploy job). A single "pages" group for every run used to make pull requests
+# wait for each other, and GitHub cancels a pending run when a newer one joins
+# the group: a pull request's docs check could be cancelled by another's.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
-    # `pages: write` here is only so configure-pages can turn Pages on by
-    # itself. Without it the first push fails at deploy time with "Get Pages
-    # site failed", and you have to go and flip a setting in the web UI --
-    # which is a poor first experience for a repo that is otherwise
-    # self-configuring.
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -64,17 +63,6 @@ jobs:
           test -f site-src/tools.md
           grep -q "porthole" site-src/index.md
 
-      - name: Enable GitHub Pages if it is not already
-        # enablement: true flips Settings -> Pages -> Source to "GitHub
-        # Actions" over the API, so setting PUBLISH_DOCS is all that is needed.
-        #
-        # No continue-on-error: this only runs when you have asked for
-        # publishing, and a failure then is real information rather than noise.
-        if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
-        with:
-          enablement: true
-
       - name: Install mkdocs
         run: pip install mkdocs-material
 
@@ -82,8 +70,10 @@ jobs:
         run: mkdocs build --strict
 
       - name: Say whether this will publish
+        env:
+          PUBLISH_DOCS: ${{ vars.PUBLISH_DOCS }}
         run: |
-          if [ "${{ vars.PUBLISH_DOCS }}" = "true" ]; then
+          if [ "$PUBLISH_DOCS" = "true" ]; then
             echo "PUBLISH_DOCS=true — deploying to GitHub Pages."
           else
             echo "Docs built and link-checked, but NOT published."
@@ -102,13 +92,29 @@ jobs:
     name: Deploy
     if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # One deploy at a time, never cancelled halfway.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    # Only the deploy can write Pages; pull request builds get a read-only token.
     permissions:
-      pages: write
-      id-token: write
+      pages: write # configure and deploy Pages
+      id-token: write # deploy-pages authenticates with OIDC
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Enable GitHub Pages if it is not already
+        # enablement: true flips Settings -> Pages -> Source to "GitHub
+        # Actions" over the API, so setting PUBLISH_DOCS is all that is needed.
+        # Without it the first push fails with "Get Pages site failed".
+        #
+        # No continue-on-error: this only runs when you have asked for
+        # publishing, and a failure then is real information rather than noise.
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+        with:
+          enablement: true
       - id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
