@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   build:
+    name: Build
     runs-on: ubuntu-latest
     # `pages: write` here is only so configure-pages can turn Pages on by
     # itself. Without it the first push fails at deploy time with "Get Pages
@@ -98,6 +99,7 @@ jobs:
           path: site
 
   deploy:
+    name: Deploy
     if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
     needs: build
     runs-on: ubuntu-latest
