@@ -502,6 +502,20 @@ def test_a_child_environment_drops_every_stale_export():
     assert env.get("PATH") == "/usr/bin", "the rest of the environment must stand"
 
 
+def test_a_porthole_named_password_reaches_the_workspace_past_an_empty_tk_one():
+    """2026-09-15: `porthole build image` in the workspace died on 'set
+    PORTHOLE_PMOS_PASSWORD' with it set, because only TK_ names cross into the
+    container and the shell carried an empty TK_PMOS_PASSWORD."""
+    sys.path.insert(0, str(ROOT / "lib"))
+    from porthole_cli import child_env
+
+    env = child_env({"TK_PMOS_PASSWORD": "", "PORTHOLE_PMOS_PASSWORD": "pw"})
+    assert env["TK_PMOS_PASSWORD"] == "pw", env
+    # The old name still wins when it is actually set.
+    env = child_env({"TK_PMOS_PASSWORD": "old", "PORTHOLE_PMOS_PASSWORD": "pw"})
+    assert env["TK_PMOS_PASSWORD"] == "old", env
+
+
 def test_every_stale_export_says_why_it_is_one():
     """A bare name in the table is a rule nobody can audit or retire. Each
     entry carries the incident, the way the permissions deny table does."""

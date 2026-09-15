@@ -340,6 +340,13 @@ def child_env(base=None, cfg=None) -> dict:
     for key, value in (cfg or {}).items():
         if key.startswith(("PORTHOLE_", "TK_")) and isinstance(value, str):
             env[key] = value
+    # The workspace is sent TK_ names only, so a password exported under its
+    # PORTHOLE_ name, or behind an empty `TK_PMOS_PASSWORD=` left in the shell,
+    # never reached pmbootstrap install there. Resolved the way ph-lib.sh
+    # resolves it: the old name, unless it is empty.
+    for name in ("PMOS_PASSWORD", "LOGIN_PASSWORD"):
+        if not env.get("TK_" + name) and env.get("PORTHOLE_" + name):
+            env["TK_" + name] = env["PORTHOLE_" + name]
     return env
 
 
