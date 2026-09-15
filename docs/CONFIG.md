@@ -80,6 +80,103 @@ confident wrong answer rather than an error.
 `PORTHOLE_ARCH_DIR` is derived, not set: `aarch64` → `arm64`, because a package
 says one and a kernel tree says the other.
 
+## Package repository
+
+A port that carries forks can publish them prebuilt, as a signed apk
+repository, so that builds resolve them instead of compiling them and phones
+upgrade from it. Three profile keys describe it:
+
+| key | becomes | example (google-taimen) |
+|---|---|---|
+| `PORTHOLE_PKG_REPO_URL` | pmbootstrap `mirrors.pmaports_custom` | `https://github.com/porthole-dev/pmos-packages/releases/download` |
+| `PORTHOLE_PKG_REPO_SYSTEMD_URL` | pmbootstrap `mirrors.systemd_custom`; empty for none | the same URL plus `/systemd` |
+| `PORTHOLE_PKG_REPO_KEY` | a copy in `<work>/config_apk_keys/` | `keys/porthole-dev-packages-20260915.rsa.pub`, relative to the profile |
+
+pmbootstrap asks for `<url>/<branch>/<arch>/APKINDEX.tar.gz`, where `<branch>`
+is the channel's `branch_pmaports` (`main` on edge). A repository hosted as
+GitHub releases therefore has one release per tree, tagged `main/aarch64`,
+`main/x86_64`, `systemd/main/aarch64` and so on. The key file must keep the
+name the index is signed with: apk finds the key by that name.
+
+`PORTHOLE_PKG_REPO_URL=none` in `~/.config/porthole/config.env` turns it off on
+one machine.
+
+### In the workspace
+
+`porthole sandbox up` probes the repository before it writes the pmbootstrap
+config: it downloads the index for the device's arch **and the host's**,
+anonymously, and checks the signature against the key. Only then does it set
+the two mirrors and install the key, and it prints each change. If the probe
+fails, the mirrors are left out and it says why; builds then use the
+postmarketOS mirrors and build the forks from source. A configured repository
+that pmbootstrap cannot fetch is worse than none, because pmbootstrap aborts
+the whole command instead of falling back.
+
+Why the host arch: pmbootstrap fetches every mirror's index for the host arch
+when it creates the native chroot, and a 404 there aborts the build even
+though nothing is installed from it. The repository needs a signed index for
+`x86_64`, an empty one is enough. See
+`brain/traps/a-package-mirror-needs-a-host-arch-index.md`.
+
+Any other `[mirrors]` entry already in the workspace config is kept. A
+different `pmaports_custom` or `systemd_custom` is replaced, and the output
+names the old value.
+
+`porthole doctor --all` repeats the probe and reports one of:
+
+| verdict | meaning |
+|---|---|
+| `ok` | every index is there and verifies |
+| `private` | every index answers 404. On GitHub this is a private repository: an anonymous download gets 404, not 403, and neither pmbootstrap nor apk can send a token |
+| `host-arch-missing` | the target arch is published and the host arch is not |
+| `missing` | the device's arch is not published |
+| `key-mismatch` | signed by another key name, or the signature does not verify with the configured key |
+| `unsigned`, `unreachable` | not an apk signature, or the network failed |
+
+It fails when the workspace already uses a repository that no longer probes,
+because that is the state that stops builds. Plain `porthole doctor` does not
+use the network and reports the probe as skipped.
+
+### On the host
+
+`porthole build --host` uses your own pmbootstrap config. That config applies
+to every device you build, so porthole does not edit it. Once the repository
+probes `ok`, `porthole doctor --all` prints the commands:
+
+```sh
+pmbootstrap config mirrors.pmaports_custom <PORTHOLE_PKG_REPO_URL>
+pmbootstrap config mirrors.systemd_custom <PORTHOLE_PKG_REPO_SYSTEMD_URL>
+sudo install -m 644 profiles/<device>/<key> <PORTHOLE_PMB_DIR>/config_apk_keys/
+```
+
+The key needs `sudo` because pmbootstrap creates that directory as root on a
+host install.
+
+### On the phone
+
+`pmbootstrap install` writes the configured mirrors into the image's
+`/etc/apk/repositories`, and porthole's image assembly removes only the build
+machine's local repository line. So an image built after the mirrors are set
+lists the repository, and the device takes new builds with:
+
+```sh
+apk update && apk upgrade
+```
+
+The device verifies with `/etc/apk/keys/`, and porthole's image assembly
+(`_ph_assemble_image` in `tools/ph-build.sh`) copies the work dir's
+`config_apk_keys/*.pub` there, the key included. Without the key, apk reports
+the repository as `UNTRUSTED signature` and installs nothing from it. On a
+phone flashed before the repository existed, add it by hand (the lines are the
+mirror URLs plus the branch):
+
+```sh
+printf '%s\n' <PORTHOLE_PKG_REPO_URL>/main <PORTHOLE_PKG_REPO_SYSTEMD_URL>/main \
+    | sudo tee -a /etc/apk/repositories
+sudo cp porthole-dev-packages-20260915.rsa.pub /etc/apk/keys/
+sudo apk update
+```
+
 ## Legacy names
 
 These are honoured and **win** over their porthole-namespaced twins, so every

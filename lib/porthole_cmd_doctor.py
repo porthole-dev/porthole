@@ -716,6 +716,97 @@ def check_profile(ch: Checks, cfg, root: pathlib.Path) -> None:
                doc="brain/traps/wait-long-enough-before-calling-a-boot-failed.md")
 
 
+def check_pkg_repo(ch: Checks, ctx, cfg, deep: bool, fetcher=None) -> None:
+    """The device's prebuilt package repository: will pmbootstrap resolve it?
+
+    Three questions, each its own row, because each has a different fix:
+    does the repository answer anonymously with a signed index for the target
+    AND the host arch (network, so `--all` only); does the workspace's
+    pmbootstrap config use it; does the host's. See porthole_pkgrepo.
+    """
+    import porthole_cmd_sandbox as sandbox
+    import porthole_pkgrepo as pkgrepo
+    import porthole_pmaports as pmap
+
+    repo = pkgrepo.resolve(cfg, ctx.root)
+    if not repo:
+        ch.add("package repository", "skip",
+               "none configured (PORTHOLE_PKG_REPO_URL)")
+        return
+    want = pkgrepo.wanted(repo)
+    pmb = sandbox._sandbox_pmb(cfg)
+    in_workspace = all(pkgrepo.read_mirrors(pmb / sandbox.PMB_CFG_NAME).get(k)
+                       == v for k, v in want.items())
+    if not repo.key or not repo.key.is_file():
+        ch.add("package repository", "fail",
+               f"{repo.url}: key {repo.key or '(unset)'} does not exist",
+               fix="set PORTHOLE_PKG_REPO_KEY to the repository's public key "
+                   "file (relative to the profile)")
+        return
+    verdict = ""
+    if not deep:
+        ch.add("package repository", "skip",
+               f"{repo.url}: not fetched -- `porthole doctor --all` downloads "
+               f"the indexes and checks the signature")
+    else:
+        verdict, detail = pkgrepo.probe(
+            repo, pkgrepo.branch(pmap.find_pmaports(cfg)),
+            cfg.get("PORTHOLE_ARCH") or "aarch64",
+            fetcher=fetcher)
+        if verdict == "ok":
+            ch.add("package repository", "ok", f"{repo.url}: {detail}")
+        elif in_workspace:
+            # Configured AND broken is the one state that stops builds: every
+            # pmbootstrap command aborts on the index it cannot fetch.
+            ch.add("package repository", "fail", f"{verdict}: {detail}",
+                   fix="porthole sandbox down && porthole sandbox up    "
+                       "# re-probes, and leaves it out while it is unusable")
+        else:
+            ch.add("package repository", "warn", f"{verdict}: {detail}",
+                   doc="not configured anywhere porthole writes, so builds "
+                       "build the forks from source; docs/CONFIG.md#package-repository")
+
+    key_in = (pmb / "config_apk_keys" / repo.key.name).is_file()
+    if (pmb / sandbox.PMB_CFG_NAME).is_file():
+        if in_workspace and key_in:
+            ch.add("workspace: package repository", "ok",
+                   f"mirrors set, {repo.key.name} installed")
+        elif verdict == "ok":
+            missing = "the mirrors" if not in_workspace else "the key"
+            ch.add("workspace: package repository", "warn",
+                   f"usable, but the workspace config lacks {missing}",
+                   doc="porthole sandbox down && porthole sandbox up    "
+                       "# mounts are fixed at creation, and so is this")
+        else:
+            # Not a warning: leaving an unusable (or unprobed) repository out
+            # is exactly what `sandbox up` is meant to do.
+            ch.add("workspace: package repository", "skip",
+                   "not configured -- `sandbox up` adds it once it probes usable")
+
+    # The host's pmbootstrap config is the user's own and serves EVERY device
+    # they build, so porthole never writes it. Say what it lacks instead.
+    host_cfg = pathlib.Path(os.environ.get("XDG_CONFIG_HOME")
+                            or pathlib.Path.home() / ".config") / sandbox.PMB_CFG_NAME
+    # Only once the repository is known good: advising a mirror that answers
+    # 404 would break every --host build the advice was meant to speed up.
+    if host_cfg.is_file() and verdict == "ok":
+        have = pkgrepo.read_mirrors(host_cfg)
+        todo = [f"pmbootstrap config mirrors.{k} {v}"
+                for k, v in want.items() if have.get(k) != v]
+        host_pmb = pathlib.Path(cfg.get("PORTHOLE_PMB_DIR")
+                                or "~/.local/var/pmbootstrap").expanduser()
+        if not (host_pmb / "config_apk_keys" / repo.key.name).is_file():
+            todo.append(f"sudo install -m 644 {repo.key} "
+                        f"{host_pmb}/config_apk_keys/")
+        if todo:
+            ch.add("host pmbootstrap: package repository", "warn",
+                   "--host builds will not use it (porthole does not edit "
+                   "your own pmbootstrap config)", doc=" && ".join(todo))
+        else:
+            ch.add("host pmbootstrap: package repository", "ok",
+                   "mirrors set, key installed")
+
+
 # Keys whose value carries the kernel series as a `<major>.<minor>` token.
 # Deliberately not "every key that mentions a version": a SoC name like
 # msm8998 or gs201 has no dot and never matches, and DTB paths carry board
@@ -1523,6 +1614,7 @@ def cmd_doctor(args, ctx) -> int:
                     skip_reason=key_skip_reason, deep=args.all)
     check_drift(ch, cfg)
     check_profile(ch, cfg, ctx.root)
+    check_pkg_repo(ch, ctx, cfg, deep=args.all)
     check_identity(ch, cfg)
     if args.no_device:
         ch.add("device: state", "skip", "--no-device")

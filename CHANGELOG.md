@@ -5,6 +5,15 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- **A device's prebuilt package repository** (`PORTHOLE_PKG_REPO_URL`,
+  `_SYSTEMD_URL`, `_KEY`; google-taimen points at porthole-dev/pmos-packages).
+  `porthole sandbox up` probes it -- device AND host arch index, anonymously,
+  signature checked against the vendored key -- and only then sets
+  pmbootstrap's `mirrors.pmaports_custom`/`systemd_custom` and installs the key
+  into `config_apk_keys`, naming every change. `porthole doctor --all` reports
+  `private`, `host-arch-missing` or `key-mismatch` instead of the build dying in
+  pmbootstrap with "getting APKINDEX from binary package mirror failed!".
+  docs/CONFIG.md#package-repository.
 - **`porthole build image`** -- the whole postmarketOS system, built from
   pmaports as it stands, and the only rung that compiles no kernel tree. Every
   other rung goes through `_ph_make`, so on a host that had just been set up

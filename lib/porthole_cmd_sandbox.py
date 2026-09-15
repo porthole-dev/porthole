@@ -219,7 +219,7 @@ def pmb_kernel_problem(value: str, pmaports, device: str) -> str:
 
 
 def pmb_config_text(device: str, carry: dict | None = None,
-                    kernel: str = "") -> str:
+                    kernel: str = "", mirrors: dict | None = None) -> str:
     """The pmbootstrap config the workspace uses, as an INI string.
 
     `work` AND `aports` both have to be set. `aports` defaults to
@@ -239,7 +239,11 @@ def pmb_config_text(device: str, carry: dict | None = None,
     for key, value in (carry or {}).items():
         rows.setdefault(key, value)
     body = "".join(f"{k} = {v}\n" for k, v in rows.items())
-    return f"[pmbootstrap]\n{body}\n[providers]\n\n[mirrors]\n"
+    # Decided by the caller (porthole_pkgrepo.merge_mirrors), which is also
+    # what carries any mirror somebody set by hand -- this file used to be
+    # rewritten with an empty section, dropping those on every `up`.
+    mirror_rows = "".join(f"{k} = {v}\n" for k, v in (mirrors or {}).items())
+    return f"[pmbootstrap]\n{body}\n[providers]\n\n[mirrors]\n{mirror_rows}"
 
 
 def _image_tag(root: pathlib.Path) -> str:
@@ -692,6 +696,43 @@ def _raise_ccache_ceiling(ctx) -> None:
                 ", ".join(raised)), "grey"))
 
 
+def _pkg_repo_mirrors(ctx, pmb: pathlib.Path, checkout) -> dict:
+    """The [mirrors] for the workspace config, with the key installed when the
+    device's package repository is usable. Says every change it makes.
+
+    Probed first, on the host, because a mirror pmbootstrap cannot fetch --
+    private, aarch64-only, signed by another key -- does not degrade into
+    building from source: it aborts every pmbootstrap command. Not configuring
+    it keeps builds working, and the warning keeps that from being silent.
+    """
+    import porthole_pkgrepo as pkgrepo
+
+    existing = pkgrepo.read_mirrors(pmb / PMB_CFG_NAME)
+    repo = pkgrepo.resolve(ctx.cfg, ctx.root)
+    usable = False
+    if repo:
+        verdict, detail = pkgrepo.probe(
+            repo, pkgrepo.branch(checkout),
+            ctx.cfg.get("PORTHOLE_ARCH") or "aarch64")
+        usable = verdict == "ok"
+        if usable:
+            done = pkgrepo.install_key(repo.key, pmb)
+            ctx.out(ctx.out.paint(
+                f"  package repository: {repo.url}\n"
+                f"    {detail}; key {done} in config_apk_keys", "grey"))
+        else:
+            ctx.out.warn(f"package repository {repo.url} is NOT configured "
+                         f"({verdict}): {detail}")
+            ctx.out.hint("porthole doctor --all",
+                         "re-checks it; builds use postmarketOS mirrors and "
+                         "build the forks from source meanwhile")
+    mirrors, notes = pkgrepo.merge_mirrors(existing, repo, usable)
+    for note in notes:
+        ctx.out(ctx.out.paint(f"  {note}", "yellow" if "kept" in note
+                              or "replaced" in note else "grey"))
+    return mirrors
+
+
 def _up(ctx, args) -> int:
     if not shutil.which("podman"):
         raise Bail("podman is not installed", EX_FAIL,
@@ -748,8 +789,9 @@ def _up(ctx, args) -> int:
 
     _checkout = _pmap.find_pmaports(ctx.cfg)
     kernel, kernel_why = resolve_pmb_kernel(ctx.cfg, _checkout, device)
+    mirrors = _pkg_repo_mirrors(ctx, pmb, _checkout)
     (pmb / PMB_CFG_NAME).write_text(
-        pmb_config_text(device, _host_pmb_cfg(), kernel))
+        pmb_config_text(device, _host_pmb_cfg(), kernel, mirrors))
     if kernel:
         ctx.out(ctx.out.paint(f"  kernel: {kernel}  ({kernel_why})", "grey"))
     problem = pmb_kernel_problem(kernel, _checkout, device)
