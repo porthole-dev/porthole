@@ -152,13 +152,15 @@ RULES = [
          ["tests/test_secrets.py",
           ".githooks/commit-msg", ".githooks/pre-push"]),
 
-    Rule("no-trailers", MUST,
-         "No attribution trailers on a commit message, a pull request body "
-         "OR an issue body",
-         "they are injected by a harness default rather than typed by anyone; "
-         "the history has been rewritten twice, #51 and #52 then published the "
-         "same lines in the body, and #54 published them in an issue -- each "
-         "time on the one surface no check had yet read",
+    Rule("attribution-trailers", MUST,
+         "Every pull request commit is signed off by its author; if an AI "
+         "helped, disclose it with `Assisted-by:`, never as a co-author, "
+         "sign-off, session or generated-with line",
+         "a sign-off is a DCO certificate only its author can give and "
+         "Co-authored-by is a human-only tag, so CI fails an unsigned pull "
+         "request commit and a wrong attribution on the commit message, the "
+         "pull request body or the issue body; Assisted-by is disclosure, "
+         "never a requirement",
          [".githooks/commit-msg", "tests/test_trailers.py",
           ".github/workflows/ci.yml",
           ".github/workflows/issue-trailers.yml"],
@@ -184,8 +186,8 @@ RULES = [
          "Point this clone at the hooks once: "
          "`git config core.hooksPath .githooks`",
          "git ignores in-repo hooks until told, so a fresh clone has the "
-         "secret scanner and the trailer strip both switched off and no way "
-         "to notice; `porthole brief` says which clones do",
+         "secret scanner and the attribution check both switched off and no "
+         "way to notice; `porthole brief` says which clones do",
          ["lib/porthole_cmd_brief.py"],
          session=True),
 

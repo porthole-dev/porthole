@@ -28,7 +28,8 @@ Over-claiming portability is worse than scoping narrowly.
 - [ ] `porthole brain reindex` run **and the result committed** — the index is
       what an agent is pointed at first, and eight commits have added a note
       without it
-- [ ] no trailers on the commit **and none in this body** — no `Signed-off-by:`,
-      no AI attribution, no "generated with" line, no session URL
+- [ ] the commit is signed off by its author; if an assistant helped, that is
+      disclosed with `Assisted-by:` — no AI co-author or sign-off, no "generated with" line and no
+      session URL on the commit **or in this body**
 - [ ] **the measurement is finished, not in progress.** This note is filed
       because the work is done, not to mark that it started

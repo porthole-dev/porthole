@@ -63,7 +63,7 @@ def _hooks_state(root: pathlib.Path) -> dict:
     tells every agent to run first, and a hook nobody installed enforces
     nothing. Git ignores in-repo hooks until `core.hooksPath` says otherwise,
     so a fresh clone -- which is what an agent usually gets -- has the secret
-    scanner and the trailer strip both switched off and no way to notice.
+    scanner and the attribution check both switched off and no way to notice.
 
     Reported, not fixed: writing to someone's git config is a change to their
     checkout, and the shared-checkout note in AGENTS.md section 7 is exactly
@@ -78,8 +78,8 @@ def _hooks_state(root: pathlib.Path) -> dict:
     if out == ".githooks":
         return {"installed": True, "message": ""}
     return {"installed": False, "message":
-            "this clone does not have the hooks installed, so nothing strips "
-            "attribution trailers or scans a commit message for a serial "
+            "this clone does not have the hooks installed, so nothing rejects "
+            "a banned attribution line or scans a commit message for a serial "
             "before it is written. Run `git config core.hooksPath .githooks` "
             "once. CI catches both afterwards, but only after they are pushed."}
 

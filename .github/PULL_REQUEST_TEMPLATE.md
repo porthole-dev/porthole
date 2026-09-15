@@ -21,9 +21,10 @@
       execution and which it only read (`state-what-you-verified`). The failure
       mode is not rudeness, it is a confident review of code nobody ran.
 - [ ] a lesson that generalises became a `brain/` note with its evidence
-- [ ] no trailers on any commit **and none in this body** — no `Signed-off-by:`,
-      no AI attribution, no "generated with" line, no session URL. The commit
-      hook only ever read the message; #51 and #52 published them here instead.
+- [ ] every commit is signed off by its author; if an assistant helped, that is
+      disclosed with `Assisted-by:` — no AI co-author or sign-off, no "generated with"
+      line and no session URL on any commit **or in this body**. #51 and #52
+      published them here while the hook held the message.
 - [ ] **the work was finished before this was opened.** A finding written
       partway through is a draft — the a540 note was reversed by its own next
       measurement. Assess, then file.

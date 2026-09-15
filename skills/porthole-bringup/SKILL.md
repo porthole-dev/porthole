@@ -230,13 +230,13 @@ patched. `brain/findings/the-workspace-caches-kernel-compiles.md`.
   (`prove-it-ran` · **SHOULD**)
 - **Write down anything that would have saved someone a session** — `porthole brain new <id>`, then lint, then submit. A session that learned something and wrote nothing down is unfinished
   (`contribute-what-you-learn` · **SHOULD**)
-- **No attribution trailers on a commit message, a pull request body OR an issue body** — they are injected by a harness default rather than typed by anyone; the history has been rewritten twice, #51 and #52 then published the same lines in the body, and #54 published them in an issue -- each time on the one surface no check had yet read
-  (`no-trailers` · **MUST**)
+- **Every pull request commit is signed off by its author; if an AI helped, disclose it with `Assisted-by:`, never as a co-author, sign-off, session or generated-with line** — a sign-off is a DCO certificate only its author can give and Co-authored-by is a human-only tag, so CI fails an unsigned pull request commit and a wrong attribution on the commit message, the pull request body or the issue body; Assisted-by is disclosure, never a requirement
+  (`attribution-trailers` · **MUST**)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST**)
 - **Open the pull request after the work is done, not partway through** — a finding written mid-session is a draft: the a540 corruption note was reversed by its own next measurement, and a body filed early describes a conclusion that no longer holds
   (`pr-after-the-work` · **SHOULD**)
-- **Point this clone at the hooks once: `git config core.hooksPath .githooks`** — git ignores in-repo hooks until told, so a fresh clone has the secret scanner and the trailer strip both switched off and no way to notice; `porthole brief` says which clones do
+- **Point this clone at the hooks once: `git config core.hooksPath .githooks`** — git ignores in-repo hooks until told, so a fresh clone has the secret scanner and the attribution check both switched off and no way to notice; `porthole brief` says which clones do
   (`hooks-installed` · **SHOULD**)
 <!-- END GENERATED RULES -->
 

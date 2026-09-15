@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""The trailer ban, checked in CI instead of only in an opt-in hook.
+"""The attribution convention, checked in CI instead of only in an opt-in hook.
 
 WHAT THIS EXISTS FOR
-    `no-trailers` was the last MUST in lib/porthole_rules.py enforced by a
-    local hook alone, and tests/test_rules.py named it in HOOK_ONLY as a known
-    hole. It was not theoretical. The hook did its job -- it stripped
-    `Claude-Session:` out of the commit message of #52 -- and the same lines
-    were published anyway, in the pull request bodies of #51 and #52, a surface
-    no check had ever read.
+    AGENTS.md section 5: an assistant is credited with `Assisted-by:`, the
+    human certifies with `Signed-off-by:`, and the harness lines (an AI
+    co-author, a session trailer or URL, a generated-with line) are banned on
+    every surface. This file is the contract for lib/porthole_trailers.py.
 
-    So the fix is two things, and this file is the second: one pattern list
-    (lib/porthole_trailers.py) instead of a copy in the hook, and a check that
-    runs whatever anyone's local `core.hooksPath` says.
+    The ban has escaped before on a surface no check read: the hook held the
+    commit message of #52 and the same lines went out in the pull request
+    bodies of #51 and #52, then in issue #54. So there is one pattern list,
+    and a check that runs whatever anyone's local `core.hooksPath` says.
 
 WHY IT ALSO SCANS THE PULL REQUEST TEMPLATES
     A template becomes the initial body of a pull request, and both templates
-    state the trailer ban by naming the trailers. If the patterns matched that,
-    CI would fail on every pull request that used the template, and the check
-    would be turned off within a day. Asserting the prose survives is what lets
-    the patterns stay strict.
+    state the ban by naming the lines. If the patterns matched that, CI would
+    fail on every pull request that used the template.
 """
 import pathlib
 import subprocess
@@ -40,10 +37,23 @@ OBSERVED = [
     "Claude-Session: https://claude.ai/code/session_01EXAMPLEEXAMPLEEXAMPLE1",
     "\U0001f916 Generated with [Claude Code](https://claude.com/claude-code)",
     "https://claude.ai/code/session_01EXAMPLEEXAMPLEEXAMPLE2",
-    # Older shapes the two rewrites removed, kept so a revert is caught too.
-    "Signed-off-by: Someone <someone@example.com>",
     "Co-authored-by: Claude <noreply@anthropic.com>",
+    "Co-developed-by: Claude <claude@example.com>",
     "\U0001f916 Generated with Claude Code",
+    "Signed-off-by: Claude <noreply@anthropic.com>",
+    "Signed-off-by: GitHub Copilot <copilot@example.com>",
+]
+
+# The convention itself. A pattern set that eats these rejects every commit
+# the convention asks for, and gets switched off within a day.
+KEPT = [
+    "Assisted-by: Claude",
+    "Assisted-by: LLM",
+    "Generated-by: Claude (Claude Opus 5)",
+    "Signed-off-by: Ai Nakamura <ai@example.com>",
+    "Signed-off-by: Someone <someone@example.com>",
+    "Co-authored-by: Alice Person <alice@example.com>",
+    "Reported-by: Bob <bob@example.com>",
 ]
 
 
@@ -61,34 +71,41 @@ def test_no_rule_matches_what_it_must_not_eat():
     assert not greedy, f"these rules match prose they must not: {greedy}"
 
 
-def test_every_observed_trailer_is_caught():
-    """The list above is the harness output itself, not a paraphrase of it. A
-    pattern set that passes its own controls but misses what actually arrives
-    is how #51 shipped."""
+def test_every_observed_harness_line_is_caught():
+    """The list above is the harness output itself, not a paraphrase of it."""
     missed = [line for line in OBSERVED if not T.scan(line)]
     assert not missed, ("these are published verbatim by a harness default and "
                         "nothing matches them:\n  " + "\n  ".join(missed))
 
 
-def test_strip_removes_the_trailers_and_keeps_the_message():
+def test_the_convention_lines_are_never_banned():
+    """Assisted-by and Signed-off-by are what the convention asks for, and a
+    human co-author is a human's business."""
+    eaten = [line for line in KEPT if T.scan(line)]
+    assert not eaten, "the convention's own lines are banned:\n  " + "\n  ".join(eaten)
+
+
+def test_strip_removes_banned_lines_and_keeps_the_trailers():
     msg = ("fix: the thing\n\nWhy it broke, in a sentence.\n\n"
-           + "\n".join(OBSERVED[:4]) + "\n")
+           + "\n".join(OBSERVED[:4]) + "\n\nAssisted-by: Claude\n"
+           "Signed-off-by: Someone <someone@example.com>\n")
     out = T.strip(msg)
-    assert not T.scan(out), f"strip left a trailer behind:\n{out}"
+    assert not T.scan(out), f"strip left a banned line behind:\n{out}"
     assert "Why it broke, in a sentence." in out, "strip ate the message body"
-    assert out.endswith("sentence.\n"), (
-        f"strip left the blank run the trailers sat in:\n{out!r}")
+    assert out.endswith("Assisted-by: Claude\n"
+                        "Signed-off-by: Someone <someone@example.com>\n"), (
+        f"strip ate the convention's trailers:\n{out!r}")
 
 
-def test_the_hook_holds_no_second_copy_of_the_patterns():
-    """The copy IS the defect. The hook carried sed expressions for the commit
-    surface while the body surface had none, so the two could not be fixed at
-    once -- and were not."""
+def test_the_hook_rejects_and_never_rewrites():
+    """The hook used to strip, and a stripping hook is how a sign-off vanished
+    without anyone deciding it should. It reads the shared list and exits
+    non-zero; it never writes the message file."""
     hook = (ROOT / ".githooks/commit-msg").read_text()
-    assert "porthole_trailers.py" in hook, (
-        "the commit-msg hook no longer calls the shared scanner")
-    assert "Co-Authored-By:/Id" not in hook and "sed -E" not in hook, (
-        "the hook has grown its own pattern list again")
+    assert "porthole_trailers.py\" --scan" in hook, (
+        "the commit-msg hook no longer asks the shared scanner")
+    assert "--strip" not in hook, "the commit-msg hook rewrites messages again"
+    assert "sed -E" not in hook, "the hook has grown its own pattern list"
 
 
 def test_the_pull_request_templates_survive_stating_the_ban():
@@ -102,13 +119,12 @@ def test_the_pull_request_templates_survive_stating_the_ban():
 
 
 def test_the_issue_body_surface_has_an_enforcer():
-    """#54 was filed carrying two of the lines above while the hook and the
-    pull request check both held. A rule holds on the surfaces its enforcer
-    reads, so the third surface gets a reader too -- and it edits the issue
-    rather than going red on an event nobody is subscribed to."""
+    """#54 was filed carrying two banned lines while the hook and the pull
+    request check both held. The third surface gets a reader too -- and it
+    edits the issue rather than going red on an event nobody watches."""
     flow = (ROOT / ".github/workflows/issue-trailers.yml").read_text()
     assert "types: [opened, edited]" in flow, (
-        "without `edited` a body is checked once at open and a trailer pasted "
+        "without `edited` a body is checked once at open and a line pasted "
         "in afterwards stays")
     assert "issues: write" in flow, "the workflow cannot fix what it finds"
     assert "make issue-trailers" in flow, (
@@ -119,35 +135,105 @@ def test_the_issue_body_surface_has_an_enforcer():
 
 
 def test_scan_exits_nonzero_only_on_a_body_that_carries_one():
-    """The exit code the workflow branches on, both directions. Comparing the
-    stripped file against the original instead would edit forever: strip()
-    normalises line endings and GitHub hands out CRLF."""
+    """The exit code the hook and the workflow branch on, both directions.
+    Comparing a stripped file against the original instead would edit forever:
+    strip() normalises line endings and GitHub hands out CRLF."""
     import contextlib
     import io
     import tempfile
     noise = contextlib.redirect_stderr(io.StringIO())   # the finding it prints
     with tempfile.TemporaryDirectory() as d, noise:
         clean = pathlib.Path(d, "clean.md")
-        clean.write_text("## What happened\r\n\r\nIt broke.\r\n")
+        clean.write_text("## What happened\r\n\r\nIt broke.\r\n\r\n"
+                         "Assisted-by: Claude\r\n")
         assert T.main(["--scan", str(clean)]) == 0
         dirty = pathlib.Path(d, "dirty.md")
         dirty.write_text("It broke.\n\n" + OBSERVED[2] + "\n")
         assert T.main(["--scan", str(dirty)]) == 1
 
 
-def test_no_commit_message_in_this_history_carries_one():
-    """The standing claim. The history has been rewritten twice to make it
-    true; this is what keeps it true without a third.
+def test_dco_wants_the_authors_own_sign_off():
+    """Both directions, and the case a lazy check passes: a sign-off by someone
+    other than the author is not the author's certificate."""
+    signed = ("a1", "me@example.com",
+              "x: y\n\nWhy.\n\nAssisted-by: Claude\n"
+              "Signed-off-by: Me Person <me@example.com>\n")
+    unsigned = ("b2", "me@example.com", "x: y\n\nWhy.\n\nAssisted-by: Claude\n")
+    by_other = ("c3", "me@example.com",
+                "x: y\n\nSigned-off-by: Someone Else <else@example.com>\n")
+    case = ("d4", "Me@Example.com",
+            "x: y\n\nSigned-off-by: Me Person <me@example.COM>\n")
+    assert T.unsigned([signed, case]) == []
+    assert T.unsigned([unsigned, by_other]) == [("b2", "me@example.com"),
+                                                ("c3", "me@example.com")]
 
-    A shallow checkout sees fewer commits and still passes honestly -- the
-    `trailers` job in ci.yml fetches full depth, which is what makes the claim
-    whole. Asserting the depth here would fail the matrix jobs for no reason.
-    """
+
+def test_a_human_only_commit_passes_with_just_its_sign_off():
+    """Assisted-by is disclosure, never a requirement: a contribution written
+    without AI, carrying nothing but its author's sign-off, passes both the
+    banned-line scan and the DCO check."""
+    body = ("fix: the thing\n\nWhy it broke.\n\n"
+            "Signed-off-by: Alice Person <alice@example.com>\n")
+    assert T.scan(body) == []
+    assert T.unsigned([("a1", "alice@example.com", body)]) == []
+
+
+def test_an_ai_assisted_commit_passes_with_disclosure_and_sign_off():
+    body = ("fix: the thing\n\nWhy it broke.\n\nAssisted-by: Claude\n"
+            "Signed-off-by: Alice Person <alice@example.com>\n")
+    assert T.scan(body) == []
+    assert T.unsigned([("a1", "alice@example.com", body)]) == []
+
+
+def test_dco_reads_a_real_range_and_skips_merges():
+    """The range half, on a real repository: base..head, no merge commits (a
+    pull request's merge commit is GitHub's, and nobody signs it)."""
+    import os
+    import tempfile
+    env = dict(os.environ, GIT_AUTHOR_NAME="Me", GIT_AUTHOR_EMAIL="me@example.com",
+               GIT_COMMITTER_NAME="Me", GIT_COMMITTER_EMAIL="me@example.com",
+               GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    with tempfile.TemporaryDirectory() as d:
+        def git(*args):
+            return subprocess.run(["git", "-C", d, *args], env=env, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        git("init", "-q")
+        git("commit", "-q", "--allow-empty", "-m", "base")
+        base = git("rev-parse", "HEAD")
+        trunk = git("symbolic-ref", "--short", "HEAD")
+        git("checkout", "-q", "-b", "topic")
+        git("commit", "-q", "--allow-empty", "-m", "signed", "-s")
+        git("commit", "-q", "--allow-empty", "-m", "unsigned\n\nAssisted-by: Claude")
+        git("checkout", "-q", trunk)
+        git("commit", "-q", "--allow-empty", "-m", "moved on", "-s")
+        git("merge", "-q", "--no-ff", "--no-edit", "topic")
+        missing = T.dco(pathlib.Path(d), f"{base}..HEAD")
+    assert [email for _, email in missing] == ["me@example.com"], (
+        f"expected exactly the one unsigned commit, got {missing}: the merge "
+        "commit or a signed commit was counted")
+
+
+def test_ci_passes_the_dco_range_through_the_environment():
+    """The range reaches the check the way the body does: through env, never
+    substituted into a run: line."""
+    flow = (ROOT / ".github/workflows/ci.yml").read_text()
+    job = flow.split("  trailers:")[1]
+    assert "fetch-depth: 0" in job, "the DCO range needs the base commit"
+    for var in ("PR_BASE: ${{ github.event.pull_request.base.sha }}",
+                "PR_HEAD: ${{ github.event.pull_request.head.sha }}"):
+        assert var in job, f"the trailers job does not export {var.split(':')[0]}"
+    assert "run: make trailers" in job
+
+
+def test_no_commit_message_in_this_history_carries_a_banned_line():
+    """The standing claim. A shallow checkout sees fewer commits and still
+    passes honestly -- the `trailers` job in ci.yml fetches full depth, which
+    is what makes the claim whole."""
     try:
         hits = T.scan_history(ROOT)
     except (subprocess.CalledProcessError, OSError):
         return                      # a git archive extraction has no log
-    assert not hits, ("commit messages carry trailers:\n  "
+    assert not hits, ("commit messages carry banned lines:\n  "
                       + "\n  ".join(f"{w} line {n}: {h!r}"
                                     for w, n, _, h in hits))
 

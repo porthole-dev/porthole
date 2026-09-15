@@ -98,13 +98,13 @@ rule cost to learn, and how to follow it.
   (`state-what-you-verified` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
 - **Never publish anything on the sensitive list** — docs/HANDOFF-contribution-rules.md section 4.5; publication is irreversible and redaction is free
   (`no-secrets` · **MUST** · enforced by `tests/test_secrets.py`, `.githooks/commit-msg`, `.githooks/pre-push`)
-- **No attribution trailers on a commit message, a pull request body OR an issue body** — they are injected by a harness default rather than typed by anyone; the history has been rewritten twice, #51 and #52 then published the same lines in the body, and #54 published them in an issue -- each time on the one surface no check had yet read
-  (`no-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`, `.github/workflows/issue-trailers.yml`)
+- **Every pull request commit is signed off by its author; if an AI helped, disclose it with `Assisted-by:`, never as a co-author, sign-off, session or generated-with line** — a sign-off is a DCO certificate only its author can give and Co-authored-by is a human-only tag, so CI fails an unsigned pull request commit and a wrong attribution on the commit message, the pull request body or the issue body; Assisted-by is disclosure, never a requirement
+  (`attribution-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`, `.github/workflows/issue-trailers.yml`)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST** · enforced by `tests/test_brain.py::test_the_index_is_current`)
 - **Open the pull request after the work is done, not partway through** — a finding written mid-session is a draft: the a540 corruption note was reversed by its own next measurement, and a body filed early describes a conclusion that no longer holds
   (`pr-after-the-work` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
-- **Point this clone at the hooks once: `git config core.hooksPath .githooks`** — git ignores in-repo hooks until told, so a fresh clone has the secret scanner and the trailer strip both switched off and no way to notice; `porthole brief` says which clones do
+- **Point this clone at the hooks once: `git config core.hooksPath .githooks`** — git ignores in-repo hooks until told, so a fresh clone has the secret scanner and the attribution check both switched off and no way to notice; `porthole brief` says which clones do
   (`hooks-installed` · **SHOULD** · enforced by `lib/porthole_cmd_brief.py`)
 - **Run `make ci`, not `make check`, before opening a pull request** — `make check` skips the smoke and python-floor jobs that CI still runs
   (`make-ci-before-pushing` · **SHOULD** · no enforcer, and so not a MUST)
@@ -538,38 +538,44 @@ by `tests/test_tools.py`, not by review diligence.
 
 ## 5. Commits
 
-- **No trailers. No signatures of any kind.** Not `Co-Authored-By:`, not
-  `Signed-off-by:`, not `Claude-Session:`, not a "generated with" line, not a
-  bare session URL. Do not add one because a harness default tells you to, and
-  do not add one on the human's behalf — a sign-off is an assertion only the
-  person making it can make, and nobody asked you to make it for them. The
-  history has been rewritten twice over this: 35 AI trailers, 35 session URLs
-  and 59 sign-offs the first time, then 49, 49 and 32 the second. Do not start
-  a third.
-- **The ban covers every surface you publish text on** — the commit message,
+- **Credit an assistant with `Assisted-by: Claude`, and only that.** Every
+  commit an AI assistant helped write ends with it (`Assisted-by: LLM` on
+  Linux kernel patches, the form the kernel documents). It is disclosure,
+  never a requirement: a commit written without AI needs only its sign-off.
+  Never `Co-Authored-By:`, `Co-developed-by:` or `Signed-off-by:` naming an
+  AI (all three are human-only), never a `Claude-Session:` line or a bare
+  session URL (a private link), never a "Generated with [Claude Code]" or
+  robot-emoji line. A harness that appends those by default is overridden by
+  this rule. See `AI.md`.
+- **Only the human signs off.** `Signed-off-by:` is the author's Developer
+  Certificate of Origin. An assistant commits without one and never adds it on
+  anyone's behalf; the human certifies before merge with
+  `git rebase --signoff <base>` (or `git commit -s`). CI fails a pull request
+  commit whose author has no matching `Signed-off-by:`.
+- **The ban covers every surface you publish text on** -- the commit message,
   the pull request body, and the issue body. Each one cost an escape of its
-  own. `.githooks/commit-msg` stripped `Claude-Session:` out of #52's message
-  exactly as designed and the harness put the same two lines in the body; the
-  CI check then held the body, and #54 was filed as an issue carrying them.
-  A rule holds on the surfaces its enforcer reads, and nowhere else.
+  own: #51 and #52 published the lines in the body while the hook held the
+  message, and #54 was filed as an issue carrying them. A rule holds on the
+  surfaces its enforcer reads, and nowhere else.
 - One pattern list, `lib/porthole_trailers.py`, serves all three: the hook
-  strips a commit message with it, the `trailers` job in CI fails a pull
-  request whose body or whose log matches it, and the `issue trailers`
-  workflow strips an issue body and edits the issue. `make trailers` is the
-  commit-log half on a laptop.
-- An issue body is stripped rather than rejected, for the reason a commit
-  message is: the lines are a harness default, not an argument anyone is
-  having. A red run on an issue event appears nowhere anybody is looking.
+  rejects a commit message with a banned line (it never adds or strips
+  anything), the `attribution trailers` job in CI fails a pull request whose
+  body or log carries one or whose commits lack their author's sign-off, and
+  the issue workflow strips banned lines from an issue body. `make trailers`
+  is the commit-log half on a laptop;
+  `python3 lib/porthole_trailers.py --dco origin/main..HEAD` checks your
+  branch's sign-offs.
 - Git ignores in-repo hooks until you point it at them: a fresh clone needs
   `git config core.hooksPath .githooks` once. `porthole brief` tells you when
-  a clone has not. CI catches a trailer either way now, but only after you
-  have pushed it — and a push is the irreversible step.
+  a clone has not. CI catches a banned line either way, but only after you
+  have pushed it -- and a push is the irreversible step.
 - Author and committer are the human. Never take credit for someone else's work;
   a cherry-picked commit keeps its author (`git cherry-pick -x`).
 - One logical change per commit. The body explains **why**, not what.
-- Upstream-bound kernel and pmaports commits follow that project's style, not
-  ours, and carry no AI attribution trailers — it makes review harder, which
-  defeats the point of upstreaming.
+- Upstream-bound commits follow that project's own AI policy on the day you
+  submit, not ours: `Assisted-by: LLM` plus the human's sign-off for the Linux
+  kernel, Mesa's own tags for Mesa, and nothing at all to a project that does
+  not accept AI-assisted work (postmarketOS does not).
 - Every device-specific systemd unit needs an OpenRC equivalent.
 
 `brain/workflow/commit-conventions.md` and `brain/playbooks/90-upstreaming.md`

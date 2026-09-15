@@ -81,23 +81,27 @@ jobs:
         run: make smoke
 
   trailers:
-    name: no attribution trailers
+    name: attribution trailers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # The one job that needs the whole log. Every other job scans the
-          # tree, where depth 1 is enough; this one asserts that no commit
-          # message in the history carries a trailer, and at depth 1 that
-          # claim would cover a single commit and still report green.
+          # The one job that needs the whole log. It asserts that no commit
+          # message in the history carries a banned attribution line, and at
+          # depth 1 that claim would cover a single commit and still report
+          # green. The DCO check also needs the pull request's base commit.
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # The body goes through the environment, never through the shell command
-      # line: it is attacker-controlled text on a fork pull request, and
-      # `${{ }}` inside a run: block is substituted before bash ever sees it.
+      # Everything goes through the environment, never through the shell
+      # command line: the body is attacker-controlled text on a fork pull
+      # request, and `${{ }}` inside a run: block is substituted before bash
+      # ever sees it. PR_BASE..PR_HEAD is the range the DCO check reads: every
+      # non-merge commit in it needs a Signed-off-by from its author.
       - name: make trailers
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: make trailers

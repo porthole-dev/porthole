@@ -138,18 +138,26 @@ breaks somebody's muscle memory silently.
 Author and committer are the human. One logical change per commit, and the
 body explains **why**.
 
-**Commits carry no trailers, and neither do pull request bodies.** No
-`Signed-off-by:`, no `Co-Authored-By:`, no `Claude-Session:`, no generated-with
-line, no session URL. If you are working through an AI assistant, that is your
-business and not the log's — and an assistant must never sign off on your
-behalf, because a sign-off is an assertion only you can make.
+**Contributions written with or without AI are both welcome.** Two rules:
 
-The body matters as much as the message because that is where the ban leaked:
-the commit hook stripped the trailers out of #52's message and the same lines
-were published in the body. `lib/porthole_trailers.py` holds the one pattern
-list; the hook strips a message with it and the `trailers` CI job fails a pull
-request whose body or log matches it. `make trailers` runs the same check
-locally.
+- **Every commit is signed off by its author** (`git commit -s`, or
+  `git rebase --signoff <base>` before merge). The sign-off is your Developer
+  Certificate of Origin; CI fails a pull request commit whose author has no
+  matching `Signed-off-by:`. An AI assistant never adds one.
+- **If an AI assistant helped, say so** with an `Assisted-by:` trailer (for
+  example `Assisted-by: Claude`), or `Generated-by:` when it wrote nearly all
+  of it. Nothing requires the trailer: a commit written without AI needs only
+  its sign-off. `AI.md`, at the top of the repository, says how this project
+  itself uses AI.
+
+Banned on commits, pull request bodies and issue bodies alike, because it
+attributes the work wrongly: a `Co-Authored-By:`, `Co-developed-by:` or
+`Signed-off-by:` naming an AI, a `Claude-Session:` line,
+a session URL, a generated-with line. `lib/porthole_trailers.py` holds the one
+pattern list; the commit hook rejects a message with it (it never rewrites
+one), and the `attribution trailers` CI job fails a pull request whose body or
+log matches it. `make trailers` runs the log check locally, and
+`python3 lib/porthole_trailers.py --dco origin/main..HEAD` the sign-off check.
 
 A cherry-picked commit keeps its original author — `git cherry-pick -x`. On a
 community port a lot of the early device tree is someone else's work, and

@@ -38,7 +38,8 @@ import porthole_rules as rules                              # noqa: E402
 # This set is the honest record of which. Shrinking it is the work; GROWING it
 # without deciding to is what this test exists to stop.
 #
-# It is empty, and that took a leak to earn. `no-trailers` sat here alone,
+# It is empty, and that took a leak to earn. The trailer rule (then
+# `no-trailers`, now `attribution-trailers`) sat here alone,
 # annotated as a known hole, and the hole opened exactly as described: the hook
 # stripped the trailer from the commit message of #52 and the same lines went
 # out in the pull request body, which no hook and no test had ever read.
