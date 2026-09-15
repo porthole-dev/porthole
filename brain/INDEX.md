@@ -136,6 +136,7 @@ generic notes as well.
 | [a-module-reload-does-not-reset-this-cards-audio-state](traps/a-module-reload-does-not-reset-this-cards-audio-state.md) | `device:google-taimen` | A module reload re-registers the card and leaves capture broken — audio needs a reboot |
 | [a-new-window-lands-in-recents-when-the-phosh-grid-is-open](traps/a-new-window-lands-in-recents-when-the-phosh-grid-is-open.md) | `generic` | With the phosh app grid open, a launched app goes straight to recents -- and every measurement of it is void |
 | [a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist](traps/a-noarch-dependency-asks-for-a-cross-compiler-that-cannot-exist.md) | `generic` | A noarch or all dependency makes pmbootstrap ask for gcc-<native>, and every fresh workspace dies on its first packaging rung |
+| [a-package-mirror-needs-a-host-arch-index](traps/a-package-mirror-needs-a-host-arch-index.md) | `generic` | A package mirror needs a host-arch index, even for a phone port |
 | [a-partial-chroot-umount-leaves-placeholder-device-nodes](traps/a-partial-chroot-umount-leaves-placeholder-device-nodes.md) | `generic` | A partial chroot umount in the workspace leaves /dev/urandom, /dev/zero and /dev/tty as empty root-only files -- and a 5.5 h build dies on the last step |
 | [a-ram-booted-kernel-cannot-survive-a-long-sleep](traps/a-ram-booted-kernel-cannot-survive-a-long-sleep.md) | `generic` | A RAM-booted kernel cannot survive a long sleep — suspend work needs a flashed slot |
 | [a-shared-log-and-a-staged-apkbuild-are-not-a-build](traps/a-shared-log-and-a-staged-apkbuild-are-not-a-build.md) | `generic` | A staged package name and a touched log invent a build that is not running |
@@ -241,7 +242,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 44
-- `generic` — 126
+- `generic` — 127
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
