@@ -136,7 +136,7 @@ jobs:
         with:
           persist-credentials: false
       # actionlint and zizmor, versions pinned in porthole-dev/.github.
-      - uses: porthole-dev/.github/actions/workflow-lint@06b66d018629f11ebf2e305940855793dbc0b775 # v1.0.0
+      - uses: porthole-dev/.github/actions/workflow-lint@b4f7bd46f772860e6f825139e2cff7d3b25d898c # v1.0.1
 
   ci-passed:
     # The one check for a ruleset to require: fails if any job above failed or
@@ -147,6 +147,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: porthole-dev/.github/actions/ci-passed@06b66d018629f11ebf2e305940855793dbc0b775 # v1.0.0
+      - uses: porthole-dev/.github/actions/ci-passed@b4f7bd46f772860e6f825139e2cff7d3b25d898c # v1.0.1
         with:
           results: ${{ join(needs.*.result, ' ') }}
