@@ -1,0 +1,64 @@
+diff --git a/pmb/build/backend.py b/pmb/build/backend.py
+index 113df2a..2e680d2 100644
+--- a/pmb/build/backend.py
++++ b/pmb/build/backend.py
+@@ -185,6 +185,32 @@ def handle_csum_failure(apkbuild: Apkbuild, chroot: Chroot) -> None:
+         raise RuntimeError(f"Remote checksum mismatch for {apkbuild['pkgname']}")
+ 
+ 
++def rust_cross_native2_env(arch: Arch, sysroot: str = "/mnt/sysroot") -> Env:
++    """Environment for cargo to cross-compile for arch in the native chroot.
++
++    cargo and rustc run natively. The target's standard library comes from the
++    rust package in the sysroot, which is the same toolchain release as the
++    native one -- crossdirect relies on that match too (cross/crossdirect).
++
++    The sysroot goes in RUSTFLAGS, not target.<triple>.rustflags: abuild's
++    default.conf exports RUSTFLAGS, and cargo lets RUSTFLAGS replace any
++    target-scoped rustflags. abuild appends to the value passed in, and with
++    a build target set cargo passes RUSTFLAGS to target artifacts only, so
++    build scripts and proc-macros stay native: bindgen in a build script
++    loads the native libclang and is only told the target and sysroot.
++    """
++    triple = arch.alpine_triple()
++    cargo_triple = triple.upper().replace("-", "_")
++    return {
++        "CARGO_BUILD_TARGET": triple,
++        f"CARGO_TARGET_{cargo_triple}_LINKER": f"{triple}-gcc",
++        "RUSTFLAGS": f"--sysroot={sysroot}/usr -Clink-arg=--sysroot={sysroot}",
++        f"BINDGEN_EXTRA_CLANG_ARGS_{triple.replace('-', '_')}": (
++            f"--target={triple} --sysroot={sysroot}"
++        ),
++    }
++
++
+ def run_abuild(
+     context: Context,
+     apkbuild: Apkbuild,
+@@ -265,6 +291,7 @@ def run_abuild(
+             env["GOARCH"] = arch.go()
+         except ValueError:
+             logging.debug(f"Not setting $GOARCH for {arch}")
++        env.update(rust_cross_native2_env(arch))
+ 
+     elif cross == CrossCompile.CROSSDIRECT:
+         env["PATH"] = ":".join([f"/native/usr/lib/crossdirect/{arch}", pmb.config.chroot_path])
+diff --git a/pmb/build/init.py b/pmb/build/init.py
+index 5316e1e..88a6edd 100644
+--- a/pmb/build/init.py
++++ b/pmb/build/init.py
+@@ -124,8 +124,12 @@ def init_compiler(context: Context, depends: list[str], cross: CrossCompile, arc
+             cross_pkgs += ["sccache"]
+         # crossdirect for rust installs all build dependencies in the
+         # native chroot too, as some of them can be required for building
+-        # native macros / build scripts
+-        cross_pkgs += depends
++        # native macros / build scripts. cross-native2 already installs
++        # makedepends_build natively and makedepends_host in the sysroot;
++        # adding the target libraries here would build them for the native
++        # arch as well.
++        if cross == CrossCompile.CROSSDIRECT:
++            cross_pkgs += depends
+         # Rust depends on gcc and musl-dev; we always install the cross GCC
+         # but we do not install the cross musl-dev by default
+         cross_pkgs += ["musl-dev-" + arch_str]

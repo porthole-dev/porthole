@@ -104,6 +104,21 @@ RUN sed -i 's|CCACHE_DISABLE=1|CCACHE_DIR=/mnt/pmbootstrap/ccache|' \
  && ! grep -q 'CCACHE_DISABLE' /opt/pmbootstrap-src/helpers/envkernel.sh \
  || (echo "FATAL: envkernel.sh no longer carries CCACHE_DISABLE=1 where this image expects it; re-read helpers/envkernel.sh before assuming kernel builds are cached" >&2; exit 1)
 
+# Rust in cross-native2 (pmbootstrap branch build/rust-cross-native2, to be
+# sent upstream): cargo cross-compiles natively instead of the package falling
+# back to a full QEMU build. Needed because crossdirect cannot run a build
+# script that loads target libraries (bindgen's libclang), and QEMU-only took
+# over 40 minutes for a gtk4-rs/libcamera-rs app. Drop this once the pmbootstrap
+# release in the base image carries rust_cross_native2_env().
+# ASSERTED like the envkernel edit above: a patch that no longer applies fails
+# the image build instead of silently leaving Rust on the slow path.
+COPY patches/pmbootstrap-rust-cross-native2.patch /tmp/
+RUN site=$(python3 -c 'import os, pmb; print(os.path.dirname(os.path.dirname(pmb.__file__)))') \
+ && git -C "$site" apply /tmp/pmbootstrap-rust-cross-native2.patch \
+ && grep -q 'def rust_cross_native2_env' "$site/pmb/build/backend.py" \
+ && rm /tmp/pmbootstrap-rust-cross-native2.patch \
+ || (echo "FATAL: the Rust cross-native2 patch no longer applies to this pmbootstrap; check whether the release already carries it" >&2; exit 1)
+
 # The load-bearing assertion. The whole zero-privilege design rests on
 # `pmbootstrap install --no-image` returning before it ever reaches losetup
 # (docs/SANDBOX-PROVISIONING.md). If a future pmbootstrap drops that flag, the

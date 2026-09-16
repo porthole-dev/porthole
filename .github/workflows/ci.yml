@@ -125,6 +125,9 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          # Numeric, and set by GitHub: the one thing a fork's pull request
+          # cannot forge. Dependabot is exempt from the DCO, nothing else.
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
         run: make trailers
 
   workflow-lint:
@@ -136,7 +139,7 @@ jobs:
         with:
           persist-credentials: false
       # actionlint and zizmor, versions pinned in porthole-dev/.github.
-      - uses: porthole-dev/.github/actions/workflow-lint@06b66d018629f11ebf2e305940855793dbc0b775 # v1.0.0
+      - uses: porthole-dev/.github/actions/workflow-lint@b4f7bd46f772860e6f825139e2cff7d3b25d898c # v1.0.1
 
   ci-passed:
     # The one check for a ruleset to require: fails if any job above failed or
@@ -147,6 +150,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: porthole-dev/.github/actions/ci-passed@06b66d018629f11ebf2e305940855793dbc0b775 # v1.0.0
+      - uses: porthole-dev/.github/actions/ci-passed@b4f7bd46f772860e6f825139e2cff7d3b25d898c # v1.0.1
         with:
           results: ${{ join(needs.*.result, ' ') }}

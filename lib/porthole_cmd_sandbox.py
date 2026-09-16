@@ -352,14 +352,24 @@ def _containerfile_sha(root: pathlib.Path) -> str:
     existing tag forever and the workspace would quietly stay on the old
     recipe. A stale thing winning silently is the failure this repo keeps
     paying for.
+
+    The hash covers the whole build context, not the Containerfile alone: a
+    file the recipe COPYs in (sandbox/patches/*) changes the image without
+    changing the Containerfile, and hashing only the recipe kept serving the
+    image built from the previous patch.
     """
     import hashlib
 
+    context = root / "sandbox"
     try:
-        data = (root / "sandbox" / "Containerfile").read_bytes()
+        (context / "Containerfile").read_bytes()
     except OSError:
         return ""
-    return hashlib.sha256(data).hexdigest()[:16]
+    digest = hashlib.sha256()
+    for path in sorted(p for p in context.rglob("*") if p.is_file()):
+        digest.update(str(path.relative_to(context)).encode() + b"\0")
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 def _image_sha(tag: str) -> str:
