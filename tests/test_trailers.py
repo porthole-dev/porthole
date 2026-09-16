@@ -259,5 +259,46 @@ def test_a_bot_is_exempt_from_the_dco_only_when_named():
     # Signed-off-by is still a finding of the scanner, which is a separate rule.
     assert T.unsigned([bot], ("someone@else.org",)) == [("a1", T.DEPENDABOT_EMAIL)]
 
+
+def test_the_ci_path_actually_exempts_dependabot():
+    """The --ci path, not just unsigned(): the exemption has to reach dco()
+    with the right argument. A unit test of unsigned() passed while the call
+    site handed `exempt` to report_dco(), whose second argument is the output
+    stream -- which only showed up as an AttributeError on a live run."""
+    import os
+    import tempfile
+    bot = "49699333+dependabot[bot]@users.noreply.github.com"
+    env = dict(os.environ, GIT_AUTHOR_NAME="dependabot[bot]", GIT_AUTHOR_EMAIL=bot,
+               GIT_COMMITTER_NAME="dependabot[bot]", GIT_COMMITTER_EMAIL=bot,
+               GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    with tempfile.TemporaryDirectory() as d:
+        def git(*args):
+            return subprocess.run(["git", "-C", d, *args], env=env, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        git("init", "-q")
+        git("commit", "-q", "--allow-empty", "-m", "base")
+        base = git("rev-parse", "HEAD")
+        git("commit", "-q", "--allow-empty", "-m", "ci: bump the actions group")
+        head = git("rev-parse", "HEAD")
+
+        def run(author_id):
+            e = dict(env, PR_BODY="a body", PR_BASE=base, PR_HEAD=head)
+            e["PR_AUTHOR_ID"] = author_id
+            e["GITHUB_EVENT_NAME"] = "pull_request"
+            return subprocess.run(
+                [sys.executable, str(ROOT / "lib/porthole_trailers.py"), "--ci"],
+                cwd=d, env=e, capture_output=True, text=True)
+
+        exempt = run("49699333")
+        assert exempt.returncode == 0, (
+            "Dependabot was not exempted on the CI path: "
+            f"rc={exempt.returncode}\n{exempt.stdout}\n{exempt.stderr}")
+        assert "Traceback" not in exempt.stderr, exempt.stderr
+
+        human = run("1234")
+        assert human.returncode != 0, (
+            "a non-Dependabot author was exempted from the sign-off")
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
