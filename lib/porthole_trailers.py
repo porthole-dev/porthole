@@ -156,15 +156,25 @@ def strip(text: str) -> str:
     return "\n".join(kept) + ("\n" if kept else "")
 
 
-def unsigned(commits):
+# A bot has no person to certify the Developer Certificate of Origin, so a
+# sign-off from one would be meaningless. Dependabot's dependency pull requests
+# are therefore exempt -- from the sign-off alone; every other rule still
+# applies, including the one that rejects a bot named in Signed-off-by.
+DEPENDABOT_EMAIL = "49699333+dependabot[bot]@users.noreply.github.com"
+
+
+def unsigned(commits, exempt=()):
     """The commits whose author did not sign off.
 
-    `commits` is [(sha, author_email, body)]. Pure, so both directions are
-    testable without a repository: a sign-off by someone else is not the
-    author's certificate.
+    `commits` is [(sha, author_email, body)]. `exempt` is author addresses that
+    need no sign-off. Pure, so both directions are testable without a
+    repository: a sign-off by someone else is not the author's certificate.
     """
+    exempt = {e.lower() for e in exempt}
     out = []
     for sha, email, body in commits:
+        if email.lower() in exempt:
+            continue
         signers = {m.lower() for m in SIGNED_OFF.findall(body)}
         if email.lower() not in signers:
             out.append((sha, email))
@@ -194,9 +204,9 @@ def scan_history(root):
     return hits
 
 
-def dco(root, rng):
+def dco(root, rng, exempt=()):
     """unsigned() over the non-merge commits of a revision range."""
-    return unsigned(_log(root, "--no-merges", rng))
+    return unsigned(_log(root, "--no-merges", rng), exempt)
 
 
 def report(hits, out=None):
@@ -285,7 +295,12 @@ def main(argv=None):
                 print("PR_BASE/PR_HEAD unset on a pull request: the DCO check "
                       "cannot run", file=sys.stderr)
                 return 69
-            rc = report_dco(dco(root, f"{base}..{head}"))
+            # PR_AUTHOR_ID comes from the event payload, which GitHub
+            # controls. The commit's own name and address are whatever the
+            # committer typed, so they can never grant this exemption.
+            exempt = ((DEPENDABOT_EMAIL,)
+                      if os.environ.get("PR_AUTHOR_ID") == "49699333" else ())
+            rc = report_dco(dco(root, f"{base}..{head}"), exempt)
     except (subprocess.CalledProcessError, OSError) as exc:
         print(f"cannot read the commit log: {exc}", file=sys.stderr)
         return 69                      # EX_UNAVAILABLE, never 0

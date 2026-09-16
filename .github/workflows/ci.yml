@@ -125,6 +125,9 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          # Numeric, and set by GitHub: the one thing a fork's pull request
+          # cannot forge. Dependabot is exempt from the DCO, nothing else.
+          PR_AUTHOR_ID: ${{ github.event.pull_request.user.id }}
         run: make trailers
 
   workflow-lint:
