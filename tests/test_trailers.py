@@ -242,5 +242,22 @@ def test_no_commit_message_in_this_history_carries_a_banned_line():
                                     for w, n, _, h in hits))
 
 
+
+
+def test_a_bot_is_exempt_from_the_dco_only_when_named():
+    """A bot has no person to certify the DCO, so Dependabot is exempt -- but
+    only when the caller passes the exemption, which the workflow does solely
+    on the event's numeric user id. The commit's own author fields never earn
+    it, or any fork pull request could claim the exemption."""
+    bot = ("a1", T.DEPENDABOT_EMAIL, "ci: bump the actions group")
+    human = ("b2", "me@example.com", "fix: a thing")
+
+    assert T.unsigned([bot]) == [("a1", T.DEPENDABOT_EMAIL)]
+    assert T.unsigned([bot], (T.DEPENDABOT_EMAIL,)) == []
+    assert T.unsigned([human], (T.DEPENDABOT_EMAIL,)) == [("b2", "me@example.com")]
+    # The exemption is for the sign-off, not for attribution: a bot named in a
+    # Signed-off-by is still a finding of the scanner, which is a separate rule.
+    assert T.unsigned([bot], ("someone@else.org",)) == [("a1", T.DEPENDABOT_EMAIL)]
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
