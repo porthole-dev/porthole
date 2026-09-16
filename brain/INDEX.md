@@ -54,8 +54,6 @@ generic notes as well.
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
-| [the-a540-blob-brackets-gmem-passes-with-ccu-maintenance-and-re-arms-the-restore-blit](findings/the-a540-blob-brackets-gmem-passes-with-ccu-maintenance-and-re-arms-the-restore-blit.md) | `soc:msm8998` | The a540 blob brackets every GMEM pass with CCU invalidate/flush and re-arms the restore blit rectangle; fd5 does neither |
-| [the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not](findings/the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not.md) | `soc:msm8998` | The a540 userspace blob writes no a5xx register that mesa fd5 and the kernel do not already write |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
@@ -244,5 +242,5 @@ generic notes as well.
 - `device:google-taimen` — 44
 - `generic` — 127
 - `soc:gs201` — 1
-- `soc:msm8998` — 31
+- `soc:msm8998` — 29
 - `soc:qcom` — 1

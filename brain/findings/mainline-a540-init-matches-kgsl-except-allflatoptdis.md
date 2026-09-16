@@ -25,10 +25,9 @@ disables an optimisation rather than enabling one.
 
 **What this rules out** -- the whole family of "kgsl sets a bit mainline
 does not" theories for the a540 hangs, and "the clock-gating tables drift".
-Together with [[the-a540-blob-writes-no-a5xx-register-that-mesa-and-the-kernel-do-not]]
+Together with the register-level comparison kept out of this repository
 this leaves, for a software cause: register *values* and packet *order* in
-the userspace command stream (mesa fd5 vs the blob), which static analysis
-of the blob is now targeting; and for a hardware cause: the rail, now at
+the userspace command stream; and for a hardware cause: the rail, now at
 the vendor's CPR ceilings since r31, with the next hang's `.ctx` file as
 the arbiter.
 
