@@ -300,7 +300,7 @@ def main(argv=None):
             # committer typed, so they can never grant this exemption.
             exempt = ((DEPENDABOT_EMAIL,)
                       if os.environ.get("PR_AUTHOR_ID") == "49699333" else ())
-            rc = report_dco(dco(root, f"{base}..{head}"), exempt)
+            rc = report_dco(dco(root, f"{base}..{head}", exempt))
     except (subprocess.CalledProcessError, OSError) as exc:
         print(f"cannot read the commit log: {exc}", file=sys.stderr)
         return 69                      # EX_UNAVAILABLE, never 0
