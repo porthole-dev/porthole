@@ -473,5 +473,44 @@ def test_a_headless_rerun_that_would_change_something_still_refuses():
     assert "SOMEONE" not in text, "the refused value reached the file"
 
 
+def test_pmaports_clone_url_falls_back_to_upstream_with_no_fork_declared():
+    """A device that really is upstream must not be redirected anywhere."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "profiles" / "some-device").mkdir(parents=True)
+        (root / "profiles" / "some-device" / "device.env").write_text(
+            'PORTHOLE_SOC="whatever"\n')
+        assert init._pmaports_clone_url(root, "some-device") == init.PMAPORTS_URL
+
+
+def test_pmaports_clone_url_prefers_the_devices_own_fork():
+    """`could not read <pkg> pkgver/pkgrel` on a fresh clone is this bug:
+    the aport a device builds is not necessarily in upstream pmaports at
+    all, and `init` cloned vanilla postmarketOS regardless of what the
+    profile actually needs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "profiles" / "some-device").mkdir(parents=True)
+        (root / "profiles" / "some-device" / "device.env").write_text(
+            'PORTHOLE_PMAPORTS_FORK_URL="https://example.invalid/fork.git"\n')
+        assert (init._pmaports_clone_url(root, "some-device")
+                == "https://example.invalid/fork.git")
+
+
+def test_pmaports_clone_url_is_pure_given_a_root_with_no_profile():
+    """A codename that does not resolve to a profile must not raise --
+    `_choose_device`'s scaffold path calls this before a profile can exist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        assert (init._pmaports_clone_url(tmp, "nothing-here")
+                == init.PMAPORTS_URL)
+
+
+def test_taimen_declares_its_pmaports_fork():
+    """The regression this whole file exists to lock down: msm8998's 7.2
+    kernel aport is archived under a different name upstream, so a fresh
+    `porthole init` clone must not be vanilla postmarketOS for this device."""
+    assert init._pmaports_clone_url(ROOT, "google-taimen") != init.PMAPORTS_URL
+
+
 if __name__ == "__main__":
     sys.exit(run_tests(globals()))

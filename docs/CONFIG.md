@@ -48,6 +48,7 @@ parses it in ten lines, and the toolbox is half of each.
 | `PORTHOLE_PMBOOTSTRAP_SRC` | pmbootstrap checkout, for `helpers/envkernel.sh` (host builds only) | *(none)* |
 | `PORTHOLE_PMAPORTS` | pmaports checkout | pmbootstrap's `cache_git/pmaports` |
 | `PORTHOLE_PMAPORTS_<DEVICE>` | pmaports checkout for one device; beats the global | *(none)* |
+| `PORTHOLE_PMAPORTS_FORK_URL` | profile key: what `porthole init` clones for this device | vanilla `postmarketOS/pmaports` |
 | `PORTHOLE_WORKDIR` | the device working repo (kernel, pmaports, blobs) | *(none)* |
 
 The two work dirs are **different directories and not interchangeable**. A
@@ -79,6 +80,23 @@ confident wrong answer rather than an error.
 
 `PORTHOLE_ARCH_DIR` is derived, not set: `aarch64` → `arm64`, because a package
 says one and a kernel tree says the other.
+
+## pmaports fork
+
+`PORTHOLE_KERNEL_PKG` names an aport, but that aport is not necessarily in
+upstream postmarketOS pmaports at all -- most bring-ups are not, and a device
+archived there keeps the archived name, not the one the port actually builds
+(google-taimen's msm8998 kernel is `linux-postmarketos-qcom-msm8998-7.2`;
+upstream's archived one is the unversioned `linux-postmarketos-qcom-msm8998`,
+years behind).
+
+`porthole init`'s "clone a fresh one" answer for pmaports clones
+`PORTHOLE_PMAPORTS_FORK_URL` from the device's profile when it is set, and
+vanilla `https://gitlab.postmarketos.org/postmarketOS/pmaports.git` otherwise.
+Leave it empty only when the device's aports really are upstream; getting this
+wrong is silent until the first build, which fails at the very first step
+with `could not read <pkg> pkgver/pkgrel` -- the aport the build wants simply
+is not in the tree that was cloned.
 
 ## Package repository
 

@@ -270,6 +270,33 @@ def _checked_pmaports(path) -> str:
     return str(resolved)
 
 
+def _pmaports_clone_url(root, device: str) -> str:
+    """Where to clone pmaports FROM for this device. Reads the profile
+    directly, never `cfg`: `init` writes PORTHOLE_DEVICE only after this
+    question is answered, so `ctx.cfg` has not loaded the profile yet and
+    cannot say what it needs to.
+
+    Most devices this toolkit ports are not in upstream postmarketOS at
+    all -- that is what "bring-up" means -- or were archived under a
+    different package name, as taimen's msm8998 kernel was. `clone a fresh
+    one` cloning vanilla `PMAPORTS_URL` in that case produces a checkout
+    with no `device/testing/<PORTHOLE_KERNEL_PKG>` in it whatsoever, and
+    every build after `init` fails at the first line that reads the
+    aport's pkgver: `could not read <pkg> pkgver/pkgrel`. Silent, because
+    nothing upstream of that check ever named which repository was wrong.
+    `PORTHOLE_PMAPORTS_FORK_URL` in the profile is the one place a device
+    can say "clone THIS instead" for the same reason `PORTHOLE_PKG_REPO_URL`
+    already does for prebuilt packages.
+    """
+    profile = pathlib.Path(root) / "profiles" / device / "device.env"
+    try:
+        url = porthole.parse_env(profile.read_text()).get(
+            "PORTHOLE_PMAPORTS_FORK_URL", "")
+    except OSError:
+        url = ""
+    return url or PMAPORTS_URL
+
+
 def _choose_pmaports(ctx, args, prompt, cfg, device) -> tuple[str, str]:
     """Point at a checkout, or clone one. Returns (config_key, value).
 
@@ -293,6 +320,7 @@ def _choose_pmaports(ctx, args, prompt, cfg, device) -> tuple[str, str]:
         return "", ""
 
     dest = pathlib.Path.home() / ".cache/porthole/aports" / (device or "pmaports")
+    clone_url = _pmaports_clone_url(ctx.root, device)
     ctx.out.blank()
     ctx.out.heading("pmaports")
     prompt.why("Every device postmarketOS supports, and every package. It is "
@@ -300,6 +328,9 @@ def _choose_pmaports(ctx, args, prompt, cfg, device) -> tuple[str, str]:
                "device's kernel aport and device package live, and what "
                "`porthole build image`",
                "builds the system from.")
+    if clone_url != PMAPORTS_URL:
+        prompt.why(f"This device's aports are not upstream -- \"clone a "
+                   f"fresh one\" below clones {clone_url}.")
     if found:
         ctx.out.kv("found", str(found), 9)
         choice = prompt.choose([
@@ -324,10 +355,10 @@ def _choose_pmaports(ctx, args, prompt, cfg, device) -> tuple[str, str]:
 
     if (dest / "device").is_dir():
         return key, str(dest)
-    ctx.out(ctx.out.paint(f"  cloning pmaports into {dest} -- this takes a "
-                          f"minute", "grey"))
+    ctx.out(ctx.out.paint(f"  cloning {clone_url} into {dest} -- this takes "
+                          f"a minute", "grey"))
     dest.parent.mkdir(parents=True, exist_ok=True)
-    rc, err = _git("clone", PMAPORTS_URL, str(dest))
+    rc, err = _git("clone", clone_url, str(dest))
     if rc != 0:
         ctx.out.warn(f"could not clone pmaports: {err.splitlines()[-1] if err else rc}")
         return "", ""
