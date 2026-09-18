@@ -80,6 +80,27 @@ def test_doctor_offers_fix_and_dry_run():
     assert "--fix" in flags and "--dry-run" in flags, flags
 
 
+
+class Skip(Exception):
+    """A case this environment cannot decide. `tests/_runner.py` prints it as
+    a visible `skip` line rather than swallowing it -- silence is what this
+    repo already paid for once, when 28 findings reached CI behind a linter
+    that printed "skipping" and exited 0."""
+
+
+def _root_cannot_test_permissions():
+    """Root ignores the mode bits, so a test that makes a directory unwritable
+    and expects a refusal cannot fail here -- and therefore cannot pass.
+
+    `make floor` runs the suite as uid 0 inside the container, so these were
+    red on every local `make ci` while green on GitHub, whose runner is an
+    ordinary user. A check that fires on a healthy tree gets muted
+    (brain/laws/a-check-that-fires-on-a-healthy-tree-gets-muted.md), and this
+    one was muting the whole target."""
+    if os.getuid() == 0:
+        raise Skip("runs as root, which ignores the mode bits this asserts "
+                   "-- run `make test` as an ordinary user for this case")
+
 class _Ctx:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -882,6 +903,7 @@ def test_the_write_probe_really_catches_an_unwritable_directory():
     """The one branch that does NOT need faking, so it is not faked: a real
     directory, really made unwritable, really probed. Without this the routing
     tests above could all pass over a probe that never fails at all."""
+    _root_cannot_test_permissions()
     d = pathlib.Path(tempfile.mkdtemp(prefix="porthole-doctor-ro-"))
     os.chmod(d, 0o500)
     try:

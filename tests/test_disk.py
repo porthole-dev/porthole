@@ -220,8 +220,21 @@ def test_divergence_and_sizes_are_reported():
         payload = json.loads(out)
         assert payload["divergence"], payload
         assert payload["divergence"][0]["package"] == "device-google-taimen"
-        assert payload["host"]["bytes"] == 5, payload
-        assert payload["sandbox"]["bytes"] == 5, payload
+        # `>=`, not `==`. `_dir_size_bytes` runs `du -sb`, whose total includes
+        # the APPARENT SIZE OF THE DIRECTORIES, and that is a property of the
+        # filesystem rather than of porthole: measured 2026-09-18 on the same
+        # tree, btrfs answers 5 for these three dirs plus the 5-byte apk, and
+        # the floor container's overlayfs answers 53. `== 5` was asserting the
+        # developer's filesystem, so `make floor` was red on a healthy tree --
+        # brain/laws/a-check-that-fires-on-a-healthy-tree-gets-muted.md.
+        #
+        # What the row must actually prove is that a size was MEASURED and
+        # that our bytes are in it, which is what these two assert. The
+        # empty size_error is the positive control: without it a `du` that
+        # failed outright would report 0 and still satisfy a `>=` on nothing.
+        assert payload["host"]["size_error"] == "", payload
+        assert payload["host"]["bytes"] >= 5, payload
+        assert payload["sandbox"]["bytes"] >= 5, payload
 
 
 def test_prune_without_yes_is_refused_and_deletes_nothing():
