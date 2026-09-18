@@ -5,6 +5,23 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- **`porthole doctor` reports the kernel tree**: which one, which key chose
+  it, the branch, how many sibling `linux*` trees are beside it, and whether
+  it is SHALLOW. Shallow is the row that matters: a shallow tree cannot
+  `format-patch` a series or rebase onto another base, so when the base has to
+  move, cloning again is the only move the tree allows -- which is how this
+  host ended up with `taimen/linux` (16 GB, `wifi-disablekey-test`) and
+  `taimen/linux-ws` (4.6 GB, `camera/camss-plain16`), two shallow clones of
+  the same remote, plus a third `linux-ws` with no `.git` at all. The fix the
+  row prints is `fetch --unshallow` and `git worktree add`, because the cure
+  is one full clone with a worktree per task, not a bigger warning.
+- `brain/findings/rust-does-not-fix-the-errors-agents-make-here.md` --
+  every bug this port lost a session to, classified. None is a memory- or
+  type-safety defect, so a Rust rewrite of porthole, pmbootstrap or the
+  msm8998 drivers does not address them; `refutes:` names the four theories
+  so the next search finds this instead of re-deriving it.
+
+### Added
 - **A device's prebuilt package repository** (`PORTHOLE_PKG_REPO_URL`,
   `_SYSTEMD_URL`, `_KEY`; google-taimen points at porthole-dev/pmos-packages).
   `porthole sandbox up` probes it -- device AND host arch index, anonymously,
@@ -216,6 +233,25 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   `clip` now takes the colour off and cuts the plain text.
 
 ### Changed
+- **The DCO check no longer runs on a pull request from this repository**, only
+  on one from a fork. Only someone with write access can open the former, so
+  the certificate was this project demanding one of itself about its own work:
+  an assistant correctly never signs off, so every agent pull request opened
+  red and stayed red until a human ran a tool whose only job was to add the
+  missing line. A gate that is always red and always cleared the same way
+  trains people to clear it unread. Our own branches are certified by a
+  Code-Owner review and the merge; a series bound **upstream** still needs a
+  real sign-off, and `porthole aports` still enforces that one. The banned-
+  attribution scan is untouched on all three surfaces. `tools/ph-pr-signoff.py`
+  is removed with the gate it existed to clear.
+- **`porthole doctor`: `PMB_SUDO` set is a warning, not a failure.** The
+  failure was the bug -- `child_env()` already strips it from every child
+  process porthole starts, so the row was telling agents their next build
+  would die when it could not. Three sessions went off to edit the host
+  environment over it and one reached for `PMB_SUDO=sudo`, the blanket
+  credential cache this subsystem exists to retire. The row now says it is
+  ignored and points at `porthole sandbox up`. A leftover broker *binary* on
+  disk is still a failure: that one is standing host privilege.
 - `porthole init`'s prompts and menus use the toolkit's own output vocabulary.
   It held the only hand-rolled interaction in the repository -- a bare
   `input()` and numbered menus with the indentation typed in by hand -- and it
