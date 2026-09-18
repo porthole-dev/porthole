@@ -996,6 +996,64 @@ def test_an_unpinned_kernel_tree_says_which_key_chose_it():
         assert "default: <workdir>/linux" in row["detail"], row["detail"]
 
 
+
+def test_the_tree_audit_finds_a_checkout_nested_inside_another():
+    """The bug this shipped with, kept as a test. The first version stopped
+    descending the moment it found a checkout, which is the obvious
+    optimisation and is wrong here: the WORKING REPO is itself a git
+    repository with the kernel trees inside it, so the walk reported `taimen`
+    and missed `taimen/linux` and `taimen/linux-ws` -- the two it exists to
+    surface. It reported "1 of 1 checkout(s)" and looked healthy."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        work = pathlib.Path(d) / "work"
+        _kernel_repo(work)                       # the working repo itself
+        _kernel_repo(work / "linux", branch="taimen-v7.2")
+        _kernel_repo(work / "linux-ws", branch="camera/camss-plain16")
+        ch = doctor.Checks()
+        doctor._check_stray_trees(ch, {"PORTHOLE_WORKDIR": str(work)})
+        row = _row(ch, "host: stray trees")
+        assert "of 3 checkout(s)" in row["detail"], row["detail"]
+        assert "linux-ws" in row["detail"], row["detail"]
+
+
+def test_the_registered_tree_is_not_called_a_stray():
+    """The positive control for the row above: if nothing were ever
+    registered, "9 strays" would be unfalsifiable. The tree the config names
+    must be excluded, or the warning is noise on a correct setup and gets
+    muted."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        work = pathlib.Path(d) / "work"
+        _kernel_repo(work / "linux")
+        ch = doctor.Checks()
+        doctor._check_stray_trees(
+            ch, {"PORTHOLE_WORKDIR": str(work),
+                 "PORTHOLE_KERNEL_TREE": str(work / "linux")})
+        row = _row(ch, "host: stray trees")
+        assert row["status"] == "ok", row
+        assert "all accounted for" in row["detail"], row["detail"]
+
+
+def test_the_tree_audit_never_fails_the_doctor():
+    """A stray checkout is frequently deliberate -- a reference tree, someone
+    else's experiment. Failing on one would fire on a healthy host, and
+    brain/laws/a-check-that-fires-on-a-healthy-tree-gets-muted.md is what
+    happens next."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        work = pathlib.Path(d) / "work"
+        _kernel_repo(work / "ref" / "somebody-elses", branch="main")
+        ch = doctor.Checks()
+        doctor._check_stray_trees(ch, {"PORTHOLE_WORKDIR": str(work)})
+        assert _row(ch, "host: stray trees")["status"] != "fail", ch.rows
+
+
+def test_the_tree_audit_offers_a_flag():
+    flags = [names[0] for names, _kw in doctor.SPEC["args"]]
+    assert "--trees" in flags, flags
+
+
 if __name__ == "__main__":
     sys.exit(main())
 

@@ -21,14 +21,18 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 
 - **`porthole doctor` reports the kernel tree**: which one, which key chose
   it, the branch, how many sibling `linux*` trees are beside it, and whether
-  it is SHALLOW. Shallow is the row that matters: a shallow tree cannot
+  it is SHALLOW -- which is the one that matters: a shallow tree cannot
   `format-patch` a series or rebase onto another base, so when the base has to
-  move, cloning again is the only move the tree allows -- which is how this
-  host ended up with `taimen/linux` (16 GB, `wifi-disablekey-test`) and
-  `taimen/linux-ws` (4.6 GB, `camera/camss-plain16`), two shallow clones of
-  the same remote, plus a third `linux-ws` with no `.git` at all. The fix the
-  row prints is `fetch --unshallow` and `git worktree add`, because the cure
-  is one full clone with a worktree per task, not a bigger warning.
+  move, a fresh clone becomes the only move available. Both of this host's
+  kernel trees are shallow. The fix the row prints is `fetch --unshallow` and
+  `git worktree add`.
+- **`porthole doctor --trees`** -- every git checkout under the working repo
+  that no config key names, with its branch, whether it is a linked worktree,
+  shallow and dirty. Bounded to three levels, never entering `.git`; ~1 s on
+  this host. Read-only: it names things and never moves or deletes one,
+  because whether a dirty directory holds work worth keeping is not a
+  machine's call. It found 9 unregistered checkouts here, including a `dtbo`
+  and three `ref/` clones.
 - `brain/findings/rust-does-not-fix-the-errors-agents-make-here.md` --
   every bug this port lost a session to, classified. None is a memory- or
   type-safety defect, so a Rust rewrite of porthole, pmbootstrap or the

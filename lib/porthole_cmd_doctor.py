@@ -10,6 +10,7 @@ nothing and something red happened".
 from __future__ import annotations
 
 import collections
+import contextlib
 import errno
 import os
 import pathlib
@@ -359,21 +360,31 @@ def _check_kernel_tree(ch: Checks, cfg) -> None:
     """WHICH kernel tree, is it pinned, and can it export a patch series.
 
     THE PROBLEM THIS REPORTS, MEASURED
-        On the reference host, 2026-09-18: `taimen/linux` 16 GB on branch
-        `wifi-disablekey-test` and `taimen/linux-ws` 4.6 GB on
-        `camera/camss-plain16` -- two clones of the SAME remote, both
-        SHALLOW, plus a third `linux-ws` under publish-sweep/ with no `.git`
-        at all. Nobody decided that. It is what the trees make people do.
+        On the reference host, 2026-09-18: `taimen/linux` on
+        `wifi-disablekey-test` and `taimen/linux-ws` on
+        `camera/camss-plain16`, both SHALLOW.
 
-        Shallow is the cause, not the symptom. A shallow tree cannot
-        `format-patch` a series or rebase onto a different base, which is
-        exactly what the aports workflow needs -- so when the base has to
-        move, cloning again is the only move the tree allows. Every extra
-        `linux*` directory in this workdir was a rational response to that.
+        A FIRST READING OF THIS WAS WRONG and is recorded because the wrong
+        version is the intuitive one. Two directories, both 16 GB and 4.6 GB,
+        both reporting `torvalds/linux.git` as origin, read as two clones of
+        one remote -- 20 GB of duplicated history. They are not.
+        `taimen/linux-ws/.git` is a FILE reading
+        `gitdir: .../taimen/linux/.git/worktrees/linux-ws`: it is a linked
+        WORKTREE, sharing one object store. `git remote get-url` answers the
+        same for both precisely BECAUSE they share it. The size is
+        checked-out files and build output, which two branches genuinely
+        need, not history.
 
-        The cure is one FULL clone with `git worktree` per task, not a
-        report. This row is how you see which tree you are standing in
-        before you build, and how the migration knows when it is done.
+        So the layout here is already one clone with worktrees, and the thing
+        actually worth reporting is what is left:
+
+        SHALLOW is the real trap, and it is real on both. A shallow tree
+        cannot `format-patch` a series or rebase onto a different base, which
+        is exactly what the aports workflow needs -- so when the base has to
+        move, a fresh clone becomes the only move the tree allows. That is
+        how sprawl starts, and `--trees` finds the ones that already have.
+
+    This row is how you see which tree you are standing in before you build.
 
     WHY IT IS A ROW AND NOT A VERB
         A `porthole workspace` verb was drafted for this. It would have been
@@ -423,6 +434,100 @@ def _check_kernel_tree(ch: Checks, cfg) -> None:
                    f"the next time a branch needs a different base")
         return
     ch.add("host: kernel tree", "ok", f"{tree} on {branch}{extra}  (via {via})")
+
+
+def _check_stray_trees(ch: Checks, cfg) -> None:
+    """Every git checkout under the working repo, and which ones nothing points
+    at. READ-ONLY: it names things, it never moves or deletes one.
+
+    This is the audit half of `host: kernel tree`. That row answers "which tree
+    am I in"; this one answers "what else is lying around", which is the
+    question the 20.6 GB of duplicate kernel trees on the reference host made
+    unanswerable without a manual `find`.
+
+    BOUNDED, because the alternative is unusable: at most three levels below
+    the working repo, never into `.git`, `node_modules` or `__pycache__`.
+
+    It does NOT stop at the first checkout it finds, and that is the whole
+    point. The working repo is ITSELF a git repository with the kernel trees
+    inside it, so a walk that stopped there reported `taimen` and missed
+    `taimen/linux` and `taimen/linux-ws` -- the two this exists to surface.
+    Measured with them present: under a second, because three levels of a
+    kernel tree is a few thousand stats and nothing is read.
+
+    A linked WORKTREE is called out separately from a clone. It is the cheap,
+    correct way to have two branches of one history and the thing the migration
+    is moving toward, so counting one as sprawl would push people back to the
+    clone that caused this.
+    """
+    workdir = (cfg.get("PORTHOLE_WORKDIR") or "").strip()
+    if not workdir or not pathlib.Path(workdir).is_dir():
+        ch.add("host: stray trees", "warn",
+               "no working repo to scan -- set PORTHOLE_WORKDIR first")
+        return
+    root = pathlib.Path(workdir)
+    try:
+        from porthole_cmd_build import _tree
+        known = {_tree(cfg).resolve()}
+    except Exception:  # noqa: BLE001 -- an audit must not fail on resolution
+        known = set()
+    for key in ("PORTHOLE_PMAPORTS", "PORTHOLE_KERNEL_TREE"):
+        value = (cfg.get(key) or "").strip()
+        if value:
+            with contextlib.suppress(OSError):
+                known.add((root / value).resolve())
+
+    found, strays = [], []
+    for current, dirs, files in os.walk(root, followlinks=False):
+        here = pathlib.Path(current)
+        if ".git" in dirs or ".git" in files:
+            linked = ".git" in files           # a worktree's .git is a FILE
+            shallow = _git_read(here, "rev-parse",
+                                "--is-shallow-repository") == "true"
+            branch = _git_read(here, "rev-parse", "--abbrev-ref", "HEAD")
+            dirty = bool(_git_read(here, "status", "--porcelain"))
+            row = {"path": here, "linked": linked, "shallow": shallow,
+                   "branch": branch or "detached", "dirty": dirty}
+            found.append(row)
+            if here.resolve() not in known:
+                strays.append(row)
+        dirs[:] = [d for d in dirs
+                   if not d.startswith(".") and d not in ("node_modules",
+                                                          "__pycache__")]
+        if len(here.relative_to(root).parts) >= 3:
+            dirs[:] = []
+
+    def describe(row):
+        marks = [row["branch"]]
+        if row["linked"]:
+            marks.append("worktree")
+        if row["shallow"]:
+            marks.append("SHALLOW")
+        if row["dirty"]:
+            marks.append("dirty")
+        return "{} ({})".format(row["path"], ", ".join(marks))
+
+    if not strays:
+        ch.add("host: stray trees", "ok",
+               "{} checkout(s) under {}, all accounted for".format(
+                   len(found), root))
+        return
+    # A WARNING, never a failure. Some of these are deliberate -- a reference
+    # tree, a colleague's experiment -- and a check that fires on a healthy
+    # tree gets muted (brain/laws/a-check-that-fires-on-a-healthy-tree-gets-
+    # muted.md). Deciding whether a directory holds work worth keeping is not
+    # a machine's call, which is the same bar `porthole sync` holds for a
+    # dirty tree.
+    ch.add("host: stray trees", "warn",
+           "{} of {} checkout(s) are not named by any config key: {}".format(
+               len(strays), len(found),
+               "; ".join(describe(r) for r in strays[:6])),
+           fix="nothing is moved or deleted by this check. A SHALLOW one is "
+               "the one to deal with first: it cannot format-patch or rebase "
+               "onto another base, which is what makes a second clone the "
+               "only way forward. `git -C <tree> fetch --unshallow`, then "
+               "`git worktree add` off it for the next branch. Check a dirty "
+               "one holds nothing you want before retiring it")
 
 
 def _git_read(path, *args) -> str:
@@ -1717,6 +1822,8 @@ def cmd_doctor(args, ctx) -> int:
     check_profile(ch, cfg, ctx.root)
     check_pkg_repo(ch, ctx, cfg, deep=args.all)
     check_identity(ch, cfg)
+    if getattr(args, 'trees', False) or args.all:
+        _check_stray_trees(ch, cfg)
     if args.no_device:
         ch.add("device: state", "skip", "--no-device")
     else:
@@ -1843,6 +1950,9 @@ SPEC = {
                        "help": "also check every tool is self-describing"}),
         (["--bench"], {"action": "store_true",
                        "help": "also measure the performance budgets"}),
+        (["--trees"], {"action": "store_true",
+                       "help": "also find git checkouts under the working "
+                               "repo that no config key names"}),
         (["--all"], {"action": "store_true", "help": "every check"}),
         (["--no-device"], {"action": "store_true",
                            "help": "skip anything that touches the device"}),
@@ -1857,5 +1967,6 @@ SPEC = {
         "porthole doctor --no-device        # host only, device unplugged",
         "porthole doctor --all --json       # everything, for an agent",
         "porthole doctor --bench            # measure, do not trust, the budgets",
+        "porthole doctor --trees            # what checkouts are lying around",
     ],
 }
