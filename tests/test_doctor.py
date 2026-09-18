@@ -98,16 +98,33 @@ def _row(ch, name):
     return hits[-1]
 
 
-def test_a_dangling_pmb_sudo_fails_with_a_named_fix():
-    """Reported from a real session: the broker was gone, PMB_SUDO still
-    pointed at it, and the build died with exit 78 deep inside pmbootstrap
-    without anything mentioning PMB_SUDO."""
+def test_a_dangling_pmb_sudo_warns_and_points_at_the_sandbox():
+    """It used to FAIL, and the failure was the bug: child_env() already
+    strips PMB_SUDO from every child porthole starts, so the row was telling
+    agents their next build would die when it could not. Three sessions went
+    and edited the host environment over it; one reached for `PMB_SUDO=sudo`,
+    the blanket credential cache this subsystem exists to retire.
+
+    So: a warning, and a fix that sends you to the sandbox rather than to your
+    shell profile."""
     ch = doctor.Checks()
     doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": "/nonexistent/ph-sudo"}), {})
     row = _row(ch, "host: PMB_SUDO")
-    assert row["status"] == "fail", row
-    assert "unset PMB_SUDO" in row["fix"], row["fix"]
-    assert "78" in row["fix"], "the fix should name the exit code you would see"
+    assert row["status"] == "warn", row
+    assert "ignored" in row["detail"], row["detail"]
+    assert "porthole sandbox up" in row["fix"], row["fix"]
+    # The way out it must NOT leave open, since that is what was reached for.
+    assert "Do NOT set it to `sudo`" in row["fix"], row["fix"]
+
+
+def test_pmb_sudo_never_fails_the_doctor():
+    """The point of the change, stated as its own assertion: a stale export
+    must not be able to take `porthole doctor` non-zero. doctor exits non-zero
+    on FAIL only, so a `warn` here is what keeps a fresh session from opening
+    on a red toolbox over a variable nothing reads."""
+    ch = doctor.Checks()
+    doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": "sudo"}), {})
+    assert _row(ch, "host: PMB_SUDO")["status"] != "fail", ch.rows
 
 
 def test_an_unset_pmb_sudo_is_fine():
@@ -126,11 +143,15 @@ def test_any_pmb_sudo_at_all_is_caught():
     """The privilege broker is gone, so PMB_SUDO can only be a leftover -- but
     an export outlives the file it named, pmbootstrap invokes it directly, and
     a stale one kills a build with exit 78 naming nothing. Both agent reports
-    that hit this had the variable set; neither could see why."""
+    that hit this had the variable set; neither could see why.
+
+    Reported, not failed, since child_env() now strips it -- but a value
+    pointing at the deleted broker is still named on sight, because the
+    NEXT row is the one that fails on the file itself."""
     ch = doctor.Checks()
     doctor._check_pmb_sudo(ch, _Ctx({"PMB_SUDO": "/usr/local/libexec/porthole/ph-sudo"}), {})
     row = _row(ch, "host: PMB_SUDO")
-    assert row["status"] == "fail", row
+    assert row["status"] == "warn", row
     assert "unset PMB_SUDO" in row["fix"], row["fix"]
 
     saved = os.environ.pop("PMB_SUDO", None)
@@ -878,6 +899,79 @@ def test_the_write_probe_leaves_nothing_behind():
     code, _why = doctor._write_probe(d)
     assert code == "", code
     assert list(d.iterdir()) == [], list(d.iterdir())
+
+
+
+def _kernel_repo(tmp, branch="main", shallow=False):
+    """A real git repo with a Makefile, because _check_kernel_tree shells out
+    to git and a fake would only prove the fake works."""
+    import subprocess
+    tmp.mkdir(parents=True, exist_ok=True)
+    (tmp / "Makefile").write_text("# kernel\n")
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e.x",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e.x",
+           "PATH": os.environ.get("PATH", "")}
+    def git(*a):
+        subprocess.run(["git", "-C", str(tmp), *a], check=True,
+                       capture_output=True, env=env)
+    git("init", "-q", "-b", branch)
+    git("add", "Makefile")
+    git("commit", "-qm", "base")
+    if shallow:
+        (tmp / ".git" / "shallow").write_text("")
+    return tmp
+
+
+def test_a_shallow_kernel_tree_is_named_as_the_thing_that_forces_a_reclone():
+    """The measured mess -- two shallow clones of one remote on two branches
+    -- is caused by shallow, not by carelessness: a shallow tree cannot
+    format-patch or rebase onto another base, so a new base means a new
+    clone. The row has to say that, or the reader fixes the wrong thing."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tree = _kernel_repo(pathlib.Path(d) / "work" / "linux", shallow=True)
+        ch = doctor.Checks()
+        doctor._check_kernel_tree(ch, {"PORTHOLE_KERNEL_TREE": str(tree)})
+        row = _row(ch, "host: kernel tree")
+        assert row["status"] == "warn", row
+        assert "SHALLOW" in row["detail"], row["detail"]
+        assert "fetch --unshallow" in row["fix"], row["fix"]
+        assert "git worktree add" in row["fix"], (
+            "the fix must name the thing that stops the NEXT clone", row["fix"])
+
+
+def test_a_full_kernel_tree_is_ok_and_counts_its_siblings():
+    """The positive control for the row above: the same code path on a tree
+    that is fine must say ok, or the warning proves nothing. Siblings are
+    counted because 'which of these am I building' is the question that the
+    20 GB of duplicate trees made unanswerable."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        work = pathlib.Path(d) / "work"
+        tree = _kernel_repo(work / "linux", branch="taimen-v7.2")
+        _kernel_repo(work / "linux-ws", branch="camera/camss-plain16")
+        ch = doctor.Checks()
+        doctor._check_kernel_tree(ch, {"PORTHOLE_KERNEL_TREE": str(tree)})
+        row = _row(ch, "host: kernel tree")
+        assert row["status"] == "ok", row
+        assert "taimen-v7.2" in row["detail"], row["detail"]
+        assert "linux-ws" in row["detail"], (
+            "a sibling tree must be visible, not silently ignored", row["detail"])
+
+
+def test_an_unpinned_kernel_tree_says_which_key_chose_it():
+    """`via` is the whole point of the row: the complaint that produced the
+    pmaports row was 'I cannot tell which variable is effective', and the
+    kernel tree has the same four-way ambiguity."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        work = pathlib.Path(d) / "work"
+        _kernel_repo(work / "linux")
+        ch = doctor.Checks()
+        doctor._check_kernel_tree(ch, {"PORTHOLE_WORKDIR": str(work)})
+        row = _row(ch, "host: kernel tree")
+        assert "default: <workdir>/linux" in row["detail"], row["detail"]
 
 
 if __name__ == "__main__":
