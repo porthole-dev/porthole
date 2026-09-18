@@ -230,7 +230,7 @@ patched. `brain/findings/the-workspace-caches-kernel-compiles.md`.
   (`prove-it-ran` · **SHOULD**)
 - **Write down anything that would have saved someone a session** — `porthole brain new <id>`, then lint, then submit. A session that learned something and wrote nothing down is unfinished
   (`contribute-what-you-learn` · **SHOULD**)
-- **Every pull request commit is signed off by its author; if an AI helped, disclose it with `Assisted-by:`, never as a co-author, sign-off, session or generated-with line** — a sign-off is a DCO certificate only its author can give and Co-authored-by is a human-only tag, so CI fails an unsigned pull request commit and a wrong attribution on the commit message, the pull request body or the issue body; Assisted-by is disclosure, never a requirement
+- **If an AI helped, disclose it with `Assisted-by:` -- never as a co-author, sign-off, session or generated-with line. Sign off only what is bound upstream** — Co-authored-by is a human-only tag and a sign-off is a DCO certificate only its author can give, so CI fails a wrong attribution on the commit message, the pull request body or the issue body, on all three surfaces. Assisted-by is disclosure, never a requirement. A sign-off is NOT required on our own pull requests: a Code-Owner review and the merge certify those, and a gate that was red on every agent branch until a human ran a tool to add the line taught people to clear it without reading
   (`attribution-trailers` · **MUST**)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST**)

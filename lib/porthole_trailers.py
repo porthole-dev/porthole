@@ -5,7 +5,7 @@
 AGENTS.md section 5 and AI.md state the convention. This is the half of it
 that runs:
 
-    REQUIRED ON A PULL REQUEST
+    REQUIRED ON A PULL REQUEST FROM A FORK
       Signed-off-by: <author>    the author's Developer Certificate of Origin,
                                  added by that human, never by an assistant
     OPTIONAL, AND ACCEPTED
@@ -29,11 +29,28 @@ The surfaces, and what reads each one:
 Hooks never add or strip anything from a commit message. They only reject a
 banned line, so what lands in the log is what a person typed.
 
-THE DCO CHECK
-    On a pull request every non-merge commit in base..head must carry a
-    `Signed-off-by:` with its author's address -- the same check the kernel's
-    and most DCO bots make. An assistant commits without one; the human
-    certifies before merge with `git rebase --signoff <base>`.
+THE DCO CHECK, AND WHY IT ONLY RUNS ON A FORK
+    On a pull request from a FORK every non-merge commit in base..head must
+    carry a `Signed-off-by:` with its author's address -- the same check the
+    kernel's and most DCO bots make. That is the case the DCO was designed
+    for: an outside contributor certifying they may give us the code.
+
+    It does NOT run on a pull request from a branch of this repository, and
+    that is a deliberate retirement rather than an oversight. Only someone
+    with write access can open one, every such branch is our own work, and
+    the certificate was being demanded of us, by us, about our own commits.
+    An assistant correctly never signs off, so every agent pull request was
+    red from the moment it opened and stayed red until a human ran a tool
+    whose only job was to add the missing line. A gate that is always red and
+    always cleared the same way teaches people to clear it without reading,
+    which is worse than no gate: it spends the attention a real check needs.
+
+    What certifies our own work is a Code-Owner review and the merge, by a
+    human, recorded by GitHub. docs/CONTRIBUTING.md states that policy.
+
+    Patches we send UPSTREAM are a different gate and still need a real
+    sign-off from their human author at submission time. `porthole aports`
+    enforces that one, and it is untouched here.
 
 THIS FILE NEVER SCANS THE TRACKED TREE
     lib/porthole_secrets.py does. A banned line is only a problem where it is
@@ -247,7 +264,8 @@ def main(argv=None):
                          "by its author, e.g. origin/main..HEAD")
     ap.add_argument("--ci", action="store_true",
                     help="scan every reachable message and $PR_BODY; on a pull "
-                         "request also the DCO check over $PR_BASE..$PR_HEAD")
+                         "request from a FORK also the DCO check over "
+                         "$PR_BASE..$PR_HEAD")
     args = ap.parse_args(argv)
 
     if args.scan:
@@ -278,6 +296,13 @@ def main(argv=None):
     hits, rc = [], 0
     body = os.environ.get("PR_BODY")
     is_pr = args.ci and os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
+    # Set from `github.event.pull_request.head.repo.fork`, which GitHub
+    # computes -- not from anything the branch or the commits can say. Absent
+    # means "not a fork": a workflow that forgot to pass it gets the lenient
+    # answer on purpose, because the strict one would fail every pull request
+    # in the repository over a missing variable, which is the outage this
+    # check is being retired for causing.
+    is_fork = os.environ.get("PR_FORK") == "true"
     if body:
         hits += scan(body, "pull request body")
     elif is_pr:
@@ -287,7 +312,7 @@ def main(argv=None):
               file=sys.stderr)
     try:
         hits += scan_history(root)
-        if is_pr:
+        if is_pr and is_fork:
             base, head = os.environ.get("PR_BASE"), os.environ.get("PR_HEAD")
             if not (base and head):
                 # brain/laws/exit-codes-are-an-api.md: "could not run" is not

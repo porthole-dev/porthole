@@ -105,10 +105,12 @@ ci: check smoke floor trailers ## every job CI runs, plus the python floor
 	@echo
 	@echo "== green here means green on GitHub: the jobs run these same targets =="
 
-trailers:        ## CI job "Commit check": banned lines in the log/PR body; DCO on a PR
+trailers:        ## CI job "Commit check": banned lines in the log and PR body
 	@# The pull request body and range are only reachable when the workflow
 	@# exports PR_BODY, PR_BASE and PR_HEAD; locally this is the commit-log half.
-	@# Check your own branch's sign-offs with:
+	@# The DCO half runs on a pull request from a FORK only -- our own branches
+	@# are certified by a Code-Owner review and the merge. `--dco RANGE` still
+	@# checks a range by hand, which is what a series bound upstream wants:
 	@#   python3 lib/porthole_trailers.py --dco origin/main..HEAD
 	@# AGENTS.md section 5.
 	@$(PY) lib/porthole_trailers.py --ci && echo "trailers                     ok"

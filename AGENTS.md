@@ -98,7 +98,7 @@ rule cost to learn, and how to follow it.
   (`state-what-you-verified` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
 - **Never publish anything on the sensitive list** — docs/HANDOFF-contribution-rules.md section 4.5; publication is irreversible and redaction is free
   (`no-secrets` · **MUST** · enforced by `tests/test_secrets.py`, `.githooks/commit-msg`, `.githooks/pre-push`)
-- **Every pull request commit is signed off by its author; if an AI helped, disclose it with `Assisted-by:`, never as a co-author, sign-off, session or generated-with line** — a sign-off is a DCO certificate only its author can give and Co-authored-by is a human-only tag, so CI fails an unsigned pull request commit and a wrong attribution on the commit message, the pull request body or the issue body; Assisted-by is disclosure, never a requirement
+- **If an AI helped, disclose it with `Assisted-by:` -- never as a co-author, sign-off, session or generated-with line. Sign off only what is bound upstream** — Co-authored-by is a human-only tag and a sign-off is a DCO certificate only its author can give, so CI fails a wrong attribution on the commit message, the pull request body or the issue body, on all three surfaces. Assisted-by is disclosure, never a requirement. A sign-off is NOT required on our own pull requests: a Code-Owner review and the merge certify those, and a gate that was red on every agent branch until a human ran a tool to add the line taught people to clear it without reading
   (`attribution-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`, `.github/workflows/issue-trailers.yml`)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST** · enforced by `tests/test_brain.py::test_the_index_is_current`)
@@ -541,20 +541,25 @@ by `tests/test_tools.py`, not by review diligence.
 - **Credit an assistant with `Assisted-by: Claude`, and only that.** Every
   commit an AI assistant helped write ends with it (`Assisted-by: LLM` on
   Linux kernel patches, the form the kernel documents). It is disclosure,
-  never a requirement: a commit written without AI needs only its sign-off.
+  never a requirement: a commit written without AI needs nothing.
   Never `Co-Authored-By:`, `Co-developed-by:` or `Signed-off-by:` naming an
   AI (all three are human-only), never a `Claude-Session:` line or a bare
   session URL (a private link), never a "Generated with [Claude Code]" or
   robot-emoji line. A harness that appends those by default is overridden by
   this rule. See `AI.md`.
-- **Only the human signs off.** `Signed-off-by:` is the author's Developer
-  Certificate of Origin. An assistant commits without one and never adds it on
-  anyone's behalf; the human certifies before merge with
-  `git rebase --signoff <base>` (or `git commit -s`), or with
-  `tools/ph-pr-signoff.py OWNER/REPO N --merge` on a pull request with no local
-  clone. CI fails a pull request commit whose author has no matching
-  `Signed-off-by:`. Never run that tool yourself except with `--dry-run`:
-  running it is the human's certificate.
+- **Only the human signs off, and only where a sign-off means something.**
+  `Signed-off-by:` is the author's Developer Certificate of Origin. An
+  assistant commits without one and never adds it on anyone's behalf.
+
+  **A pull request on this repository does not need one**, and CI no longer
+  asks: only someone with write access can open one, so the certificate would
+  be this project asking itself about its own work. It is certified by a
+  Code-Owner review and the merge — a human reading the diff. CI still
+  requires it on a pull request **from a fork**, which is the case the DCO was
+  designed for, and `porthole aports` still requires it on a series bound
+  **upstream**. Those two are real gates; the one that used to run on our own
+  branches was red on every agent pull request until a human ran a tool to add
+  the missing line, which is a gate that trains people to clear it unread.
 - **The ban covers every surface you publish text on** -- the commit message,
   the pull request body, and the issue body. Each one cost an escape of its
   own: #51 and #52 published the lines in the body while the hook held the
