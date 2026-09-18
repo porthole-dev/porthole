@@ -21,10 +21,13 @@
       execution and which it only read (`state-what-you-verified`). The failure
       mode is not rudeness, it is a confident review of code nobody ran.
 - [ ] a lesson that generalises became a `brain/` note with its evidence
-- [ ] every commit is signed off by its author; if an assistant helped, that is
-      disclosed with `Assisted-by:` — no AI co-author or sign-off, no "generated with"
-      line and no session URL on any commit **or in this body**. #51 and #52
-      published them here while the hook held the message.
+- [ ] if an assistant helped, that is disclosed with `Assisted-by:` — no AI
+      co-author or sign-off, no "generated with" line and no session URL on any
+      commit **or in this body**. #51 and #52 published them here while the
+      hook held the message. A `Signed-off-by:` is **not** required on a branch
+      of this repository: a Code-Owner review and the merge certify those. It
+      **is** required on a pull request from a fork, and on a series bound
+      upstream.
 - [ ] **the work was finished before this was opened.** A finding written
       partway through is a draft — the a540 note was reversed by its own next
       measurement. Assess, then file.
