@@ -237,6 +237,7 @@ def cmd_brief(args, ctx) -> int:
                   for r in rules.RULES],
         "laws": _laws,
         "findings": _findings,
+        "compact": False,
         "entrypoints": {
             "agents": "AGENTS.md",
             "humans": "README.md",
@@ -255,6 +256,9 @@ def cmd_brief(args, ctx) -> int:
         "port": _port_state(ctx, device),
         "aports": _carried_aports(ctx, device),
     }
+
+    if getattr(args, "compact", False):
+        payload = _compact(payload)
 
     def render():
         ctx.out.heading(f"porthole {payload['porthole_version']} — session brief")
@@ -469,6 +473,69 @@ def _port_state(ctx, device: str) -> dict:
         return {}
 
 
+def _compact(payload: dict) -> dict:
+    """The same brief with its two bulk fields replaced by the lookup that
+    answers them on demand.
+
+    MEASURED, 2026-09-18, configured host, `brief --no-device --json`:
+    61228 bytes total, of which `findings` was 40093 (65%) and `rules` 9716
+    (16%). Four fifths of what every session was told to read first was a
+    catalogue, and a catalogue is the one thing a search is better at.
+
+    WHAT IS NEVER DROPPED
+        Everything that is a fact about THIS device and THIS moment, because
+        that is the half a lookup cannot replace and the half a session is
+        wrong without: device state, `device.traps`, config drift, workspace
+        readiness, hooks, the port's milestone, carried aports, next steps.
+        No safety fact is truncated to meet a byte budget -- the budget is met
+        by dropping catalogue, and only catalogue.
+
+    WHAT IS REPLACED, AND BY WHAT
+        `findings` -> a count and `porthole brain <query>`. Findings rank
+        first in that search and each carries a `refutes:` line, so searching
+        for the THEORY you are about to pursue finds the note that killed it.
+        That is strictly better than reading 40 KB of titles up front, and it
+        is how the notes were designed to be reached.
+
+        `rules` -> the MUST statements alone. The `why` and `enforced_by` of
+        every rule is reference, not instruction; `porthole brief` without
+        --compact still prints all of it, and AGENTS.md section 1 has the
+        narrative.
+
+        `laws` and `brain` -> titles and the commands. Ten notes, and the
+        instruction to read them properly once is kept.
+
+    Pure: a payload in, a payload out, so the budget is testable with no
+    device and no subprocess.
+    """
+    out = dict(payload)
+    findings = payload.get("findings") or []
+    out["findings"] = {
+        "count": len(findings),
+        "search": "porthole brain <the theory you are about to pursue>",
+        "why": "each finding carries a `refutes:` line naming the ideas it "
+               "kills, so searching for the theory finds the note that "
+               "already closed it. Do this BEFORE forming a theory.",
+    }
+    out["rules"] = [{"id": r["id"], "rule": r["rule"]}
+                    for r in payload.get("rules", [])
+                    if r.get("level") == "MUST"]
+    out["rules_full"] = "porthole brief --json    # every rule, with why and enforcer"
+    laws = payload.get("laws") or []
+    out["laws"] = {"count": len(laws),
+                   "ids": [n.get("id", "") for n in laws],
+                   "read": "porthole brain search --severity law",
+                   "note": "ten notes, not about phones. Read them once, "
+                           "properly."}
+    brain = payload.get("brain") or {}
+    out["brain"] = {"search": brain.get("search", ""),
+                    "index": brain.get("index", ""),
+                    "new": (brain.get("contribute") or {}).get("new", ""),
+                    "duty": (brain.get("contribute") or {}).get("duty", "")}
+    out["compact"] = True
+    return out
+
+
 def _from_brain(root: pathlib.Path, device: str, soc: str):
     """The laws and the findings, READ from brain/ rather than restated here.
 
@@ -550,11 +617,15 @@ SPEC = {
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
         (["--no-device"], {"action": "store_true",
                            "help": "skip the device probe (faster, offline)"}),
+        (["--compact"], {"action": "store_true",
+                         "help": "drop the findings and rule catalogues, "
+                                 "which are lookups; keep every device fact"}),
     ],
     "run": cmd_brief,
     "examples": [
         "porthole brief",
-        "porthole brief --json         # for an agent",
-        "porthole brief --no-device    # offline",
+        "porthole brief --compact --json   # for an agent: start here",
+        "porthole brief --json             # everything, as a reference",
+        "porthole brief --no-device        # offline",
     ],
 }

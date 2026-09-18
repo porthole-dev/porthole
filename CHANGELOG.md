@@ -5,6 +5,20 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- **`porthole brief --compact`** -- the agent entry point. Measured before
+  writing it: `brief --no-device --json` was 61228 bytes, of which `findings`
+  was 40093 (65%) and `rules` 9716 (16%). Four fifths of what every session
+  was told to read first was a catalogue, and a catalogue is the one thing a
+  search is strictly better at -- each finding carries a `refutes:` line, so
+  `porthole brain <the theory you are about to pursue>` finds the note that
+  already killed it. Compact is **7083 bytes**, and drops catalogue only:
+  device state, traps, workspace, drift, hooks, milestone, carried aports and
+  next steps all survive intact, with `tests/test_brief_compact.py` failing if
+  a trap is ever compacted away. `--json` without it is unchanged.
+- `docs/AGENTS-RULES.md` -- the narrative behind each rule, moved out of the
+  front door. Section 1 of AGENTS.md was 24241 bytes of a 43015-byte file and
+  almost all of it was this. The rules themselves stay in AGENTS.md, generated.
+
 - **`porthole doctor` reports the kernel tree**: which one, which key chose
   it, the branch, how many sibling `linux*` trees are beside it, and whether
   it is SHALLOW. Shallow is the row that matters: a shallow tree cannot
@@ -233,6 +247,19 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   `clip` now takes the colour off and cuts the plain text.
 
 ### Changed
+- **The bring-up skill and AGENTS.md no longer contradict the CLI.** This was
+  the actual cause of agents reading porthole's source before running it: one
+  caught contradiction teaches that the prose here is unreliable, and reading
+  the implementation then becomes the rational move. The skill said
+  "**Run `porthole build`. It measures, then picks** ... without `--yes` it
+  compiles", while `porthole build` with no action prints the ladder and
+  **runs nothing** -- measuring takes the buildroot lock, so `--measure` or an
+  explicit `auto` is what measures. The skill also told you to check host
+  passwordless sudo, two sections before telling you never to build on the
+  host. Both are fixed at the source, and the entry point is now
+  `porthole <verb> --help` as the contract rather than the source as the
+  reference. Skill 16439 -> 9748 bytes, AGENTS.md 42251 -> 29461.
+
 - **The DCO check no longer runs on a pull request from this repository**, only
   on one from a fork. Only someone with write access can open the former, so
   the certificate was this project demanding one of itself about its own work:
