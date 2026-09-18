@@ -124,7 +124,7 @@ reached a public branch.
   (`state-what-you-verified` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
 - **Never publish anything on the sensitive list** — docs/HANDOFF-contribution-rules.md section 4.5; publication is irreversible and redaction is free
   (`no-secrets` · **MUST** · enforced by `tests/test_secrets.py`, `.githooks/commit-msg`, `.githooks/pre-push`)
-- **If an AI helped, disclose it with `Assisted-by:` -- never as a co-author, sign-off, session or generated-with line. Sign off only what is bound upstream** — Co-authored-by is a human-only tag and a sign-off is a DCO certificate only its author can give, so CI fails a wrong attribution on the commit message, the pull request body or the issue body, on all three surfaces. Assisted-by is disclosure, never a requirement. A sign-off is NOT required on our own pull requests: a Code-Owner review and the merge certify those, and a gate that was red on every agent branch until a human ran a tool to add the line taught people to clear it without reading
+- **If an AI helped, disclose it with `Assisted-by:` -- never as a co-author, sign-off, session or generated-with line. Sign off only what is bound upstream** — Co-authored-by is a human-only tag and a sign-off is a DCO certificate only its author can give, so CI fails a wrong attribution on the commit message, the pull request body or the issue body, on all three surfaces. Assisted-by is disclosure, never a requirement. A sign-off is NOT required on our own pull requests: a maintainer reading the diff and merging certifies those, and a gate that was red on every agent branch until a human ran a tool to add the line taught people to clear it without reading
   (`attribution-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`, `.github/workflows/issue-trailers.yml`)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST** · enforced by `tests/test_brain.py::test_the_index_is_current`)
@@ -308,7 +308,7 @@ by `tests/test_tools.py`, not by review diligence.
   **A pull request on this repository does not need one**, and CI no longer
   asks: only someone with write access can open one, so the certificate would
   be this project asking itself about its own work. It is certified by a
-  Code-Owner review and the merge — a human reading the diff. CI still
+  maintainer reading the diff and merging. CI still
   requires it on a pull request **from a fork**, which is the case the DCO was
   designed for, and `porthole aports` still requires it on a series bound
   **upstream**. Those two are real gates; the one that used to run on our own

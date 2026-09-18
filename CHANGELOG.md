@@ -271,7 +271,7 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   red and stayed red until a human ran a tool whose only job was to add the
   missing line. A gate that is always red and always cleared the same way
   trains people to clear it unread. Our own branches are certified by a
-  Code-Owner review and the merge; a series bound **upstream** still needs a
+  maintainer reading the diff and merging; a series bound **upstream** needs a
   real sign-off, and `porthole aports` still enforces that one. The banned-
   attribution scan is untouched on all three surfaces. `tools/ph-pr-signoff.py`
   is removed with the gate it existed to clear.

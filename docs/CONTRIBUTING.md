@@ -148,8 +148,8 @@ body explains **why**.
 
   **On a branch of this repository it is not required, and CI does not ask.**
   Only someone with write access can open one, so the certificate would be us
-  asking ourselves about our own work. What certifies those is a **Code-Owner
-  review and the merge**, by a human, recorded by GitHub — a person looking at
+  asking ourselves about our own work. What certifies those is a **maintainer
+  reading the diff and merging**, recorded by GitHub — a person looking at
   the diff, which is the thing a trailer never was. Patches we send **upstream**
   still carry a real sign-off from their human author at submission time;
   `porthole aports` enforces that one separately.
@@ -172,3 +172,53 @@ sign-offs by hand — what you want before sending a series upstream.
 A cherry-picked commit keeps its original author — `git cherry-pick -x`. On a
 community port a lot of the early device tree is someone else's work, and
 getting this wrong is both rude and a licensing problem.
+
+## Reviewing and merging
+
+Most of the work here is opened by an assistant, so **the review is where a
+human enters the loop** — there is no trailer standing in for one, and no
+script to run before merging. Reviewing the diff and pressing merge IS this
+project's provenance record.
+
+Three commands, and none of them needs a clone:
+
+```sh
+gh pr diff <N>                              # the whole diff, in the terminal
+gh pr diff <N> --patch | git apply --check  # does it still apply cleanly?
+gh pr merge <N> --squash --delete-branch    # when you are happy
+```
+
+**To review commit by commit rather than as one diff** — which is the point of
+keeping them separate — open the pull request's **Commits** tab and click each
+one. GitHub shows that commit alone, with its own message and its own
+comment threads. `gh pr view <N> --web` opens it.
+
+A pull request body here states **which claims were verified by execution and
+which were only read** (`state-what-you-verified`). Read that first: it tells
+you which parts of the diff have evidence behind them and which are the
+author's belief, and those are the parts worth your attention.
+
+### The branch protection
+
+`.github/main-ruleset.json` is the ruleset `main` carries: a pull request is
+required, `CI passed` must be green, and force-pushes and deletion are
+blocked. Organization admins bypass it, so a hotfix is never locked out.
+
+It deliberately requires **zero approving reviews**. GitHub will not let you
+approve a pull request you opened, so a required-review rule would block every
+branch a solo maintainer pushes — a gate that cannot be satisfied is the thing
+this project just finished removing. The merge button is the gate; the ruleset
+is there to stop an accident, not to stand in for reading the diff.
+
+Apply or update it with:
+
+```sh
+gh api -X POST repos/porthole-dev/<repo>/rulesets \
+  --input .github/main-ruleset.json          # first time
+gh api -X PUT repos/porthole-dev/<repo>/rulesets/<id> \
+  --input .github/main-ruleset.json          # to change it later
+gh api repos/porthole-dev/<repo>/rulesets    # what is in force now
+```
+
+The organization is on the free plan, which has no organization-wide rulesets,
+so this is applied per repository.

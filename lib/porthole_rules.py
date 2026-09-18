@@ -161,7 +161,7 @@ RULES = [
          "attribution on the commit message, the pull request body or the "
          "issue body, on all three surfaces. Assisted-by is disclosure, never "
          "a requirement. A sign-off is NOT required on our own pull requests: "
-         "a Code-Owner review and the merge certify those, and a gate that "
+         "a maintainer reading the diff and merging certifies those, and a gate that "
          "was red on every agent branch until a human ran a tool to add the "
          "line taught people to clear it without reading",
          [".githooks/commit-msg", "tests/test_trailers.py",

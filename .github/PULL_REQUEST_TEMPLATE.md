@@ -25,7 +25,7 @@
       co-author or sign-off, no "generated with" line and no session URL on any
       commit **or in this body**. #51 and #52 published them here while the
       hook held the message. A `Signed-off-by:` is **not** required on a branch
-      of this repository: a Code-Owner review and the merge certify those. It
+      of this repository: a maintainer reading the diff and merging certifies those. It
       **is** required on a pull request from a fork, and on a series bound
       upstream.
 - [ ] **the work was finished before this was opened.** A finding written

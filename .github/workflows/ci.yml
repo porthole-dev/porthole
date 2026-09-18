@@ -128,7 +128,7 @@ jobs:
           # Computed by GitHub from where the head branch lives, so no branch
           # name and no commit can claim it. The DCO check runs on a fork's
           # pull request and on nothing else: our own branches are certified
-          # by a Code-Owner review and the merge, not by a trailer we would be
+          # by a maintainer reading the diff and merging, not by a trailer
           # demanding of ourselves. lib/porthole_trailers.py says why.
           PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
           # Numeric, and set by GitHub: the one thing a fork's pull request

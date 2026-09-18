@@ -45,8 +45,8 @@ THE DCO CHECK, AND WHY IT ONLY RUNS ON A FORK
     always cleared the same way teaches people to clear it without reading,
     which is worse than no gate: it spends the attention a real check needs.
 
-    What certifies our own work is a Code-Owner review and the merge, by a
-    human, recorded by GitHub. docs/CONTRIBUTING.md states that policy.
+    What certifies our own work is a maintainer reading the diff and
+    merging, recorded by GitHub. docs/CONTRIBUTING.md states that policy.
 
     Patches we send UPSTREAM are a different gate and still need a real
     sign-off from their human author at submission time. `porthole aports`
