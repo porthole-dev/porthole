@@ -50,24 +50,30 @@ The RPM has the sleep-set *values* -- `icc-rpm` sends `RPM_SLEEP_TAG` requests
    `dwc3_qcom_suspend()`) and venus (`pm_runtime_forbid()`, so it never
    drops) -- and zeroing venus by unbinding it changed nothing.
 
-**RETRACTED 2026-09-19, same evening: `system-pc` is NOT safe to enable.**
-This note first said it no longer hangs, on the strength of two clean cycles.
-A third, on the same kernel after a reboot, **did not come back**: no USB
-enumeration, no fastboot, nothing on wifi, for over five minutes, with a 30 s
-RTC alarm armed. It took a power-key press. Two successes are not a result on
-a device whose oldest trap is that a booted phone and a hung one look
-identical. Whether that third cycle was a real collapse with no armed wake or
-an ordinary hang cannot be told apart from the host, which is exactly why n=2
-was not enough. Treat `system-pc` as **unproven and hands-required** until
-someone runs it with the panel-photo or the pstore route armed.
+**A retraction of my own retraction, same evening.** This note briefly said
+`system-pc` was proven unsafe, because a third cycle went dark for 45 minutes
+and needed a power-key press. That attribution was wrong and is withdrawn: the
+harness never ran that cycle. The suspend log held no `TRY` line for that boot,
+`state3/disable` read 1 and `state3/s2idle/usage` read 0, so `system-pc` was
+never entered. The journal shows what actually happened -- `Reached target
+Sleep` at 22:22:59 and `PM: suspend entry (s2idle)` at 22:23:00, a 29-minute
+gap, then `PM: suspend exit` at 22:51:47. **The phone idle-suspended by
+itself** while nobody was driving it, and stayed down because nothing had
+scheduled a wake.
+
+So the standing evidence is two clean `system-pc` cycles and no third data
+point. That is **unproven, not disproven** -- and two cycles is still not a
+result on a device where a booted phone and a hung one look identical. Arm
+`tools/ph-afk.sh` before any unattended run, or the phone will sleep under the
+experiment and the null will be about nothing.
 
 **What did change: `system-pc` reached a state the earlier kernel could not.** The 6.18-era result that
 cpuidle retention and power-collapse hang s2idle
 (`docs/campaign/ws-05-suspend.md`) does not hold on 7.2. States 1 and 2 are
 enabled by default with millions of uses and 11/11 suspends are clean, and
 writing `0` to every `cpuidle/state3/disable` gave two clean suspends that
-resumed on the RTC with `boot_id` unchanged -- and then a third that never
-returned (see the retraction above). The `10-taimen-cpuidle` hook that
+resumed on the RTC with `boot_id` unchanged. A third attempt never ran; see
+above. The `10-taimen-cpuidle` hook that
 was written to disable states 1-2 across suspend is **not installed** -- the
 device APKBUILD still carries its comment with no `install` line under it --
 and on 7.2 it is not needed.
