@@ -413,6 +413,7 @@ a wrong one wastes a session finding out.
 | `devices` | list device profiles | yes | no |
 | `sync` | move the three repos between hosts: report, push, or fast-forward | yes | needs --yes |
 | `aports` | work on pmaports: status, feature branches, diffs, patches | yes | needs --yes |
+| `workspace` | every checkout on this desk: registered, worktree, shallow, dirty | yes | no |
 | `channel` | see and switch the postmarketOS release channel | yes | no |
 | `experiment` | run something with the device state captured either side | yes | no |
 | `ui` | see and switch the compositor / desktop | yes | no |

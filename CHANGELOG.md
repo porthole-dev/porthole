@@ -26,13 +26,26 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   move, a fresh clone becomes the only move available. Both of this host's
   kernel trees are shallow. The fix the row prints is `fetch --unshallow` and
   `git worktree add`.
-- **`porthole doctor --trees`** -- every git checkout under the working repo
-  that no config key names, with its branch, whether it is a linked worktree,
-  shallow and dirty. Bounded to three levels, never entering `.git`; ~1 s on
-  this host. Read-only: it names things and never moves or deletes one,
-  because whether a dirty directory holds work worth keeping is not a
-  machine's call. It found 9 unregistered checkouts here, including a `dtbo`
-  and three `ref/` clones.
+- **`porthole workspace`** -- every git checkout under the working repo: its
+  branch, whether it is a linked WORKTREE or a clone, whether it is SHALLOW,
+  how much is uncommitted, and which config key names it. Answers the question
+  nothing else did: *which of these `linux*` directories is which, and which
+  one will my build use.* Bounded to three levels, ~1 s on this host, and
+  entirely READ-ONLY -- it never deletes, moves or fetches, and prints the
+  command where there is one to run.
+
+  A `prune` action was written and cut before shipping: it wrapped
+  `git worktree prune` in a preview and a `--yes` and did nothing git does not
+  already do.
+
+  Two things it deliberately does NOT flag, both of which would be a check
+  firing on a healthy tree: a **worktree of a registered tree** is attributed
+  to its parent rather than called a stray -- it is the cheap correct way to
+  hold two branches of one history, and calling it sprawl pushes people toward
+  the second clone that causes the real thing -- and a **shallow `ref/`
+  clone** is left alone, because those are disposable by design and you never
+  send a series from one. `--unshallow` is printed once per *repository*, not
+  per checkout, since a worktree cannot be deepened on its own.
 - `brain/findings/rust-does-not-fix-the-errors-agents-make-here.md` --
   every bug this port lost a session to, classified. None is a memory- or
   type-safety defect, so a Rust rewrite of porthole, pmbootstrap or the
