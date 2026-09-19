@@ -339,5 +339,68 @@ def test_a_missing_repo_is_reported_not_crashed_on():
         assert row_of(ctx, "pmaports")["branch"] == "main"
 
 
+
+
+def make_kernel_tree(tmp: pathlib.Path, extra: tuple[str, ...]):
+    """A kernel-tree stand-in: `main` tracks a remote, `extra` branches do not.
+
+    Dates are forced and distinct because the row sorts by committerdate to put
+    live work above retired work, and two commits made in the same second sort
+    arbitrarily -- which would make the ordering assertion pass or fail on how
+    fast the machine is.
+    """
+    _bare, work = make_clone(tmp, "kernel")
+    for i, name in enumerate(extra):
+        git(work, "checkout", "-qb", name)
+        (work / name.replace("/", "-")).write_text("x")
+        git(work, "add", "-A")
+        subprocess.run(("git", "-C", str(work), "commit", "-qm", name),
+                       check=True, capture_output=True,
+                       env={**__import__("os").environ,
+                            "GIT_COMMITTER_DATE": f"2026-01-0{i + 1}T00:00:00",
+                            "GIT_AUTHOR_DATE": f"2026-01-0{i + 1}T00:00:00"})
+    git(work, "checkout", "-q", "main")
+    return work
+
+
+def test_the_kernel_row_counts_branches_and_names_the_ones_on_no_remote():
+    """The tree sync refuses to mirror is where the branches are. Refusing to
+    mirror it was being read as refusing to look at it, and 53 of 54 branches
+    on the reference host existed on no remote with nothing saying so."""
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        tree = make_kernel_tree(tmp, ("wip/older", "wip/newer"))
+        _made, ctx, _rc = run(tmp, PORTHOLE_KERNEL_TREE=str(tree))
+
+        kern = ctx.captured["kernel"]
+        assert kern["present"] and kern["branches"] == 3, kern
+        assert kern["tracked"] == 1, kern            # only main has an upstream
+        assert set(kern["unbacked"]) == {"wip/older", "wip/newer"}, kern
+        # Newest first: the branch you touched last is the one you would miss.
+        assert kern["unbacked"][0] == "wip/newer", kern
+
+        line = next(ln for ln in ctx.out.lines if "kernel" in ln)
+        assert "3 branches (1 tracked)" in line, line
+        assert "2 on NO remote" in line, line
+        assert any("on no remote: wip/newer" in ln for ln in ctx.out.lines), ctx.out.lines
+
+
+def test_the_kernel_row_survives_a_tree_that_is_absent_or_not_a_repo():
+    """A host with no kernel tree, or a directory that is not one, still gets
+    the refusal line -- the row must never be the thing that breaks `sync`."""
+    for kind in ("absent", "not-a-repo"):
+        # A fresh tempdir per case: scenario() builds the three clones by name
+        # and re-running it in a used directory fails on the first mkdir.
+        with tempfile.TemporaryDirectory() as d:
+            tmp = pathlib.Path(d)
+            path = tmp / "kernel-ish"
+            if kind == "not-a-repo":
+                path.mkdir()
+            _made, ctx, rc = run(tmp, PORTHOLE_KERNEL_TREE=str(path))
+            assert rc == EX_OK, kind
+            assert ctx.captured["kernel"]["present"] is False, kind
+            assert any("kernel" in ln and "not synced" in ln
+                       for ln in ctx.out.lines), kind
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
