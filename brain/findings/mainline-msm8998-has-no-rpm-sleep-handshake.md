@@ -108,17 +108,57 @@ on their own ticks never satisfy that condition.
 `state3/rejected` is 4 724 against 386 598 entries, so outright rejection is
 not the main path -- the calls are being accepted and doing nothing.
 
-**The one concrete un-ported piece.** `glink-rpm` (irq 14) fires ~237 times
-during every 31 s suspend, with or without `system-pc`. That is the RPM's own
-channel interrupt waking the AP, and masking it is literally the first half of
-`msm_rpm_enter_sleep()`:
+**CORRECTED 2026-09-20, by reading the code instead of the counters.** This
+note previously said glink-rpm's ~237 interrupts per suspend were wakes and
+that masking the RPM channel was the next port. Both were wrong, and the patch
+built on them (0248) has been reverted.
+
+Tracing `events/irq/irq_handler_entry` together with
+`events/power/suspend_resume` and counting only what falls between
+`machine_suspend` begin and end -- the window where the trace clock is frozen,
+so anything firing during the sleep lands inside it -- gives **8 IPIs and 2
+arch_timer, and zero glink-rpm**. All 247 glink-rpm interrupts are outside it:
+RPM voting traffic in the suspend and resume device phases, which is what the
+channel exists for. The measurement after the patch agreed that it changed
+nothing: 237 -> 358, noise. **s2idle on this device already sleeps cleanly.
+There are essentially no spurious wakes to remove.**
+
+**And the OSI story is not what it looked like.** `psci_dt_cpu_init_topology()`
+only installs `psci_enter_s2idle_domain_idle_state` under
+`psci_has_osi_support()`, and our CPU nodes carry `power-domain-names = "cprh"`
+so `dt_idle_attach_cpu(cpu, "psci")` returns NULL and that path bails. The
+reason `system-pc` still runs under s2idle is generic, in
+`drivers/cpuidle/dt_idle_states.c:38`:
 
 ```c
-smd_mask_receive_interrupt(msm_rpm_data.ch_info, true, cpumask);  /* or glink_rpm_mask_rx_interrupt */
-msm_rpm_flush_requests(print);
+/* ... So enter() can be also enter_s2idle() callback. */
+idle_state->enter_s2idle = match_id->data;
 ```
 
-Mainline never masks it. That is the next thing to port, and it is small.
+Every DT idle state gets `enter_s2idle` set to the same callback as `enter`.
+So `system-pc` is entered through plain `psci_enter_idle_state()`, which hands
+`0x42000343` to the firmware via `CPU_PM_CPU_IDLE_ENTER_PARAM_RCU` with **no
+domain coordination at all**. There is no genpd, no OSI, and none is needed
+for the call to happen.
+
+**Which puts the limit in the firmware.** The boot log is explicit:
+
+```
+psci: OSI mode supported.
+psci: [Firmware Bug]: failed to set PC mode: -3
+```
+
+The TZ advertises OS_INITIATED in its CPU_SUSPEND feature bits and then
+rejects `SET_SUSPEND_MODE` in both directions. In Platform-Coordinated mode
+the firmware, not Linux, decides the cluster and system state from what the
+cores request, and it is free to clamp an affinity-2 request down to a CPU
+collapse. That is what the numbers say it does: 386 598 entries, 4 724
+rejected outright, the rest returning success in an average of 24 us.
+
+So there is no missing AP-side call to port. `msm_rpm_enter_sleep()`'s
+remaining half is a channel mask that measurably does nothing here, and the
+MPM handover already runs. What is left is a firmware that will not perform a
+system collapse, on a SoC whose PSCI implementation is already known buggy.
 
 **What parity actually needs**, in dependency order: a CCI/system SAW node and
 `spm.c` support for it including the notify-RPM bit; something to issue the RPM
