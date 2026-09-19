@@ -57,6 +57,7 @@ generic notes as well.
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [request-firmware-from-open-shares-the-openers-symlink-budget](findings/request-firmware-from-open-shares-the-openers-symlink-budget.md) | `generic` | request_firmware() from a file's ->open() shares that open()'s symlink budget, and a split firmware runs out |
+| [resume-is-two-drivers-not-the-pm-core](findings/resume-is-two-drivers-not-the-pm-core.md) | `device:google-taimen` | The slow wake is two drivers, not the PM core, and one of them is blocked by a 60-byte firmware file that declares no features |
 | [rust-builds-natively-with-pmbootstrap-cross-native2](findings/rust-builds-natively-with-pmbootstrap-cross-native2.md) | `generic` | A bindgen Rust aport builds in minutes with cross-native2, once pmbootstrap sets cargo up for it |
 | [rust-does-not-fix-the-errors-agents-make-here](findings/rust-does-not-fix-the-errors-agents-make-here.md) | `generic` | Rewriting porthole, pmbootstrap or the msm8998 drivers in Rust does not address the class of error this port actually hits |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
@@ -250,7 +251,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 47
+- `device:google-taimen` — 48
 - `generic` — 133
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
