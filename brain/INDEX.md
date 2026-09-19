@@ -20,6 +20,7 @@ generic notes as well.
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [a-trustzone-command-can-succeed-and-do-nothing](findings/a-trustzone-command-can-succeed-and-do-nothing.md) | `device:google-taimen` | A TrustZone command can return status 0 and do nothing -- the tell is how long it took |
 | [a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever](findings/a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever.md) | `soc:msm8998` | A venus firmware assert wedges the video GDSC, and the driver's recovery then retries every 10 ms forever |
+| [a540-lm-is-mostly-vendor-parity](findings/a540-lm-is-mostly-vendor-parity.md) | `soc:msm8998` | Three of the four a540 GPMU limiter "gaps" are vendor parity; only the throttle bit and the stale power level are real |
 | [a5xx-gmem-never-resolves-multisample-buffers](findings/a5xx-gmem-never-resolves-multisample-buffers.md) | `soc:msm8998` | GPU rasterisation is visibly wrong on a540 because the a5xx GMEM store never resolves multisample buffers |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [android-interaction-boost-is-the-remaining-perf-delta](findings/android-interaction-boost-is-the-remaining-perf-delta.md) | `soc:msm8998` | Android's INTERACTION boost is the remaining perf delta -- the scaling infrastructure already has vendor parity |
@@ -57,6 +58,7 @@ generic notes as well.
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [request-firmware-from-open-shares-the-openers-symlink-budget](findings/request-firmware-from-open-shares-the-openers-symlink-budget.md) | `generic` | request_firmware() from a file's ->open() shares that open()'s symlink budget, and a split firmware runs out |
+| [resume-is-two-drivers-not-the-pm-core](findings/resume-is-two-drivers-not-the-pm-core.md) | `device:google-taimen` | The slow wake is two drivers, not the PM core, and one of them is blocked by a 60-byte firmware file that declares no features |
 | [rust-builds-natively-with-pmbootstrap-cross-native2](findings/rust-builds-natively-with-pmbootstrap-cross-native2.md) | `generic` | A bindgen Rust aport builds in minutes with cross-native2, once pmbootstrap sets cargo up for it |
 | [rust-does-not-fix-the-errors-agents-make-here](findings/rust-does-not-fix-the-errors-agents-make-here.md) | `generic` | Rewriting porthole, pmbootstrap or the msm8998 drivers in Rust does not address the class of error this port actually hits |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
@@ -78,6 +80,7 @@ generic notes as well.
 | [the-scroll-stall-is-the-pages-own-javascript](findings/the-scroll-stall-is-the-pages-own-javascript.md) | `generic` | The browser scroll stall is the page's own JavaScript -- not the engine, not the tile-record path, and not page settling |
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
 | [the-sigkill-venus-wedge-was-vp9-bandwidth-starvation](findings/the-sigkill-venus-wedge-was-vp9-bandwidth-starvation.md) | `device:google-taimen` | The "SIGKILL wedges venus until reboot" was VP9 bandwidth starvation misread -- venus survives SIGKILL on both codecs |
+| [the-skin-ladder-caps-the-die-22c-and-is-self-limiting](findings/the-skin-ladder-caps-the-die-22c-and-is-self-limiting.md) | `device:google-taimen` | The vendor's skin thermal ladder drops the die 22 C under sustained load, and its own first two rungs stop it reaching the rest |
 | [the-top-right-corruption-is-freedreno-gmem](findings/the-top-right-corruption-is-freedreno-gmem.md) | `soc:msm8998` | The top-right corruption is freedreno's GMEM tile path, not a GPU fault -- the boundary is the a5xx bin column at x=1024 |
 | [the-vendor-runs-four-thermal-layers](findings/the-vendor-runs-four-thermal-layers.md) | `soc:msm8998` | The vendor runs four thermal layers on msm8998; mainline runs one, and two of the other three are hardware we switch off |
 | [the-venus-wedge-was-wrapper-clock-auto-gating](findings/the-venus-wedge-was-wrapper-clock-auto-gating.md) | `device:google-taimen` | The msm8998 venus wedge was wrapper clock auto-gating, and one write closes it |
@@ -201,6 +204,7 @@ generic notes as well.
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [the-bootloader-reboot-can-drop-the-phone-off-usb-entirely](traps/the-bootloader-reboot-can-drop-the-phone-off-usb-entirely.md) | `device:google-taimen` | The bootloader reboot can drop the phone off USB entirely |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
+| [the-default-kernel-tree-can-be-a-stale-branch](traps/the-default-kernel-tree-can-be-a-stale-branch.md) | `generic` | The default kernel tree can be parked on an old branch, and then every tool reports the wrong kernel version perfectly truthfully |
 | [the-device-keeps-a-default-route-through-a-link-that-is-gone](traps/the-device-keeps-a-default-route-through-a-link-that-is-gone.md) | `generic` | The device keeps its USB default route after the host drops the link, and then has no internet at all |
 | [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
 | [the-msm-reset-debugfs-does-not-make-a-client-lose-its-context](traps/the-msm-reset-debugfs-does-not-make-a-client-lose-its-context.md) | `soc:msm8998` | Writing msm's reset debugfs faults the GPU but no client loses its context, so it cannot test GPU-reset recovery |
@@ -251,9 +255,9 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 46
+- `device:google-taimen` — 48
 - `device:taimen` — 2
-- `generic` — 132
+- `generic` — 133
 - `soc:gs201` — 1
-- `soc:msm8998` — 32
+- `soc:msm8998` — 33
 - `soc:qcom` — 1

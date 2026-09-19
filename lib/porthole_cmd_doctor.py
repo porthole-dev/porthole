@@ -425,6 +425,35 @@ def _check_kernel_tree(ch: Checks, cfg) -> None:
         siblings = []
     extra = f", {len(siblings)} sibling tree(s): {' '.join(siblings)}" if siblings else ""
 
+    # THE VERSION IS CHECKED BEFORE ANYTHING ELSE ABOUT THE TREE.
+    #
+    # The default tree is <workdir>/linux, and a checkout parked on an old
+    # topic branch is invisible here unless we say so: every tool then reports
+    # the stale version perfectly truthfully, and a reader -- human or agent --
+    # concludes the PORT is on that version. On google-taimen the default tree
+    # sat on a 6.18 branch for weeks after the device moved to 7.2, and the
+    # 6.18/7.2 confusion was re-derived in session after session from exactly
+    # this row saying nothing about it.
+    #
+    # `porthole build` already refuses on the mismatch, but only once you try
+    # to build. doctor is what gets read first, so it belongs here too.
+    want = _kernel_series_of(cfg)
+    got = _tree_kernel_version(tree)
+    if want and got and got != want:
+        ch.add("host: kernel tree", "warn",
+               f"{tree} on {branch} is Linux {got}, but "
+               f"{cfg.get('PORTHOLE_KERNEL_PKG', 'the kernel aport')} is "
+               f"{want} -- a module built here will not load, and every tool "
+               f"will report {got} as though it were the port's version"
+               f"{extra}  (via {via})",
+               fix=f"PORTHOLE_KERNEL_TREE=<a tree on "
+                   f"{cfg.get('PORTHOLE_KERNEL_BRANCH', 'the product branch')}>"
+                   f"    # e.g. `git -C {tree} worktree add ../linux-{want} "
+                   f"{cfg.get('PORTHOLE_KERNEL_BRANCH', '<branch>')}`, then pin it in "
+                   f"config.env. Do NOT just checkout over the existing tree -- "
+                   f"it may be carrying someone's uncommitted work")
+        return
+
     shallow = _git_read(tree, "rev-parse", "--is-shallow-repository") == "true"
     if shallow:
         ch.add("host: kernel tree", "warn",
@@ -435,6 +464,42 @@ def _check_kernel_tree(ch: Checks, cfg) -> None:
                    f"the next time a branch needs a different base")
         return
     ch.add("host: kernel tree", "ok", f"{tree} on {branch}{extra}  (via {via})")
+
+
+
+def _tree_kernel_version(tree) -> str:
+    """"6.18" / "7.2" from a kernel tree's Makefile, or "" if unreadable.
+
+    Reads the file rather than running `make kernelversion`, which wants a
+    configured tree and costs a fork.
+    """
+    ver = {}
+    try:
+        with open(tree / "Makefile", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                for key in ("VERSION", "PATCHLEVEL"):
+                    if line.startswith(key):
+                        _, _, val = line.partition("=")
+                        ver[key] = val.strip()
+                if len(ver) == 2:
+                    break
+    except OSError:
+        return ""
+    if len(ver) != 2 or not all(v.isdigit() for v in ver.values()):
+        return ""
+    return f"{ver['VERSION']}.{ver['PATCHLEVEL']}"
+
+
+def _kernel_series_of(cfg) -> str:
+    """The series the device's kernel aport builds, e.g. "7.2".
+
+    Taken from the aport name's trailing version rather than a separate key,
+    because the aport name is the thing that actually has to match.
+    """
+    import re as _re
+    pkg = cfg.get("PORTHOLE_KERNEL_PKG", "") or ""
+    m = _re.search(r"(\d+\.\d+)$", pkg)
+    return m.group(1) if m else ""
 
 
 def _git_read(path, *args) -> str:
