@@ -67,7 +67,15 @@ log "=== TRY $(date +%FT%T) alarm=+${ALARM}s btime=$(awk '/btime/{print $2}' /pr
 log "boot_id_before=$(cat /proc/sys/kernel/random/boot_id) cmd=[$SUSPEND_CMD]"
 [ -f /tmp/ph-prep.sh ] && { log "--- prep ---"; . /tmp/ph-prep.sh >> $LOG 2>&1; sync; log "--- prep done ---"; }
 log "success_before=$(cat /sys/power/suspend_stats/success) fail_before=$(cat /sys/power/suspend_stats/fail)"
+# Clear first: the RTC rejects a write to wakealarm while an alarm is already
+# pending (EBUSY), and the shell swallows it. A stale alarm from the PREVIOUS
+# run then fires instead, so the cycle ends at someone else's deadline with
+# wakeirq=<rtc> and looks like a well-behaved timed wake. Cost a run on
+# 2026-09-19: a 120 s arm returned after 44 s, exactly on the prior cycle's
+# +120, and read as "nothing woke it early".
+echo 0 > /sys/class/rtc/rtc0/wakealarm
 echo "+$ALARM" > /sys/class/rtc/rtc0/wakealarm
+log "wakealarm_set=$(cat /sys/class/rtc/rtc0/wakealarm)"
 log "SUSPEND_ENTER $(date +%s)"
 eval "$SUSPEND_CMD"
 RC=$?
