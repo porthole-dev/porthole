@@ -43,6 +43,7 @@ generic notes as well.
 | [fuse2fs-cannot-replace-the-loop-device](findings/fuse2fs-cannot-replace-the-loop-device.md) | `generic` | fuse2fs cannot stand in for the loop device, because the loop device is exposing a partition table |
 | [gold-osm-acd-autoxfer-timeout](findings/gold-osm-acd-autoxfer-timeout.md) | `soc:msm8998` | The gold OSM -110 is the ACD auto-transfer poll, and four tempting causes are dead |
 | [gstreamer-copies-every-venus-frame-when-the-sink-lacks-video-meta](findings/gstreamer-copies-every-venus-frame-when-the-sink-lacks-video-meta.md) | `device:google-taimen` | GStreamer's V4L2 pool copies every venus frame when the sink offers no video meta: 12 fps at 4K, 82 fps otherwise |
+| [gtk4-icon-squares-are-the-gsk-renderer-not-mesa](findings/gtk4-icon-squares-are-the-gsk-renderer-not-mesa.md) | `soc:msm8998` | GTK4 symbolic icons drawn as solid squares on a5xx are GSK_RENDERER=gl, not mesa |
 | [hardware-decode-works-in-webkit-the-ceiling-is-webkits-process-count](findings/hardware-decode-works-in-webkit-the-ceiling-is-webkits-process-count.md) | `device:google-taimen` | Hardware decode does work in Epiphany -- the residual ceiling is WebKit's ~7 processes per tab, not the decoder and not GEM runaway |
 | [holding-vdd-mx-does-not-stop-the-wake-crash](findings/holding-vdd-mx-does-not-stop-the-wake-crash.md) | `soc:msm8998` | Holding VDD_MX does not stop the display-wake crash -- neither enabled nor at TURBO |
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
@@ -64,6 +65,7 @@ generic notes as well.
 | [taimens-skin-sensor-is-one-devicetree-change](findings/taimens-skin-sensor-is-one-devicetree-change.md) | `device:taimen` | taimen's skin thermistor needs no driver: bd_therm2 is VADC 0x51 and mainline already scales it |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
+| [the-af-dioptre-map-is-wrong-in-scale-not-just-direction](findings/the-af-dioptre-map-is-wrong-in-scale-not-just-direction.md) | `device:google-taimen` | The imx362 AF tuning map is wrong in scale: code 0 is ~0.47 m, not 14 cm, and infinity lands near code 157 |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-browser-stutter-is-a-blocked-webkit-main-thread](findings/the-browser-stutter-is-a-blocked-webkit-main-thread.md) | `generic` | The browser stutter is a blocked WebKit main thread, not the display stack |
@@ -251,9 +253,9 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 46
+- `device:google-taimen` — 47
 - `device:taimen` — 2
 - `generic` — 132
 - `soc:gs201` — 1
-- `soc:msm8998` — 32
+- `soc:msm8998` — 33
 - `soc:qcom` — 1
