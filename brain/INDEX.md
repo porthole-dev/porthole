@@ -50,6 +50,7 @@ generic notes as well.
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
 | [lax-build-buys-nothing-measurable](findings/lax-build-buys-nothing-measurable.md) | `generic` | PORTHOLE_LAX_BUILD=1 saves no measurable time, and the zap it skips is not the wall clock |
 | [mainline-a540-init-matches-kgsl-except-allflatoptdis](findings/mainline-a540-init-matches-kgsl-except-allflatoptdis.md) | `soc:msm8998` | Mainline a5xx_hw_init programs the A540 at parity with kgsl's a5xx_start; the one extra mainline write is VPC ALLFLATOPTDIS |
+| [mainline-msm8998-has-no-rpm-sleep-handshake](findings/mainline-msm8998-has-no-rpm-sleep-handshake.md) | `soc:msm8998` | The SoC can never reach VDD-min because mainline msm8998 has no RPM sleep-set handshake, not because something is voting against it |
 | [no-hardware-video-decode-is-built](findings/no-hardware-video-decode-is-built.md) | `device:google-taimen` | There is no hardware video decode on taimen -- venus is described in DT but not built |
 | [nothing-polls-an-idle-link-on-ath10k](findings/nothing-polls-an-idle-link-on-ath10k.md) | `generic` | ath10k turns off mac80211's idle connection polling, then disables the firmware keepalive too |
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
@@ -262,5 +263,5 @@ generic notes as well.
 - `device:taimen` — 2
 - `generic` — 133
 - `soc:gs201` — 1
-- `soc:msm8998` — 33
+- `soc:msm8998` — 34
 - `soc:qcom` — 1
