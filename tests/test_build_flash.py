@@ -1221,6 +1221,21 @@ def test_a_stray_directory_in_the_package_repo_is_moved_out_of_it():
     assert any("packages/edge/rejected" in line for line in said), said
 
 
+
+class Skip(Exception):
+    """A case this environment cannot decide; `tests/_runner.py` prints it as
+    a visible `skip` line rather than swallowing it."""
+
+
+def _root_cannot_test_permissions():
+    """Root ignores the mode bits, so a case that makes a directory unwritable
+    and expects the failure cannot fail here -- and so cannot pass. `make
+    floor` runs as uid 0 in the container; GitHub's runner is an ordinary
+    user, which is why this was red locally and green in CI."""
+    if os.getuid() == 0:
+        raise Skip("runs as root, which ignores the mode bits this asserts "
+                   "-- run `make test` as an ordinary user for this case")
+
 def test_a_host_rename_it_cannot_make_is_explained_as_the_workspace_command():
     """Reported from the first real repair: it printed `[Errno 13] Permission
     denied`, and the `mv` it suggested would have failed the same way.
@@ -1232,6 +1247,7 @@ def test_a_host_rename_it_cannot_make_is_explained_as_the_workspace_command():
     not available either, the command it hands back has to be the one that
     would actually work.
     """
+    _root_cannot_test_permissions()
     import porthole_cmd_build as build
 
     err = ("ERROR: Command failed (exit code 1): (native) % cd "

@@ -5,6 +5,54 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Added
+- **`porthole brief --compact`** -- the agent entry point. Measured before
+  writing it: `brief --no-device --json` was 61228 bytes, of which `findings`
+  was 40093 (65%) and `rules` 9716 (16%). Four fifths of what every session
+  was told to read first was a catalogue, and a catalogue is the one thing a
+  search is strictly better at -- each finding carries a `refutes:` line, so
+  `porthole brain <the theory you are about to pursue>` finds the note that
+  already killed it. Compact is **7083 bytes**, and drops catalogue only:
+  device state, traps, workspace, drift, hooks, milestone, carried aports and
+  next steps all survive intact, with `tests/test_brief_compact.py` failing if
+  a trap is ever compacted away. `--json` without it is unchanged.
+- `docs/AGENTS-RULES.md` -- the narrative behind each rule, moved out of the
+  front door. Section 1 of AGENTS.md was 24241 bytes of a 43015-byte file and
+  almost all of it was this. The rules themselves stay in AGENTS.md, generated.
+
+- **`porthole doctor` reports the kernel tree**: which one, which key chose
+  it, the branch, how many sibling `linux*` trees are beside it, and whether
+  it is SHALLOW -- which is the one that matters: a shallow tree cannot
+  `format-patch` a series or rebase onto another base, so when the base has to
+  move, a fresh clone becomes the only move available. Both of this host's
+  kernel trees are shallow. The fix the row prints is `fetch --unshallow` and
+  `git worktree add`.
+- **`porthole workspace`** -- every git checkout under the working repo: its
+  branch, whether it is a linked WORKTREE or a clone, whether it is SHALLOW,
+  how much is uncommitted, and which config key names it. Answers the question
+  nothing else did: *which of these `linux*` directories is which, and which
+  one will my build use.* Bounded to three levels, ~1 s on this host, and
+  entirely READ-ONLY -- it never deletes, moves or fetches, and prints the
+  command where there is one to run.
+
+  A `prune` action was written and cut before shipping: it wrapped
+  `git worktree prune` in a preview and a `--yes` and did nothing git does not
+  already do.
+
+  Two things it deliberately does NOT flag, both of which would be a check
+  firing on a healthy tree: a **worktree of a registered tree** is attributed
+  to its parent rather than called a stray -- it is the cheap correct way to
+  hold two branches of one history, and calling it sprawl pushes people toward
+  the second clone that causes the real thing -- and a **shallow `ref/`
+  clone** is left alone, because those are disposable by design and you never
+  send a series from one. `--unshallow` is printed once per *repository*, not
+  per checkout, since a worktree cannot be deepened on its own.
+- `brain/findings/rust-does-not-fix-the-errors-agents-make-here.md` --
+  every bug this port lost a session to, classified. None is a memory- or
+  type-safety defect, so a Rust rewrite of porthole, pmbootstrap or the
+  msm8998 drivers does not address them; `refutes:` names the four theories
+  so the next search finds this instead of re-deriving it.
+
+### Added
 - **A device's prebuilt package repository** (`PORTHOLE_PKG_REPO_URL`,
   `_SYSTEMD_URL`, `_KEY`; google-taimen points at porthole-dev/pmos-packages).
   `porthole sandbox up` probes it -- device AND host arch index, anonymously,
@@ -216,6 +264,38 @@ Notable changes. Format loosely follows [Keep a Changelog](https://keepachangelo
   `clip` now takes the colour off and cuts the plain text.
 
 ### Changed
+- **The bring-up skill and AGENTS.md no longer contradict the CLI.** This was
+  the actual cause of agents reading porthole's source before running it: one
+  caught contradiction teaches that the prose here is unreliable, and reading
+  the implementation then becomes the rational move. The skill said
+  "**Run `porthole build`. It measures, then picks** ... without `--yes` it
+  compiles", while `porthole build` with no action prints the ladder and
+  **runs nothing** -- measuring takes the buildroot lock, so `--measure` or an
+  explicit `auto` is what measures. The skill also told you to check host
+  passwordless sudo, two sections before telling you never to build on the
+  host. Both are fixed at the source, and the entry point is now
+  `porthole <verb> --help` as the contract rather than the source as the
+  reference. Skill 16439 -> 9748 bytes, AGENTS.md 42251 -> 29461.
+
+- **The DCO check no longer runs on a pull request from this repository**, only
+  on one from a fork. Only someone with write access can open the former, so
+  the certificate was this project demanding one of itself about its own work:
+  an assistant correctly never signs off, so every agent pull request opened
+  red and stayed red until a human ran a tool whose only job was to add the
+  missing line. A gate that is always red and always cleared the same way
+  trains people to clear it unread. Our own branches are certified by a
+  maintainer reading the diff and merging; a series bound **upstream** needs a
+  real sign-off, and `porthole aports` still enforces that one. The banned-
+  attribution scan is untouched on all three surfaces. `tools/ph-pr-signoff.py`
+  is removed with the gate it existed to clear.
+- **`porthole doctor`: `PMB_SUDO` set is a warning, not a failure.** The
+  failure was the bug -- `child_env()` already strips it from every child
+  process porthole starts, so the row was telling agents their next build
+  would die when it could not. Three sessions went off to edit the host
+  environment over it and one reached for `PMB_SUDO=sudo`, the blanket
+  credential cache this subsystem exists to retire. The row now says it is
+  ignored and points at `porthole sandbox up`. A leftover broker *binary* on
+  disk is still a failure: that one is standing host privilege.
 - `porthole init`'s prompts and menus use the toolkit's own output vocabulary.
   It held the only hand-rolled interaction in the repository -- a bare
   `input()` and numbered menus with the indentation typed in by hand -- and it
