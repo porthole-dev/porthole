@@ -50,6 +50,38 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 
 
+CACHE = os.path.expanduser("~/.porthole/wol-mac")
+
+
+def cached_mac(host):
+    """The MAC we last saw this host use. Outside the repo on purpose: a MAC
+    identifies a device and has no documentary value, so it is never committed
+    -- but a fresh session still has to be able to wake the phone without
+    anyone exporting anything."""
+    try:
+        for line in open(CACHE):
+            h, _, m = line.strip().partition(" ")
+            if h == host:
+                return m
+    except OSError:
+        pass
+    return None
+
+
+def remember_mac(host, mac):
+    """Refresh the cache while the phone is awake -- the only time the ARP
+    entry is any good."""
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        keep = [l for l in open(CACHE).read().splitlines()
+                if l.split(" ")[:1] != [host]] if os.path.exists(CACHE) else []
+        keep.append(f"{host} {mac}")
+        with open(CACHE, "w") as f:
+            f.write("\n".join(keep) + "\n")
+    except OSError:
+        pass
+
+
 def arp_mac(host):
     """The phone's MAC as the host last saw it -- works while it is awake."""
     try:
@@ -102,16 +134,22 @@ def main():
         return 64
 
     if answers(args.host):
+        seen = args.mac or arp_mac(args.host)
+        if seen:
+            remember_mac(args.host, seen)
         print(f">> {args.host} already answers -- nothing to wake")
         return 0
 
-    mac = args.mac or os.environ.get("PORTHOLE_WOL_MAC") or arp_mac(args.host)
+    mac = (args.mac or os.environ.get("PORTHOLE_WOL_MAC")
+           or arp_mac(args.host) or cached_mac(args.host))
     if not mac or not re.fullmatch(r"([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", mac):
         print("ph-wol: no MAC to send to. The ARP entry for a sleeping phone",
               file=sys.stderr)
         print("        goes FAILED, so record it while the phone is awake:",
               file=sys.stderr)
         print("          export PORTHOLE_WOL_MAC=$(ssh $PHONE 'cat /sys/class/net/wlan0/address')",
+              file=sys.stderr)
+        print(f"        or run this once while it IS awake, to fill {CACHE}",
               file=sys.stderr)
         return 65
 
