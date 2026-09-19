@@ -57,6 +57,7 @@ generic notes as well.
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [request-firmware-from-open-shares-the-openers-symlink-budget](findings/request-firmware-from-open-shares-the-openers-symlink-budget.md) | `generic` | request_firmware() from a file's ->open() shares that open()'s symlink budget, and a split firmware runs out |
 | [rust-builds-natively-with-pmbootstrap-cross-native2](findings/rust-builds-natively-with-pmbootstrap-cross-native2.md) | `generic` | A bindgen Rust aport builds in minutes with cross-native2, once pmbootstrap sets cargo up for it |
+| [rust-does-not-fix-the-errors-agents-make-here](findings/rust-does-not-fix-the-errors-agents-make-here.md) | `generic` | Rewriting porthole, pmbootstrap or the msm8998 drivers in Rust does not address the class of error this port actually hits |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
 | [taimen-rear-module-is-three-i2c-parts](findings/taimen-rear-module-is-three-i2c-parts.md) | `device:google-taimen` | taimen's rear camera module is three I2C parts -- IMX362 (0x1a), LC898214XD focus (0x72) and an LC898123F40 OIS controller (0x3e) that also holds the module calibration |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
@@ -247,7 +248,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 46
-- `generic` — 131
+- `generic` — 132
 - `soc:gs201` — 1
 - `soc:msm8998` — 30
 - `soc:qcom` — 1

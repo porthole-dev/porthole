@@ -281,9 +281,10 @@ def test_the_ci_path_actually_exempts_dependabot():
         git("commit", "-q", "--allow-empty", "-m", "ci: bump the actions group")
         head = git("rev-parse", "HEAD")
 
-        def run(author_id):
+        def run(author_id, fork="true"):
             e = dict(env, PR_BODY="a body", PR_BASE=base, PR_HEAD=head)
             e["PR_AUTHOR_ID"] = author_id
+            e["PR_FORK"] = fork
             e["GITHUB_EVENT_NAME"] = "pull_request"
             return subprocess.run(
                 [sys.executable, str(ROOT / "lib/porthole_trailers.py"), "--ci"],
@@ -298,6 +299,21 @@ def test_the_ci_path_actually_exempts_dependabot():
         human = run("1234")
         assert human.returncode != 0, (
             "a non-Dependabot author was exempted from the sign-off")
+
+        # The retirement, with its positive control right above it: the SAME
+        # unsigned commit that fails from a fork passes from a branch of this
+        # repository. Asserting only the pass would also pass if the whole
+        # check had stopped working.
+        ours = run("1234", fork="false")
+        assert ours.returncode == 0, (
+            "an unsigned commit on our own branch was failed by the DCO check, "
+            f"which no longer applies to it:\n{ours.stdout}\n{ours.stderr}")
+        # Absent, not just false: a workflow that forgets the variable must get
+        # the lenient answer, never fail every pull request in the repository.
+        missing = run("1234", fork="")
+        assert missing.returncode == 0, (
+            "a missing PR_FORK was treated as a fork: "
+            f"{missing.stdout}\n{missing.stderr}")
 
 
 if __name__ == "__main__":

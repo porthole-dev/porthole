@@ -12,27 +12,53 @@ an SDK agent, an IDE assistant, or a human reading over someone's shoulder.
 ## 0. Run this first
 
 ```sh
-porthole brief          # or `porthole brief --json` if you are parsing
+porthole brief --compact --json    # start here
+porthole doctor                    # will the toolbox work? names every fix
 ```
 
-`brief` carries the port's own state: how far along it is, the single next
-milestone with its command, and anything ticked that a probe says is not true.
-`porthole next --json` is that block on its own.
+`--compact` is the agent entry point: which device and its live state, that
+device's encoded **traps**, workspace readiness, config drift, the MUST rules,
+the port's next milestone with its command, and what to do next. Read-only and
+safe at the start of every session.
 
-One call gives you: which device and its live state, that device's encoded traps
-as prose, the rules below, the tool catalogue pointer, the laws, and suggested
-next steps. It is read-only and safe at the start of every session.
+It is 7 KB where the full brief is 60 KB, and the difference is catalogue, not
+content. Measured 2026-09-18: of 61228 bytes, `findings` was 40093 and `rules`
+9716 -- four fifths of it. Nothing about the device was dropped to get there;
+`tests/test_brief_compact.py` fails if a trap ever is.
 
-Then, as needed:
+Reach the catalogues when you need them, which is the way they were designed
+to be reached:
 
 ```sh
-porthole doctor --all              # will the toolbox work? names every fix
-porthole tools --json              # the full catalogue, with each tool's contract
-porthole config --json             # every resolved value and which layer set it
-porthole brain search --severity law      # ten notes. Read them.
+porthole brain <the theory you are about to pursue>   # findings rank first
+porthole brief --json                                 # every rule, with why and enforcer
+porthole brain search --severity law                  # ten notes. Read them once, properly.
+porthole tools --grep <what>                          # 150+ tools; ask, never guess
+porthole config --json                                # every resolved value and its layer
 ```
 
-Everything above takes `--json`. Exit codes are an API — see §7.
+**Builds go in the workspace, never on the host.** A rootless container where
+you are uid 0 inside and the user's own unprivileged uid outside:
+
+```sh
+porthole sandbox status
+porthole sandbox up
+porthole sandbox shell --command <command>    # works with no TTY
+```
+
+Never ask for host root and never work around its absence — §1
+`no-host-root`, and [what that one cost](docs/AGENTS-RULES.md). An
+inherited `PMB_SUDO` is a leftover and is ignored: porthole strips it from
+every child process, so do not set it and do not edit the host environment
+over it. A deliberate host build has prerequisites: `docs/NEW-HOST.md`.
+
+**`porthole` is a supported CLI.** Read `porthole <verb> --help`, run the verb,
+check the documented result. Its help states prerequisites, where it runs,
+what it writes, preview versus execute, and where the log goes. Reading the
+implementation is for **changing** it, or for a failure its help cannot
+explain -- not a prerequisite for using it.
+
+Exit codes are an API — see §7.
 
 Then, depending on what you are doing:
 
@@ -52,9 +78,10 @@ porthole tools --needs BOOTED       # what can I run right now
 porthole tools ph-suspend-cycle.sh  # read its contract without opening it
 ```
 
-There are 114. A truncated `ls` has caused exactly the mistake of concluding a
-tool does not exist. Every tool's first 20 lines declare `scope`, `needs`, `env`
-and `exits`, so `head -20 <tool>` also answers the question.
+A truncated `ls` has caused exactly the mistake of concluding a tool does not
+exist. `porthole tools` knows how many there are, so no number is written here
+to go stale. Every tool's first 20 lines declare `scope`, `needs`, `env` and
+`exits`, so `head -20 <tool>` answers the question too.
 
 ---
 
@@ -68,8 +95,7 @@ MUST with a checkbox and nothing behind it is exactly how a device serial
 reached a public branch.
 
 **This block is generated from `lib/porthole_rules.py`** — edit that and run
-`make rules`, never this list. The sections below are the narrative: what each
-rule cost to learn, and how to follow it.
+`make rules`, never this list.
 
 <!-- BEGIN GENERATED RULES -->
 - **Never hand-roll what a tool already does** — writing `ssh ... reboot` or `sleep 60` means you have not found the tool yet -- `porthole tools --grep <what>`
@@ -98,7 +124,7 @@ rule cost to learn, and how to follow it.
   (`state-what-you-verified` · **SHOULD** · enforced by `.github/PULL_REQUEST_TEMPLATE.md`)
 - **Never publish anything on the sensitive list** — docs/HANDOFF-contribution-rules.md section 4.5; publication is irreversible and redaction is free
   (`no-secrets` · **MUST** · enforced by `tests/test_secrets.py`, `.githooks/commit-msg`, `.githooks/pre-push`)
-- **Every pull request commit is signed off by its author; if an AI helped, disclose it with `Assisted-by:`, never as a co-author, sign-off, session or generated-with line** — a sign-off is a DCO certificate only its author can give and Co-authored-by is a human-only tag, so CI fails an unsigned pull request commit and a wrong attribution on the commit message, the pull request body or the issue body; Assisted-by is disclosure, never a requirement
+- **If an AI helped, disclose it with `Assisted-by:` -- never as a co-author, sign-off, session or generated-with line. Sign off only what is bound upstream** — Co-authored-by is a human-only tag and a sign-off is a DCO certificate only its author can give, so CI fails a wrong attribution on the commit message, the pull request body or the issue body, on all three surfaces. Assisted-by is disclosure, never a requirement. A sign-off is NOT required on our own pull requests: a maintainer reading the diff and merging certifies those, and a gate that was red on every agent branch until a human ran a tool to add the line taught people to clear it without reading
   (`attribution-trailers` · **MUST** · enforced by `.githooks/commit-msg`, `tests/test_trailers.py`, `.github/workflows/ci.yml`, `.github/workflows/issue-trailers.yml`)
 - **A new brain note is reindexed in the same commit** — eight commits added a note and never ran `make brain-index`; a note missing from the index is a note nobody finds, and the index is what an agent is pointed at first
   (`brain-index-current` · **MUST** · enforced by `tests/test_brain.py::test_the_index_is_current`)
@@ -134,283 +160,11 @@ rule cost to learn, and how to follow it.
   (`comments-record-the-incident` · **SHOULD** · no enforcer, and so not a MUST)
 <!-- END GENERATED RULES -->
 
-### Never hand-roll what a tool already does
 
-If you are writing an `ssh ... reboot` one-liner or a `sleep 60`, stop. There is
-a tool and you have not found it yet. Both of those specific mistakes have cost
-whole sessions.
-
-**To watch a build, run `porthole build watch`. Do not write a poll loop.**
-
-`porthole build watch` and `porthole pkg watch` block until the build stops
-and exit with it — 0 on success, non-zero on failure or on a run whose process
-has gone. `porthole build watch --json` emits one JSON object per update on
-stdout, line-buffered, which is what an agent can consume; a redrawn terminal
-bar is not. Start long builds with `--detach` and wait on the watcher.
-
-**Never run the redrawing form inside a tool call.** `watch` without `--json`
-paints with carriage returns, and a tool call captures that into a pipe. The
-human gets the smeared, column-overlapped mess it produced on 2026-09-01
-rather than a bar. A repainting display has to be drawn by something the
-human's terminal owns -- see the status line below.
-
-Three hand-rolled poll loops were written against `--json` in a single session
-and one of them timed out at ten minutes, reporting nothing, while the build
-was still healthy.
-
-### Let `porthole build` pick the rung
-
-**Run `porthole build`.** It does an incremental `make`, sees what actually got
-rebuilt, and runs the cheapest rung that covers it. Without `--yes` it compiles
-and reports which rung it would run, touching no device.
-
-Do not reason a rung out of the diff and type it: a header edit moves every
-module's CRC without looking like a config change, and a Kconfig edit can flip
-a module to built-in. Both fool a diff reader; neither fools what make wrote.
-Name a rung only to override the measurement.
-
-| rung it chooses between | covers | cost |
-|---|---|---|
-| `porthole build mod FOO.ko foo --yes` | a driver that is a module | ~40 s, no reboot |
-| `porthole build boot --yes` | DTS, or built-in code you can RAM-boot | ~40 s, one `fastboot boot` |
-| `porthole build boot --kernel --yes` | built-in code, only where the device RAM-boots without modules | ~40 s, one `fastboot boot` |
-| `porthole build fast --yes` | a CONFIG change (module CRCs move) | ~6 min, flashes boot |
-| `porthole build kernel --yes` | rootfs changed, or boot/rootfs desynced | ~10 min, reflash both |
-
-Run any of them without `--yes` to preview and print the table. `--kernel` on
-`boot` rebuilds `Image.gz` too.
-
-The old default for a bare `porthole build` was `kernel` -- the most expensive
-of the five. It is `auto` now.
-
-**And a build is no longer a black box.** It prints a live bar with a phase and
-an ETA, writes the full log to `.run/build-<rung>-<stamp>.log`, and publishes
-where it is to `.run/build-status.json` the whole time. If you run a build in
-the background, **poll it instead of sleeping**:
-
-```sh
-porthole build --yes &            # or in your harness's background runner
-porthole build status --json    # rung, phase, progress, elapsed, eta, last line
-```
-
-`--verbose` streams the raw output instead of the bar. The ETA comes from what
-this rung took last time on this machine, so the first run of a rung says
-`eta --` rather than inventing a number.
-
-### Userspace packages: `porthole pkg`, never raw pmbootstrap
-
-`porthole build` is the KERNEL loop. For a userspace aport -- phoc, webkit,
-gst-plugins-good -- the verb is `porthole pkg`, and reaching past it to
-`pmbootstrap build` is not a shortcut, it is four separate losses:
-
-```sh
-porthole pkg build webkit2gtk-6.0 --detach   # survives the session
-porthole pkg watch                           # live bar, free to leave open
-porthole pkg status --json                   # one-shot, for you
-porthole pkg outdated                        # what you edited and did not rebuild
-porthole pkg resume webkit2gtk-6.0           # recompile IN the tree that is already there
-```
-
-**`resume` is the one that saves the afternoon.** `pmbootstrap build` runs
-abuild's whole sequence and deletes `/home/pmos/build` first, so "recompile
-three files and repackage" against a 5.5-hour webkit tree costs 5.5 hours --
-which is why it was done by hand, twice, on 2026-09-02. `porthole pkg resume
-<aport>` runs `abuild build rootpkg update_abuildrepo_index` against the
-intact tree under the same lock, tracker and bar; `--apply-new-patches` puts
-the aport's patches into `src/` (abuild's `prepare` is what a resume skips)
-and `--pkgrel N` bumps the aport AND the build tree's copy, which is the pair
-that has to move together.
-
-- **It takes the buildroot lock.** One workspace has one buildroot per arch and
-  `abuild` wipes `$srcdir` before unpacking, so a second pmbootstrap command
-  deletes the first one's source tree mid-build. This has destroyed a 37-minute
-  webkit build and a full kernel build, and **both failures blamed the
-  compiler.** `pmbootstrap checksum` counts -- it is what killed the kernel one.
-- **It passes `--lax`,** without which a build cannot run in the workspace at all.
-- **It logs, and it reports.** A raw call reports nothing for hours.
-- **It verifies the artifact,** because `pmbootstrap build` can exit 0 having
-  done nothing.
-
-`porthole sandbox shell --command 'pmbootstrap build ...'` is refused for these
-reasons; `--raw` overrides it if you genuinely mean to bypass all of them.
-
-**Run it in the background and let the harness tell you it finished -- but
-that puts the bar somewhere the HUMAN CANNOT SEE.** A background task's
-stdout is a log file or a buffer the harness reads, not a terminal in front of
-a person.
-
-**The fix is a status line, not a command you ask the human to type.**
-`porthole statusline` renders `.run/build-status.json` -- the same bar `watch`
-draws, from the same renderer -- into the agent's own status row, on a
-2-second timer that keeps ticking while you are idle. It costs no tokens and
-needs nothing from the human. This repo is wired up in `.claude/settings.json`;
-any other project (a device workdir, say) takes one command, once:
-
-    porthole statusline --install
-
-So the whole obligation reduces to: **start the build detached and stop
-talking about progress.**
-
-    porthole build fast --yes --detach
-    porthole pkg build <pkg> --detach
-
-On a harness with no status line, fall back to the old contract: put
-`porthole build watch` (or `pkg watch`) in your reply as a command the human
-can run in their own terminal, every time, not only when they ask.
-
-Either way, do not poll the status yourself in a loop: that spends a request
-per check to re-read a number that moved 1%. The human's display is not your
-display.
-
-The percentage is real (ninja states its total), but **the ETA is deliberately
-absent during generator steps.** A `[N/M]` counter stalls dead on
-single-threaded codegen -- measured at five steps in four minutes with fifteen
-cores idle, which naively extrapolates to 74 hours on a healthy build. When the
-line says `generating  --/s  eta --`, that is normal and the build is fine.
-**Do not kill a build over a missing ETA.**
-
-`mod` and `boot` are ~15x cheaper than the top rung and were unreachable until
-they were added to the verb table — they existed only as shell functions in
-`tools/ph-build.sh`. If you have been iterating on `kernel`, you are paying ten
-minutes for a forty-second change.
-
-### Do not sleep after a build verb
-
-Every rung returns **when the device is back**, not when it was asked to move.
-`mod` proves by `srcversion` that the module now running is the one just built;
-`boot`, `fast` and `kernel` poll via `tk_wait_ssh` and print the `/proc/version`
-that answered. A `sleep` after one of these is redundant and wrong in both
-directions — see `brain/laws/poll-never-sleep.md`. `PORTHOLE_BOOT_DEADLINE`
-(or the legacy `TK_BOOT_DEADLINE`) is the give-up point, not a poll interval
-— default 300s. Hitting it after a flash exits 124, not 1: the write already
-succeeded by the time `_ph_wait_up` runs, so a slow phone is a timeout to
-raise the deadline for, not a failed flash.
-
-### Every command that touches the device goes through the mutex
-
-```sh
-TK_AGENT=<yourname> tools/ph-device.sh --need-booted <command>
-```
-
-There is one physical device and possibly several of you. Declare the state you
-need, or you will queue ten minutes for a device that was never going to answer.
-Exit **75** = could not get the lock, retryable. Exit **76** = wrong state,
-**not** retryable — something has to physically move the device.
-
-See `brain/laws/the-lock-says-who-not-what.md`.
-
-### If you find the device in a state you did not put it in, say so and hand back
-
-Do not recover someone else's experiment out from under them. A device sitting
-in the bootloader is usually a measurement in progress, not a fault.
-
-### Never ask for host root
-
-pmbootstrap needs root; you do not need it on the host, and the design grants
-you none. Builds run in a persistent rootless container where you are uid 0
-inside and the user's unprivileged uid outside:
-
-```sh
-porthole sandbox status                      # is the workspace up?
-porthole sandbox up                          # build the image if needed, start it
-porthole sandbox shell --command <command>   # one command, works with no TTY
-```
-
-Inside it pmbootstrap uses no sudo at all — it checks `os.getuid()`, and you
-are root there. Outside, that root is just the user.
-
-pmbootstrap itself refuses uid 0 outright, before it looks at anything else --
-`--as-root` is the only way past, and the image wraps it so nothing has to know
-that. Three more things a rootless namespace cannot do are shimmed the same
-way: `mknod` (the kernel refuses device-node creation in a userns, so the
-chroots get a recursive bind of the container's own `/dev`), `chmod` on a node
-it does not own, and `sudo`, which has nothing to escalate to in here.
-`brain/findings/what-a-rootless-workspace-cannot-do.md` has the measurements.
-
-**The workspace has its OWN pmbootstrap work directory**
-(`~/.local/var/porthole-sandbox`), created and owned by it; `porthole sandbox
-up` writes the config and the chroots bootstrap on first use. The host's work
-dir is untouched and `--host` still uses it. A kernel tree's `.output` belongs
-to ONE of the two -- the uids do not line up -- and a build in the wrong one
-refuses rather than failing inside kbuild.
-
-**If the workspace is not set up, stop and ask.** Installing podman needs a
-password you cannot type, and that is deliberate rather than a limitation.
-Do not work around it, and never propose a sudo credential cache:
-`brain/traps/a-long-sudo-cache-is-unlimited-root.md`.
-
-There is **no fallback tier**. A validating privilege broker (`ph-sudo`,
-`PMB_SUDO`) used to exist for a host without podman and has been removed: it
-granted a real sudoers entry and could not contain a determined chroot payload,
-and a weaker path that still exists is the one a stuck agent reaches for. If
-you find yourself wanting host root, that is a bug in the plan.
-
-`PMB_SUDO` is dead too. `porthole doctor` **fails** if it is still exported —
-pmbootstrap invokes it directly, so a leftover kills a build with exit 78 from
-deep inside pmbootstrap, naming nothing. `docs/SANDBOX.md`.
-
-### When a rung is still slow
-
-`PORTHOLE_LAX_BUILD=1` skips the zap, and this section used to call that zap
-most of the wall clock in the flashing rungs. **Measured 2026-08-29: it is not,
-and the flag buys nothing.** Interleaved runs on a warm buildroot put the
-device package at 1.66-1.72 s either way. The minutes in those rungs are
-`install`, `export`, the flash and the boot wait, none of which the flag
-touches.
-
-On the kernel rung it is not merely unhelpful, it is **inert**: `pmbootstrap
-build --envkernel` returns from `pmb/commands/build.py` before the strict-mode
-zap block, so `--lax` never reaches that path. (The kernel numbers this section
-used to quote were four readings of a flag that could not have done anything.)
-
-**In the WORKSPACE this is reversed, and porthole handles it for you.** A
-non-lax `pmbootstrap build` cannot run there at all: `zap_buildroots()` umounts
-the chroot, and the recursive `/dev` bind the rootless workspace needs leaves
-propagated sub-mounts that cannot be umounted by path -- `umount:
-/pmb/chroot_native/dev/shm: not mounted.` (exit 32) -- so the build dies at
-"Zapping buildroots" before it starts. `tools/ph-build.sh` therefore passes
-`--lax` automatically in the workspace and nowhere else; you do not need to set
-anything. Upstream made strict the default for correctness (`e14f4169`, MR
-2939, 2026-05), so it is a real trade, covered by porthole's own stale-package
-guards. `brain/findings/what-a-rootless-workspace-cannot-do.md` §5.
-
-So do not reach for it. It accepts something real -- this repo has been bitten
-repeatedly by stale build state, a `_p` apk outranking a release, a stale
-APKINDEX making install pick an older package, each one presenting as a
-mysterious wrong-kernel bug -- for no measured gain.
-`brain/findings/lax-build-buys-nothing-measurable.md`.
-
-**What actually cuts a rung** is picking the right one, which `porthole build`
-does by measuring. Run `porthole build purge` if a stale dev package is
-suspected.
-
-It does NOT speed up the compile. The compile is cached separately, and **in
-the workspace that cache now works** -- the image rewrites envkernel's
-`CCACHE_DISABLE=1` to a `CCACHE_DIR`, and `_ph_arm_ccache` in `tools/ph-build.sh`
-installs ccache into `chroot_native` and links clang into its masquerade dir on
-every activate. Measured: the same 643-step rebuild is 1m49s with no cache, 2m09s on a run
-that misses everywhere, and **43 s** once the cache has seen those objects.
-So it costs ~18% the first time a set of objects is compiled and pays 2.5x on
-every repeat. `PORTHOLE_NO_CCACHE=1` turns it off if you build a tree once and
-never again.
-
-That helps a full rebuild -- a kernel version move, a common header, a fresh
-workspace -- and does nothing for the 7-second incremental loop, which never
-repeats a compilation to cache. `--host` builds use your own pmbootstrap
-checkout, which is not patched and stays uncached.
-`brain/findings/the-workspace-caches-kernel-compiles.md`.
-
-### Confirm before anything irreversible
-
-Flashing, thermal ramps, anything that can leave a slot unbootable. Approval for
-one flash is not approval for the next.
-
-### Put a timeout on every ssh in anything that induces a reset
-
-"The device stopped answering" is the *expected* outcome of suspend and hang
-work. A command without a timeout wedges the device lock against everyone else.
-
----
+**The narrative for each rule -- what it cost to learn, and how to follow it --
+is [docs/AGENTS-RULES.md](docs/AGENTS-RULES.md).** It is reference: read the rule here, read its
+story there when you need it. `porthole brief --json` carries each rule's
+`why` and `enforced_by` in machine-readable form.
 
 ## 2. Before you report any result
 
@@ -541,20 +295,25 @@ by `tests/test_tools.py`, not by review diligence.
 - **Credit an assistant with `Assisted-by: Claude`, and only that.** Every
   commit an AI assistant helped write ends with it (`Assisted-by: LLM` on
   Linux kernel patches, the form the kernel documents). It is disclosure,
-  never a requirement: a commit written without AI needs only its sign-off.
+  never a requirement: a commit written without AI needs nothing.
   Never `Co-Authored-By:`, `Co-developed-by:` or `Signed-off-by:` naming an
   AI (all three are human-only), never a `Claude-Session:` line or a bare
   session URL (a private link), never a "Generated with [Claude Code]" or
   robot-emoji line. A harness that appends those by default is overridden by
   this rule. See `AI.md`.
-- **Only the human signs off.** `Signed-off-by:` is the author's Developer
-  Certificate of Origin. An assistant commits without one and never adds it on
-  anyone's behalf; the human certifies before merge with
-  `git rebase --signoff <base>` (or `git commit -s`), or with
-  `tools/ph-pr-signoff.py OWNER/REPO N --merge` on a pull request with no local
-  clone. CI fails a pull request commit whose author has no matching
-  `Signed-off-by:`. Never run that tool yourself except with `--dry-run`:
-  running it is the human's certificate.
+- **Only the human signs off, and only where a sign-off means something.**
+  `Signed-off-by:` is the author's Developer Certificate of Origin. An
+  assistant commits without one and never adds it on anyone's behalf.
+
+  **A pull request on this repository does not need one**, and CI no longer
+  asks: only someone with write access can open one, so the certificate would
+  be this project asking itself about its own work. It is certified by a
+  maintainer reading the diff and merging. CI still
+  requires it on a pull request **from a fork**, which is the case the DCO was
+  designed for, and `porthole aports` still requires it on a series bound
+  **upstream**. Those two are real gates; the one that used to run on our own
+  branches was red on every agent pull request until a human ran a tool to add
+  the missing line, which is a gate that trains people to clear it unread.
 - **The ban covers every surface you publish text on** -- the commit message,
   the pull request body, and the issue body. Each one cost an escape of its
   own: #51 and #52 published the lines in the body while the hook held the
@@ -615,6 +374,15 @@ nothing else — it will burn a long time and return BLOCKED.
 
 ## 8. Every verb, generated
 
+**The contract for any one of them is `porthole <verb> --help`**: prerequisites,
+where it runs, what it writes, preview versus execute, and the log path. That
+is generated from the code, so it cannot drift from what the verb does.
+
+The table below is regenerated by `porthole docs build`, and
+`tests/test_documented_commands.py` fails if it is stale -- a hand-kept
+inventory is wrong the first time a verb is renamed, and an agent that trusts
+a wrong one wastes a session finding out.
+
 <!-- BEGIN GENERATED: verbs -->
 | verb | does | json | writes outside its profile |
 |---|---|---|---|
@@ -645,6 +413,7 @@ nothing else — it will burn a long time and return BLOCKED.
 | `devices` | list device profiles | yes | no |
 | `sync` | move the three repos between hosts: report, push, or fast-forward | yes | needs --yes |
 | `aports` | work on pmaports: status, feature branches, diffs, patches | yes | needs --yes |
+| `workspace` | every checkout on this desk: registered, worktree, shallow, dirty | yes | no |
 | `channel` | see and switch the postmarketOS release channel | yes | no |
 | `experiment` | run something with the device state captured either side | yes | no |
 | `ui` | see and switch the compositor / desktop | yes | no |
@@ -656,16 +425,6 @@ nothing else — it will burn a long time and return BLOCKED.
 | `docs` | generate the documentation site | yes | no |
 | `version` | version, environment and host tool versions | yes | no |
 <!-- END GENERATED: verbs -->
-
-This table is generated from the live command registry by `porthole docs build`,
-and a test fails if the file on disk disagrees with it. That is deliberate: a
-hand-maintained inventory is wrong the first time a verb is renamed, and an
-agent that trusts a wrong inventory wastes a session discovering it.
-
-The prose in this file is hand-written and stays that way — judgement and war
-stories are why it is worth reading. Only the inventory is generated.
-
----
 
 ## 9. The session contract
 

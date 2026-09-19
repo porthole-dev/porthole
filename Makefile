@@ -78,9 +78,22 @@ floor:           ## the suite on the declared python floor, in a container (need
 	@# on 3.12+ and a syntax error below it. It compiled locally on 3.14 and
 	@# broke every CI job. The floor is what bin/porthole declares, so the floor
 	@# is what must be checked.
+	@# `rm -rf /w/.git`, and it is load-bearing. In a LINKED WORKTREE `.git` is
+	@# a FILE holding `gitdir: <path on the host>`, and that path does not exist
+	@# inside the container -- so every git call with a cwd under /w exits 128
+	@# with "not a git repository". `_merge_one` reads >=128 as "the merge could
+	@# not run" and correctly returns a conflict, so six test_pkg_rebase cases
+	@# and one fidelity case failed for a reason that had nothing to do with the
+	@# code under test. Measured 2026-09-18: 10 failures from a worktree, 3 from
+	@# a true clone of the same commit.
+	@#
+	@# Dropping it makes the run identical either way, which is the property
+	@# this target actually needs. Nothing under tests/ requires the repo's own
+	@# history: the one reader (test_brain.py) already handles "git absent, or
+	@# not a clone" and only uses it to enrich a failure message.
 	@if command -v podman >/dev/null; then \
 	  $(PODMAN) -v "$(CURDIR):/src:ro" -w /tmp $(FLOOR_IMAGE) \
-	    sh -c 'cp -r /src /w && cd /w || exit 1; \
+	    sh -c 'cp -r /src /w && rm -rf /w/.git && cd /w || exit 1; \
 	      fail=0; \
 	      python -m compileall -q lib bin tools tests || fail=1; \
 	      for t in tests/test_*.py; do \
@@ -105,10 +118,12 @@ ci: check smoke floor trailers ## every job CI runs, plus the python floor
 	@echo
 	@echo "== green here means green on GitHub: the jobs run these same targets =="
 
-trailers:        ## CI job "Commit check": banned lines in the log/PR body; DCO on a PR
+trailers:        ## CI job "Commit check": banned lines in the log and PR body
 	@# The pull request body and range are only reachable when the workflow
 	@# exports PR_BODY, PR_BASE and PR_HEAD; locally this is the commit-log half.
-	@# Check your own branch's sign-offs with:
+	@# The DCO half runs on a pull request from a FORK only -- our own branches
+	@# are certified by a Code-Owner review and the merge. `--dco RANGE` still
+	@# checks a range by hand, which is what a series bound upstream wants:
 	@#   python3 lib/porthole_trailers.py --dco origin/main..HEAD
 	@# AGENTS.md section 5.
 	@$(PY) lib/porthole_trailers.py --ci && echo "trailers                     ok"
