@@ -15,6 +15,7 @@ generic notes as well.
 | [a-dev-snapshot-blocks-install-and-says-nothing](findings/a-dev-snapshot-blocks-install-and-says-nothing.md) | `generic` | An envkernel _p snapshot blocks every install, and nothing reports it until a build refuses twelve minutes in |
 | [a-killed-build-is-resurrected-by-the-log-it-died-writing](findings/a-killed-build-is-resurrected-by-the-log-it-died-writing.md) | `generic` | A killed build is resurrected by the shared log it died writing |
 | [a-level-irq-with-a-pull-up-storms-when-its-chip-is-off](findings/a-level-irq-with-a-pull-up-storms-when-its-chip-is-off.md) | `device:google-taimen` | The NFC interrupt storm was a devicetree pull-up, not a driver bug |
+| [a-magic-packet-does-wake-this-phone](findings/a-magic-packet-does-wake-this-phone.md) | `device:google-taimen` | Wake-on-WLAN works -- a magic packet wakes taimen from s2idle, and the association survives suspend |
 | [a-phone-in-the-bootloader-can-be-off-the-bus](findings/a-phone-in-the-bootloader-can-be-off-the-bus.md) | `generic` | A phone can reach the bootloader and never enumerate, and porthole read that as never reaching it |
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
@@ -77,6 +78,7 @@ generic notes as well.
 | [the-monitor-vif-was-never-deaf-the-parser-was](findings/the-monitor-vif-was-never-deaf-the-parser-was.md) | `device:google-taimen` | The monitor vif was never deaf -- the radiotap parser was, and the phone is LOUD |
 | [the-msm8998-thermal-trip-is-a-cliff](findings/the-msm8998-thermal-trip-is-a-cliff.md) | `soc:msm8998` | The mainline msm8998 thermal zone is a cliff -- one passive trip, no limit, 2.36 GHz to 500 MHz in about 7 s |
 | [the-reserved-vht-width-pair-is-why-the-ap-refused](findings/the-reserved-vht-width-pair-is-why-the-ap-refused.md) | `soc:msm8998` | The reserved VHT channel-width pair was the refusal -- clamping it associates 8/8 |
+| [the-resume-tail-is-easel-and-the-firmware-cache](findings/the-resume-tail-is-easel-and-the-firmware-cache.md) | `device:google-taimen` | The two unattributed halves of the s2idle cycle are one PM notifier each -- Easel's PCIe revival and the firmware cache |
 | [the-scroll-stall-is-the-pages-own-javascript](findings/the-scroll-stall-is-the-pages-own-javascript.md) | `generic` | The browser scroll stall is the page's own JavaScript -- not the engine, not the tile-record path, and not page settling |
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
 | [the-sigkill-venus-wedge-was-vp9-bandwidth-starvation](findings/the-sigkill-venus-wedge-was-vp9-bandwidth-starvation.md) | `device:google-taimen` | The "SIGKILL wedges venus until reboot" was VP9 bandwidth starvation misread -- venus survives SIGKILL on both codecs |
@@ -255,7 +257,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 48
+- `device:google-taimen` — 50
 - `device:taimen` — 2
 - `generic` — 133
 - `soc:gs201` — 1
