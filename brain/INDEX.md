@@ -20,6 +20,7 @@ generic notes as well.
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
 | [a-trustzone-command-can-succeed-and-do-nothing](findings/a-trustzone-command-can-succeed-and-do-nothing.md) | `device:google-taimen` | A TrustZone command can return status 0 and do nothing -- the tell is how long it took |
 | [a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever](findings/a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever.md) | `soc:msm8998` | A venus firmware assert wedges the video GDSC, and the driver's recovery then retries every 10 ms forever |
+| [a540-lm-is-mostly-vendor-parity](findings/a540-lm-is-mostly-vendor-parity.md) | `soc:msm8998` | Three of the four a540 GPMU limiter "gaps" are vendor parity; only the throttle bit and the stale power level are real |
 | [a5xx-gmem-never-resolves-multisample-buffers](findings/a5xx-gmem-never-resolves-multisample-buffers.md) | `soc:msm8998` | GPU rasterisation is visibly wrong on a540 because the a5xx GMEM store never resolves multisample buffers |
 | [acp-splits-a-verb-with-two-outputs-into-two-profiles](findings/acp-splits-a-verb-with-two-outputs-into-two-profiles.md) | `soc:msm8998` | ACP gives a UCM verb with two outputs on one PCM two profiles, not two ports -- so callaudiod's speaker button cannot work |
 | [android-interaction-boost-is-the-remaining-perf-delta](findings/android-interaction-boost-is-the-remaining-perf-delta.md) | `soc:msm8998` | Android's INTERACTION boost is the remaining perf delta -- the scaling infrastructure already has vendor parity |
@@ -76,6 +77,7 @@ generic notes as well.
 | [the-scroll-stall-is-the-pages-own-javascript](findings/the-scroll-stall-is-the-pages-own-javascript.md) | `generic` | The browser scroll stall is the page's own JavaScript -- not the engine, not the tile-record path, and not page settling |
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
 | [the-sigkill-venus-wedge-was-vp9-bandwidth-starvation](findings/the-sigkill-venus-wedge-was-vp9-bandwidth-starvation.md) | `device:google-taimen` | The "SIGKILL wedges venus until reboot" was VP9 bandwidth starvation misread -- venus survives SIGKILL on both codecs |
+| [the-skin-ladder-caps-the-die-22c-and-is-self-limiting](findings/the-skin-ladder-caps-the-die-22c-and-is-self-limiting.md) | `device:google-taimen` | The vendor's skin thermal ladder drops the die 22 C under sustained load, and its own first two rungs stop it reaching the rest |
 | [the-top-right-corruption-is-freedreno-gmem](findings/the-top-right-corruption-is-freedreno-gmem.md) | `soc:msm8998` | The top-right corruption is freedreno's GMEM tile path, not a GPU fault -- the boundary is the a5xx bin column at x=1024 |
 | [the-venus-wedge-was-wrapper-clock-auto-gating](findings/the-venus-wedge-was-wrapper-clock-auto-gating.md) | `device:google-taimen` | The msm8998 venus wedge was wrapper clock auto-gating, and one write closes it |
 | [the-vocproc-refuses-a-volume-step-without-cal](findings/the-vocproc-refuses-a-volume-step-without-cal.md) | `soc:msm8998` | In-call volume: the vocproc refuses VSS_IVOLUME_CMD_SET_STEP without a registered volume calibration table |
@@ -247,8 +249,8 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 46
+- `device:google-taimen` — 47
 - `generic` — 132
 - `soc:gs201` — 1
-- `soc:msm8998` — 30
+- `soc:msm8998` — 31
 - `soc:qcom` — 1
