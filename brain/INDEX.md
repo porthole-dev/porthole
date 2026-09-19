@@ -30,6 +30,7 @@ generic notes as well.
 | [chromium-segfaults-because-a-phone-sends-no-xkb-keymap](findings/chromium-segfaults-because-a-phone-sends-no-xkb-keymap.md) | `generic` | Chromium segfaults on every launch under phoc because a phone with no physical keyboard is sent no wl_keyboard.keymap |
 | [clipping-webkit-compositing-to-damage-is-worth-8-percent](findings/clipping-webkit-compositing-to-damage-is-worth-8-percent.md) | `device:google-taimen` | Clipping WebKit's compositing to the damaged rectangles is worth ~8% and 3 C on taimen, not a step change |
 | [crossdirect-hands-the-linker-to-qemu-on-purpose](findings/crossdirect-hands-the-linker-to-qemu-on-purpose.md) | `generic` | Crossdirect hands every link step to qemu on purpose, not just compile |
+| [eas-never-starts-without-an-energy-model](findings/eas-never-starts-without-an-energy-model.md) | `soc:msm8998` | EAS never starts on msm8998: the CPU OPP tables carry CPR corners, not power |
 | [envkernel-activation-is-cheap-once-the-chroot-is-warm](findings/envkernel-activation-is-cheap-once-the-chroot-is-warm.md) | `generic` | envkernel activation costs 0.8 s, not 14 s -- the 14 s is a one-off apk add |
 | [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
 | [epiphany-is-a-memory-ceiling-not-a-gpu-fault](findings/epiphany-is-a-memory-ceiling-not-a-gpu-fault.md) | `device:google-taimen` | Epiphany on YouTube is a memory ceiling, and the GPU buffers are charged to its cgroup |
@@ -58,8 +59,10 @@ generic notes as well.
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
 | [request-firmware-from-open-shares-the-openers-symlink-budget](findings/request-firmware-from-open-shares-the-openers-symlink-budget.md) | `generic` | request_firmware() from a file's ->open() shares that open()'s symlink budget, and a split firmware runs out |
 | [rust-builds-natively-with-pmbootstrap-cross-native2](findings/rust-builds-natively-with-pmbootstrap-cross-native2.md) | `generic` | A bindgen Rust aport builds in minutes with cross-native2, once pmbootstrap sets cargo up for it |
+| [rust-does-not-fix-the-errors-agents-make-here](findings/rust-does-not-fix-the-errors-agents-make-here.md) | `generic` | Rewriting porthole, pmbootstrap or the msm8998 drivers in Rust does not address the class of error this port actually hits |
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
 | [taimen-rear-module-is-three-i2c-parts](findings/taimen-rear-module-is-three-i2c-parts.md) | `device:google-taimen` | taimen's rear camera module is three I2C parts -- IMX362 (0x1a), LC898214XD focus (0x72) and an LC898123F40 OIS controller (0x3e) that also holds the module calibration |
+| [taimens-skin-sensor-is-one-devicetree-change](findings/taimens-skin-sensor-is-one-devicetree-change.md) | `device:taimen` | taimen's skin thermistor needs no driver: bd_therm2 is VADC 0x51 and mainline already scales it |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
 | [the-af-dioptre-map-is-wrong-in-scale-not-just-direction](findings/the-af-dioptre-map-is-wrong-in-scale-not-just-direction.md) | `device:google-taimen` | The imx362 AF tuning map is wrong in scale: code 0 is ~0.47 m, not 14 cm, and infinity lands near code 157 |
@@ -78,6 +81,7 @@ generic notes as well.
 | [the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why](findings/the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why.md) | `device:google-taimen` | The whole session is back to 30 fps on 7.2 -- the commit pipelining IS present, and the missing CTL_START patch is NOT why (msm8998 has no such interrupt) |
 | [the-sigkill-venus-wedge-was-vp9-bandwidth-starvation](findings/the-sigkill-venus-wedge-was-vp9-bandwidth-starvation.md) | `device:google-taimen` | The "SIGKILL wedges venus until reboot" was VP9 bandwidth starvation misread -- venus survives SIGKILL on both codecs |
 | [the-top-right-corruption-is-freedreno-gmem](findings/the-top-right-corruption-is-freedreno-gmem.md) | `soc:msm8998` | The top-right corruption is freedreno's GMEM tile path, not a GPU fault -- the boundary is the a5xx bin column at x=1024 |
+| [the-vendor-runs-four-thermal-layers](findings/the-vendor-runs-four-thermal-layers.md) | `soc:msm8998` | The vendor runs four thermal layers on msm8998; mainline runs one, and two of the other three are hardware we switch off |
 | [the-venus-wedge-was-wrapper-clock-auto-gating](findings/the-venus-wedge-was-wrapper-clock-auto-gating.md) | `device:google-taimen` | The msm8998 venus wedge was wrapper clock auto-gating, and one write closes it |
 | [the-vocproc-refuses-a-volume-step-without-cal](findings/the-vocproc-refuses-a-volume-step-without-cal.md) | `soc:msm8998` | In-call volume: the vocproc refuses VSS_IVOLUME_CMD_SET_STEP without a registered volume calibration table |
 | [the-wake-crash-dies-inside-a5xx-hw-init](findings/the-wake-crash-dies-inside-a5xx-hw-init.md) | `soc:msm8998` | The display-wake crash dies inside a5xx_hw_init() -- it IS a GPU register access, and the instrument that said otherwise could not see this window |
@@ -87,6 +91,7 @@ generic notes as well.
 | [the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail](findings/the-webkit-snapshot-crash-is-epiphanys-full-document-thumbnail.md) | `generic` | The WebKitWebProcess SIGSEGV is Epiphany asking for a FULL_DOCUMENT snapshot of a 237522 px page: Skia refuses a raster surface over 2 GB and WebKit dereferences the null |
 | [the-workspace-caches-kernel-compiles](findings/the-workspace-caches-kernel-compiles.md) | `generic` | The workspace caches kernel compiles now: 18% dearer the first time, 2.5x faster every repeat |
 | [the-workspace-loop-is-seconds-and-still-uncached](findings/the-workspace-loop-is-seconds-and-still-uncached.md) | `generic` | The workspace edit-build loop is 6-8 s, and ccache is still hit zero times |
+| [three-always-on-blocks-cost-244mw-at-idle](findings/three-always-on-blocks-cost-244mw-at-idle.md) | `device:taimen` | 244 mW of taimen's screen-off idle is three blocks nothing is using |
 | [touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm](findings/touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm.md) | `device:google-taimen` | Finger drags on GTK4 WebKit ride the scrolling thread, and r61's two patches cut the Wikipedia drag from 289 layouts per 10 s to 10 |
 | [two-thirds-of-associations-never-get-keys](findings/two-thirds-of-associations-never-get-keys.md) | `device:google-taimen` | Two thirds of successful associations never complete the 4-way handshake, and ath10k says nothing |
 | [va-api-cannot-wrap-a-stateful-v4l2-decoder](findings/va-api-cannot-wrap-a-stateful-v4l2-decoder.md) | `generic` | VA-API cannot be put on top of venus: it is a STATEFUL V4L2 decoder and VA-API's model is stateless, which is why only GStreamer-based browsers get hardware decode here |
@@ -249,7 +254,8 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 47
-- `generic` — 131
+- `device:taimen` — 2
+- `generic` — 132
 - `soc:gs201` — 1
-- `soc:msm8998` — 31
+- `soc:msm8998` — 33
 - `soc:qcom` — 1

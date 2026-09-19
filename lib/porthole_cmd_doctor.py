@@ -10,6 +10,7 @@ nothing and something red happened".
 from __future__ import annotations
 
 import collections
+import contextlib
 import errno
 import os
 import pathlib
@@ -317,6 +318,7 @@ def check_host(ch: Checks, cfg, family: str) -> None:
     _check_envkernel(ch, cfg)
     _check_pmaports(ch, cfg)
     _check_device_workdir(ch, cfg)
+    _check_kernel_tree(ch, cfg)
     _check_host_workdir(ch, cfg)
     _check_disk(ch, cfg)
 
@@ -352,6 +354,102 @@ def _check_pmaports(ch: Checks, cfg) -> None:
     # computed in parallel with the search is a label that can disagree with
     # the path beside it, which is worse than printing no label at all.
     ch.add("host: pmaports", "ok", f"{found}  (via {via})")
+
+
+def _check_kernel_tree(ch: Checks, cfg) -> None:
+    """WHICH kernel tree, is it pinned, and can it export a patch series.
+
+    THE PROBLEM THIS REPORTS, MEASURED
+        On the reference host, 2026-09-18: `taimen/linux` on
+        `wifi-disablekey-test` and `taimen/linux-ws` on
+        `camera/camss-plain16`, both SHALLOW.
+
+        A FIRST READING OF THIS WAS WRONG and is recorded because the wrong
+        version is the intuitive one. Two directories, both 16 GB and 4.6 GB,
+        both reporting `torvalds/linux.git` as origin, read as two clones of
+        one remote -- 20 GB of duplicated history. They are not.
+        `taimen/linux-ws/.git` is a FILE reading
+        `gitdir: .../taimen/linux/.git/worktrees/linux-ws`: it is a linked
+        WORKTREE, sharing one object store. `git remote get-url` answers the
+        same for both precisely BECAUSE they share it. The size is
+        checked-out files and build output, which two branches genuinely
+        need, not history.
+
+        So the layout here is already one clone with worktrees, and the thing
+        actually worth reporting is what is left:
+
+        SHALLOW is the real trap, and it is real on both. A shallow tree
+        cannot `format-patch` a series or rebase onto a different base, which
+        is exactly what the aports workflow needs -- so when the base has to
+        move, a fresh clone becomes the only move the tree allows. That is
+        how sprawl starts. `porthole workspace` lists the ones that
+        already have; this row is only about the tree you will build.
+
+    This row is how you see which tree you are standing in before you build.
+
+    WHY IT IS A ROW AND NOT A VERB
+        A `porthole workspace` verb was drafted for this. It would have been
+        a fifth thing to discover, document and keep honest, in a toolbox
+        whose measured problem is that agents already read too much of it.
+        doctor is what every session runs first, it already owns "which
+        directory did you mean", and this fits in it for thirty lines.
+    """
+    from porthole_cmd_build import _branch_of, _tree
+
+    pinned = (cfg.get("PORTHOLE_KERNEL_TREE") or "").strip()
+    tree = _tree(cfg)
+    if str(tree) in ("", "."):
+        ch.add("host: kernel tree", "warn",
+               "no tree -- PORTHOLE_WORKDIR is unset, so there is nothing to "
+               "resolve a relative PORTHOLE_KERNEL_TREE against",
+               fix="porthole init    or set PORTHOLE_KERNEL_TREE to an "
+                   "absolute path")
+        return
+    via = "PORTHOLE_KERNEL_TREE" if pinned else "default: <workdir>/linux"
+    if not (tree / "Makefile").is_file():
+        ch.add("host: kernel tree", "warn",
+               f"{tree} has no Makefile -- not a kernel tree  (via {via})",
+               fix="porthole build image    needs none; anything else needs "
+                   "PORTHOLE_KERNEL_TREE pointed at a real tree")
+        return
+
+    branch = _branch_of(tree) or "detached"
+    # Siblings are counted, never adopted: naming how many there are is what
+    # makes "which one am I in" a question with a visible answer. `porthole
+    # build` picks between them only when exactly one is on the product
+    # branch, and says so loudly when it does.
+    try:
+        siblings = sorted(p.name for p in tree.parent.glob("linux*")
+                          if p.is_dir() and p != tree)
+    except OSError:
+        siblings = []
+    extra = f", {len(siblings)} sibling tree(s): {' '.join(siblings)}" if siblings else ""
+
+    shallow = _git_read(tree, "rev-parse", "--is-shallow-repository") == "true"
+    if shallow:
+        ch.add("host: kernel tree", "warn",
+               f"{tree} on {branch} is SHALLOW -- it cannot `format-patch` a "
+               f"series or rebase onto another base{extra}  (via {via})",
+               fix=f"git -C {tree} fetch --unshallow    # then reuse it with "
+                   f"`git worktree add`, rather than cloning a second tree "
+                   f"the next time a branch needs a different base")
+        return
+    ch.add("host: kernel tree", "ok", f"{tree} on {branch}{extra}  (via {via})")
+
+
+def _git_read(path, *args) -> str:
+    """One local git read, or "" -- never an exception and never a hang.
+
+    Ten seconds because doctor must stay fast and a wedged git must not be
+    able to take it down; the same ceiling `porthole sync` carries for the
+    same reason.
+    """
+    try:
+        proc = subprocess.run(["git", "-C", str(path), *args],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
 def _check_device_workdir(ch: Checks, cfg) -> None:
@@ -1087,36 +1185,51 @@ def bench(ch: Checks, ctx) -> None:
 
 
 def _check_pmb_sudo(ch: Checks, ctx, state: dict) -> None:
-    """PMB_SUDO set at all is now a leftover, and a dangerous one.
+    """PMB_SUDO set is a leftover -- and porthole already handles it.
 
-    The privilege broker it used to name is gone -- the workspace needs no
-    sudoers entry, so a weaker path nobody needed was one more thing that could
-    be wrong. But an export survives in a shell long after the file does, and
-    pmbootstrap invokes PMB_SUDO directly, prefixing nothing: a stale one kills
-    a build with **exit 78 deep inside pmbootstrap**, with nothing anywhere
-    saying the words "PMB_SUDO". Reported from a real session, where the
-    workaround reached for was `PMB_SUDO=sudo` -- the blanket credential cache
-    this whole subsystem exists to retire.
+    The privilege broker it used to name is gone: the workspace needs no
+    sudoers entry, so a weaker path nobody needed was one more thing that
+    could be wrong. An export outlives the file, and pmbootstrap invokes
+    PMB_SUDO directly, prefixing nothing, so a stale one used to kill a build
+    with exit 78 deep inside pmbootstrap while naming nothing.
 
-    So: set is a failure, and the fix is spelled out.
+    WHY THIS IS A WARNING AND NOT A FAILURE
+        It was a failure, and the failure was the bug. `child_env()` in
+        porthole_cli.py strips PMB_SUDO from every child process porthole
+        starts, and a convention test fails any verb that builds a child
+        environment without going through it. So when this row is printed the
+        hazard it describes cannot happen, and the row was telling an agent
+        that its very next build would die.
+
+        A red row is a call to action, so agents acted: three sessions went
+        off to edit the host environment, and one reached for `PMB_SUDO=sudo`
+        -- the blanket credential cache this whole subsystem exists to retire.
+        The check was manufacturing the behaviour it was written to prevent.
+
+        It stays as a warning because an export nothing reads is still worth
+        knowing about, and because `pmbootstrap` run BY HAND, outside
+        porthole, is not covered by child_env(). That is a real residue, and
+        it is a warning-sized one.
+
+        `_check_leftover_broker` below stays a FAILURE. A broker *file* on
+        disk is a standing privilege grant; a stale shell variable is not.
+        That is the whole distinction, and it is why this row got quieter and
+        that one did not.
     """
     value = (ctx.cfg.get("PMB_SUDO") or os.environ.get("PMB_SUDO") or "").strip()
     if value:
-        # `unset` alone fixes ONE shell. Reported three times by agents that
-        # each worked around it with `env -u PMB_SUDO` and moved on, which
-        # fixes nothing and hides the check: on the host where this was found
-        # the export came from the desktop session, so every new terminal and
-        # every agent inherited it again.
-        ch.add("host: PMB_SUDO", "fail",
-               f"set to {value} -- a leftover; the privilege broker it named "
-               f"is gone",
-               fix="systemctl --user unset-environment PMB_SUDO"
-                   "    # then `unset PMB_SUDO` in this shell."
-                   " A build otherwise dies with exit 78 deep inside "
-                   "pmbootstrap, naming nothing. The user manager is where it"
-                   " was actually found: not in any rc file, not in"
-                   " environment.d, so grepping dotfiles finds nothing and"
-                   " every new terminal inherits it again")
+        ch.add("host: PMB_SUDO", "warn",
+               f"set to {value} -- a leftover, and ignored: porthole strips it "
+               f"from every child process it starts",
+               fix="nothing to do for a porthole build. To clear it anyway, "
+                   "because a hand-run `pmbootstrap` still reads it: "
+                   "`systemctl --user unset-environment PMB_SUDO`, then "
+                   "`unset PMB_SUDO` in this shell -- the user manager is "
+                   "where it was actually found, not in any rc file, so "
+                   "grepping dotfiles finds nothing. Do NOT set it to `sudo` "
+                   "to 'fix' this, and do not build on the host to avoid it: "
+                   "`porthole sandbox up`, or docs/NEW-HOST.md if you really "
+                   "want a host build")
     else:
         ch.add("host: PMB_SUDO", "ok", "unset -- nothing here uses it")
     _check_leftover_broker(ch, value)

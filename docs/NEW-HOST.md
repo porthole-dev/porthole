@@ -233,7 +233,10 @@ the namespace cannot see. The container has to own its own.
    pmbootstrap moves it
 2. **a different checkout** — you give it a path, it writes
    `PORTHOLE_PMAPORTS_<CODENAME>`
-3. **clone a fresh one** — into `~/.cache/porthole/aports/<codename>`
+3. **clone a fresh one** — into `~/.cache/porthole/aports/<codename>`, from
+   the device profile's `PORTHOLE_PMAPORTS_FORK_URL` if it sets one, or
+   vanilla postmarketOS otherwise (docs/CONFIG.md#pmaports-fork). Most
+   bring-ups need the fork: their kernel aport is not upstream at all.
 
 Whichever you pick, `porthole sandbox up` mounts that checkout into the
 workspace at `/pmb/cache_git/pmaports` — the path pmbootstrap derives from its

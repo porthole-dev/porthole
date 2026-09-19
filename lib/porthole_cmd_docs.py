@@ -383,13 +383,19 @@ def cmd_build(args, ctx) -> int:
     (src / "index.md").write_text(
         _readme_as_index((root / "README.md").read_text()))
     pages = ["NEW-HOST.md", "SANDBOX.md", "CONFIG.md", "ARCHITECTURE.md",
-             "PERFORMANCE.md", "CONTRIBUTING.md"]
+             "PERFORMANCE.md", "CONTRIBUTING.md", "AGENTS-RULES.md"]
     for name, title in [("NEW-HOST.md", "Setting up a new host"),
                         ("SANDBOX.md", "Running pmbootstrap safely"),
                         ("CONFIG.md", "Configuration"),
                         ("ARCHITECTURE.md", "Architecture"),
                         ("PERFORMANCE.md", "Performance"),
-                        ("CONTRIBUTING.md", "Contributing")]:
+                        ("CONTRIBUTING.md", "Contributing"),
+                        # The narrative behind section 1, split out of
+                        # AGENTS.md. It has to be a page: AGENTS.md links to
+                        # it, and _docs_links rewrites docs/ links for the
+                        # flat site, so an unregistered target 404s there
+                        # while working fine in the repository.
+                        ("AGENTS-RULES.md", "The rules, and what they cost")]:
         source = root / "docs" / name
         if source.is_file():
             (src / name.lower()).write_text(_docs_links(source.read_text(), pages))
@@ -427,7 +433,10 @@ def cmd_build(args, ctx) -> int:
             ("Tools", "tools.md"),
             ("Profile keys", "profile-keys.md"),
         ]),
-        ("For agents", "agents.md"),
+        ("For agents", [
+            ("AGENTS.md", "agents.md"),
+            ("The rules, and what they cost", "agents-rules.md"),
+        ]),
     ]
     brain_nav = []
     if (src / "brain" / "README.md").is_file():
@@ -476,6 +485,7 @@ README_LINK_MAP = {
     "docs/PERFORMANCE.md": "performance.md",
     "docs/ARCHITECTURE.md": "architecture.md",
     "docs/CONTRIBUTING.md": "contributing.md",
+    "docs/AGENTS-RULES.md": "agents-rules.md",
     "docs/TOOLS.md": "tools.md",
     "AGENTS.md": "agents.md",
     "skills/porthole-bringup/": "https://github.com/porthole-dev/porthole/tree/main/skills/porthole-bringup",

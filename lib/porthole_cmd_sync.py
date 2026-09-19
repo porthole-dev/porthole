@@ -149,6 +149,61 @@ def _blockers(row: dict, action: str) -> list[str]:
     return []
 
 
+def kernel_survey(path: pathlib.Path, cfg) -> dict:
+    """What the kernel tree is holding that no remote has a copy of.
+
+    `sync` deliberately does not MIRROR this tree (see _render), but refusing
+    to mirror it was being read as refusing to look at it, and the tree is
+    where the branches are: on the reference host, 54 of them against three
+    in the repos sync does cover, one with an upstream, and a `worktree-agent-`
+    branch six weeks stale that nothing had ever mentioned.
+
+    COUNTS BRANCHES, NOT COMMITS, ON PURPOSE. "How many commits are on no
+    remote" needs a graph walk -- `rev-list --count --branches --not --remotes`
+    took ~30 s on this tree, and a status verb that people run before starting
+    work cannot spend that. Comparing tip SHAs against the set of remote tips
+    is two ref reads and answers the question actually being asked: is there a
+    branch here that exists nowhere else? It will not notice a branch whose
+    tip moved but whose commits are all pushed; that is a rename away from
+    danger, not danger.
+    """
+    out = {"path": str(path), "present": path.is_dir(), "branches": 0,
+           "tracked": 0, "unbacked": [], "worktrees": 0, "prunable": 0}
+    if not out["present"]:
+        return out
+    rc, _o, _e = git(path, "rev-parse", "--git-dir", cfg=cfg)
+    if rc != 0:
+        out["present"] = False
+        return out
+
+    rc, remotes, _e = git(path, "for-each-ref", "--format=%(objectname)",
+                          "refs/remotes/", cfg=cfg)
+    have = set(remotes.split()) if rc == 0 else set()
+
+    # Newest first: an unbacked branch you touched yesterday is work you would
+    # miss, and an unbacked branch from a retired device is not. Alphabetical
+    # put `angler-bringup` at the top of the list and the live work below the
+    # cut, which is the opposite of useful.
+    rc, locals_, _e = git(path, "for-each-ref", "--sort=-committerdate",
+                          "--format=%(objectname)\t%(refname:short)\t%(upstream)",
+                          "refs/heads/", cfg=cfg)
+    if rc == 0:
+        for line in locals_.splitlines():
+            sha, _, rest = line.partition("\t")
+            name, _, upstream = rest.partition("\t")
+            out["branches"] += 1
+            if upstream:
+                out["tracked"] += 1
+            elif sha not in have:
+                out["unbacked"].append(name)
+
+    rc, wt, _e = git(path, "worktree", "list", "--porcelain", cfg=cfg)
+    if rc == 0:
+        out["worktrees"] = wt.count("\nworktree ") + wt.startswith("worktree ")
+        out["prunable"] = wt.count("\nprunable")
+    return out
+
+
 def _act(row: dict, action: str, cfg) -> dict:
     """Push or fast-forward one repo. Assumes _blockers() already passed."""
     path = pathlib.Path(row["path"])
@@ -218,8 +273,25 @@ def _render(ctx, rows: list[dict], action: str) -> None:
     # a tree is worse than one that refuses it". This is the loudly. It is
     # printed in every mode, not only `status`, because the mode where
     # somebody assumes their kernel went with the rest is `out`.
-    out.kv("kernel", "not synced, by design", width,
-           note="not mirrored between hosts; see docs/NEW-HOST.md")
+    kern = rows[0].get("_kernel") if rows else None
+    note = "not mirrored between hosts; see docs/NEW-HOST.md"
+    if kern and kern.get("present"):
+        bits = [f"{kern['branches']} branches ({kern['tracked']} tracked)",
+                f"{kern['worktrees']} worktrees"]
+        if kern["prunable"]:
+            bits.append(f"{kern['prunable']} prunable")
+        if kern["unbacked"]:
+            bits.append(f"{len(kern['unbacked'])} on NO remote")
+        note = ", ".join(bits) + "; not mirrored, see docs/NEW-HOST.md"
+    out.kv("kernel", "not synced, by design", width, note=note)
+    # Named, not just counted: a number tells you there is a problem, a name
+    # tells you which branch to look at. Capped because this list is a nudge,
+    # not an inventory -- `git -C <tree> branch --no-contains ...` is that.
+    for name in (kern or {}).get("unbacked", [])[:5]:
+        out(f"      on no remote: {name}")
+    extra = len((kern or {}).get("unbacked", [])) - 5
+    if extra > 0:
+        out(f"      ... and {extra} more")
 
     if action == "status":
         out.blank()
@@ -256,8 +328,24 @@ def cmd_sync(args, ctx) -> int:
         row["result"] = _act(row, action, ctx.cfg)
         bad = bad or row["result"]["action"] in ("failed", "blocked")
 
+    # The kernel tree is surveyed even though it is never synced: see
+    # kernel_survey(). Resolved the way every other verb resolves it
+    # (porthole_cmd_verify.py:142), and a tree that is absent or not a repo
+    # just leaves the line as it always was.
+    kern = {"present": False}
+    try:
+        work = resolve_target("workdir", ctx.cfg, ctx.root)
+        kpath = pathlib.Path(ctx.cfg.get("PORTHOLE_KERNEL_TREE", "")
+                             or str(work / "linux")).expanduser()
+        kern = kernel_survey(kpath, ctx.cfg)
+    except Bail:
+        pass
+    if rows:
+        rows[0]["_kernel"] = kern
+
     ctx.emit({"action": action, "repos": rows, "ok": not bad,
-              "kernel_tree": "not synced -- not mirrored between hosts"},
+              "kernel_tree": "not synced -- not mirrored between hosts",
+              "kernel": kern},
              lambda: _render(ctx, rows, action))
     return EX_FAIL if bad else EX_OK
 

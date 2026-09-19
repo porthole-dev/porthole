@@ -91,6 +91,8 @@ ALLOWED_VERBS = {
     "matrix":     "reads what is known to work",
     "soc":        "reads other profiles for the same SoC",
     "cd":         "prints a path",
+    "workspace":  "inventories the checkouts on this desk; the whole verb is "
+                  "read-only, with no action and no writing flag",
     "version":    "version and host tool versions",
     "completion": "emits a completion script to stdout",
     "slots":      "reads the A/B policy off the device; setting one is `flash`",
