@@ -199,6 +199,7 @@ generic notes as well.
 | [the-boot-header-hash-does-not-cover-the-cmdline](traps/the-boot-header-hash-does-not-cover-the-cmdline.md) | `generic` | The boot header hash does not cover the cmdline — which makes it the cheapest liveness test |
 | [the-bootloader-reboot-can-drop-the-phone-off-usb-entirely](traps/the-bootloader-reboot-can-drop-the-phone-off-usb-entirely.md) | `device:google-taimen` | The bootloader reboot can drop the phone off USB entirely |
 | [the-debug-cable-starves-the-battery](traps/the-debug-cable-starves-the-battery.md) | `generic` | A battery that will not charge is usually the debug cable, not the driver |
+| [the-default-kernel-tree-can-be-a-stale-branch](traps/the-default-kernel-tree-can-be-a-stale-branch.md) | `generic` | The default kernel tree can be parked on an old branch, and then every tool reports the wrong kernel version perfectly truthfully |
 | [the-device-keeps-a-default-route-through-a-link-that-is-gone](traps/the-device-keeps-a-default-route-through-a-link-that-is-gone.md) | `generic` | The device keeps its USB default route after the host drops the link, and then has no internet at all |
 | [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
 | [the-msm-reset-debugfs-does-not-make-a-client-lose-its-context](traps/the-msm-reset-debugfs-does-not-make-a-client-lose-its-context.md) | `soc:msm8998` | Writing msm's reset debugfs faults the GPU but no client loses its context, so it cannot test GPU-reset recovery |
@@ -250,7 +251,7 @@ generic notes as well.
 ## By scope
 
 - `device:google-taimen` — 47
-- `generic` — 132
+- `generic` — 133
 - `soc:gs201` — 1
 - `soc:msm8998` — 31
 - `soc:qcom` — 1
