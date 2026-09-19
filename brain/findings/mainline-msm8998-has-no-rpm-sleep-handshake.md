@@ -84,6 +84,42 @@ about 14 000 entries per second. PSCI is returning from it almost immediately,
 because nothing armed the handshake it exists to trigger. It buys no power and
 spins the CPU.
 
+**Measured 2026-09-19, late: what `system-pc` actually does.** Three clean
+cycles now, all returning on the RTC. With it enabled on all 8 CPUs, against a
+control that is the same 31 s suspend with it disabled:
+
+| | `arch_timer` IRQs | `system-pc` entries |
+|---|---|---|
+| control, `system-pc` off | 1 742 | 0 |
+| `system-pc` on | **140 299** | **386 598** |
+
+`CONFIG_HZ=1000`, so the control's 1 742 ticks over 31 s across 8 CPUs (~56/s)
+is a properly tickless idle. Enabling `system-pc` multiplies the local-timer
+rate **80x**. `state3/s2idle/time` is 9 344 590 us over 386 598 entries --
+**24 us per entry**. That is the round trip of an SMC that does nothing:
+**the firmware accepts the call and returns immediately without collapsing.**
+
+The tick storm is the *symptom*, not the cause: each enter/exit pair re-arms
+the tick that `local-timer-stop` had just handed to the broadcast device. But
+it is self-reinforcing, and it matters for PC-mode firmware, where the system
+only collapses when the **last** CPU enters at affinity 2. Eight CPUs bouncing
+on their own ticks never satisfy that condition.
+
+`state3/rejected` is 4 724 against 386 598 entries, so outright rejection is
+not the main path -- the calls are being accepted and doing nothing.
+
+**The one concrete un-ported piece.** `glink-rpm` (irq 14) fires ~237 times
+during every 31 s suspend, with or without `system-pc`. That is the RPM's own
+channel interrupt waking the AP, and masking it is literally the first half of
+`msm_rpm_enter_sleep()`:
+
+```c
+smd_mask_receive_interrupt(msm_rpm_data.ch_info, true, cpumask);  /* or glink_rpm_mask_rx_interrupt */
+msm_rpm_flush_requests(print);
+```
+
+Mainline never masks it. That is the next thing to port, and it is small.
+
 **What parity actually needs**, in dependency order: a CCI/system SAW node and
 `spm.c` support for it including the notify-RPM bit; something to issue the RPM
 sleep-set swap at system-pc entry; and the MPM wake programming
