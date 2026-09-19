@@ -71,9 +71,31 @@ CMD=$*
 # callers legitimately pipe a script in (`ph-device.sh 'sh -s' < foo.sh`).
 # Without this the probe eats their script and they run an empty one.
 #
+# An ABSENT phone is usually just asleep, not broken. A phone nobody is
+# driving idle-suspends within minutes, takes its USB gadget down with it, and
+# then looks exactly like a dead one -- which cost several turns on 2026-09-19,
+# each ending in "please press power". A magic packet is the no-hands way back
+# in, so try it ONCE before giving up, rather than making every caller learn
+# this. ph-wol.py exits 0 only when the phone actually answered again, and
+# refuses fast when it has no MAC to send to, so this costs a second at most
+# when it cannot help.
+#
+# Only for --need-booted: a phone that is meant to be in fastboot is not
+# asleep, and waking it would be the wrong recovery.
+try_wol() {
+    [ "$NEED" = BOOTED ] || return 1
+    [ "${PORTHOLE_AUTOWAKE:-1}" = 1 ] || return 1
+    command -v "$(dirname "$0")/ph-wol.py" >/dev/null 2>&1 || return 1
+    echo "tk-device: phone is ABSENT -- trying a magic packet before giving up" >&2
+    "$(dirname "$0")/ph-wol.py" --wait "${PORTHOLE_AUTOWAKE_WAIT:-45}" >&2
+}
+
 # Before the queue, so a wrong-state caller does not burn TK_DEVICE_TIMEOUT.
 if [ -n "$NEED" ]; then
     state=$(tk_device_state </dev/null)
+    if [ "$state" != "$NEED" ] && [ "$state" = ABSENT ] && try_wol; then
+        state=$(tk_device_state </dev/null)
+    fi
     [ "$state" = "$NEED" ] || wrong_state "$state"
 fi
 
