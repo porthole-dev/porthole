@@ -2867,5 +2867,54 @@ def test_a_non_android_file_is_refused_rather_than_guessed_at():
         pass
 
 
+
+# -- the device address crosses the container boundary ----------------------
+#
+# 2026-09-20: the host shell exported PORTHOLE_HOST=172.16.42.1 while
+# config.env -- the only layer a container can read -- still named a wifi
+# address from an earlier session. Host-side commands all worked; every build
+# died on "cannot reach the device, so no base image can be seeded", and
+# doctor said BOOTED throughout because doctor probes from the host.
+
+def test_the_device_address_is_sent_into_the_build_container():
+    import porthole_cmd_build as build
+
+    argv = build._container_cmd(
+        "tkboot", None, {}, "",
+        {"PORTHOLE_HOST": "10.0.0.1", "PHONE": "user@10.0.0.1"})
+    assert "PORTHOLE_HOST=10.0.0.1" in argv
+    assert "PHONE=user@10.0.0.1" in argv
+
+
+def test_an_unset_address_forwards_nothing():
+    import porthole_cmd_build as build
+
+    argv = build._container_cmd("tkboot", None, {}, "",
+                                {"PORTHOLE_HOST": "", "PHONE": ""})
+    assert not [a for a in argv if a.startswith(("PORTHOLE_HOST=", "PHONE="))]
+
+
+def test_the_address_is_resolved_the_way_the_host_resolves_it():
+    """Mirror the host, including when a legacy PHONE shadows PORTHOLE_HOST.
+
+    Recomposing PHONE here would make container and host disagree again,
+    which is the bug class this removes.
+    """
+    import porthole_cmd_build as build
+
+    got = build._device_address({"HOST": "10.99.99.99",
+                                 "PHONE": "user@10.0.0.1"})
+    assert got["PORTHOLE_HOST"] == "10.99.99.99"
+    assert got["PHONE"] == "user@10.0.0.1"
+
+
+def test_the_env_flag_precedes_the_container_name():
+    """podman exec takes options BEFORE the container, or they become argv."""
+    import porthole_cmd_sandbox as sandbox
+
+    argv = sandbox._exec_argv(["true"], False, {"PORTHOLE_HOST": "1.2.3.4"})
+    assert argv.index("-e") < argv.index(sandbox.CONTAINER)
+
+
 if __name__ == "__main__":
     sys.exit(main())

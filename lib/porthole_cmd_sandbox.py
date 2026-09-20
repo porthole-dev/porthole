@@ -1311,16 +1311,26 @@ def _is_shell_line(text: str) -> bool:
     return any(ch in _SHELL_CHARS for ch in text)
 
 
-def _exec_argv(command, tty: bool) -> list[str]:
+def _exec_argv(command, tty: bool, address: dict | None = None) -> list[str]:
     """`-it` ONLY for an interactive human.
 
     podman refuses `-t` when stdin is not a terminal, so an unconditional `-it`
     fails for every agent -- which is exactly what made the container tier
     unreachable from the thing it was built for.
+
+    `address` carries the phone's address, resolved on the host. It is the
+    same family as the five host-vs-container mismatches documented in
+    _run_argv, and it is sent for the same reason: the environment layer stops
+    at the container boundary, so a container that can only read config.env
+    talks to whatever address that file last named. See _device_address in
+    porthole_cmd_build for the session this cost.
     """
     argv = ["podman", "exec"]
     if tty:
         argv.append("-it")
+    for key, value in sorted((address or {}).items()):
+        if value:
+            argv += ["-e", f"{key}={value}"]
     argv.append(CONTAINER)
     if not command:
         return argv + ["/bin/bash"]
@@ -1355,7 +1365,9 @@ def _shell(ctx, args) -> int:
             f"mean to bypass all of that.")
 
     tty = sys.stdin.isatty() and not args.command
-    argv = _exec_argv(args.command, tty)
+    import porthole_cmd_build as _build
+    argv = _exec_argv(args.command, tty,
+                      _build._device_address(ctx.cfg))
     if args.dry_run:
         # shlex.quote: printed bare, a single-element `--command "a b"` looks
         # exactly like the two-argument form and hides the very bug this
