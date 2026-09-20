@@ -62,7 +62,16 @@ def parse_build_version(text: str) -> dict:
 # did not run -- brain/laws/empty-must-mean-unknown-never-changed.md.
 PROBE = (
     "cat /proc/version; echo '<<>>'; "
-    "apk info -v 2>/dev/null | grep -E '^linux-(postmarketos|[a-z]+-)' || true; "
+    # --no-network, because this reads the INSTALLED database and must not
+    # depend on reaching a mirror. Measured 2026-09-20 on a freshly flashed
+    # device, which has no wifi credentials yet: apk spent its time on DNS,
+    # printed three "transient error" warnings, and the grep found nothing --
+    # so provenance reported "the device did not answer, so its kernel is
+    # unknown" about a phone that was answering fine. A check that fails
+    # BECAUSE the device was just reflashed is useless exactly when it is
+    # most wanted.
+    "apk info -v --no-network 2>/dev/null | "
+    "grep -E '^linux-(postmarketos|[a-z]+-)' || true; "
     "echo '<<>>'; ls /lib/modules 2>/dev/null | tr '\\n' ' '; "
     # The slot, from the running kernel rather than the profile: the profile
     # records which slot we INTEND to use, and the bootloader's A/B retry
@@ -280,7 +289,8 @@ def installed_versions(dev, names) -> dict:
     wanted = [n for n in names if n]
     if not wanted:
         return {}
-    out = dev.run("apk info -v 2>/dev/null", timeout=30) or ""
+    # --no-network: see PROBE. A freshly flashed phone has no network yet.
+    out = dev.run("apk info -v --no-network 2>/dev/null", timeout=30) or ""
     if not out.strip():
         return {}
     found = {}
