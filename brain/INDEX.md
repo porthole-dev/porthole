@@ -225,6 +225,7 @@ generic notes as well.
 | [the-device-keeps-a-default-route-through-a-link-that-is-gone](traps/the-device-keeps-a-default-route-through-a-link-that-is-gone.md) | `generic` | The device keeps its USB default route after the host drops the link, and then has no internet at all |
 | [the-dpu-counter-is-phocs-frame-rate-not-the-apps](traps/the-dpu-counter-is-phocs-frame-rate-not-the-apps.md) | `generic` | The DPU vsync counter is phoc's output rate, not the app's -- a browser scrolling at 30 fps and presenting video at 15 fps both read "60 fps, 0 jank |
 | [the-msm-reset-debugfs-does-not-make-a-client-lose-its-context](traps/the-msm-reset-debugfs-does-not-make-a-client-lose-its-context.md) | `soc:msm8998` | Writing msm's reset debugfs faults the GPU but no client loses its context, so it cannot test GPU-reset recovery |
+| [the-panel-follower-registers-but-never-fires](traps/the-panel-follower-registers-but-never-fires.md) | `device:google-taimen` | drm_panel_add_follower() succeeding does not mean the callbacks will ever run |
 | [the-slpi-subscription-must-come-after-the-handover](traps/the-slpi-subscription-must-come-after-the-handover.md) | `device:google-taimen` | The SLPI wake-gesture subscription is spent on arrival: subscribe AFTER the handover, never at boot |
 | [the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series](traps/the-taimen-v7-2-tree-was-ten-venus-patches-behind-its-own-aport-series.md) | `device:google-taimen` | The taimen-v7.2 tree was ten venus patches behind its own aport series, and a venus_core built from it wedges the SoC |
 | [the-usb-gadget-can-steal-the-hosts-default-route](traps/the-usb-gadget-can-steal-the-hosts-default-route.md) | `generic` | The USB gadget is a DHCP server, and NetworkManager lets it take the host's default route and DNS |
@@ -273,7 +274,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 60
+- `device:google-taimen` — 61
 - `device:taimen` — 2
 - `generic` — 136
 - `soc:gs201` — 1
