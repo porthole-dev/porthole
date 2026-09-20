@@ -51,6 +51,12 @@ The three blocks:
    The vendor does the opposite: `mnh-sm` powers Easel **down** and brings it up on
    demand, and thermal-engine throttles it from 48 C skin.
 
+**APPORTIONED 2026-09-20** — it was block 1, all of it. Dropping the camera
+sensors' `pm_runtime_get_noresume()` reaches the PARK median exactly, with
+venus and Easel still powered: [[the-camera-hold-was-the-whole-244mw]]. The
+Easel and venus items below are real descriptions of the hardware state and
+are NOT worth idle-power work.
+
 **What this rules out** —
 - *"The idle drain is all the missing RPM handshake."* The floor after parking is
   still ~207 mA and that part IS the handshake — but a fifth of screen-off idle

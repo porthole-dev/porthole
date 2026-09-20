@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # scope: soc:qcom
 # needs: BOOTED
-# env: PHONE, PORTHOLE_ALARM, TK_HOST, PORTHOLE_SUSPEND_CMD
+# env: PHONE, PORTHOLE_ALARM, PORTHOLE_SUSPEND_CMD, PORTHOLE_SUSPEND_MARGIN, TK_HOST
 # exits: 0 ok · non-zero on failure
 # One real s2idle cycle, driven from the host, with evidence that survives the
 # reset that a failed one ends in.
@@ -67,7 +67,15 @@ log "=== TRY $(date +%FT%T) alarm=+${ALARM}s btime=$(awk '/btime/{print $2}' /pr
 log "boot_id_before=$(cat /proc/sys/kernel/random/boot_id) cmd=[$SUSPEND_CMD]"
 [ -f /tmp/ph-prep.sh ] && { log "--- prep ---"; . /tmp/ph-prep.sh >> $LOG 2>&1; sync; log "--- prep done ---"; }
 log "success_before=$(cat /sys/power/suspend_stats/success) fail_before=$(cat /sys/power/suspend_stats/fail)"
+# Clear first: the RTC rejects a write to wakealarm while an alarm is already
+# pending (EBUSY), and the shell swallows it. A stale alarm from the PREVIOUS
+# run then fires instead, so the cycle ends at someone else's deadline with
+# wakeirq=<rtc> and looks like a well-behaved timed wake. Cost a run on
+# 2026-09-19: a 120 s arm returned after 44 s, exactly on the prior cycle's
+# +120, and read as "nothing woke it early".
+echo 0 > /sys/class/rtc/rtc0/wakealarm
 echo "+$ALARM" > /sys/class/rtc/rtc0/wakealarm
+log "wakealarm_set=$(cat /sys/class/rtc/rtc0/wakealarm)"
 log "SUSPEND_ENTER $(date +%s)"
 eval "$SUSPEND_CMD"
 RC=$?
@@ -85,14 +93,44 @@ S "sudo rm -f /tmp/ph-prep.sh /tmp/ph-post.sh" >/dev/null
 scp -q "${TK_SSH_OPTS[@]}" "$DEV" "$H:/tmp/try.sh"
 S "sudo cp /tmp/try.sh /usr/local/bin/ph-suspend-try.sh; sudo chmod +x /usr/local/bin/ph-suspend-try.sh; sudo truncate -s0 $LOG; sudo sync"
 
+# The boot_id BEFORE the suspend, so the poll loop can recognise a reset. Read
+# over ssh while the phone is still awake; it is the only cheap thing that
+# distinguishes "came back" from "never went away".
+BOOT_BEFORE=$(S 'cat /proc/sys/kernel/random/boot_id' 12 | tr -d '\r')
+
 echo ">> suspending (alarm=+${A}s, prep=${PREP:-none})"
 # The trailing sleep matters: without it ssh closes the channel before sudo has
 # even exec'd, and the run silently never happens.
 timeout 20 ssh -o ConnectTimeout=6 "${TK_SSH_OPTS[@]}" "$H" \
 	"sudo PORTHOLE_ALARM=$A PORTHOLE_SUSPEND_CMD=\"${PORTHOLE_SUSPEND_CMD:-}\" setsid /usr/local/bin/ph-suspend-try.sh </dev/null >/dev/null 2>&1 & sleep 4" >/dev/null 2>&1
 
-for _ in $(seq 1 60); do
+# Poll to a DEADLINE derived from the alarm, never a fixed number of probes.
+# A count-based loop (`seq 1 60`, ~6 s per failed probe) gives up after ~360 s,
+# so every alarm longer than that reported "ssh: connect ... timed out" for a
+# phone that was merely still asleep -- a harness failure wearing a device
+# result's clothes. Cost a 900 s run on 2026-09-20. The margin is for the
+# resume itself plus the ssh/USB gadget coming back.
+#
+# TWO exit conditions, because a FAILURE never writes TRY DONE. A resume-side
+# hang ends in a watchdog reset, the log is truncated at the start of the run,
+# and so `grep TRY DONE` can never succeed -- the loop then sat out the entire
+# alarm for a phone that had already answered the question. On 2026-09-20 that
+# held the device mutex for 13 minutes after a reset that took 25 seconds. A
+# reset is a NEW boot_id, and that is the result, so break on it.
+#
+# Only a NON-EMPTY and DIFFERENT boot_id counts: a suspended phone answers
+# nothing, and treating the empty string as a change ends the wait instantly on
+# every run.
+DEADLINE=$(tk_deadline_ms $(( A + ${PORTHOLE_SUSPEND_MARGIN:-180} )))
+until tk_expired "$DEADLINE"; do
 	[ "$(S "grep -q 'TRY DONE' $LOG && echo READY" 12)" = READY ] && break
+	BOOT_NOW=$(S 'cat /proc/sys/kernel/random/boot_id' 12 | tr -d '\r')
+	case $BOOT_NOW in
+	''|*[!0-9a-f-]*) ;;                       # asleep, or not a boot_id
+	"$BOOT_BEFORE") ;;                        # same boot, still waiting
+	*) echo ">> RESET detected: boot_id $BOOT_BEFORE -> $BOOT_NOW"
+	   break ;;
+	esac
 done
 echo ">> result"
 S "echo \"now_btime=\$(awk '/btime/{print \$2}' /proc/stat) uptime=\$(cut -d. -f1 /proc/uptime)s bootreason=\$(grep -o 'bootreason=[a-z]*' /proc/cmdline)\"; cat $LOG" 30 |

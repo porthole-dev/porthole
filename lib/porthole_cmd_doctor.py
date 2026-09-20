@@ -354,6 +354,66 @@ def _check_pmaports(ch: Checks, cfg) -> None:
     # computed in parallel with the search is a label that can disagree with
     # the path beside it, which is worse than printing no label at all.
     ch.add("host: pmaports", "ok", f"{found}  (via {via})")
+    _check_pmaports_is_what_builds(ch, cfg, found)
+
+
+def _pmaports_head(tree) -> str:
+    """`<branch> <short sha>` for a checkout, or "" when it is not readable.
+
+    Best effort on purpose: this is a label beside a warning, and a doctor row
+    must not fail because a git call did.
+    """
+    import subprocess
+
+    def git(*args):
+        try:
+            out = subprocess.run(("git", "-C", str(tree)) + args,
+                                 capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return out.stdout.strip() if out.returncode == 0 else ""
+
+    sha = git("rev-parse", "--short", "HEAD")
+    if not sha:
+        return ""
+    branch = git("rev-parse", "--abbrev-ref", "HEAD") or "?"
+    return f"{branch} {sha}"
+
+
+def _check_pmaports_is_what_builds(ch: Checks, cfg, host_tree) -> None:
+    """Is the pmaports you EDIT the one the workspace BUILDS?
+
+    porthole_cmd_aports already guards this for its own verbs, and its
+    docstring records that the repo "has already paid for it twice" -- but the
+    build path never checked, so on 2026-09-20 an afternoon went into a flash
+    that kept coming out stale. The edited tree was a per-device checkout on
+    the merged branch; the workspace builds the work dir's own
+    cache_git/pmaports, which was parked on a divergent branch 14231 commits
+    behind with an older pkgrel. Every build then packaged the old aport, and
+    the image verification correctly refused to flash while blaming a cause
+    (the stale-APKINDEX bug) that re-running could not fix.
+
+    `porthole sync` cannot catch this: it compares the edited tree against its
+    remote, which was honestly "in sync".
+    """
+    import porthole_cmd_aports as aports
+
+    mounted = aports._mounted_pmaports(cfg)
+    if aports._same_path(host_tree, mounted):
+        ch.add("pmaports: builds from", "ok", "the tree you edit")
+        return
+
+    host_head = _pmaports_head(host_tree)
+    built_head = _pmaports_head(mounted)
+    detail = (f"you edit {host_tree}"
+              f"{' (' + host_head + ')' if host_head else ''}, "
+              f"the workspace builds {mounted}"
+              f"{' (' + built_head + ')' if built_head else ''}")
+    ch.add("pmaports: builds from", "warn", detail,
+           f"an edit you make will NOT reach a build. Point them at the same "
+           f"commit before building: "
+           f"git -C {mounted} fetch origin && "
+           f"git -C {mounted} switch --detach <the branch you are building>")
 
 
 def _check_kernel_tree(ch: Checks, cfg) -> None:
@@ -425,6 +485,35 @@ def _check_kernel_tree(ch: Checks, cfg) -> None:
         siblings = []
     extra = f", {len(siblings)} sibling tree(s): {' '.join(siblings)}" if siblings else ""
 
+    # THE VERSION IS CHECKED BEFORE ANYTHING ELSE ABOUT THE TREE.
+    #
+    # The default tree is <workdir>/linux, and a checkout parked on an old
+    # topic branch is invisible here unless we say so: every tool then reports
+    # the stale version perfectly truthfully, and a reader -- human or agent --
+    # concludes the PORT is on that version. On google-taimen the default tree
+    # sat on a 6.18 branch for weeks after the device moved to 7.2, and the
+    # 6.18/7.2 confusion was re-derived in session after session from exactly
+    # this row saying nothing about it.
+    #
+    # `porthole build` already refuses on the mismatch, but only once you try
+    # to build. doctor is what gets read first, so it belongs here too.
+    want = _kernel_series_of(cfg)
+    got = _tree_kernel_version(tree)
+    if want and got and got != want:
+        ch.add("host: kernel tree", "warn",
+               f"{tree} on {branch} is Linux {got}, but "
+               f"{cfg.get('PORTHOLE_KERNEL_PKG', 'the kernel aport')} is "
+               f"{want} -- a module built here will not load, and every tool "
+               f"will report {got} as though it were the port's version"
+               f"{extra}  (via {via})",
+               fix=f"PORTHOLE_KERNEL_TREE=<a tree on "
+                   f"{cfg.get('PORTHOLE_KERNEL_BRANCH', 'the product branch')}>"
+                   f"    # e.g. `git -C {tree} worktree add ../linux-{want} "
+                   f"{cfg.get('PORTHOLE_KERNEL_BRANCH', '<branch>')}`, then pin it in "
+                   f"config.env. Do NOT just checkout over the existing tree -- "
+                   f"it may be carrying someone's uncommitted work")
+        return
+
     shallow = _git_read(tree, "rev-parse", "--is-shallow-repository") == "true"
     if shallow:
         ch.add("host: kernel tree", "warn",
@@ -435,6 +524,42 @@ def _check_kernel_tree(ch: Checks, cfg) -> None:
                    f"the next time a branch needs a different base")
         return
     ch.add("host: kernel tree", "ok", f"{tree} on {branch}{extra}  (via {via})")
+
+
+
+def _tree_kernel_version(tree) -> str:
+    """"6.18" / "7.2" from a kernel tree's Makefile, or "" if unreadable.
+
+    Reads the file rather than running `make kernelversion`, which wants a
+    configured tree and costs a fork.
+    """
+    ver = {}
+    try:
+        with open(tree / "Makefile", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                for key in ("VERSION", "PATCHLEVEL"):
+                    if line.startswith(key):
+                        _, _, val = line.partition("=")
+                        ver[key] = val.strip()
+                if len(ver) == 2:
+                    break
+    except OSError:
+        return ""
+    if len(ver) != 2 or not all(v.isdigit() for v in ver.values()):
+        return ""
+    return f"{ver['VERSION']}.{ver['PATCHLEVEL']}"
+
+
+def _kernel_series_of(cfg) -> str:
+    """The series the device's kernel aport builds, e.g. "7.2".
+
+    Taken from the aport name's trailing version rather than a separate key,
+    because the aport name is the thing that actually has to match.
+    """
+    import re as _re
+    pkg = cfg.get("PORTHOLE_KERNEL_PKG", "") or ""
+    m = _re.search(r"(\d+\.\d+)$", pkg)
+    return m.group(1) if m else ""
 
 
 def _git_read(path, *args) -> str:

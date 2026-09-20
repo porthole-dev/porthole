@@ -61,8 +61,18 @@ def main():
     else:
         found = find_gadget()
         if not found:
-            sys.exit(f"no {GADGET} on the bus -- the phone is not enumerated at "
-                     f"all, so this is a reboot or a cable, not a wedged suspend")
+            sys.exit(
+                f"no {GADGET} on the bus, so there is nothing here to reset.\n"
+                "This does NOT mean the phone rebooted. A taimen in a long idle\n"
+                "s2idle leaves the bus entirely -- on 2026-09-20 one was gone from\n"
+                "lsusb, gone from fastboot and unreachable on wifi (NetworkManager\n"
+                "unmanages wlan0 on PrepareForSleep), and it had not rebooted at\n"
+                "all: same btime and boot_id, and a double tap on the screen woke\n"
+                "it. This message used to claim 'a reboot or a cable' and cost a\n"
+                "session an unnecessary hand-back.\n"
+                "Try, in order: tools/ph-wol.py (a magic packet does wake this\n"
+                "phone), then a physical double tap or power press, then the cable."
+            )
         bus, dev = found
 
     path = f"/dev/bus/usb/{bus}/{dev}"
