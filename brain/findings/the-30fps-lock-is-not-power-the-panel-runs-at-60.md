@@ -1,16 +1,16 @@
 ---
 id: the-30fps-lock-is-not-power-the-panel-runs-at-60
-title: The 30 fps session lock is not power -- the panel runs at 60 and every second frame is dropped above it
+title: There may be no 30 fps lock at all -- the panel runs at 60 and ph-framprobe reports ~31 whether the screen is on or OFF
 scope: device:google-taimen
 subsystem: display
 severity: finding
 confidence: proven
-evidence: panel on and held on, three interleaved runs -- client 31.4/32.1/31.6 fps while the DPU's own vsync counter moved 302/349/347 in the same 5 s, i.e. 60-70 vsync/s
-refutes: the 30 fps session lock is caused by the suspend-era power policies, thermal throttling, the a540 AGC limiter, mesa, or the GTK renderer
+evidence: the probe reports ~31 fps with the panel ON (vsync +302/+349/+347 per 5 s) and ~31 fps with the panel OFF (vsync delta 0, display IRQs frozen) -- the same number across opposite display states
+refutes: the 30 fps session lock is caused by the suspend-era power policies, thermal throttling, the a540 AGC limiter, mesa or the GTK renderer; and that ph-framprobe.py's number describes the session at all on this device
 first-learned: 2026-09-20
 ---
 
-# The panel is at 60. The client gets 30. The loss is above the display.
+# The panel is at 60, the operator sees smooth scrolling, and the probe says 31 either way
 
 **The measurement.** `ph-framprobe.py` against
 `/sys/kernel/debug/dri/c901000.display-controller/encoder-0/status`, with the
@@ -21,8 +21,20 @@ panel verified on before AND after each run (`bl_power=0`,
     run2  32.1 fps   vsync +349 / 5 s  = 69.8 vsync/s
     run3  31.6 fps   vsync +347 / 5 s  = 69.4 vsync/s
 
-Two frames of display for every one the client is given. Whatever drops them
-sits between the DPU and the Wayland client, not in the panel and not below it.
+That reads like two frames of display for every one the client is given. **It
+is not safe to conclude that**, and the operator caught why: phosh scrolls
+smoothly, which a genuine half-rate session does not.
+
+**THE PROBE REPORTS THE SAME ~31 fps WITH THE PANEL SWITCHED OFF.** Four runs
+taken against a blanked screen gave 28.3/31.5/30.8/31.9 while `vsync` did not
+move at all and both display IRQs (`msm`, `dsi_isr`) were frozen. A number
+that does not change when the display stops existing is not measuring the
+display. So ~31 is what this probe produces on this device, and the session's
+real rate is not known from it.
+
+What IS established: the panel delivers ~60 vsync/s under load, and the
+operator reports smooth scrolling. There may be no session-wide half-rate
+lock to explain.
 
 **What this rules out, each measured on the same boot:**
 
@@ -57,10 +69,12 @@ counter is sampled across it.** `bl_power`/`enabled` for the first,
 Idle blanking has to be disabled for the duration or it lands mid-run:
 `gsettings set org.gnome.desktop.session idle-delay 0`.
 
-**Where to look next.** The split is above the DPU, so: does phoc commit at
-60 and signal clients at 30, or does it commit at 30? That decides whether
-this is phoc's frame scheduling or the kernel's pageflip event timing, and it
-is one WAYLAND_DEBUG=1 capture away -- `ph-wlgaps.py` already parses that log.
+**Where to look next.** Not at the display. Fix the INSTRUMENT first: find
+why `ph-framprobe.py` self-limits to ~31 fps -- an unpresented or unfocused
+surface that phoc throttles, or cost inside its own tick callback -- and give
+it a positive control that fails when the window is not being presented. Until
+it has one, no fps figure from it should be quoted, including the historical
+57.7.
 
 **Two tool bugs found on the way, both live:**
 
