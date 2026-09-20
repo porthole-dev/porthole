@@ -22,8 +22,33 @@ WHY THIS EXISTS
 NO VIDEO: damage a widget every frame, time the frame-clock callbacks. That
 isolates the display path from decode, GStreamer and buffer pools.
 
-  ~16.7 ms -> the session runs at the panel's 60 Hz
-  ~33.4 ms -> the half-rate command-mode lock
+  ~16.7 ms -> this CLIENT is painting at the panel's 60 Hz
+  ~33.4 ms -> this CLIENT is at half rate
+
+WHAT THIS DOES NOT MEASURE, and it cost a session on 2026-09-20: it is NOT
+the session's frame rate and never was. The number is this probe's own paint
+cost, and on taimen that paint is the limiter. Measured the same minute, same
+compositor, same panel:
+
+    tickonly  (frame clock, no damage)   58.6 / 59.3 fps
+    this probe (clock + its repaint)     30.4 / 30.5 fps
+
+So it reported ~31 fps and an agent concluded the whole session was locked at
+half rate -- while the operator, looking at the phone, saw phosh scrolling
+smoothly. It also reports ~31 fps with the PANEL SWITCHED OFF, where vsync
+does not move at all. A number that survives the display being powered down
+is not a number about the display.
+
+Hence --control, ON BY DEFAULT: an identical window that ticks and paints
+NOTHING runs first, and its rate is the frame clock the compositor is
+actually handing out. If the control is ~60 and the damaged run is ~30, the
+limiter is in here, not in the session. If BOTH are low, the clock itself is
+throttled and that is a real finding. Reading the second number without the
+first is what produced the wrong conclusion.
+
+Always check the panel is ON either side of a run (bl_power, and
+card0-DSI-1/enabled) -- see
+brain/findings/the-30fps-lock-is-not-power-the-panel-runs-at-60.
 
 Damage is done by swapping a CSS class, NOT a cairo draw handler: pygobject
 here has no cairo.Context converter, so a draw_func raises every frame and the
@@ -35,7 +60,11 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib, Gdk
 
 DUR = float(sys.argv[1]) if len(sys.argv) > 1 else 8.0
+# The control runs unless explicitly waived. Waiving it is how the wrong
+# conclusion gets drawn again, so it takes a word, not a flag character.
+CONTROL = "--no-control" not in sys.argv
 stamps = []
+control_fps = None
 
 CSS = b"""
 .a { background: linear-gradient(90deg, #f00, #00f); }
@@ -43,7 +72,45 @@ CSS = b"""
 """
 
 
+def run_control(seconds):
+    """The frame clock with NO damage: what the compositor is handing out.
+
+    Same window, same tick callback, no CSS swap and no paint. Whatever this
+    reaches is the ceiling the session offers; the damaged run below can only
+    be lower, and the gap between them is THIS PROBE's cost, not the
+    session's.
+    """
+    ticks = []
+
+    class Control(Gtk.Application):
+        def __init__(self):
+            super().__init__(application_id="dev.porthole.framprobe.control")
+            self.connect("activate", self.up)
+
+        def up(self, *_):
+            win = Gtk.ApplicationWindow(application=self)
+            win.set_default_size(400, 400)
+            box = Gtk.Box()
+            win.set_child(box)
+            box.add_tick_callback(lambda *_a: (ticks.append(time.monotonic())
+                                               or GLib.SOURCE_CONTINUE))
+            win.present()
+            GLib.timeout_add(int(seconds * 1000), self.done)
+
+        def done(self):
+            self.quit()
+            return GLib.SOURCE_REMOVE
+
+    Control().run([])
+    if len(ticks) < 3:
+        return None
+    return (len(ticks) - 1) / (ticks[-1] - ticks[0])
+
+
 def report():
+    if control_fps is not None:
+        print(f"control (no damage) = {control_fps:.1f} fps"
+              "   <- the frame clock the compositor gives out")
     if len(stamps) < 3:
         print("too few frames -- did the window map?")
         return
@@ -58,6 +125,17 @@ def report():
                           (">45ms  (worse)", 45, 1e9)):
         c = sum(1 for g in gaps if lo <= g < hi)
         print(f"  {label:22s} {c:5d}  {100.0*c/n:5.1f}%")
+    # The verdict, so nobody has to remember which number means what.
+    if control_fps is None:
+        print("NO CONTROL RAN -- this number alone cannot tell you whether "
+              "the session or this probe is the limiter.")
+    elif control_fps > 1.4 * (n / span):
+        print(f"THIS PROBE is the limiter: the clock offered "
+              f"{control_fps:.0f} fps and the damaged run reached "
+              f"{n/span:.0f}. Not a session frame-rate result.")
+    else:
+        print(f"the clock itself is at {control_fps:.0f} fps, so the limit is "
+              f"NOT this probe's paint -- that is a real session finding.")
 
 
 class App(Gtk.Application):
@@ -92,5 +170,8 @@ class App(Gtk.Application):
         self.quit()
         return GLib.SOURCE_REMOVE
 
+
+if CONTROL:
+    control_fps = run_control(min(DUR, 4.0))
 
 App().run([])

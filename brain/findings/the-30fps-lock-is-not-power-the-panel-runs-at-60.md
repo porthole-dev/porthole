@@ -69,12 +69,31 @@ counter is sampled across it.** `bl_power`/`enabled` for the first,
 Idle blanking has to be disabled for the duration or it lands mid-run:
 `gsettings set org.gnome.desktop.session idle-delay 0`.
 
-**Where to look next.** Not at the display. Fix the INSTRUMENT first: find
-why `ph-framprobe.py` self-limits to ~31 fps -- an unpresented or unfocused
-surface that phoc throttles, or cost inside its own tick callback -- and give
-it a positive control that fails when the window is not being presented. Until
-it has one, no fps figure from it should be quoted, including the historical
-57.7.
+**RESOLVED, same session. The probe's own paint is the limiter.** A control
+window with the identical tick callback and NO damage, run the same minute
+against the same compositor and panel:
+
+    tickonly  (frame clock, no damage)   58.6 / 59.3 fps
+    ph-framprobe (clock + its repaint)   30.4 / 30.5 fps
+
+The frame clock hands out 60. The probe halves it with the per-tick CSS class
+swap, which forces a restyle and repaint of the widget every frame. **There is
+no session-wide 30 fps lock**, which is exactly what the operator saw by
+scrolling the phone while the probe claimed otherwise.
+
+`ph-framprobe.py` now runs that control BY DEFAULT and prints the verdict
+itself:
+
+    control (no damage) = 59.0 fps
+    frames=151 over 5.0s = 30.1 fps
+    THIS PROBE is the limiter: the clock offered 59 fps and the damaged run
+    reached 30. Not a session frame-rate result.
+
+Every historical figure from this tool measures its own paint cost, not the
+session -- including the 57.7 fps in
+[[the-session-is-back-to-30fps-on-7-2-and-ctl-start-is-not-why]]. That number
+may still mean something as a RELATIVE comparison between two configurations
+measured the same way, but it was never a session frame rate.
 
 **Two tool bugs found on the way, both live:**
 
