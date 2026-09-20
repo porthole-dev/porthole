@@ -19,6 +19,7 @@ generic notes as well.
 | [a-phone-in-the-bootloader-can-be-off-the-bus](findings/a-phone-in-the-bootloader-can-be-off-the-bus.md) | `generic` | A phone can reach the bootloader and never enumerate, and porthole read that as never reaching it |
 | [a-shebang-probe-is-a-subset-of-running-the-tool](findings/a-shebang-probe-is-a-subset-of-running-the-tool.md) | `generic` | Parsing a shebang catches less than running the tool, and pmbootstrap --version does not need a config |
 | [a-short-power-collapse-leaves-the-a5xx-cp-alive](findings/a-short-power-collapse-leaves-the-a5xx-cp-alive.md) | `soc:msm8998` | The display-wake reset: a runtime power collapse too short to discharge GX leaves the a5xx CP alive, and hw_init reprograms CP_RB_BASE underneath it |
+| [a-tap-on-an-armed-suspended-screen-hangs-the-resume](findings/a-tap-on-an-armed-suspended-screen-hangs-the-resume.md) | `device:google-taimen` | The overnight resume hang is a touch on a wake-gesture-armed suspended screen, not a suspend regression |
 | [a-trustzone-command-can-succeed-and-do-nothing](findings/a-trustzone-command-can-succeed-and-do-nothing.md) | `device:google-taimen` | A TrustZone command can return status 0 and do nothing -- the tell is how long it took |
 | [a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever](findings/a-venus-firmware-assert-wedges-the-gdsc-and-recovery-spins-forever.md) | `soc:msm8998` | A venus firmware assert wedges the video GDSC, and the driver's recovery then retries every 10 ms forever |
 | [a540-lm-is-mostly-vendor-parity](findings/a540-lm-is-mostly-vendor-parity.md) | `soc:msm8998` | Three of the four a540 GPMU limiter "gaps" are vendor parity; only the throttle bit and the stale power level are real |
@@ -32,6 +33,7 @@ generic notes as well.
 | [chromium-segfaults-because-a-phone-sends-no-xkb-keymap](findings/chromium-segfaults-because-a-phone-sends-no-xkb-keymap.md) | `generic` | Chromium segfaults on every launch under phoc because a phone with no physical keyboard is sent no wl_keyboard.keymap |
 | [clipping-webkit-compositing-to-damage-is-worth-8-percent](findings/clipping-webkit-compositing-to-damage-is-worth-8-percent.md) | `device:google-taimen` | Clipping WebKit's compositing to the damaged rectangles is worth ~8% and 3 C on taimen, not a step change |
 | [crossdirect-hands-the-linker-to-qemu-on-purpose](findings/crossdirect-hands-the-linker-to-qemu-on-purpose.md) | `generic` | Crossdirect hands every link step to qemu on purpose, not just compile |
+| [disabling-cpu-retention-is-parity-theatre](findings/disabling-cpu-retention-is-parity-theatre.md) | `soc:msm8998` | Disabling the CPU retention idle state, as the vendor does, is worth about 0.02 mW and does not deepen idle |
 | [eas-never-starts-without-an-energy-model](findings/eas-never-starts-without-an-energy-model.md) | `soc:msm8998` | EAS never starts on msm8998: the CPU OPP tables carry CPR corners, not power |
 | [envkernel-activation-is-cheap-once-the-chroot-is-warm](findings/envkernel-activation-is-cheap-once-the-chroot-is-warm.md) | `generic` | envkernel activation costs 0.8 s, not 14 s -- the 14 s is a one-off apk add |
 | [envkernel-disables-ccache](findings/envkernel-disables-ccache.md) | `generic` | Every envkernel kernel build compiles from scratch, because envkernel disables ccache on purpose |
@@ -49,6 +51,7 @@ generic notes as well.
 | [holding-vdd-mx-does-not-stop-the-wake-crash](findings/holding-vdd-mx-does-not-stop-the-wake-crash.md) | `soc:msm8998` | Holding VDD_MX does not stop the display-wake crash -- neither enabled nor at TURBO |
 | [kernel-7-2-rebase-is-cheap](findings/kernel-7-2-rebase-is-cheap.md) | `soc:msm8998` | The 188-patch series rebases onto v7.2 with 16 small conflicts |
 | [lax-build-buys-nothing-measurable](findings/lax-build-buys-nothing-measurable.md) | `generic` | PORTHOLE_LAX_BUILD=1 saves no measurable time, and the zap it skips is not the wall clock |
+| [mainline-a540-gpmu-takes-five-voltage-levels](findings/mainline-a540-gpmu-takes-five-voltage-levels.md) | `soc:msm8998` | Mainline's a540_gpmu.fw2 accepts five voltage-table levels; a sixth stops the GPMU booting at all |
 | [mainline-a540-init-matches-kgsl-except-allflatoptdis](findings/mainline-a540-init-matches-kgsl-except-allflatoptdis.md) | `soc:msm8998` | Mainline a5xx_hw_init programs the A540 at parity with kgsl's a5xx_start; the one extra mainline write is VPC ALLFLATOPTDIS |
 | [mainline-msm8998-has-no-rpm-sleep-handshake](findings/mainline-msm8998-has-no-rpm-sleep-handshake.md) | `soc:msm8998` | The SoC can never reach VDD-min because mainline msm8998 has no RPM sleep-set handshake, not because something is voting against it |
 | [networkmanager-unmanages-wifi-on-sleep-so-wol-never-arrives](findings/networkmanager-unmanages-wifi-on-sleep-so-wol-never-arrives.md) | `device:google-taimen` | NetworkManager tears down wlan0 on PrepareForSleep, so wake-on-WLAN only works on suspend paths logind never hears about |
@@ -57,6 +60,7 @@ generic notes as well.
 | [opening-a-pcm-is-not-starting-it](findings/opening-a-pcm-is-not-starting-it.md) | `generic` | Opening a PCM is not starting it: the codec only moves data at TRIGGER_START |
 | [panel-corruption-was-gpu-reset-wreckage-not-tearing](findings/panel-corruption-was-gpu-reset-wreckage-not-tearing.md) | `device:google-taimen` | The panel corruption and degraded phosh were one GPU reset's wreckage -- not display tearing, and not the rd_ptr patch |
 | [phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it](findings/phosh-aborts-on-a-gpu-reset-and-takes-the-session-with-it.md) | `device:google-taimen` | A GPU reset aborts phosh, not phoc -- the session restarts and looks like a reboot |
+| [pm-test-cannot-go-above-platform-on-s2idle](findings/pm-test-cannot-go-above-platform-on-s2idle.md) | `generic` | pm_test rejects processors and core when the sleep state is s2idle |
 | [pmbootstrap-shutdown-unmounts-portholes-own-binds](findings/pmbootstrap-shutdown-unmounts-portholes-own-binds.md) | `generic` | pmbootstrap shutdown unmounts porthole's own container binds, not just pmbootstrap's chroot mounts |
 | [qmi-data-len-is-u32-on-the-host](findings/qmi-data-len-is-u32-on-the-host.md) | `soc:msm8998` | QMI_DATA_LEN fields must be u32 on the host since 7.2, or every request is -EINVAL |
 | [ram-does-not-survive-a-reset-here](findings/ram-does-not-survive-a-reset-here.md) | `device:google-taimen` | No RAM survives a reset on taimen, so pstore/ramoops and ram_console are all dead ends |
@@ -73,6 +77,7 @@ generic notes as well.
 | [the-auto-preview-builds-a-package-nobody-reads](findings/the-auto-preview-builds-a-package-nobody-reads.md) | `generic` | porthole build auto spends 14.7 s making a _p apk its router never opens, and leaves it behind |
 | [the-browser-stutter-is-a-blocked-webkit-main-thread](findings/the-browser-stutter-is-a-blocked-webkit-main-thread.md) | `generic` | The browser stutter is a blocked WebKit main thread, not the display stack |
 | [the-browsers-blank-band-is-a-main-thread-record-not-a-prepaint-shortfall](findings/the-browsers-blank-band-is-a-main-thread-record-not-a-prepaint-shortfall.md) | `generic` | The unpainted band during a fast fling is a 200 ms record() on the WebKit main thread, and no prepaint knob bridges it |
+| [the-camera-hold-was-the-whole-244mw](findings/the-camera-hold-was-the-whole-244mw.md) | `device:google-taimen` | The 244 mW of always-on idle was the camera sensors alone; venus and Easel are inside the noise |
 | [the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized](findings/the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized.md) | `device:google-taimen` | Epiphany's frame period is CPU paint PLUS the GPU tail, serialized -- frameDone to next frame start is 0.1 ms |
 | [the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible](findings/the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible.md) | `device:google-taimen` | Epiphany's frame period is pinned at 2 refreshes because the CPU paint alone exceeds one -- every sub-quantum optimisation measures as neutral |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
@@ -142,6 +147,7 @@ generic notes as well.
 | [a-board-name-is-not-a-soc-name](traps/a-board-name-is-not-a-soc-name.md) | `generic` | A vendor's reference board is not the SoC, and tools will accept it silently |
 | [a-browser-arm-runs-on-a-throttled-phone-that-is-discharging-on-the-pc-port](traps/a-browser-arm-runs-on-a-throttled-phone-that-is-discharging-on-the-pc-port.md) | `device:google-taimen` | Every browser arm runs at 75-78 C with the big cores capped to 1.0-1.5 GHz, and a phone on a PC's USB port discharges under that load until it browns out |
 | [a-build-outlives-the-porthole-run-that-tracks-it](traps/a-build-outlives-the-porthole-run-that-tracks-it.md) | `generic` | A build survives the porthole run that started it, and takes the buildroot lock to the grave |
+| [a-count-based-poll-loop-caps-the-experiment-it-measures](traps/a-count-based-poll-loop-caps-the-experiment-it-measures.md) | `generic` | A count-based poll loop silently caps how long an experiment may take |
 | [a-fresh-kernel-cannot-ram-boot-against-installed-modules](traps/a-fresh-kernel-cannot-ram-boot-against-installed-modules.md) | `generic` | A freshly built kernel cannot RAM-boot against the modules already on the device |
 | [a-freshness-indicator-must-measure-the-thing-you-actually-read](traps/a-freshness-indicator-must-measure-the-thing-you-actually-read.md) | `generic` | A freshness indicator that measures a different object than the one you compared turns "nobody looked" into confidence |
 | [a-full-zap-inside-the-workspace-unmounts-it](traps/a-full-zap-inside-the-workspace-unmounts-it.md) | `generic` | pmbootstrap zap inside the workspace tears down porthole's own bind mounts, and the build then refuses about a version |
@@ -169,6 +175,7 @@ generic notes as well.
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
 | [an-arm-behind-the-phosh-lockscreen-measures-a-still-page](traps/an-arm-behind-the-phosh-lockscreen-measures-a-still-page.md) | `device:google-taimen` | An arm behind the phosh lockscreen measures a still page, and it looks exactly like the change under test breaking WebKit |
 | [an-injected-touch-does-not-wake-a-blanked-screen](traps/an-injected-touch-does-not-wake-a-blanked-screen.md) | `generic` | An injected touch does not wake a blanked screen, and every gesture arm then measures a still image |
+| [an-instrument-that-fails-quietly-is-worse-than-none](traps/an-instrument-that-fails-quietly-is-worse-than-none.md) | `generic` | An instrument must report 'I could not run' differently from 'I ran and saw nothing |
 | [an-unblanked-screen-can-still-be-locked](traps/an-unblanked-screen-can-still-be-locked.md) | `generic` | On, unlocked and showing your app are three different things -- an injected gesture drives whatever is actually on top, and every frame statistic then describes that |
 | [androidboot-bootreason-always-says-watchdog-here](traps/androidboot-bootreason-always-says-watchdog-here.md) | `device:google-taimen` | androidboot.bootreason says watchdog on every boot of taimen, including clean ones -- it is not a reset-reason oracle |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
@@ -194,11 +201,13 @@ generic notes as well.
 | [monitor-mode-alongside-managed-captures-no-rx](traps/monitor-mode-alongside-managed-captures-no-rx.md) | `soc:msm8998` | A monitor vif on ath10k can be added alongside managed but receives nothing |
 | [never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport](traps/never-flash-a-tree-built-kernel-when-the-device-ships-from-an-aport.md) | `generic` | Never flash a kernel built from the source tree when the device ships from an aport series |
 | [no-cgroup-io-control-without-kernel-config](traps/no-cgroup-io-control-without-kernel-config.md) | `soc:msm8998` | cgroup I/O control is inert unless the kernel config enables it |
+| [no-log-channel-survives-s2idle-on-this-device](traps/no-log-channel-survives-s2idle-on-this-device.md) | `device:google-taimen` | No log channel survives s2idle here: netconsole is gagged and its netdev is down |
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
 | [one-arm-cannot-resolve-a-browser-change-here](traps/one-arm-cannot-resolve-a-browser-change-here.md) | `device:google-taimen` | One browser arm cannot resolve anything under ~10% here: the same build gave 29% and 73% frames-over-budget |
 | [pmbootstrap-never-runs-the-shell-in-an-apkbuild](traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md) | `generic` | pmbootstrap parses an APKBUILD line by line and never runs the shell |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
+| [pstore-has-never-worked-on-7-2](traps/pstore-has-never-worked-on-7-2.md) | `device:google-taimen` | pstore has never produced a record on 7.2.2, even though ramoops registers and enables a console |
 | [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
 | [reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone](traps/reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone.md) | `soc:msm8998` | Reading the qfprom corrected region through nvmem hard resets the phone |
 | [running-a-device-script-on-the-host](traps/running-a-device-script-on-the-host.md) | `generic` | A device-side script run on the host produces plausible, entirely wrong output |
@@ -261,9 +270,9 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 53
+- `device:google-taimen` — 57
 - `device:taimen` — 2
-- `generic` — 133
+- `generic` — 136
 - `soc:gs201` — 1
-- `soc:msm8998` — 34
+- `soc:msm8998` — 36
 - `soc:qcom` — 1
