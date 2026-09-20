@@ -270,5 +270,36 @@ def test_a_mute_device_yields_nothing_rather_than_a_pass():
 
 
 
+# -- work that is in the tree and in no package ----------------------------
+
+def test_a_dirty_kernel_tree_is_reported_with_the_count():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_tree({"path": "/t", "branch": "v7.2", "dirty": 2})
+    assert state == "todo"
+    assert "2 file(s)" in why and "/t" in why
+    assert "evaporate" in why
+
+
+def test_a_clean_tree_passes():
+    import porthole_provenance as prov
+
+    assert prov.compare_tree({"path": "/t", "branch": "m", "dirty": 0})[0] == "done"
+
+
+def test_no_tree_skips_rather_than_passing():
+    import porthole_provenance as prov
+
+    assert prov.compare_tree({})[0] == "skip"
+
+
+def test_a_path_that_is_not_a_checkout_yields_nothing():
+    import porthole_provenance as prov
+
+    assert prov.dirty_tree("/nonexistent/tree") == {}
+    assert prov.dirty_tree("") == {}
+
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

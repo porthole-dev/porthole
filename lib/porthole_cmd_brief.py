@@ -168,6 +168,14 @@ def cmd_brief(args, ctx) -> int:
                     evidence = (evidence + " | " + pkg_why
                                 if verdict != "done" else pkg_why)
                     verdict = "todo"
+                # And the third axis: work that is in the TREE and in no
+                # package at all. Host-side and cheap -- one `git status`.
+                tree_state, tree_why = prov.compare_tree(
+                    prov.dirty_tree(cfg.get("PORTHOLE_KERNEL_TREE", "")))
+                if tree_state == "todo":
+                    evidence = (evidence + " | " + tree_why
+                                if verdict != "done" else tree_why)
+                    verdict = "todo"
                 # "at" is what lets probe_kernel_provenance() age this claim
                 # out: without it a "done" read here kept printing verbatim
                 # forever, including past a reflash that made it false.

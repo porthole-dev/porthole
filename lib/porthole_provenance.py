@@ -348,3 +348,48 @@ def checkout_versions(cfg, names) -> dict:
             if version:
                 out[name] = version
     return out
+
+
+# -- the tree the package is NOT built from --------------------------------
+#
+# A kernel aport builds from its PATCH SERIES, not from the checkout. So an
+# uncommitted edit in the kernel tree is present in every `mod`/`boot` rung
+# -- which compile the tree -- and absent from every `fast`/`kernel`/`image`
+# rung, which rebuild the package. The edit does not fail; it evaporates.
+#
+# This repo has already paid for it once: "aport patch series NOT regenerated
+# -- a kernel pkg rebuild reverts display". With several agents on several
+# worktrees of one tree it stops being an edge case. On 2026-09-20 the
+# registered tree carried two uncommitted files while an image was built from
+# the series, and nothing anywhere said so.
+def dirty_tree(path) -> dict:
+    """`{path, dirty, branch}` for a checkout, or {} when it is not one.
+
+    Reuses porthole_cmd_workspace.survey rather than shelling out to git
+    again: one definition of "dirty", so the two cannot disagree about it.
+    """
+    import pathlib
+
+    import porthole_cmd_workspace as ws
+
+    if not path:
+        return {}
+    where = pathlib.Path(path)
+    if not (where / ".git").exists():
+        return {}
+    row = ws.survey(where)
+    return {"path": str(where), "dirty": row["dirty"], "branch": row["branch"]}
+
+
+def compare_tree(tree: dict):
+    """`(state, evidence)` for uncommitted work in the kernel tree. Pure."""
+    if not tree:
+        return "skip", "no kernel tree to inspect"
+    if not tree["dirty"]:
+        return "done", "the kernel tree is clean"
+    return "todo", (
+        "UNCOMMITTED WORK in {} on {}: {} file(s). A package build takes the "
+        "aport's PATCH SERIES, not this tree, so those edits are in a `mod` "
+        "or `boot` rung and absent from `fast`, `kernel` and `image` -- they "
+        "do not fail, they evaporate.".format(
+            tree["path"], tree["branch"], tree["dirty"]))
