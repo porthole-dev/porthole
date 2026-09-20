@@ -33,6 +33,7 @@ generic notes as well.
 | [chromium-segfaults-because-a-phone-sends-no-xkb-keymap](findings/chromium-segfaults-because-a-phone-sends-no-xkb-keymap.md) | `generic` | Chromium segfaults on every launch under phoc because a phone with no physical keyboard is sent no wl_keyboard.keymap |
 | [clipping-webkit-compositing-to-damage-is-worth-8-percent](findings/clipping-webkit-compositing-to-damage-is-worth-8-percent.md) | `device:google-taimen` | Clipping WebKit's compositing to the damaged rectangles is worth ~8% and 3 C on taimen, not a step change |
 | [crossdirect-hands-the-linker-to-qemu-on-purpose](findings/crossdirect-hands-the-linker-to-qemu-on-purpose.md) | `generic` | Crossdirect hands every link step to qemu on purpose, not just compile |
+| [deep-sleep-is-blocked-by-the-tick-not-a-voter](findings/deep-sleep-is-blocked-by-the-tick-not-a-voter.md) | `device:google-taimen` | Deep sleep is blocked by a 5.3k/s tick inside the frozen window, not by a missing RPM voter |
 | [disabling-cpu-retention-is-parity-theatre](findings/disabling-cpu-retention-is-parity-theatre.md) | `soc:msm8998` | Disabling the CPU retention idle state, as the vendor does, is worth about 0.02 mW and does not deepen idle |
 | [eas-never-starts-without-an-energy-model](findings/eas-never-starts-without-an-energy-model.md) | `soc:msm8998` | EAS never starts on msm8998: the CPU OPP tables carry CPR corners, not power |
 | [envkernel-activation-is-cheap-once-the-chroot-is-warm](findings/envkernel-activation-is-cheap-once-the-chroot-is-warm.md) | `generic` | envkernel activation costs 0.8 s, not 14 s -- the 14 s is a one-off apk add |
@@ -272,7 +273,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 59
+- `device:google-taimen` — 60
 - `device:taimen` — 2
 - `generic` — 136
 - `soc:gs201` — 1
