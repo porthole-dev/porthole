@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import subprocess
 
-from porthole_cli import Bail, EX_FAIL, EX_OK, EX_UNAVAILABLE
+from porthole_cli import Bail, EX_FAIL, EX_OK, EX_STATE, EX_UNAVAILABLE
 import porthole_pmaports as pmap
 
 
@@ -106,6 +106,36 @@ def cmd_channel(args, ctx) -> int:
                 f"  WARNING: {len(dirty)} uncommitted change(s) in pmaports.\n"
                 f"  Switching branches will carry or clobber them. Commit or\n"
                 f"  stash first -- `porthole aports status`.", "red"))
+            ctx.out.blank()
+
+    # Does OUR package repository publish this channel at all? The mirror URL
+    # ends in the pmaports BRANCH, and the CI publishes one release per
+    # <branch>/<arch> -- four of them, all `main`. Switching to a release
+    # channel points apk at a 404 for our repo, every carried fork falls back
+    # to stock, and nothing says so until something that used to work stops.
+    import porthole_pkgrepo as pkgrepo
+
+    base = (ctx.cfg.get("PORTHOLE_PKG_REPO_URL") or "").strip()
+    arch = (ctx.cfg.get("PORTHOLE_ARCH") or "").strip()
+    pub_state, pub_why = "skipped", "no package repository configured"
+    if base and base.lower() != "none" and arch:
+        branch = pkgrepo.channel_branch(args.name, chans)
+        url = pkgrepo.index_url(base, branch, arch)
+        pub_state, pub_why = pkgrepo.channel_supported(
+            pkgrepo.probe_index(url))
+        if pub_state == "absent":
+            ctx.out(ctx.out.paint(
+                f"  REFUSING: {pub_why}.\n"
+                f"  Looked for {url}\n"
+                f"  Publish that branch from the package CI first, or set\n"
+                f"  PORTHOLE_PKG_REPO_URL=none to opt this machine out.",
+                "red"))
+            ctx.out.blank()
+            # 76: the state is wrong and waiting will not fix it. Not 1,
+            # which would read as "the switch was tried and failed".
+            return EX_STATE
+        if pub_state == "unknown":
+            ctx.out(ctx.out.paint(f"  NOTE: {pub_why}", "yellow"))
             ctx.out.blank()
 
     if not args.yes:

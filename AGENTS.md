@@ -363,6 +363,70 @@ from "the answer is no" reports broken tools as findings.
 
 ---
 
+## 6b. Provenance: is the phone running what you built?
+
+**Never form a theory about device behaviour before this answers.** On
+2026-09-20 an agent spent hours on GPU theories for a 30 fps session, a
+"regressed" camera and a "missing" fingerprint port. All three were the same
+thing: the phone was not running the code the tree contained. One of them, the
+fingerprint fix, had been written a week earlier and silently replaced.
+
+`porthole brief --compact --json` already carries the verdict at
+`device.kernel.state`. Four independent things can make it `todo`, and the
+evidence string names which:
+
+| axis | what it compares | typical message |
+|---|---|---|
+| content | the DTB in the ACTIVE SLOT vs the one the tree builds | `DTB CONTENT DRIFT: the phone boots <sha> (<n> bytes), the tree builds <sha>` |
+| packages | installed versions vs the checkout's APKBUILDs | `STALE DEVICE PACKAGES -- <pkg>: phone <a>, checkout <b>` |
+| repository | `apk policy`: did a fork we publish lose to another repo | `OUR FORKS LOST TO ANOTHER REPO -- <pkg>: running <a>, we publish <b>` |
+| tree | uncommitted work in the kernel tree | `UNCOMMITTED WORK in <path>: <n> file(s)` |
+
+**pkgrel is a label, not content.** `aport r80 matching the checkout` was
+printed while the phone's DTB differed from the tree's by 8 bytes. Only the
+content axis can see that.
+
+**A package build takes the aport's PATCH SERIES, not your tree.** An
+uncommitted kernel edit is present in `mod` and `boot` and absent from `fast`,
+`kernel` and `image`. It does not fail. It evaporates.
+
+### The fork-drift verbs
+
+```sh
+porthole pkg drift --fetch --json   # would upstream outrank a fork we carry?
+porthole pkg rebase <aport>         # replay our delta onto current upstream
+```
+
+`drift` verdicts, per aport:
+
+| verdict | meaning | act |
+|---|---|---|
+| `safe` | same pkgver, our pkgrel is higher | nothing |
+| `loses` | same pkgver, upstream's pkgrel is higher or equal | rebase now |
+| `at-risk` | the pkgvers differ | look: apk compares pkgver BEFORE pkgrel |
+| `stale` | the comparison itself is older than `stale_after_days` | `--fetch`, then judge |
+| `unresolved` | the upstream path could not be found | fix the manifest's `upstream:` |
+
+`stale` exists because a verdict computed against old data is not a verdict.
+`drift` printed `last synced 2026-09-09` on the run that called mesa `SAFE`
+eleven days after Alpine moved past it; a footnote and a verdict do not carry
+the same weight. **`drift` exits 1 when anything is at-risk OR stale**, so
+exit 0 genuinely means "checked, and fine".
+
+JSON fields you can rely on: `aports` (per-name rows with `ours`, `upstream`,
+`verdict`, `patches`), `at_risk`, `stale`, `upstream_ref`, `upstream_synced`,
+`upstream_age_days`, `stale_after_days`.
+
+### What drift cannot tell you
+
+It compares the CHECKOUT against the Alpine **aports git tree**. The device
+installs from a **binary repository**, and the two can disagree. So `drift`
+answering `safe` does not mean the phone is running your fork — only the
+repository axis above, which reads `apk policy` on the device, can say that.
+Both were needed to see mesa: `drift` said `SAFE` while the phone ran stock.
+
+---
+
 ## 7. Do not give worktree isolation to work touching nested repos
 
 A worktree of the outer repo does not contain nested repos (a kernel tree, a

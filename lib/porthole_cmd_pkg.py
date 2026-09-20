@@ -1860,7 +1860,8 @@ def _drift(ctx, args) -> int:
                 f"compares pkgver before pkgrel, so upstream may have moved "
                 f"past them since. This is how mesa 26.2.2-r51 read SAFE "
                 f"while the phone ran stock 26.2.3-r0.")
-            ctx.out.hint("porthole pkg drift --fetch    refresh, then judge")
+            ctx.out.hint("porthole pkg drift --fetch",
+                         "refresh, then judge")
         if bad:
             ctx.out.blank()
             ctx.out.warn(f"{len(bad)} carried fork(s) upstream may outrank "

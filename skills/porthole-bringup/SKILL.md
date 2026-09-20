@@ -41,6 +41,50 @@ Read once, properly: `brain/laws/` (ten notes, not about phones),
 `brain/playbooks/00-device-protocol.md` before touching the device.
 `AGENTS.md` is the full front door.
 
+## Before you form a theory, prove the phone runs what you built
+
+`porthole brief --compact --json` carries the verdict at
+`device.kernel.state`. **If it is not `done`, stop and read the evidence
+string before theorising about anything the device does.**
+
+On 2026-09-20 that check was not run, and hours went into GPU theories for a
+30 fps session, a camera that had "regressed", and a fingerprint port that
+looked unfinished. All three were one thing: the phone was not running the
+code the tree contained. The fingerprint fix had been written a week earlier
+and silently replaced by a stock package.
+
+Four independent axes can make it `todo`, and the message names which:
+
+- **content** — the DTB in the active slot differs from the one the tree
+  builds. `pkgrel is a label, not content`: `aport r80 matching the checkout`
+  was printed while the two differed by 8 bytes.
+- **packages** — installed versions differ from the checkout's APKBUILDs.
+- **repository** — a fork we publish lost to another repo. apk compares
+  pkgver BEFORE pkgrel, so a fork at `-r51` is outranked the moment upstream's
+  pkgver moves, with no message anywhere.
+- **tree** — uncommitted work in the kernel tree. A package build takes the
+  aport's PATCH SERIES, not the tree, so those edits reach `mod` and `boot`
+  and never reach `fast`, `kernel` or `image`. They do not fail; they
+  evaporate.
+
+```sh
+porthole pkg drift --fetch --json   # would upstream outrank a fork we carry?
+porthole pkg rebase <aport>         # replay our delta onto current upstream
+```
+
+`drift` exits **1** when anything is at-risk or `stale`, so exit 0 means
+"checked, and fine". `stale` means the comparison itself was older than
+`stale_after_days` — it is not a pass, and `--fetch` is what resolves it.
+
+**`drift` alone is not enough.** It compares the checkout against the Alpine
+aports GIT tree; the device installs from a BINARY repository and the two can
+disagree. `drift` reported mesa `SAFE` while the phone ran stock with every
+a5xx patch missing. Only the repository axis in `brief`, which reads
+`apk policy` on the device, sees that.
+
+Full contract, including every JSON field: `AGENTS.md` section 6b. Read that
+rather than porthole's source.
+
 ## Builds go in the workspace, never on the host
 
 ```sh

@@ -398,5 +398,60 @@ def main():
     return _runner.run(globals())
 
 
+# -- does our repo publish the channel you are switching to? ----------------
+#
+# The mirror URL ends in the pmaports BRANCH, not a channel name, and the CI
+# publishes one release per <branch>/<arch>. As of 2026-09-20 that is four,
+# all `main`. Measured: main -> 200, v26.06 -> 404. So a switch to any stable
+# channel points apk at a 404 for our repo, every carried fork falls back to
+# stock, and nothing says so until something that worked stops.
+
+def test_edge_resolves_to_the_main_branch():
+    import porthole_pkgrepo as pkgrepo
+
+    chans = {"edge": {"branch_pmaports": "main"},
+             "v26.06": {"branch_pmaports": "v26.06"}}
+    assert pkgrepo.channel_branch("edge", chans) == "main"
+    assert pkgrepo.channel_branch("v26.06", chans) == "v26.06"
+
+
+def test_a_channel_without_a_stanza_falls_back_to_its_own_name():
+    """What pmbootstrap does; guessing `main` would point at the wrong tree."""
+    import porthole_pkgrepo as pkgrepo
+
+    assert pkgrepo.channel_branch("v9.99", {}) == "v9.99"
+
+
+def test_the_index_url_is_branch_then_arch():
+    import porthole_pkgrepo as pkgrepo
+
+    assert pkgrepo.index_url("https://h/d/", "main", "aarch64") == \
+        "https://h/d/main/aarch64/APKINDEX.tar.gz"
+
+
+def test_a_404_means_the_channel_is_not_published():
+    import porthole_pkgrepo as pkgrepo
+
+    state, why = pkgrepo.channel_supported(404)
+    assert state == "absent"
+    assert "fall back to stock" in why
+
+
+def test_a_200_is_published():
+    import porthole_pkgrepo as pkgrepo
+
+    assert pkgrepo.channel_supported(200)[0] == "published"
+
+
+def test_an_unreachable_repo_is_unknown_not_absent():
+    """An offline host must not be told its channel is unpublished. Empty
+    means unknown, never 'no'."""
+    import porthole_pkgrepo as pkgrepo
+
+    assert pkgrepo.channel_supported(0)[0] == "unknown"
+    assert pkgrepo.channel_supported(500)[0] == "unknown"
+
+
+
 if __name__ == "__main__":
     sys.exit(main())
