@@ -72,6 +72,7 @@ generic notes as well.
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
 | [taimen-rear-module-is-three-i2c-parts](findings/taimen-rear-module-is-three-i2c-parts.md) | `device:google-taimen` | taimen's rear camera module is three I2C parts -- IMX362 (0x1a), LC898214XD focus (0x72) and an LC898123F40 OIS controller (0x3e) that also holds the module calibration |
 | [taimens-skin-sensor-is-one-devicetree-change](findings/taimens-skin-sensor-is-one-devicetree-change.md) | `device:taimen` | taimen's skin thermistor needs no driver: bd_therm2 is VADC 0x51 and mainline already scales it |
+| [the-30fps-lock-is-not-power-the-panel-runs-at-60](findings/the-30fps-lock-is-not-power-the-panel-runs-at-60.md) | `device:google-taimen` | The 30 fps session lock is not power -- the panel runs at 60 and every second frame is dropped above it |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
@@ -274,7 +275,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 61
+- `device:google-taimen` — 62
 - `device:taimen` — 2
 - `generic` — 136
 - `soc:gs201` — 1
