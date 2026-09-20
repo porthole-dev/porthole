@@ -139,6 +139,20 @@ _add(Op("image",
         destroys=("the previous rootfs image",), reversible=True,
         disk_gb=25.0))
 
+# The phone finishes the job. `apk add` runs mkinitfs and boot-deploy, which
+# regenerate boot.img with the phone's OWN uuids, install the matching modules
+# in the same transaction, and flash the slot the phone is actually on -- the
+# three things a host-side boot.img keeps getting wrong.
+#
+# No ROOTFS_PW, deliberately: it runs no `pmbootstrap install`. That is also
+# the answer to why `kernel` needs one -- that rung is not "compile a kernel",
+# it is mkfs plus a whole new rootfs.
+_add(Op("deploy",
+        "install the built kernel apk on the phone; boot-deploy flashes it",
+        needs_state=BOOTED, needs=(KERNEL_PKG, ARCH, WORKDIR),
+        produces=("boot.img on the device",),
+        destroys=("the boot partition",), reversible=False, disk_gb=0.5))
+
 _add(Op("clean", "unstack /mnt/linux binds", needs_state=NONE, disk_gb=0.0))
 _add(Op("purge", "remove envkernel apks that outrank a release",
         needs_state=NONE, destroys=("local dev snapshots",), disk_gb=0.0))

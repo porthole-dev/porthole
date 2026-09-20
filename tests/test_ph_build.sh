@@ -841,5 +841,44 @@ is "assembly's failure cleanup unlinks out, .boot and .root even if one unlink f
    "$(saw "$asmbody" "contextlib.suppress")" "yes"
 
 
+# -- tkdeploy: the phone finishes the job -----------------------------------
+#
+# Every host-side rung mints a boot.img here and flashes it there, and has to
+# get the uuids, the module/BTF match and the slot right to do it. On
+# 2026-09-20 the host minted 64f8921c/91eb67cd for a phone holding
+# 50c85185/f830086a, which lands in the initramfs debug shell. `apk add` on
+# the phone regenerates boot.img with the phone's OWN uuids, installs the
+# matching modules in the same transaction and flashes the slot the phone is
+# really on.
+dep=$(sed -n '/^tkdeploy()/,/^}/p' "$ROOT/tools/ph-build.sh")
+
+is "tkdeploy refuses a phone that is not BOOTED" \
+   "$(saw "$dep" 'BOOTED')" "yes"
+is "tkdeploy names the missing apk before it touches the device" \
+   "$(saw "$dep" 'no built')" "yes"
+is "tkdeploy installs with --allow-untrusted, since these are local builds" \
+   "$(saw "$dep" '--allow-untrusted')" "yes"
+
+# THE RECEIPT. An apk that installed without reaching boot-deploy has moved
+# /lib/modules and left the boot partition on the old kernel -- the exact
+# desync this rung exists to make impossible -- so the flash is CHECKED, not
+# assumed.
+is "tkdeploy checks boot-deploy actually flashed" \
+   "$(saw "$dep" 'Flashing boot image')" "yes"
+
+# RESUMABLE, like tkpush-modules. The first run of this rung read apk's no-op
+# "OK:" as "installed but never flashed" and reported a desync that did not
+# exist.
+is "tkdeploy is a no-op when the phone already has this release" \
+   "$(saw "$dep" 'nothing to deploy')" "yes"
+is "the installed-version grep is anchored so a subpackage cannot answer" \
+   "$(saw "$dep" '${_PH_KPKG}-[0-9]')" "yes"
+
+# No pmbootstrap install, so no rootfs password. That is the whole reason the
+# rung is cheap, and the answer to why `kernel` needs one.
+is "tkdeploy needs no rootfs password" \
+   "$(saw "$dep" 'PMOS_PASSWORD')" "no"
+
+
 echo "test_ph_build.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

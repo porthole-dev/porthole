@@ -135,6 +135,11 @@ ACTIONS = {
              "image's pmos_root_uuid is checked against the phone (~6m)"),
     "kernel": ("tkbuild",
                "build the kernel, package it, install and verify, but NOT flash (~10m)"),
+    # The cheapest correct way onto a BOOTED phone: no host-side boot.img,
+    # so no uuid to get wrong, no module/BTF mismatch, and no slot to guess.
+    "deploy": ("tkdeploy",
+               "install the built kernel apk on the phone and let boot-deploy "
+               "flash it -- no uuid patching, no password (~1m)"),
     "upgrade": ("tkupgrade-kernel",
                 "swap to a DIFFERENT kernel flavor: push modules, flash boot (~7m)"),
     # The only rung that compiles no kernel tree. See tksysimage in
@@ -151,7 +156,8 @@ ACTIONS = {
 # The rungs that compile and move the device. `clean` and `purge` are neither.
 # `auto` is here so its FALLBACK -- no tree yet, or an unfilled profile --
 # renders the ladder preview instead of running an empty function name.
-BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade", "image")
+BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade", "image",
+                 "deploy")
 
 # The rungs that compile a kernel tree, and therefore need one. `image` is the
 # whole point of this table: every OTHER rung goes through `_ph_make`, so on a

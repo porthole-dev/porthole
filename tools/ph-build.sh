@@ -2678,3 +2678,118 @@ tkboot() {
 	_ph_wait_up "$old_id" || return $?
 	_ph_pushed_write
 }
+
+# Put a BUILT kernel apk on the phone and let the phone finish the job.
+#
+# WHY THIS RUNG EXISTS, and it is the cheapest correct path there is.
+#
+# Every host-side rung mints a boot.img here and flashes it there, which means
+# the host has to know three things it keeps getting wrong:
+#
+#   the UUIDs   `pmbootstrap install` re-mints pmos_boot_uuid/pmos_root_uuid,
+#               so a boot.img built on the host names the rootfs of the
+#               install that produced it -- not the one on the phone. On
+#               2026-09-20 that was 64f8921c/91eb67cd against a phone holding
+#               50c85185/f830086a, and flashing it lands in the initramfs
+#               debug shell with "failed to mount subpartitions".
+#   the modules CONFIG_DEBUG_INFO_BTF_MODULES=y, so a rebuilt kernel refuses
+#               every .ko already on the phone. Boot image and rootfs have to
+#               move together or not at all.
+#   the slot    the A/B retry counter moves the phone without asking, so the
+#               slot the profile names is an intention, not a fact.
+#
+# The phone already solves all three, for free. `apk add` runs mkinitfs and
+# boot-deploy, which regenerate boot.img with the phone's OWN uuids, install
+# the matching modules in the same transaction, and flash the slot the phone
+# is actually on. Measured on taimen the same night, from the phone's output:
+#
+#     ==> initramfs: creating boot.img
+#     ==> Installing: /boot/msm8998-google-taimen.dtb
+#     ==> Flashing boot image
+#     Flashing boot.img to 'boot_b'
+#
+# and the DTB that landed was 97251 bytes, the one the tree had just built.
+#
+# It needs no PORTHOLE_PMOS_PASSWORD, because it runs no `pmbootstrap
+# install` -- which is also the answer to why `kernel` needs one: that rung
+# is not "compile a kernel", it is mkfs plus a whole new rootfs.
+tkdeploy() {
+	# shellcheck source=ph-lib.sh
+	. "$_PH_REPO/tools/ph-lib.sh"
+	local phone=${PHONE:-$PORTHOLE_USER@$HOST}
+	local repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
+
+	# The chroot half first: a missing apk is a build problem and must be
+	# named before any device state is, not after. Same order as
+	# tkpush-modules, and for the same reason.
+	local apk
+	apk=$(ls -t "$repo"/"$_PH_KPKG"-*.apk 2>/dev/null | head -1)
+	[ -n "$apk" ] && [ -s "$apk" ] || {
+		echo ">> no built $_PH_KPKG apk in $repo" >&2
+		echo ">>   this rung DEPLOYS a package; it does not build one." >&2
+		echo ">>   \`porthole build image --yes\` builds it from the aport" >&2
+		return 1; }
+
+	local st; st=$(tk_device_state)
+	[ "$st" = BOOTED ] || {
+		echo ">> the phone is $st, and this rung is an scp plus an apk add" >&2
+		echo ">>   so it needs it BOOTED. In the bootloader, the host-side" >&2
+		echo ">>   path is \`porthole flash boot\` -- and that one has to" >&2
+		echo ">>   patch the UUIDs itself." >&2
+		return 1; }
+
+	local name; name=$(basename "$apk")
+	local want; want=${name%.apk}
+
+	# RESUMABLE, the same way tkpush-modules is: if the phone already has
+	# exactly this release, nothing moved and there is nothing to flash.
+	# Without this the receipt check below reads apk's no-op `OK:` as
+	# "installed but never flashed" and reports a desync that does not
+	# exist -- which it did, on the first run of this rung.
+	#
+	# Anchored on `-[0-9]`, so device-google-taimen-fingerprint cannot
+	# answer for device-google-taimen. Same trap the provenance probe has.
+	local have
+	have=$(tk_run "apk info -v 2>/dev/null | grep -x '${_PH_KPKG}-[0-9].*'" \
+		2>/dev/null | tr -d '\r' | head -1)
+	if [ "$have" = "$want" ]; then
+		echo ">> the phone already has $want -- nothing to deploy"
+		return 0
+	fi
+
+	echo ">> deploying $name"
+	scp -q "${TK_SSH_OPTS[@]}" "$apk" "$phone:/tmp/$name" || {
+		_ph_ssh_diagnose; return 1; }
+
+	# --allow-untrusted: these are locally built apks and the phone has no
+	# reason to trust this host's key. The install runs boot-deploy, which is
+	# what actually writes the boot partition, so its output is the receipt
+	# and is printed rather than swallowed.
+	local out
+	out=$(TK_RUN_TIMEOUT=300 tk_run \
+		"sudo -n apk add --allow-untrusted /tmp/$name 2>&1") || {
+		echo ">> apk add failed on the phone:" >&2
+		printf '%s\n' "$out" | tail -20 >&2
+		return 1; }
+	printf '%s\n' "$out" | tail -12
+
+	# The receipt, and it is checked rather than assumed: boot-deploy is what
+	# makes this rung a FLASH, and an apk that installed without reaching it
+	# has updated /lib/modules while leaving the boot partition on the old
+	# kernel -- the exact desync this rung exists to make impossible.
+	case $out in
+		*"Flashing boot image"*|*"Flashing boot.img"*) ;;
+		*) echo ">> $want installed but boot-deploy did NOT flash." >&2
+		   echo ">>   the phone was on ${have:-<unknown>} before this." >&2
+		   echo ">>   /lib/modules moved and the boot partition did not;" >&2
+		   echo ">>   they are now desynced. Do not reboot into this." >&2
+		   return 1 ;;
+	esac
+
+	tk_run "rm -f /tmp/$name" >/dev/null 2>&1 || true
+
+	local old_id; old_id=$(tk_boot_id 2>/dev/null || true)
+	echo ">> rebooting into it"
+	tk_request_reboot || return 1
+	_ph_wait_up "$old_id" || return $?
+}
