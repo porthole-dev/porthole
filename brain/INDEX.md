@@ -92,6 +92,7 @@ generic notes as well.
 | [the-skin-ladder-caps-the-die-22c-and-is-self-limiting](findings/the-skin-ladder-caps-the-die-22c-and-is-self-limiting.md) | `device:google-taimen` | The vendor's skin thermal ladder drops the die 22 C under sustained load, and its own first two rungs stop it reaching the rest |
 | [the-skin-thermal-adc-tm-storms-at-1600-irq-per-second](findings/the-skin-thermal-adc-tm-storms-at-1600-irq-per-second.md) | `device:google-taimen` | The skin thermal zone storms the PMIC ADC at ~1600 interrupts a second, awake and idle, in the shipped config |
 | [the-slpi-gates-its-ftm4-driver-on-tlmm-75](findings/the-slpi-gates-its-ftm4-driver-on-tlmm-75.md) | `device:google-taimen` | The SLPI refuses to arm a wake gesture unless tlmm 75 is already high, and it gives up after 500 ms |
+| [the-slpi-needs-the-irq-not-just-the-mux](findings/the-slpi-needs-the-irq-not-just-the-mux.md) | `device:google-taimen` | The SLPI needs to OWN the touch interrupt, not just the i2c mux, before it will report a wake gesture |
 | [the-top-right-corruption-is-freedreno-gmem](findings/the-top-right-corruption-is-freedreno-gmem.md) | `soc:msm8998` | The top-right corruption is freedreno's GMEM tile path, not a GPU fault -- the boundary is the a5xx bin column at x=1024 |
 | [the-vendor-runs-four-thermal-layers](findings/the-vendor-runs-four-thermal-layers.md) | `soc:msm8998` | The vendor runs four thermal layers on msm8998; mainline runs one, and two of the other three are hardware we switch off |
 | [the-venus-wedge-was-wrapper-clock-auto-gating](findings/the-venus-wedge-was-wrapper-clock-auto-gating.md) | `device:google-taimen` | The msm8998 venus wedge was wrapper clock auto-gating, and one write closes it |
@@ -270,7 +271,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 57
+- `device:google-taimen` — 58
 - `device:taimen` — 2
 - `generic` — 136
 - `soc:gs201` — 1
