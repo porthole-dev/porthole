@@ -301,5 +301,68 @@ def test_a_path_that_is_not_a_checkout_yields_nothing():
 
 
 
+# -- forks that lost to another repository ----------------------------------
+#
+# mesa was published here at 26.2.2-r51 and the phone ran stock 26.2.3-r0,
+# because apk compares pkgver before pkgrel and upstream moved 26.2.2 ->
+# 26.2.3. Fifty-one releases of a5xx patches gone, and the display corruption
+# they fix came back reading as a new bug.
+
+_OURS = "https://github.com/porthole-dev/pmos-packages/releases/download/main"
+_STOCK = "http://dl-cdn.alpinelinux.org/alpine/edge/main"
+
+
+def test_a_fork_outranked_by_stock_is_reported():
+    import porthole_provenance as prov
+
+    text = ("mesa policy:\n"
+            "  26.2.2-r51:\n    " + _OURS + "\n"
+            "  26.2.3-r0:\n    lib/apk/db/installed\n    " + _STOCK + "\n")
+    got = prov.parse_policy(text)
+    assert got == [{"name": "mesa", "installed": "26.2.3-r0",
+                    "ours": "26.2.2-r51"}]
+    assert prov.compare_policy(got)[0] == "todo"
+
+
+def test_a_package_we_do_not_publish_is_ignored():
+    import porthole_provenance as prov
+
+    text = ("busybox policy:\n"
+            "  1.37.0-r0:\n    lib/apk/db/installed\n    " + _STOCK + "\n")
+    assert prov.parse_policy(text) == []
+
+
+def test_our_own_version_installed_is_the_healthy_case():
+    import porthole_provenance as prov
+
+    text = ("phoc policy:\n"
+            "  0.57.0-r62:\n    lib/apk/db/installed\n    " + _OURS + "\n")
+    assert prov.parse_policy(text) == []
+    assert prov.compare_policy([])[0] == "done"
+
+
+def test_a_hand_installed_package_ahead_of_our_repo_is_not_drift():
+    """The false positive that made the first real run 21 lines of which 2
+    were true. A version served by nothing but db/installed was put there by
+    hand; it is AHEAD of what we publish, not outranked by stock."""
+    import porthole_provenance as prov
+
+    text = ("device-google-taimen policy:\n"
+            "  1-r62:\n    " + _OURS + "\n"
+            "  1-r63:\n    lib/apk/db/installed\n")
+    assert prov.parse_policy(text) == []
+
+
+def test_subpackages_of_one_fork_collapse_to_one_line():
+    import porthole_provenance as prov
+
+    drifted = [{"name": n, "installed": "26.2.3-r0", "ours": "26.2.2-r51"}
+               for n in ("mesa", "mesa-gl", "mesa-egl")]
+    why = prov.compare_policy(drifted)[1]
+    assert "mesa (+2 subpackages)" in why
+    assert "mesa-gl:" not in why
+
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

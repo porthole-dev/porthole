@@ -184,8 +184,18 @@ def cmd_brief(args, ctx) -> int:
                     evidence = (evidence + " | " + pkg_why
                                 if verdict != "done" else pkg_why)
                     verdict = "todo"
-                # And the third axis: work that is in the TREE and in no
-                # package at all. Host-side and cheap -- one `git status`.
+                # The axis that needs no list at all, and therefore cannot
+                # rot: ask apk which repository actually won. Every other
+                # check here inherits the rot of whatever list it was handed;
+                # this one asks the package manager what it did.
+                pol_state, pol_why = prov.compare_policy(prov.parse_policy(
+                    ctx.device().run(prov.POLICY_PROBE, timeout=120) or ""))
+                if pol_state == "todo":
+                    evidence = (evidence + " | " + pol_why
+                                if verdict != "done" else pol_why)
+                    verdict = "todo"
+                # And work that is in the TREE and in no package at all.
+                # Host-side and cheap -- one `git status`.
                 tree_state, tree_why = prov.compare_tree(
                     prov.dirty_tree(cfg.get("PORTHOLE_KERNEL_TREE", "")))
                 if tree_state == "todo":

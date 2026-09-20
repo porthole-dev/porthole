@@ -393,3 +393,178 @@ def compare_tree(tree: dict):
         "or `boot` rung and absent from `fast`, `kernel` and `image` -- they "
         "do not fail, they evaporate.".format(
             tree["path"], tree["branch"], tree["dirty"]))
+
+
+# -- what we BUILD, which cannot rot the way a manifest can ------------------
+#
+# compare_packages() above is only as honest as the list it is given, and the
+# first list it was given was the aports.conf manifest. That manifest names 15
+# aports; the tree carries 27 (docs/DESIGN-pmaports-upstream-refork.md §3).
+# So sns-reg, rmtfs, neard, modemmanager, chromium and seven others could go
+# stale on the phone with the gate saying nothing -- the same rot the manifest
+# already shows in both directions, declaring an fprintd that does not exist
+# and not declaring a chromium that does.
+#
+# The local package repo cannot rot that way. It is the set of things this
+# host has actually built, so a fork nobody remembered to declare is in it by
+# construction. Measured 2026-09-20: this is what would have caught
+#
+#     mesa  26.2.2-r51 built here,  26.2.3-r0 installed on the phone
+#
+# where apk took stock because it compares pkgver before pkgrel and upstream
+# moved 26.2.2 -> 26.2.3, dropping fifty-one releases of a5xx patches and
+# bringing back display corruption that read as a new bug.
+#
+# `porthole pkg drift` cannot see it: that compares the CHECKOUT against
+# upstream aports and never asks the device.
+_APK_NAME = re.compile(r"^(?P<name>.+?)-(?P<ver>\d[^-]*(?:-r\d+)?)\.apk$")
+
+
+def built_packages(cfg) -> dict:
+    """`{name: "pkgver-rN"}` for every apk this host has built. Newest wins.
+
+    Pure apart from the directory read. An empty result means "no local repo
+    to compare against", which compare_packages() reports as `skip`.
+    """
+    import pathlib
+
+    pmb = cfg.get("PORTHOLE_PMB_DIR", "")
+    arch = cfg.get("PORTHOLE_ARCH", "")
+    if not (pmb and arch):
+        return {}
+    repo = pathlib.Path(pmb) / "packages" / "edge" / arch
+    if not repo.is_dir():
+        return {}
+    out = {}
+    for apk in repo.glob("*.apk"):
+        hit = _APK_NAME.match(apk.name)
+        if not hit:
+            continue
+        name, ver = hit.group("name"), hit.group("ver")
+        # Several pkgrels of one package accumulate here. The newest file is
+        # the one a build just produced and therefore the one the device is
+        # expected to be carrying; an older sibling is not drift.
+        prev = out.get(name)
+        if prev is None or apk.stat().st_mtime > prev[1]:
+            out[name] = (ver, apk.stat().st_mtime)
+    return {name: ver for name, (ver, _mtime) in out.items()}
+
+
+def undeclared_carries(built: dict, declared) -> list:
+    """Packages this host builds that the manifest never mentions. Pure.
+
+    Detection only. The manifest is where a human says WHY a fork is carried,
+    and nothing here can write that line -- but it can stop the omission being
+    invisible, which is the failure the refork design names as membership
+    drift.
+    """
+    known = {n for n in (declared or []) if n}
+    # Subpackages are not separate carries: device-google-taimen-fingerprint
+    # is the device package. Attribute a name to its longest declared prefix
+    # before calling it undeclared.
+    missing = []
+    for name in sorted(built):
+        if name in known:
+            continue
+        if any(name.startswith(k + "-") for k in known):
+            continue
+        missing.append(name)
+    return missing
+
+
+# -- the one that cannot rot: ask apk which repo actually won ---------------
+#
+# Every list-based check inherits the list's rot. aports.conf names 15 aports
+# and the tree carries 27; the local package repo is whatever this host
+# happened to build and had mesa at neither version. So the list is the wrong
+# place to stand.
+#
+# apk already knows. `apk policy <pkg>` names every version on offer and which
+# repository each came from, and marks the installed one. On 2026-09-20:
+#
+#     mesa policy:
+#       26.2.2-r51:
+#         https://github.com/porthole-dev/pmos-packages/...   <- ours
+#       26.2.3-r0:
+#         lib/apk/db/installed                                <- INSTALLED
+#         http://dl-cdn.alpinelinux.org/alpine/edge/main
+#
+# That is the whole bug, in output apk was already willing to produce: our
+# fork was on offer and stock won, because apk compares pkgver before pkgrel
+# and upstream moved 26.2.2 -> 26.2.3. No manifest, no build directory and no
+# declared list is needed to see it -- only the question "did anything we
+# publish lose to something we did not".
+#
+# One call for the whole system: 5341 lines for 1247 packages, measured.
+POLICY_PROBE = "apk info 2>/dev/null | xargs apk policy 2>/dev/null"
+
+
+def parse_policy(text: str, ours: str = "porthole-dev") -> list:
+    """`[{name, installed, ours}]` for packages where OUR repo lost. Pure.
+
+    `ours` is matched as a substring of the repository URL, so it works for
+    any fork host without the caller naming a full URL.
+    """
+    drifted, name, versions = [], "", {}
+
+    def flush():
+        if not name:
+            return
+        installed, from_foreign = "", False
+        for version, srcs in versions.items():
+            if not any("db/installed" in s for s in srcs):
+                continue
+            installed = version
+            # WHICH repo also offers the installed version decides whether
+            # this is the bug or its harmless mirror image. A version served
+            # by a repository that is not ours means stock outranked the
+            # fork, which is the failure. A version served by nothing but
+            # db/installed was put there by hand and is simply AHEAD of what
+            # we publish -- true of every package deployed straight to the
+            # phone, and not drift. Flagging those made the first run of this
+            # report 21 lines of which 2 were real, and a report that is 90%
+            # noise is one nobody reads.
+            from_foreign = any(("://" in s and ours not in s) for s in srcs)
+        mine = sorted(v for v, srcs in versions.items()
+                      if any(ours in s for s in srcs))
+        if installed and mine and installed not in mine and from_foreign:
+            drifted.append({"name": name, "installed": installed,
+                            "ours": mine[-1]})
+
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line:
+            continue
+        if not line.startswith(" ") and line.endswith("policy:"):
+            flush()
+            name, versions = line[:-len(" policy:")].strip(), {}
+        elif line.endswith(":") and line.strip().rstrip(":") and name:
+            versions[line.strip().rstrip(":")] = []
+        elif versions and name:
+            versions[list(versions)[-1]].append(line.strip())
+    flush()
+    return drifted
+
+
+def compare_policy(drifted: list):
+    """`(state, evidence)` for forks that lost to another repository. Pure."""
+    if not drifted:
+        return "done", "every package we publish is the one installed"
+    # Collapse subpackages. mesa, mesa-gl, mesa-egl, mesa-dri-gallium and
+    # mesa-vulkan-freedreno are one fork losing once, and listing them
+    # separately turned a two-line finding into nine.
+    groups = {}
+    for d in drifted:
+        groups.setdefault((d["installed"], d["ours"]), []).append(d["name"])
+    parts = []
+    for (installed, mine), names in sorted(groups.items()):
+        head = min(names, key=len)
+        extra = " (+{} subpackages)".format(len(names) - 1) if len(names) > 1 else ""
+        parts.append("{}{}: running {}, we publish {}".format(
+            head, extra, installed, mine))
+    worst = "; ".join(parts)
+    return "todo", (
+        "OUR FORKS LOST TO ANOTHER REPO -- " + worst +
+        ". apk compares pkgver before pkgrel, so a fork is outranked the "
+        "moment upstream's pkgver moves; the patches vanish with no message "
+        "and the bugs they fix come back looking new.")
