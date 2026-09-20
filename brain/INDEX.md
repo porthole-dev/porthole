@@ -109,6 +109,7 @@ generic notes as well.
 | [three-always-on-blocks-cost-244mw-at-idle](findings/three-always-on-blocks-cost-244mw-at-idle.md) | `device:taimen` | 244 mW of taimen's screen-off idle is three blocks nothing is using |
 | [touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm](findings/touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm.md) | `device:google-taimen` | Finger drags on GTK4 WebKit ride the scrolling thread, and r61's two patches cut the Wikipedia drag from 289 layouts per 10 s to 10 |
 | [two-thirds-of-associations-never-get-keys](findings/two-thirds-of-associations-never-get-keys.md) | `device:google-taimen` | Two thirds of successful associations never complete the 4-way handshake, and ath10k says nothing |
+| [unblank-corruption-is-below-the-compositor](findings/unblank-corruption-is-below-the-compositor.md) | `device:google-taimen` | The blank/unblank corruption is BELOW the compositor -- grim captures a clean frame while the glass shows garbage |
 | [va-api-cannot-wrap-a-stateful-v4l2-decoder](findings/va-api-cannot-wrap-a-stateful-v4l2-decoder.md) | `generic` | VA-API cannot be put on top of venus: it is a STATEFUL V4L2 decoder and VA-API's model is stateless, which is why only GStreamer-based browsers get hardware decode here |
 | [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
@@ -275,7 +276,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 62
+- `device:google-taimen` — 63
 - `device:taimen` — 2
 - `generic` — 136
 - `soc:gs201` — 1
