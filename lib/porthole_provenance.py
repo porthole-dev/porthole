@@ -255,3 +255,96 @@ def tree_dtb_path(cfg: dict) -> str:
     out = cfg.get("PORTHOLE_KERNEL_OUT") or os.path.join(tree, ".output")
     return os.path.join(out, "arch", arch, "boot", "dts",
                         dtb.rsplit("/", 1)[0], name)
+
+
+# -- the USERSPACE half ----------------------------------------------------
+#
+# The kernel is not the only thing that drifts, and on 2026-09-20 it was not
+# even the worst one. The phone carried device-google-taimen r60 while the
+# checkout was at r62. The two releases in between contained the fix for an
+# on-screen keyboard that unfolded over every Settings page -- written,
+# committed, reviewed, and simply not on the phone. brief said nothing,
+# because provenance covered only the kernel package.
+#
+# The device package is where a port keeps its dconf databases, udev rules,
+# modprobe options and service units, so a stale one is indistinguishable
+# from a bug in whatever it configures. That is precisely how this one was
+# read: as a keyboard regression.
+def installed_versions(dev, names) -> dict:
+    """`{name: "pkgver-rN"}` for the named packages. {} if the device is mute.
+
+    Queried BY NAME rather than by dumping `apk info -v`: the full list is
+    about 1200 lines, and a prefix match there would happily attribute
+    device-google-taimen-fingerprint's release to device-google-taimen.
+    """
+    wanted = [n for n in names if n]
+    if not wanted:
+        return {}
+    out = dev.run("apk info -v 2>/dev/null", timeout=30) or ""
+    if not out.strip():
+        return {}
+    found = {}
+    for line in out.splitlines():
+        entry = line.strip()
+        for name in wanted:
+            # Exact: everything up to the LAST two dash-separated fields is
+            # the package name, so `-fingerprint` cannot match its parent.
+            if entry.startswith(name + "-"):
+                rest = entry[len(name) + 1:]
+                if "-r" in rest and "-" not in rest.split("-r")[0]:
+                    found.setdefault(name, rest)
+    return found
+
+
+def compare_packages(installed: dict, checkout: dict):
+    """`(state, evidence)` for device-owned packages. Pure.
+
+    Only reports packages present in BOTH maps. A package the checkout does
+    not describe is not drift, and one the phone does not have is a missing
+    install rather than a stale one -- a different problem with a different
+    fix, and conflating them produces a warning nobody can act on.
+    """
+    if not installed or not checkout:
+        return "skip", "no package versions to compare"
+    stale = []
+    for name, want in sorted(checkout.items()):
+        have = installed.get(name)
+        if have and want and have != want:
+            stale.append(f"{name}: phone {have}, checkout {want}")
+    if not stale:
+        return "done", "device packages match the checkout"
+    return "todo", ("STALE DEVICE PACKAGES -- " + "; ".join(stale) +
+                    ". Whatever those releases changed is NOT on the phone, "
+                    "and a fix you cannot see looks exactly like a bug.")
+
+
+def checkout_versions(cfg, names) -> dict:
+    """`{name: "pkgver-rN"}` from the pmaports checkout. {} when unresolvable.
+
+    Reuses porthole_cmd_pkg's APKBUILD reader rather than parsing a second
+    time: two parsers for one file format is how they drift apart.
+    """
+    import pathlib
+
+    import porthole_cmd_pkg as pkg
+    import porthole_pmaports as pmap
+
+    # find_pmaports, not cfg["PORTHOLE_PMAPORTS"]: four things can decide
+    # where pmaports is, and `porthole cd pmaports` on this desk answers
+    # pmbootstrap's cache_git clone rather than the working checkout. Reading
+    # the wrong tree would compare the phone against somebody else's aports
+    # and report drift that is not there -- or worse, miss drift that is.
+    root = pmap.find_pmaports(cfg)
+    if root is None:
+        return {}
+    root = pathlib.Path(root)
+    out = {}
+    for name in names:
+        if not name:
+            continue
+        where = pkg.find_aport(root, name)
+        if where:
+            version = pkg.apkbuild_version(where)
+            if version:
+                out[name] = version
+    return out

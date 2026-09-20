@@ -216,5 +216,59 @@ def test_a_missing_dtb_file_is_absent_not_zero_length():
 
 
 
+# -- the userspace half ----------------------------------------------------
+
+class _FakeDev:
+    def __init__(self, text):
+        self.text = text
+
+    def run(self, command, timeout=12):
+        return self.text
+
+
+def test_a_stale_device_package_is_reported_with_both_versions():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_packages({"device-google-taimen": "1-r60"},
+                                       {"device-google-taimen": "1-r62"})
+    assert state == "todo"
+    assert "1-r60" in why and "1-r62" in why
+
+
+def test_matching_packages_pass():
+    import porthole_provenance as prov
+
+    state, _ = prov.compare_packages({"a": "1-r1"}, {"a": "1-r1"})
+    assert state == "done"
+
+
+def test_a_package_only_in_the_checkout_is_not_called_drift():
+    """Absent is a missing install, not a stale one. Different fix."""
+    import porthole_provenance as prov
+
+    state, _ = prov.compare_packages({"a": "1-r1"}, {"a": "1-r1", "b": "2-r2"})
+    assert state == "done"
+
+
+def test_a_subpackage_is_not_mistaken_for_its_parent():
+    """device-google-taimen-fingerprint must not supply the parent's release."""
+    import porthole_provenance as prov
+
+    dev = _FakeDev("device-google-taimen-fingerprint-1-r60\n"
+                   "device-google-taimen-1-r62\n")
+    got = prov.installed_versions(dev, ["device-google-taimen",
+                                        "device-google-taimen-fingerprint"])
+    assert got["device-google-taimen"] == "1-r62"
+    assert got["device-google-taimen-fingerprint"] == "1-r60"
+
+
+def test_a_mute_device_yields_nothing_rather_than_a_pass():
+    import porthole_provenance as prov
+
+    assert prov.installed_versions(_FakeDev(""), ["a"]) == {}
+    assert prov.compare_packages({}, {"a": "1-r1"})[0] == "skip"
+
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

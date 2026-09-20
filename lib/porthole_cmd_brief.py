@@ -153,6 +153,21 @@ def cmd_brief(args, ctx) -> int:
                         prov.dtb_in_tree(prov.tree_dtb_path(cfg)))
                     if dtb_state in ("todo", "blocked"):
                         verdict, evidence = dtb_state, dtb_why
+                # The userspace half, and on 2026-09-20 the worse one: the
+                # phone ran device-google-taimen r60 against a checkout at
+                # r62, and the two releases in between held a keyboard fix
+                # that was therefore invisible. The device package carries
+                # the dconf databases, udev rules and unit files, so a stale
+                # one reads as a bug in whatever it configures.
+                owned = [cfg.get("PORTHOLE_DEVICE_PKG", ""),
+                         cfg.get("PORTHOLE_KERNEL_PKG", "")]
+                pkg_state, pkg_why = prov.compare_packages(
+                    prov.installed_versions(ctx.device(), owned),
+                    prov.checkout_versions(cfg, owned))
+                if pkg_state == "todo":
+                    evidence = (evidence + " | " + pkg_why
+                                if verdict != "done" else pkg_why)
+                    verdict = "todo"
                 # "at" is what lets probe_kernel_provenance() age this claim
                 # out: without it a "done" read here kept printing verbatim
                 # forever, including past a reflash that made it false.
