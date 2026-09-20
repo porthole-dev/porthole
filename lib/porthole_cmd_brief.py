@@ -142,6 +142,17 @@ def cmd_brief(args, ctx) -> int:
 
                 info = prov.running(ctx.device(), cfg.get("PORTHOLE_KERNEL_PKG", ""))
                 verdict, evidence = prov.compare(info, *_build.aport_version(ctx))
+                # Only when the LABEL says everything is fine. That is both
+                # the dangerous case -- a confident "done" over drifted
+                # content is what cost 2026-09-20 -- and the cheap one: a
+                # verdict that already says "flash" needs no second opinion,
+                # and this probe reads a 20 MB partition.
+                if verdict == "done":
+                    dtb_state, dtb_why = prov.compare_dtb(
+                        prov.dtb_on_device(ctx.device(), info.get("slot", "")),
+                        prov.dtb_in_tree(prov.tree_dtb_path(cfg)))
+                    if dtb_state in ("todo", "blocked"):
+                        verdict, evidence = dtb_state, dtb_why
                 # "at" is what lets probe_kernel_provenance() age this claim
                 # out: without it a "done" read here kept printing verbatim
                 # forever, including past a reflash that made it false.

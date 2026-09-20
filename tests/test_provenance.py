@@ -142,5 +142,79 @@ def test_running_without_kpkg_never_invents_a_desync():
     assert "desync" not in evidence.lower(), evidence
 
 
+# -- content, not just the label -------------------------------------------
+#
+# 2026-09-20: brief said "done -- aport r79, matching the checkout" while the
+# phone's DTB and the tree's differed by 8 bytes (one power-domains entry, the
+# fix for a camera broken all session). The label matched. The content did
+# not, and no pkgrel can see that.
+
+def test_matching_content_is_done():
+    import porthole_provenance as prov
+
+    same = {"sha": "a" * 64, "size": 97251}
+    state, why = prov.compare_dtb(same, dict(same))
+    assert state == "done"
+    assert "97251" in why
+
+
+def test_drifted_content_is_caught_and_names_both_sides():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_dtb({"sha": "89236401" + "0" * 56, "size": 97251},
+                                  {"sha": "a4343929" + "0" * 56, "size": 97243})
+    assert state == "todo"
+    assert "89236401" in why and "a4343929" in why
+    assert "97251" in why and "97243" in why
+
+
+def test_an_unreadable_device_blocks_rather_than_passes():
+    """Empty must mean unknown, never 'unchanged'."""
+    import porthole_provenance as prov
+
+    state, _ = prov.compare_dtb({}, {"sha": "b" * 64, "size": 1})
+    assert state == "blocked"
+
+
+def test_no_built_dtb_skips_instead_of_claiming_a_match():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_dtb({"sha": "b" * 64, "size": 1}, {})
+    assert state == "skip"
+    assert "says nothing" in why
+
+
+def test_the_slot_comes_from_the_running_kernel():
+    """The profile records intent; the A/B retry counter overrides it."""
+    import porthole_provenance as prov
+
+    assert prov.slot_suffix("x androidboot.slot_suffix=_a y") == "a"
+    assert prov.slot_suffix("no slot here") == ""
+
+
+def test_the_tree_dtb_path_mirrors_ph_build():
+    import porthole_provenance as prov
+
+    got = prov.tree_dtb_path({"PORTHOLE_KERNEL_TREE": "/t",
+                              "PORTHOLE_ARCH_DIR": "arm64",
+                              "PORTHOLE_DTB": "qcom/msm8998-google-taimen",
+                              "PORTHOLE_DTB_FILE": "msm8998-google-taimen.dtb"})
+    assert got == "/t/.output/arch/arm64/boot/dts/qcom/msm8998-google-taimen.dtb"
+
+
+def test_an_incomplete_profile_yields_no_path():
+    import porthole_provenance as prov
+
+    assert prov.tree_dtb_path({}) == ""
+
+
+def test_a_missing_dtb_file_is_absent_not_zero_length():
+    import porthole_provenance as prov
+
+    assert prov.dtb_in_tree("/nonexistent/none.dtb") == {}
+    assert prov.dtb_in_tree("") == {}
+
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
