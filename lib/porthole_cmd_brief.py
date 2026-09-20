@@ -161,6 +161,22 @@ def cmd_brief(args, ctx) -> int:
                 # one reads as a bug in whatever it configures.
                 owned = [cfg.get("PORTHOLE_DEVICE_PKG", ""),
                          cfg.get("PORTHOLE_KERNEL_PKG", "")]
+                # And every aport this port CARRIES, not just the two it is
+                # named after. 2026-09-20: mesa on the phone was stock
+                # 26.2.3-r0 while the fork sat at 26.2.2-r51, because apk
+                # compares pkgver before pkgrel and upstream had moved
+                # 26.2.2 -> 26.2.3. Fifty-one releases of a5xx patches gone,
+                # silently, and the display corruption they fix came back
+                # looking like a new bug. gnome-control-center had done the
+                # same thing 50.4 -> 51.0. `porthole pkg drift` cannot see
+                # either: it compares the CHECKOUT against upstream and
+                # never asks the device.
+                try:
+                    import porthole_aports_manifest as _man
+                    owned += _man.names(_man.load(ctx.root, cfg.get(
+                        "PORTHOLE_DEVICE", "")))
+                except Exception:  # noqa: BLE001 -- a missing manifest is
+                    pass           # not a reason for brief to fail
                 pkg_state, pkg_why = prov.compare_packages(
                     prov.installed_versions(ctx.device(), owned),
                     prov.checkout_versions(cfg, owned))
