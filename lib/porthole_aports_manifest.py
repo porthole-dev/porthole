@@ -113,3 +113,54 @@ def verdict(ours_ver: str, ours_rel: str, up_ver: str, up_rel: str) -> str:
         return "safe" if int(ours_rel) > int(up_rel) else "loses"
     except (TypeError, ValueError):
         return "at-risk"
+
+
+# How old a comparison may be before `safe` stops meaning anything.
+#
+# WHY THIS EXISTS. On 2026-09-20 `porthole pkg drift` reported
+#
+#     mesa   26.2.2-r51   upstream 26.2.2-r1   SAFE
+#
+# and it was right about the data it had. The data was eleven days old: the
+# aports_upstream clone's origin/master sat at 2026-09-09, where Alpine's mesa
+# was still 26.2.2. Alpine had since moved to 26.2.3, the phone had taken stock
+# 26.2.3-r0, and fifty-one releases of a5xx patches were not installed. The
+# display corruption they fix came back and read as a new bug.
+#
+# drift PRINTED the sync date the whole time. Printing was not enough, because
+# a verdict and a footnote do not carry the same weight -- the verdict said
+# SAFE and that is what was believed. So staleness has to change the verdict
+# rather than sit beside it.
+#
+# Three days, not one: a fetch is a network round trip nobody wants on every
+# invocation, and an aports tree that moved yesterday rarely invalidates a
+# comparison. Eleven days does.
+STALE_AFTER_DAYS = 3
+
+
+def age_in_days(synced: str, today=None) -> int:
+    """Whole days between an ISO date (`%cs`) and today. -1 when unknown."""
+    import datetime
+
+    try:
+        when = datetime.date.fromisoformat((synced or "").strip())
+    except ValueError:
+        return -1
+    now = today or datetime.date.today()
+    return (now - when).days
+
+
+def stale_verdict(verdict_now: str, age_days: int,
+                  limit: int = STALE_AFTER_DAYS) -> str:
+    """Downgrade a clean verdict that was computed against old data. Pure.
+
+    Only `safe` is downgraded. `loses` and `at-risk` already say "look at
+    this", and an old comparison that found a problem has still found a real
+    problem -- upstream only moves forward. `unknown`/`unresolved` are
+    untouched because they are already not claims.
+    """
+    if verdict_now != "safe":
+        return verdict_now
+    if age_days < 0:
+        return "stale"
+    return "stale" if age_days > limit else "safe"

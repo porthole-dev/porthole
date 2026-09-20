@@ -119,5 +119,55 @@ def test_a_fresh_entry_is_flagged_until_someone_says_why():
     assert manifest.problems(got), "an unexplained fork must be a problem"
 
 
+# -- a verdict computed against stale data is not a verdict ------------------
+#
+# 2026-09-20: drift reported `mesa 26.2.2-r51 upstream 26.2.2-r1 SAFE` and was
+# right about the data it had. The data was eleven days old; Alpine had moved
+# to 26.2.3, the phone had taken stock, and fifty-one releases of a5xx patches
+# were not installed. The sync date was printed the whole time. A footnote and
+# a verdict do not carry the same weight.
+
+def test_a_clean_verdict_goes_stale_when_the_data_is_old():
+    import porthole_aports_manifest as man
+
+    assert man.stale_verdict("safe", 11) == "stale"
+
+
+def test_a_fresh_clean_verdict_survives():
+    import porthole_aports_manifest as man
+
+    assert man.stale_verdict("safe", 1) == "safe"
+    assert man.stale_verdict("safe", man.STALE_AFTER_DAYS) == "safe"
+
+
+def test_a_problem_found_against_old_data_is_still_a_problem():
+    """Upstream only moves forward, so an old comparison that found a fork
+    losing has still found a real one. Only `safe` is downgraded."""
+    import porthole_aports_manifest as man
+
+    assert man.stale_verdict("loses", 99) == "loses"
+    assert man.stale_verdict("at-risk", 99) == "at-risk"
+    assert man.stale_verdict("unresolved", 99) == "unresolved"
+
+
+def test_an_unknown_age_is_treated_as_stale():
+    """Empty must mean unknown, never 'fresh enough'."""
+    import porthole_aports_manifest as man
+
+    assert man.stale_verdict("safe", -1) == "stale"
+    assert man.age_in_days("") == -1
+    assert man.age_in_days("not-a-date") == -1
+
+
+def test_the_age_is_whole_days():
+    import datetime
+
+    import porthole_aports_manifest as man
+
+    assert man.age_in_days("2026-09-09", datetime.date(2026, 9, 20)) == 11
+    assert man.age_in_days("2026-09-20", datetime.date(2026, 9, 20)) == 0
+
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
