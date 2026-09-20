@@ -142,5 +142,227 @@ def test_running_without_kpkg_never_invents_a_desync():
     assert "desync" not in evidence.lower(), evidence
 
 
+# -- content, not just the label -------------------------------------------
+#
+# 2026-09-20: brief said "done -- aport r79, matching the checkout" while the
+# phone's DTB and the tree's differed by 8 bytes (one power-domains entry, the
+# fix for a camera broken all session). The label matched. The content did
+# not, and no pkgrel can see that.
+
+def test_matching_content_is_done():
+    import porthole_provenance as prov
+
+    same = {"sha": "a" * 64, "size": 97251}
+    state, why = prov.compare_dtb(same, dict(same))
+    assert state == "done"
+    assert "97251" in why
+
+
+def test_drifted_content_is_caught_and_names_both_sides():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_dtb({"sha": "89236401" + "0" * 56, "size": 97251},
+                                  {"sha": "a4343929" + "0" * 56, "size": 97243})
+    assert state == "todo"
+    assert "89236401" in why and "a4343929" in why
+    assert "97251" in why and "97243" in why
+
+
+def test_an_unreadable_device_blocks_rather_than_passes():
+    """Empty must mean unknown, never 'unchanged'."""
+    import porthole_provenance as prov
+
+    state, _ = prov.compare_dtb({}, {"sha": "b" * 64, "size": 1})
+    assert state == "blocked"
+
+
+def test_no_built_dtb_skips_instead_of_claiming_a_match():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_dtb({"sha": "b" * 64, "size": 1}, {})
+    assert state == "skip"
+    assert "says nothing" in why
+
+
+def test_the_slot_comes_from_the_running_kernel():
+    """The profile records intent; the A/B retry counter overrides it."""
+    import porthole_provenance as prov
+
+    assert prov.slot_suffix("x androidboot.slot_suffix=_a y") == "a"
+    assert prov.slot_suffix("no slot here") == ""
+
+
+def test_the_tree_dtb_path_mirrors_ph_build():
+    import porthole_provenance as prov
+
+    got = prov.tree_dtb_path({"PORTHOLE_KERNEL_TREE": "/t",
+                              "PORTHOLE_ARCH_DIR": "arm64",
+                              "PORTHOLE_DTB": "qcom/msm8998-google-taimen",
+                              "PORTHOLE_DTB_FILE": "msm8998-google-taimen.dtb"})
+    assert got == "/t/.output/arch/arm64/boot/dts/qcom/msm8998-google-taimen.dtb"
+
+
+def test_an_incomplete_profile_yields_no_path():
+    import porthole_provenance as prov
+
+    assert prov.tree_dtb_path({}) == ""
+
+
+def test_a_missing_dtb_file_is_absent_not_zero_length():
+    import porthole_provenance as prov
+
+    assert prov.dtb_in_tree("/nonexistent/none.dtb") == {}
+    assert prov.dtb_in_tree("") == {}
+
+
+
+# -- the userspace half ----------------------------------------------------
+
+class _FakeDev:
+    def __init__(self, text):
+        self.text = text
+
+    def run(self, command, timeout=12):
+        return self.text
+
+
+def test_a_stale_device_package_is_reported_with_both_versions():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_packages({"device-google-taimen": "1-r60"},
+                                       {"device-google-taimen": "1-r62"})
+    assert state == "todo"
+    assert "1-r60" in why and "1-r62" in why
+
+
+def test_matching_packages_pass():
+    import porthole_provenance as prov
+
+    state, _ = prov.compare_packages({"a": "1-r1"}, {"a": "1-r1"})
+    assert state == "done"
+
+
+def test_a_package_only_in_the_checkout_is_not_called_drift():
+    """Absent is a missing install, not a stale one. Different fix."""
+    import porthole_provenance as prov
+
+    state, _ = prov.compare_packages({"a": "1-r1"}, {"a": "1-r1", "b": "2-r2"})
+    assert state == "done"
+
+
+def test_a_subpackage_is_not_mistaken_for_its_parent():
+    """device-google-taimen-fingerprint must not supply the parent's release."""
+    import porthole_provenance as prov
+
+    dev = _FakeDev("device-google-taimen-fingerprint-1-r60\n"
+                   "device-google-taimen-1-r62\n")
+    got = prov.installed_versions(dev, ["device-google-taimen",
+                                        "device-google-taimen-fingerprint"])
+    assert got["device-google-taimen"] == "1-r62"
+    assert got["device-google-taimen-fingerprint"] == "1-r60"
+
+
+def test_a_mute_device_yields_nothing_rather_than_a_pass():
+    import porthole_provenance as prov
+
+    assert prov.installed_versions(_FakeDev(""), ["a"]) == {}
+    assert prov.compare_packages({}, {"a": "1-r1"})[0] == "skip"
+
+
+
+# -- work that is in the tree and in no package ----------------------------
+
+def test_a_dirty_kernel_tree_is_reported_with_the_count():
+    import porthole_provenance as prov
+
+    state, why = prov.compare_tree({"path": "/t", "branch": "v7.2", "dirty": 2})
+    assert state == "todo"
+    assert "2 file(s)" in why and "/t" in why
+    assert "evaporate" in why
+
+
+def test_a_clean_tree_passes():
+    import porthole_provenance as prov
+
+    assert prov.compare_tree({"path": "/t", "branch": "m", "dirty": 0})[0] == "done"
+
+
+def test_no_tree_skips_rather_than_passing():
+    import porthole_provenance as prov
+
+    assert prov.compare_tree({})[0] == "skip"
+
+
+def test_a_path_that_is_not_a_checkout_yields_nothing():
+    import porthole_provenance as prov
+
+    assert prov.dirty_tree("/nonexistent/tree") == {}
+    assert prov.dirty_tree("") == {}
+
+
+
+# -- forks that lost to another repository ----------------------------------
+#
+# mesa was published here at 26.2.2-r51 and the phone ran stock 26.2.3-r0,
+# because apk compares pkgver before pkgrel and upstream moved 26.2.2 ->
+# 26.2.3. Fifty-one releases of a5xx patches gone, and the display corruption
+# they fix came back reading as a new bug.
+
+_OURS = "https://github.com/porthole-dev/pmos-packages/releases/download/main"
+_STOCK = "http://dl-cdn.alpinelinux.org/alpine/edge/main"
+
+
+def test_a_fork_outranked_by_stock_is_reported():
+    import porthole_provenance as prov
+
+    text = ("mesa policy:\n"
+            "  26.2.2-r51:\n    " + _OURS + "\n"
+            "  26.2.3-r0:\n    lib/apk/db/installed\n    " + _STOCK + "\n")
+    got = prov.parse_policy(text)
+    assert got == [{"name": "mesa", "installed": "26.2.3-r0",
+                    "ours": "26.2.2-r51"}]
+    assert prov.compare_policy(got)[0] == "todo"
+
+
+def test_a_package_we_do_not_publish_is_ignored():
+    import porthole_provenance as prov
+
+    text = ("busybox policy:\n"
+            "  1.37.0-r0:\n    lib/apk/db/installed\n    " + _STOCK + "\n")
+    assert prov.parse_policy(text) == []
+
+
+def test_our_own_version_installed_is_the_healthy_case():
+    import porthole_provenance as prov
+
+    text = ("phoc policy:\n"
+            "  0.57.0-r62:\n    lib/apk/db/installed\n    " + _OURS + "\n")
+    assert prov.parse_policy(text) == []
+    assert prov.compare_policy([])[0] == "done"
+
+
+def test_a_hand_installed_package_ahead_of_our_repo_is_not_drift():
+    """The false positive that made the first real run 21 lines of which 2
+    were true. A version served by nothing but db/installed was put there by
+    hand; it is AHEAD of what we publish, not outranked by stock."""
+    import porthole_provenance as prov
+
+    text = ("device-google-taimen policy:\n"
+            "  1-r62:\n    " + _OURS + "\n"
+            "  1-r63:\n    lib/apk/db/installed\n")
+    assert prov.parse_policy(text) == []
+
+
+def test_subpackages_of_one_fork_collapse_to_one_line():
+    import porthole_provenance as prov
+
+    drifted = [{"name": n, "installed": "26.2.3-r0", "ours": "26.2.2-r51"}
+               for n in ("mesa", "mesa-gl", "mesa-egl")]
+    why = prov.compare_policy(drifted)[1]
+    assert "mesa (+2 subpackages)" in why
+    assert "mesa-gl:" not in why
+
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))

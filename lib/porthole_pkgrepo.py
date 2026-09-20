@@ -371,3 +371,76 @@ def probe(repo: Repo, mirrordir: str, target_arch: str,
         status, body, error = fetcher(url)
         results.append((label, arch, url, status, body, error))
     return classify(results, repo.key.name, pem, target_arch, host)
+
+
+# -- does our repo actually publish the channel you are switching to? -------
+#
+# The mirror URL pmbootstrap builds ends in the pmaports BRANCH, not a channel
+# name: `<PORTHOLE_PKG_REPO_URL>/<branch>/<arch>/APKINDEX.tar.gz`. edge's
+# branch is `main`, and every release channel's is its own version -- v26.06,
+# v25.12 and so on (pmaports/channels.cfg, `branch_pmaports`).
+#
+# Our package CI publishes one GitHub release per <branch>/<arch>, and as of
+# 2026-09-20 that is exactly four: main/aarch64, main/x86_64,
+# systemd/main/aarch64 and systemd/main/x86_64. Measured:
+#
+#     main     -> HTTP 200
+#     v26.06   -> HTTP 404
+#
+# So switching to any stable channel points apk at a 404 for our repo. Every
+# fork this port carries -- mesa, phoc, libcamera, the device package itself
+# -- silently stops being available, and what installs instead is whatever
+# stock provides. That is the same class of failure as the mesa drift, with a
+# wider blast radius, and nothing anywhere says it before the switch.
+CHANNEL_BRANCH_DEFAULT = "main"
+
+
+def channel_branch(channel: str, channels: dict | None = None) -> str:
+    """The pmaports branch a channel resolves to. Pure.
+
+    Falls back to the channel name, which is what pmbootstrap does for a
+    channel whose stanza has no branch_pmaports.
+    """
+    info = (channels or {}).get(channel) or {}
+    return (info.get("branch_pmaports") or channel
+            or CHANNEL_BRANCH_DEFAULT).strip()
+
+
+def index_url(base: str, branch: str, arch: str) -> str:
+    """The APKINDEX our CI would have published for this branch and arch."""
+    return "{}/{}/{}/APKINDEX.tar.gz".format(
+        (base or "").rstrip("/"), branch, arch)
+
+
+def probe_index(url: str, timeout: float = 10.0) -> int:
+    """HTTP status for an APKINDEX, or 0 when the request could not be made.
+
+    0 is NOT a failure verdict: an offline host must not be told its channel
+    is unpublished. Empty must mean unknown -- brain/laws.
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        request = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(request, timeout=timeout) as answer:
+            return int(getattr(answer, "status", 0) or 0)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+    except (urllib.error.URLError, OSError, ValueError):
+        return 0
+
+
+def channel_supported(status: int):
+    """`(state, why)` for one probe result. Pure."""
+    if status == 0:
+        return "unknown", ("could not reach the package repository, so "
+                           "whether it publishes this channel is unknown")
+    if 200 <= status < 400:
+        return "published", "the package repository publishes this channel"
+    if status == 404:
+        return "absent", (
+            "the package repository does NOT publish this channel. Every fork "
+            "this port carries would fall back to stock, silently, and the "
+            "patches in them would stop being installed")
+    return "unknown", f"the package repository answered HTTP {status}"

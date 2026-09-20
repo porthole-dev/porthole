@@ -142,6 +142,66 @@ def cmd_brief(args, ctx) -> int:
 
                 info = prov.running(ctx.device(), cfg.get("PORTHOLE_KERNEL_PKG", ""))
                 verdict, evidence = prov.compare(info, *_build.aport_version(ctx))
+                # Only when the LABEL says everything is fine. That is both
+                # the dangerous case -- a confident "done" over drifted
+                # content is what cost 2026-09-20 -- and the cheap one: a
+                # verdict that already says "flash" needs no second opinion,
+                # and this probe reads a 20 MB partition.
+                if verdict == "done":
+                    dtb_state, dtb_why = prov.compare_dtb(
+                        prov.dtb_on_device(ctx.device(), info.get("slot", "")),
+                        prov.dtb_in_tree(prov.tree_dtb_path(cfg)))
+                    if dtb_state in ("todo", "blocked"):
+                        verdict, evidence = dtb_state, dtb_why
+                # The userspace half, and on 2026-09-20 the worse one: the
+                # phone ran device-google-taimen r60 against a checkout at
+                # r62, and the two releases in between held a keyboard fix
+                # that was therefore invisible. The device package carries
+                # the dconf databases, udev rules and unit files, so a stale
+                # one reads as a bug in whatever it configures.
+                owned = [cfg.get("PORTHOLE_DEVICE_PKG", ""),
+                         cfg.get("PORTHOLE_KERNEL_PKG", "")]
+                # And every aport this port CARRIES, not just the two it is
+                # named after. 2026-09-20: mesa on the phone was stock
+                # 26.2.3-r0 while the fork sat at 26.2.2-r51, because apk
+                # compares pkgver before pkgrel and upstream had moved
+                # 26.2.2 -> 26.2.3. Fifty-one releases of a5xx patches gone,
+                # silently, and the display corruption they fix came back
+                # looking like a new bug. gnome-control-center had done the
+                # same thing 50.4 -> 51.0. `porthole pkg drift` cannot see
+                # either: it compares the CHECKOUT against upstream and
+                # never asks the device.
+                try:
+                    import porthole_aports_manifest as _man
+                    owned += _man.names(_man.load(ctx.root, cfg.get(
+                        "PORTHOLE_DEVICE", "")))
+                except Exception:  # noqa: BLE001 -- a missing manifest is
+                    pass           # not a reason for brief to fail
+                pkg_state, pkg_why = prov.compare_packages(
+                    prov.installed_versions(ctx.device(), owned),
+                    prov.checkout_versions(cfg, owned))
+                if pkg_state == "todo":
+                    evidence = (evidence + " | " + pkg_why
+                                if verdict != "done" else pkg_why)
+                    verdict = "todo"
+                # The axis that needs no list at all, and therefore cannot
+                # rot: ask apk which repository actually won. Every other
+                # check here inherits the rot of whatever list it was handed;
+                # this one asks the package manager what it did.
+                pol_state, pol_why = prov.compare_policy(prov.parse_policy(
+                    ctx.device().run(prov.POLICY_PROBE, timeout=120) or ""))
+                if pol_state == "todo":
+                    evidence = (evidence + " | " + pol_why
+                                if verdict != "done" else pol_why)
+                    verdict = "todo"
+                # And work that is in the TREE and in no package at all.
+                # Host-side and cheap -- one `git status`.
+                tree_state, tree_why = prov.compare_tree(
+                    prov.dirty_tree(cfg.get("PORTHOLE_KERNEL_TREE", "")))
+                if tree_state == "todo":
+                    evidence = (evidence + " | " + tree_why
+                                if verdict != "done" else tree_why)
+                    verdict = "todo"
                 # "at" is what lets probe_kernel_provenance() age this claim
                 # out: without it a "done" read here kept printing verbatim
                 # forever, including past a reflash that made it false.

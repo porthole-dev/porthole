@@ -72,6 +72,7 @@ generic notes as well.
 | [taimen-has-no-factory-wlan-mac](findings/taimen-has-no-factory-wlan-mac.md) | `device:google-taimen` | taimen invents a new WLAN MAC every boot -- and it is not rmtfs, not caldata, and not a rate mismatch |
 | [taimen-rear-module-is-three-i2c-parts](findings/taimen-rear-module-is-three-i2c-parts.md) | `device:google-taimen` | taimen's rear camera module is three I2C parts -- IMX362 (0x1a), LC898214XD focus (0x72) and an LC898123F40 OIS controller (0x3e) that also holds the module calibration |
 | [taimens-skin-sensor-is-one-devicetree-change](findings/taimens-skin-sensor-is-one-devicetree-change.md) | `device:taimen` | taimen's skin thermistor needs no driver: bd_therm2 is VADC 0x51 and mainline already scales it |
+| [the-30fps-lock-is-not-power-the-panel-runs-at-60](findings/the-30fps-lock-is-not-power-the-panel-runs-at-60.md) | `device:google-taimen` | There may be no 30 fps lock at all -- the panel runs at 60 and ph-framprobe reports ~31 whether the screen is on or OFF |
 | [the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core](findings/the-a540-skia-gpu-faults-are-blur-shaders-stalling-the-shader-core.md) | `soc:msm8998` | The a540 GPU faults under Skia-GPU are Skia blur/downsample passes stalling SP/TPL1 -- not binning, not fp16, and a different class from the compositor's one VSC fault |
 | [the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state](findings/the-a5xx-first-tile-restore-runs-with-the-previous-submits-msaa-state.md) | `soc:msm8998` | The phosh top-right strip is the FIRST GMEM tile, restored with the previous process's MSAA registers -- fd5 tile init never programs them |
 | [the-aport-ships-the-tree-is-a-workshop](findings/the-aport-ships-the-tree-is-a-workshop.md) | `device:google-taimen` | The aport series ships; linux/ is a topic-branch workshop, and diffing it against a checked-out branch means nothing |
@@ -108,6 +109,7 @@ generic notes as well.
 | [three-always-on-blocks-cost-244mw-at-idle](findings/three-always-on-blocks-cost-244mw-at-idle.md) | `device:taimen` | 244 mW of taimen's screen-off idle is three blocks nothing is using |
 | [touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm](findings/touch-drags-scroll-on-the-scrolling-thread-and-r61-removed-the-layout-storm.md) | `device:google-taimen` | Finger drags on GTK4 WebKit ride the scrolling thread, and r61's two patches cut the Wikipedia drag from 289 layouts per 10 s to 10 |
 | [two-thirds-of-associations-never-get-keys](findings/two-thirds-of-associations-never-get-keys.md) | `device:google-taimen` | Two thirds of successful associations never complete the 4-way handshake, and ath10k says nothing |
+| [unblank-corruption-is-below-the-compositor](findings/unblank-corruption-is-below-the-compositor.md) | `device:google-taimen` | The blank/unblank corruption is BELOW the compositor -- grim captures a clean frame while the glass shows garbage |
 | [va-api-cannot-wrap-a-stateful-v4l2-decoder](findings/va-api-cannot-wrap-a-stateful-v4l2-decoder.md) | `generic` | VA-API cannot be put on top of venus: it is a STATEFUL V4L2 decoder and VA-API's model is stateless, which is why only GStreamer-based browsers get hardware decode here |
 | [venus-decode-works-and-what-it-took](findings/venus-decode-works-and-what-it-took.md) | `device:google-taimen` | Hardware video decode works on taimen -- three more root causes, and no power collapse |
 | [venus-dies-below-printk-on-msm8998](findings/venus-dies-below-printk-on-msm8998.md) | `device:google-taimen` | Enabling venus on msm8998 kills the SoC instantly, and the missing bus vote is not why |
@@ -274,7 +276,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 61
+- `device:google-taimen` — 63
 - `device:taimen` — 2
 - `generic` — 136
 - `soc:gs201` — 1

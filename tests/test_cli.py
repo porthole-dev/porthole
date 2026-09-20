@@ -777,6 +777,10 @@ def test_every_op_lands_in_the_tier_its_own_fields_say_it_should():
         "boot":       (1, ""),
         "kernel":     (1, ""),
         "clean":      (1, ""),
+        # Writes the boot partition and cannot be undone, exactly like fast
+        # and flash-boot. It is gentler in every OTHER way -- the phone mints
+        # the image, so no uuid can be wrong -- but "gentler" is not a tier.
+        "deploy":     (2, "--yes"),
         "fast":       (2, "--yes"),
         "upgrade":    (2, "--yes"),
         "purge":      (2, "--yes"),

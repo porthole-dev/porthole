@@ -135,6 +135,11 @@ ACTIONS = {
              "image's pmos_root_uuid is checked against the phone (~6m)"),
     "kernel": ("tkbuild",
                "build the kernel, package it, install and verify, but NOT flash (~10m)"),
+    # The cheapest correct way onto a BOOTED phone: no host-side boot.img,
+    # so no uuid to get wrong, no module/BTF mismatch, and no slot to guess.
+    "deploy": ("tkdeploy",
+               "install the built kernel apk on the phone and let boot-deploy "
+               "flash it -- no uuid patching, no password (~1m)"),
     "upgrade": ("tkupgrade-kernel",
                 "swap to a DIFFERENT kernel flavor: push modules, flash boot (~7m)"),
     # The only rung that compiles no kernel tree. See tksysimage in
@@ -151,7 +156,8 @@ ACTIONS = {
 # The rungs that compile and move the device. `clean` and `purge` are neither.
 # `auto` is here so its FALLBACK -- no tree yet, or an unfilled profile --
 # renders the ladder preview instead of running an empty function name.
-BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade", "image")
+BUILD_ACTIONS = ("auto", "mod", "boot", "fast", "kernel", "upgrade", "image",
+                 "deploy")
 
 # The rungs that compile a kernel tree, and therefore need one. `image` is the
 # whole point of this table: every OTHER rung goes through `_ph_make`, so on a
@@ -811,8 +817,30 @@ def _tree_inside(tree, workdir) -> str:
 KNOBS_THAT_CROSS = ("PORTHOLE_NO_CCACHE", "PORTHOLE_LAX_BUILD")
 
 
+def _device_address(cfg: dict) -> dict:
+    """The phone's address, resolved on the host, for the container to reuse.
+
+    Pure. Returns only non-empty values, so a host that has configured nothing
+    sends nothing and the container falls back to its own config layer exactly
+    as before.
+    """
+    import porthole as _p
+
+    # Both, and deliberately as the HOST resolves them -- including when the
+    # two disagree, which they do whenever a legacy PHONE export shadows
+    # PORTHOLE_HOST. The contract is that the container behaves exactly as the
+    # host does; "helpfully" recomposing PHONE here would make the two sides
+    # differ again, which is the whole bug class this exists to remove.
+    # doctor's `no legacy HOST/PHONE shadowing PORTHOLE_HOST` check owns that
+    # disagreement and is the right place to fix it.
+    return {"PORTHOLE_HOST": _p.resolve_host(cfg),
+            "PHONE": _p.resolve_phone(cfg)}
+
+
+
 def _container_cmd(func: str, extra: list[str] | None,
-                   secrets, tree_inside: str = "") -> list[str]:
+                   secrets, tree_inside: str = "",
+                   address: dict | None = None) -> list[str]:
     """The podman exec line for a build, as argv.
 
     Pure, so where a build runs is testable without podman, a device or a
@@ -860,6 +888,23 @@ def _container_cmd(func: str, extra: list[str] | None,
     # container's path, not ours, so it cannot come from our environment.
     if tree_inside:
         argv += ["-e", f"PORTHOLE_KERNEL_TREE={tree_inside}"]
+    # The device's ADDRESS, which is not a path and means the same thing on
+    # both sides of the boundary -- the container reaches the phone over the
+    # same network we do. It is sent as NAME=value because it is RESOLVED on
+    # the host: `porthole_host` may come from the environment, which stops at
+    # the boundary, and `-e NAME` would then forward nothing at all.
+    #
+    # Found the expensive way on 2026-09-20. The host shell exported
+    # PORTHOLE_HOST=172.16.42.1 while ~/.config/porthole/config.env -- the only
+    # layer the container can see -- still named a wifi address from an earlier
+    # unplugged-drain session. Every command run BY HAND worked; every build
+    # died on `cannot reach the device, so no base image can be seeded`, and
+    # `porthole doctor` reported `device: state BOOTED` throughout, because
+    # doctor probes from the host. Two rungs and about an hour went into
+    # diagnosing a kernel that was never the problem.
+    for key, value in sorted((address or {}).items()):
+        if value:
+            argv += ["-e", f"{key}={value}"]
     argv += [sandbox.CONTAINER, "/bin/bash", "-lc",
              f"cd /porthole && source tools/ph-build.sh && {call}"]
     return argv
@@ -929,7 +974,8 @@ def _run(ctx, func: str, timeout: int, extra: list[str] | None = None,
                    if k.startswith("TK_") and isinstance(v, str)}
         cmd = _container_cmd(func, extra, secrets,
                              _tree_inside(env.get("PORTHOLE_KERNEL_TREE"),
-                                          env.get("PORTHOLE_WORKDIR")))
+                                          env.get("PORTHOLE_WORKDIR")),
+                             _device_address(ctx.cfg))
         # Not grey. WHERE a build ran is the first thing you need when it fails
         # in a way that makes no sense, and burying it cost someone three
         # attempts before they noticed the tail.

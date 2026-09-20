@@ -1603,6 +1603,27 @@ def _owned(ctx, args) -> int:
     return EX_FAIL if complaints else EX_OK
 
 
+def _git_fetch(cwd, timeout=300):
+    """The ONE network call in this module, and only ever opt-in.
+
+    Deliberately not routed through _git_read, whose contract is that it
+    never touches the network -- `drift` running offline by default is why
+    it is cheap enough that people actually run it. Breaking that promise
+    inside the read helper would make every caller a possible network call.
+    Returns True when the fetch succeeded; a failure is not fatal, because a
+    stale comparison is still worth printing and now says so itself.
+    """
+    import subprocess
+
+    try:
+        done = subprocess.run(["git", "-C", str(cwd), "fetch", "--quiet",
+                               "origin"], capture_output=True, text=True,
+                              timeout=timeout)
+        return done.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _git_read(cwd, args, timeout=10):
     """One read-only `git` call against `cwd`: (stdout, returncode).
 
@@ -1701,6 +1722,18 @@ def _drift(ctx, args) -> int:
     upstream = pmap.find_aports_upstream(pmaports, ctx.cfg)
     ref = upstream_remote_ref(upstream) if upstream else "origin/master"
 
+    # BEFORE the comparison, not after it. Written the wrong way round first,
+    # and the result was this verb reporting `last synced 2026-09-20` beside
+    # verdicts computed from pre-fetch data -- a fresh date over stale rows,
+    # which is a more convincing version of exactly the bug this feature
+    # exists to kill. One network round trip, opt-in: fetching on every run
+    # would make the check slow enough that people stop running it.
+    if getattr(args, "fetch", False) and upstream:
+        ctx.out(f"  fetching {upstream} ...")
+        if not _git_fetch(upstream):
+            ctx.out.warn("the fetch failed -- the comparison below is "
+                         "whatever was already on disk, and its age says so")
+
     rows = {}
     for name, fields in manifest.items():
         up_rel_path = fields.get("upstream", "")
@@ -1776,6 +1809,20 @@ def _drift(ctx, args) -> int:
         if rc == 0 and behind_out.strip().isdigit():
             behind = int(behind_out.strip())
 
+    # Staleness CHANGES the verdict, it does not sit beside it. drift printed
+    # "last synced 2026-09-09" on the run that called mesa SAFE eleven days
+    # after Alpine had moved past it; the footnote was there and the verdict
+    # is what was believed. Only `safe` is downgraded -- see stale_verdict().
+    age = man.age_in_days(synced)
+    stale = []
+    for _name, _row in rows.items():
+        was = _row["verdict"]
+        now = man.stale_verdict(was, age)
+        if now != was:
+            _row["verdict"] = now
+            _row["stale_age_days"] = age
+            stale.append(_name)
+
     unresolved = [n for n, r in rows.items() if r["verdict"] == "unresolved"]
 
     def render():
@@ -1805,6 +1852,16 @@ def _drift(ctx, args) -> int:
             if row["verdict"] != "safe" and row["patches"]:
                 ctx.out(f"      {len(row['patches'])} patches at risk: "
                         f"{', '.join(row['patches'])}")
+        if stale:
+            ctx.out.blank()
+            ctx.out.warn(
+                f"{len(stale)} fork(s) COULD NOT BE JUDGED: the comparison "
+                f"is {age} days old ({ref} last moved {synced}), and apk "
+                f"compares pkgver before pkgrel, so upstream may have moved "
+                f"past them since. This is how mesa 26.2.2-r51 read SAFE "
+                f"while the phone ran stock 26.2.3-r0.")
+            ctx.out.hint("porthole pkg drift --fetch",
+                         "refresh, then judge")
         if bad:
             ctx.out.blank()
             ctx.out.warn(f"{len(bad)} carried fork(s) upstream may outrank "
@@ -1822,9 +1879,13 @@ def _drift(ctx, args) -> int:
             ctx.out("every carried fork still outranks upstream")
 
     ctx.emit({"aports": rows, "at_risk": bad, "upstream_ref": ref,
-              "upstream_synced": synced, "upstream_worktree_behind": behind},
+              "upstream_synced": synced, "upstream_worktree_behind": behind,
+              "upstream_age_days": age, "stale": stale,
+              "stale_after_days": man.STALE_AFTER_DAYS},
              render)
-    return EX_FAIL if bad else EX_OK
+    # Stale is a failure too. A verdict nobody can trust must not exit 0, or
+    # a CI gate and an agent both read it as "checked, fine".
+    return EX_FAIL if (bad or stale) else EX_OK
 
 
 def _status(ctx) -> int:
@@ -3160,6 +3221,9 @@ SPEC = {
                              "reports what the merge would do"}),
         (["--tier"], {"choices": ("required", "optional"),
                      "help": "owned: only this tier (default: all)"}),
+        (["--fetch"], {"action": "store_true",
+                       "help": "drift: git fetch the upstream aports clone "
+                               "first, so the comparison is current"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "escapes_scope": True,
