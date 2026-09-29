@@ -22,6 +22,8 @@ on:
   pull_request:
   merge_group:
   workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
 
 permissions:
   contents: read
@@ -57,6 +59,9 @@ jobs:
 
       - name: Install the locked site toolchain
         run: npm ci --prefix site-app
+
+      - name: Refresh verified public download catalogs
+        run: python3 .github/scripts/site-downloads.py
 
       - name: Generate Starlight content
         run: ./bin/porthole docs build --org "${GITHUB_REPOSITORY%/*}" --repo "${GITHUB_REPOSITORY#*/}"

@@ -11,7 +11,7 @@ hero:
       icon: right-arrow
       variant: primary
     - text: Browse downloads
-      link: ./downloads/
+      link: ./images/
       variant: secondary
 ---
 import { CardGrid, LinkCard } from '@astrojs/starlight/components';
@@ -22,11 +22,14 @@ import { CardGrid, LinkCard } from '@astrojs/starlight/components';
   <LinkCard title="Device support" href="./devices/">
     Find your model, check tested features, and review known limitations.
   </LinkCard>
-  <LinkCard title="Downloads" href="./downloads/">
-    Get available builds with checksums, source revisions, and release notes.
+  <LinkCard title="Downloads" href="./images/">
+    Get complete images, required boot files, and installation instructions.
   </LinkCard>
   <LinkCard title="Development" href="./working-guide/">
     Set up a rootless workspace, build packages, and contribute a device port.
+  </LinkCard>
+  <LinkCard title="Signed APK packages" href="./packages/">
+    Browse package versions and download from verified, signed repositories.
   </LinkCard>
 </CardGrid>
 
@@ -44,5 +47,5 @@ Porthole maintains downstream Nura device packages and a signed APK repository.
 The bring-up toolkit records device checks and lessons so contributors can
 reproduce the work.
 
-Independent community project. See our [contribution policy](./contributing/)
-and [naming notes](./upstream-naming/).
+Independent community project. Read [why this fork exists](./about/), including
+our thanks to the Nura team and the upstream projects that make this work possible.

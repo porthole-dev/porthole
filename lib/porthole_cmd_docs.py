@@ -193,6 +193,7 @@ def _resolve_links(body: str, here: pathlib.Path,
 def copy_brain(root: pathlib.Path, dest: pathlib.Path) -> dict[str, list]:
     """Copy brain notes, turning frontmatter into a rendered header."""
     sections: dict[str, list] = {}
+    topics = {}
     brain = root / "brain"
     index = _brain_map(brain)
     for path in sorted(brain.rglob("*.md")):
@@ -229,6 +230,20 @@ def copy_brain(root: pathlib.Path, dest: pathlib.Path) -> dict[str, list]:
         target.write_text("\n".join(header) + body)
         sections.setdefault(section, []).append(
             (meta.get("title", rel.stem), f"brain/{rel.as_posix()}"))
+        topic = meta.get("subsystem", "general")
+        topics.setdefault(topic, []).append((meta.get("title", rel.stem), rel, meta))
+    directory = dest / "brain" / "topics"
+    directory.mkdir(parents=True, exist_ok=True)
+    browse = ["# Knowledge base", "", "Find device notes, troubleshooting lessons, and development playbooks by topic. Use the site search for a symptom, command, or note title.", "", "## Browse by topic", "", "| Topic | Notes |", "|---|---|"]
+    for topic, notes in sorted(topics.items()):
+        slug = re.sub(r"[^a-z0-9-]+", "-", topic.lower()).strip("-") or "general"
+        browse.append("| [{}](topics/{}.md) | {} |".format(topic.capitalize(), slug, len(notes)))
+        page = ["# " + topic.capitalize(), "", "[All topics](../browse.md)", "", "| Note | Type | Scope | Confidence |", "|---|---|---|---|"]
+        for title, rel, meta in notes:
+            page.append("| [{}](../{}) | {} | {} | {} |".format(title.replace("|", "\\|"), rel.as_posix(), meta.get("severity", rel.parts[0]), meta.get("scope", "general"), meta.get("confidence", "—")))
+        (directory / (slug + ".md")).write_text("\n".join(page) + "\n")
+    (dest / "brain" / "browse.md").write_text("\n".join(browse) + "\n")
+
     return sections
 
 
@@ -322,7 +337,13 @@ def cmd_build(args, ctx) -> int:
     release_data = catalogue(root, getattr(args, "catalog", None) or root / "releases")
     markdown_catalogue(release_data, src / "devices")
     (src / "downloads.md").write_text(markdown_downloads(release_data))
-    for name in ("RELEASES.md", "PROJECT-STATUS.md", "WORKING-GUIDE.md", "PIPELINES.md"):
+    public_downloads = root / ".run" / "public-downloads"
+    for name, title in (("packages", "Signed APK packages"), ("images", "Device downloads")):
+        source = public_downloads / (name + ".md")
+        text = source.read_text() if source.is_file() else "# " + title + "\n\nThe published catalog is refreshed by the website deployment workflow.\n"
+        (src / (name + ".md")).write_text(text)
+
+    for name in ("RELEASES.md", "PROJECT-STATUS.md", "WORKING-GUIDE.md", "PIPELINES.md", "ABOUT.md"):
         (src / name.lower()).write_text(_readme_as_index(_docs_links(
             (root / "docs" / name).read_text(), pages)))
     (src / "upstream-naming.md").write_text(_docs_links(
@@ -333,11 +354,14 @@ def cmd_build(args, ctx) -> int:
 
     nav = [
         ("Home", "index.md"),
-        ("Downloads", "downloads.md"),
+        ("Downloads", [("Device images", "images.md"),
+                       ("Signed APK packages", "packages.md"),
+                       ("Release evidence", "downloads.md")]),
         ("Release pipelines", "pipelines.md"),
         ("Devices", [("Device directory", "devices/index.md")] + [
             (d["policy"]["name"], "devices/{}.md".format(d["device"]))
             for d in release_data["devices"]]),
+        ("About Porthole", "about.md"),
         ("Project status", "project-status.md"),
         ("Get started", [
             ("Working guide", "working-guide.md"),
@@ -362,7 +386,7 @@ def cmd_build(args, ctx) -> int:
             ("The rules, and what they cost", "agents-rules.md"),
         ]),
     ]
-    brain_nav = []
+    brain_nav = [("Browse by topic", "brain/browse.md")]
     if (src / "brain" / "README.md").is_file():
         brain_nav.append(("How to read this", "brain/README.md"))
     for section in ("laws", "traps", "playbooks", "workflow", "devices",

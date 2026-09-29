@@ -1,87 +1,49 @@
 :root {
-  --sl-color-accent-low: #e6ece5;
-  --sl-color-accent: #52765c;
-  --sl-color-accent-high: #294b35;
-  --sl-color-white: #252a24;
-  --sl-color-gray-1: #343a33;
-  --sl-color-gray-2: #4d554c;
-  --sl-color-gray-3: #70786f;
-  --sl-color-gray-4: #a4aaa0;
-  --sl-color-gray-5: #d4d6cd;
-  --sl-color-gray-6: #eeece4;
-  --sl-color-black: #fbfaf6;
-  --sl-color-bg: #f4f1e9;
-  --sl-color-bg-nav: #f4f1e9;
-  --sl-color-bg-sidebar: #f4f1e9;
-  --sl-content-width: 52rem;
-  --sl-text-h1: clamp(2.65rem, 7vw, 5rem);
-  --sl-font: "Avenir Next", Avenir, "Segoe UI", sans-serif;
-  --sl-font-system: "Avenir Next", Avenir, "Segoe UI", sans-serif;
-  --sl-font-system-mono: "SFMono-Regular", Consolas, monospace;
+  --sl-color-accent-low: #e9edf4;
+  --sl-color-accent: #3759b8;
+  --sl-color-accent-high: #263b77;
+  --sl-color-white: #17202b;
+  --sl-color-gray-1: #283445;
+  --sl-color-gray-2: #455368;
+  --sl-color-gray-3: #64748b;
+  --sl-color-gray-4: #94a3b8;
+  --sl-color-gray-5: #d5dce5;
+  --sl-color-gray-6: #f0f3f8;
+  --sl-color-black: #ffffff;
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #f8fafc;
+  --sl-content-width: 56rem;
+  --sl-text-h1: clamp(2.5rem, 6vw, 4.5rem);
+  --sl-font: "Inter", "Segoe UI", system-ui, sans-serif;
 }
-
 :root[data-theme="dark"] {
-  --sl-color-accent-low: #23382a;
-  --sl-color-accent: #a8c7ae;
-  --sl-color-accent-high: #d1e5d4;
-  --sl-color-white: #e8e9df;
-  --sl-color-gray-1: #d5d8d0;
-  --sl-color-gray-2: #b4b9b0;
-  --sl-color-gray-3: #92988f;
-  --sl-color-gray-4: #626960;
-  --sl-color-gray-5: #404840;
-  --sl-color-gray-6: #29302b;
-  --sl-color-black: #1d231f;
-  --sl-color-bg: #171c19;
-  --sl-color-bg-nav: #171c19;
-  --sl-color-bg-sidebar: #171c19;
+  --sl-color-accent-low: #1c2a45;
+  --sl-color-accent: #a7bfff;
+  --sl-color-accent-high: #d3dfff;
+  --sl-color-white: #f1f5f9;
+  --sl-color-gray-1: #e2e8f0;
+  --sl-color-gray-2: #cbd5e1;
+  --sl-color-gray-3: #a5b4c8;
+  --sl-color-gray-4: #6b7c93;
+  --sl-color-gray-5: #35445a;
+  --sl-color-gray-6: #202b3b;
+  --sl-color-black: #101722;
+  --sl-color-bg: #101722;
+  --sl-color-bg-nav: #141d2b;
+  --sl-color-bg-sidebar: #141d2b;
 }
-
-:root[data-theme="light"] .hero h1 {
-  max-width: 13ch;
-  font-family: Georgia, "Iowan Old Style", serif;
-  font-weight: 400;
-  letter-spacing: -.055em;
-  line-height: .98;
-}
-
-:root[data-theme="light"] .hero .tagline {
-  max-width: 38rem;
-  color: var(--sl-color-gray-2);
-  font-size: clamp(1.05rem, 2vw, 1.3rem);
-  line-height: 1.65;
-}
-
-.sl-markdown-content starlight-aside {
-  border-inline-start-color: #a05e3e;
-}
-
-.sl-markdown-content .card-grid a {
-  text-decoration: none;
-}
-
-.sl-markdown-content .card-grid sl-link-card {
-  transition: transform .18s ease, border-color .18s ease;
-}
-
-.sl-markdown-content .card-grid sl-link-card:hover {
-  transform: translateY(-2px);
-}
-
-.sl-markdown-content table {
-  font-size: .88em;
-}
-
+.site-title img { border-radius: 0.6rem; }
+.hero { padding-block: clamp(2rem, 6vw, 5rem); }
+.hero h1 { max-width: 15ch; letter-spacing: -0.05em; line-height: 1.08; text-wrap: balance; }
+.hero .tagline { max-width: 38rem; color: var(--sl-color-gray-2); line-height: 1.7; }
+.sl-markdown-content h2 { letter-spacing: -0.025em; }
+.sl-markdown-content .card-grid { gap: 1rem; }
+.sl-markdown-content .sl-link-card { border-radius: 0.75rem; padding: 1.5rem; }
+.sl-markdown-content table { font-size: 0.9em; }
+.sl-markdown-content td code { white-space: normal; overflow-wrap: anywhere; }
+.sl-markdown-content a { text-underline-offset: 0.18em; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--sl-color-accent); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
-
-.site-title img { border-radius: 0.6rem; }
-.hero { padding-block: clamp(2rem, 6vw, 5rem); }
-.hero h1 { text-wrap: balance; }
-.sl-markdown-content .card-grid { gap: 1rem; }
-.sl-markdown-content .sl-link-card {
-  border-radius: 0.75rem;
-  padding: 1.5rem;
-}
-.sl-markdown-content h2 { letter-spacing: -0.025em; }

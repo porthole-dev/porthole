@@ -9,6 +9,7 @@ latest workflow result; open a pipeline for its running jobs and logs.
 |---|---|---|
 | Packages and signed APK publication | [![Packages and signed APK publication](https://github.com/porthole-dev/pmaports/actions/workflows/build.yml/badge.svg?branch=taimen-bringup)](https://github.com/porthole-dev/pmaports/actions/workflows/build.yml) | [Open pipeline](https://github.com/porthole-dev/pmaports/actions/workflows/build.yml) |
 | Package source and workflow checks | [![Package source and workflow checks](https://github.com/porthole-dev/pmaports/actions/workflows/ci.yml/badge.svg?branch=taimen-bringup)](https://github.com/porthole-dev/pmaports/actions/workflows/ci.yml) | [Open pipeline](https://github.com/porthole-dev/pmaports/actions/workflows/ci.yml) |
+| Final Pixel 2 XL image | [![Device image](https://github.com/porthole-dev/pmaports/actions/workflows/image.yml/badge.svg?branch=taimen-bringup)](https://github.com/porthole-dev/pmaports/actions/workflows/image.yml) | [Build, verification, and publication](https://github.com/porthole-dev/pmaports/actions/workflows/image.yml) |
 | Website deployment | [![Website deployment](https://github.com/porthole-dev/porthole/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/porthole-dev/porthole/actions/workflows/docs.yml) | [Open pipeline](https://github.com/porthole-dev/porthole/actions/workflows/docs.yml) |
 | Porthole checks | [![Porthole checks](https://github.com/porthole-dev/porthole/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/porthole-dev/porthole/actions/workflows/ci.yml) | [Open pipeline](https://github.com/porthole-dev/porthole/actions/workflows/ci.yml) |
 | Obscura release | [![Obscura release](https://github.com/porthole-dev/obscura/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/porthole-dev/obscura/actions/workflows/release.yml) | [Open pipeline](https://github.com/porthole-dev/obscura/actions/workflows/release.yml) |
@@ -30,6 +31,7 @@ latest workflow result; open a pipeline for its running jobs and logs.
 
 ## Published artifacts
 
+- [Installable image candidates](https://github.com/porthole-dev/pmaports/releases)
 - [Signed APK repositories](https://github.com/porthole-dev/pmos-packages/releases)
 - [Obscura releases](https://github.com/porthole-dev/obscura/releases)
 - [Tap releases](https://github.com/porthole-dev/tap/releases)
