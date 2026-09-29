@@ -1,42 +1,48 @@
 ---
-title: Porthole · bring-up and downloads
-description: Bring-up tools, device notes, and community releases for Linux phones.
+title: Porthole
+description: Nura on community-supported phones. Find your device, download a build, or help develop the port.
 template: splash
 hero:
-  title: Bring devices up. Find the right image.
-  tagline: A practical toolkit for bringing Linux to phones, with device notes and releases in one place.
+  title: A new chapter for your phone.
+  tagline: Nura device ports, signed packages, and practical tools for keeping hardware in use.
   actions:
-    - text: Browse downloads
-      link: ./downloads/
+    - text: Find your device
+      link: ./devices/
       icon: right-arrow
       variant: primary
-    - text: Start a bring-up
-      link: ./working-guide/
+    - text: Browse downloads
+      link: ./downloads/
+      variant: secondary
 ---
-import { Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Independent fork · not affiliated with Nura">
-We use AI assistance. Nura's [contribution policy](https://docs.postmarketos.org/policies-and-processes/development/ai-policy.html) does not accept AI-assisted work, so we maintain those changes here instead of sending them upstream. See [our AI policy](https://github.com/porthole-dev/porthole/blob/main/AI.md).
-</Aside>
-
-## Where to go
+## Start here
 
 <CardGrid>
-  <LinkCard title="Porthole bring-up" href="./working-guide/">
-    Install Porthole and work through a device bring-up.
-  </LinkCard>
-  <LinkCard title="Device directory" href="./devices/">
-    See the work and test results for each device.
+  <LinkCard title="Device support" href="./devices/">
+    Find your model, check tested features, and review known limitations.
   </LinkCard>
   <LinkCard title="Downloads" href="./downloads/">
-    Find available images, checksums, and release notes.
+    Get available builds with checksums, source revisions, and release notes.
+  </LinkCard>
+  <LinkCard title="Development" href="./working-guide/">
+    Set up a rootless workspace, build packages, and contribute a device port.
   </LinkCard>
 </CardGrid>
 
-## About this project
+## Know what you are installing
 
-Porthole is the command-line toolkit for building and testing device ports. Each device page tracks its own progress; downloads appear only after release checks pass. Hardware results name the exact image tested.
+Device pages distinguish experimental ports from tested releases. Hardware
+results apply to the exact image tested; a successful build alone does not
+establish device support.
 
-See [project status](./project-status/), [release guidance](./releases/), and [contributing](./contributing/). Start a change with `make ci`.
+[Current project status](./project-status/) · [Release process](./releases/) · [Contribute](./contributing/)
 
-Nura's name changed in 2026. Some package names still use `postmarketOS` for compatibility; see [naming notes](./upstream-naming/).
+## Built in the open
+
+Porthole maintains downstream Nura device packages and a signed APK repository.
+The bring-up toolkit records device checks and lessons so contributors can
+reproduce the work.
+
+Independent community project. See our [contribution policy](./contributing/)
+and [naming notes](./upstream-naming/).

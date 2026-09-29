@@ -272,6 +272,14 @@ def markdown_catalogue(data, out):
     out.mkdir(parents=True, exist_ok=True)
     rows = ["# Devices", "",
             "Browse device bring-up status, release availability, and test results.", ""]
+    rows += ["| Device | Manufacturer | Port status | Images |", "|---|---|---|---|"]
+    for device in data["devices"]:
+        policy = device["policy"]
+        available = sum(1 for build in device["builds"] if build.get("download_ready"))
+        rows.append("| [{}]({}.md) | {} | {} | {} |".format(
+            policy["name"], device["device"], policy.get("vendor", "Unknown"),
+            policy["status"].capitalize(), str(available) if available else "Not available yet"))
+    rows += [""]
     for d in data["devices"]:
         p, builds = d["policy"], d["builds"]
         rows += ["## " + p["name"], "",

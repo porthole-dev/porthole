@@ -337,14 +337,8 @@ def cmd_build(args, ctx) -> int:
         ("Devices", [("Device directory", "devices/index.md")] + [
             (d["policy"]["name"], "devices/{}.md".format(d["device"]))
             for d in release_data["devices"]]),
-        ("Porthole bring-up", [
-            ("Start a bring-up", "working-guide.md"),
-            ("Setting up a new host", "new-host.md"),
-            ("Commands", "cli.md"),
-            ("Tools", "tools.md"),
-        ]),
         ("Project status", "project-status.md"),
-        ("Guides", [
+        ("Get started", [
             ("Working guide", "working-guide.md"),
             # First, and deliberately: it is the page a new host needs, and it
             # was the one that did not exist.
@@ -357,7 +351,7 @@ def cmd_build(args, ctx) -> int:
             ("Building and reviewing releases", "releases.md"),
             ("Nura naming and upstream compatibility", "upstream-naming.md"),
         ]),
-        ("Reference", [
+        ("Developer reference", [
             ("Commands", "cli.md"),
             ("Tools", "tools.md"),
             ("Profile keys", "profile-keys.md"),

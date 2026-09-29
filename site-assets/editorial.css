@@ -75,3 +75,13 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.site-title img { border-radius: 0.6rem; }
+.hero { padding-block: clamp(2rem, 6vw, 5rem); }
+.hero h1 { text-wrap: balance; }
+.sl-markdown-content .card-grid { gap: 1rem; }
+.sl-markdown-content .sl-link-card {
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+.sl-markdown-content h2 { letter-spacing: -0.025em; }
