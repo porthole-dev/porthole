@@ -2,8 +2,11 @@
 
 Release tooling is local and uses the existing porthole profiles, pmbootstrap
 workspace, boot-image verifier, and matrix probes. It does not flash, sign,
-upload, or contact a forge. A public build and promotion workflow is not wired
-yet; add it only after the release blockers below have evidence-backed fixes.
+upload, or contact a forge. GitHub builds and publishes signed packages through
+the pmaports Build workflow. Its Device image workflow assembles experimental
+candidates, verifies packaged kernel and DTB contents, publishes checksums and
+provenance attestations, and checks the downloaded release assets. Promotion to
+a tested release still requires the hardware evidence below.
 
 ## Rehearse the organization chain locally
 
