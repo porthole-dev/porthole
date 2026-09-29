@@ -402,7 +402,7 @@ def dispatch(args, ctx):
         elif args.action == "rehearse":
             from porthole_release_rehearsal import rehearse
             result = rehearse(ctx.root, args.org or ctx.root / ".run/organization-cleanup",
-                              args.pmaports, args.mirror, args.manifest, args.artifacts)
+                              args.pmaports, args.mirror, args.manifest, args.artifacts, cfg=ctx.cfg)
         else:
             if not args.manifest or not args.report:
                 raise ValueError("report requires --manifest and --report")

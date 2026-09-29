@@ -132,7 +132,7 @@ def mirror_check(mirror, key, branch, target_arch):
         thread.join()
 
 
-def rehearse(root, org, pmaports=None, mirror=None, manifest=None, artifacts=None):
+def rehearse(root, org, pmaports=None, mirror=None, manifest=None, artifacts=None, cfg=None):
     root, org = pathlib.Path(root).resolve(), pathlib.Path(org).resolve()
     out = []
     apps = ("obscura", "tap", "phosh-nfc-quick-setting")
@@ -196,12 +196,16 @@ def rehearse(root, org, pmaports=None, mirror=None, manifest=None, artifacts=Non
     else:
         out.append(row("package publisher contract", "blocked", "pmaports test unavailable"))
     if mirror:
-        key = root / "profiles/google-taimen/keys/porthole-dev-packages-20260915.rsa.pub"
+        repo = pkgrepo.resolve(cfg or {}, root)
+        target_arch = (cfg or {}).get("PORTHOLE_ARCH", "")
         branch = pkgrepo.branch(tree)
-        if not branch:
+        if not repo or not repo.key or not target_arch:
+            out.append(row("signed APK mirror", "blocked",
+                           "selected device needs a repository key and target architecture"))
+        elif not branch:
             out.append(row("signed APK mirror", "blocked", "pmaports branch unavailable"))
         else:
-            out.append(mirror_check(pathlib.Path(mirror), key, branch, "aarch64"))
+            out.append(mirror_check(pathlib.Path(mirror), repo.key, branch, target_arch))
     else:
         out.append(row("signed APK mirror and downloads", "blocked",
                        "provide --mirror with real published release assets"))

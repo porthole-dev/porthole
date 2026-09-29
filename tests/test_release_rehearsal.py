@@ -104,7 +104,30 @@ def test_shared_commit_must_be_reachable_from_a_fetched_origin_ref():
         assert not rehearsal.commit_is_published(repo, local)
 
 
+def test_rehearsal_uses_selected_device_architecture_and_key():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        calls = []
+        original = rehearsal.mirror_check, rehearsal.pkgrepo.branch, rehearsal.release.plan
+        def capture_mirror(mirror, key, branch, arch):
+            calls.append((key, arch))
+            return rehearsal.row("mirror", "pass", "reached")
+
+        rehearsal.mirror_check = capture_mirror
+        rehearsal.pkgrepo.branch = lambda _: "main"
+        rehearsal.release.plan = lambda *_: {"include": [], "blocked": []}
+        try:
+            rehearsal.rehearse(root, root / "org", mirror=root / "mirror", cfg={
+                "PORTHOLE_ARCH": "armv7", "PORTHOLE_PKG_REPO_URL": "https://example.test/packages",
+                "PORTHOLE_PKG_REPO_KEY": str(root / "another-device.rsa.pub"),
+            })
+        finally:
+            rehearsal.mirror_check, rehearsal.pkgrepo.branch, rehearsal.release.plan = original
+        assert calls == [(root / "another-device.rsa.pub", "armv7")]
+
+
 if __name__ == "__main__":
+    test_rehearsal_uses_selected_device_architecture_and_key()
     test_index_names_drive_downloads()
     test_http_mirror_requires_every_signed_index()
     test_relative_checkout_runs_publisher_contract()
