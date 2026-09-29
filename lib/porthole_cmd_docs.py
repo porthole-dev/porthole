@@ -389,7 +389,7 @@ def cmd_build(args, ctx) -> int:
     brain_nav = [("Browse by topic", "brain/browse.md")]
     if (src / "brain" / "README.md").is_file():
         brain_nav.append(("How to read this", "brain/README.md"))
-    for section in ("laws", "traps", "playbooks", "workflow", "devices",
+    for section in ("laws", "traps", "findings", "playbooks", "workflow", "devices",
                     "memory"):
         if section in sections:
             brain_nav.append((section.title(),

@@ -59,6 +59,20 @@ eligibility unreviewed. Only profiles with reviewed release policies enter the
 image plan; disabled or blocked combinations remain excluded. Enable Taimen
 only after its firmware, first-boot, and package prerequisites are resolved.
 
+## Add another device
+
+The website reads all device profiles; release builds read pmaports'
+[image device inventory](https://github.com/porthole-dev/pmaports/blob/taimen-bringup/.github/image-devices.json).
+Add the device's profile and maintenance manifest, then one inventory entry
+with its architecture, runner, kernel, UI, required package recipes, firmware
+paths and installation guide. Set a DTBO hash only when that device requires
+an overlay. Firmware approval is scoped to each device; Taimen's grant does
+not enable publication for another handset.
+
+The same image workflow accepts a codename or `all`. Each candidate includes
+`device.json`, which the website uses to group downloads by model. Keep its
+hardware policy disabled until first boot, login and recovery are tested.
+
 ## Candidate build
 
 Build in `porthole sandbox`. Use the same pinned porthole and pmaports revisions

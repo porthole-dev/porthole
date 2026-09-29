@@ -291,7 +291,7 @@ def markdown_catalogue(data, out):
                 "Unofficial community work; not affiliated with Nura.", "",
                 "## Downloads", ""]
         if not builds:
-            page += ["No release images yet.", ""]
+            page += ["No tested release image yet. [Browse experimental image downloads](../../images/).", ""]
         for m in builds:
             page += ["### {} · {} · {} · {}".format(
                 m["channel"], m["ui"], m["init"], m["id"]), "",

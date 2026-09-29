@@ -108,7 +108,7 @@ def test_catalogue_and_hardware():
         assert 'works' in text
         cheetah = (page_dir/'google-cheetah.md').read_text()
         assert 'build and release setup is still needed' in cheetah
-        assert 'No release images yet.' in cheetah
+        assert 'No tested release image yet.' in cheetah
         assert 'Nura' not in (page_dir/'index.md').read_text()
         assert 'AI policy' not in cheetah
         downloads = release.markdown_downloads(data)
