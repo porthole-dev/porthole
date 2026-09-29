@@ -103,6 +103,7 @@ ALLOWED_VERBS = {
 # the table auditable: "not in the allow list" is an accident, "in the deny
 # list because it flashes" is a decision.
 DENIED_VERBS = {
+    "release":    "inventory and catalogue subcommands write local output files",
     "flash":      "writes partitions -- the irreversible one",
     "build":      "compiles for minutes and can flash; sub-actions are granted",
     "push":       "installs a helper on the device that survives a reboot",

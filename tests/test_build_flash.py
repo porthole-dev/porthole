@@ -853,6 +853,7 @@ def test_the_preview_prints_the_ladder():
     assert rc == 0
     for rung in ("mod", "boot", "fast"):
         assert rung in out, f"the preview never mentions the {rung} rung"
+    assert "reinstalls the rootfs chroot, needs its password" in out
 
 
 def test_the_fast_rungs_wait_instead_of_handing_back_mid_reboot():
@@ -1698,6 +1699,7 @@ def test_the_ccache_off_switch_actually_reaches_the_workspace():
         # By name, so the value comes from our environment rather than the
         # podman argv -- the same rule the TK_ secrets follow.
         assert "PORTHOLE_NO_CCACHE=1" not in argv, argv
+
     finally:
         for k, v in saved.items():
             if v is None:
@@ -1714,6 +1716,22 @@ def test_no_host_path_setting_crosses_by_accident():
     import porthole_cmd_build as build
     for key in build.KNOBS_THAT_CROSS:
         assert not any(w in key for w in ("DIR", "TREE", "PATH", "WORKDIR")), key
+
+
+def test_public_image_ssh_key_switch_reaches_workspace():
+    import porthole_cmd_build as build
+    saved = os.environ.pop("PORTHOLE_IMAGE_NO_SSH_KEYS", None)
+    try:
+        assert "PORTHOLE_IMAGE_NO_SSH_KEYS" not in build._container_cmd("tkbuild", None, {})
+        os.environ["PORTHOLE_IMAGE_NO_SSH_KEYS"] = "1"
+        argv = build._container_cmd("tkbuild", None, {})
+        assert "PORTHOLE_IMAGE_NO_SSH_KEYS" in argv, argv
+        assert "PORTHOLE_IMAGE_NO_SSH_KEYS=1" not in argv, argv
+    finally:
+        if saved is None:
+            os.environ.pop("PORTHOLE_IMAGE_NO_SSH_KEYS", None)
+        else:
+            os.environ["PORTHOLE_IMAGE_NO_SSH_KEYS"] = saved
 
 
 def test_a_relative_kernel_tree_resolves_against_the_workdir():
@@ -2031,7 +2049,9 @@ def test_run_follows_pmbootstraps_own_log():
         "/usr/bin/pmbootstrap" if name == "pmbootstrap" else real_which(name))
     try:
         ctx = _FakeCtx({"PORTHOLE_DEVICE": "google-taimen",
-                        "PORTHOLE_WORKDIR": "/nonexistent"})
+                        "PORTHOLE_WORKDIR": "/nonexistent",
+                        "PORTHOLE_PMB_DIR": tempfile.mkdtemp(
+                            prefix="porthole-build-history-")})
         build._run(ctx, "tkbuild-kernel", 60, host=True, rung="fast")
     finally:
         build._stream = real_stream
@@ -2070,6 +2090,7 @@ def test_a_non_export_rung_keeps_its_bare_rung_as_the_history_key():
     try:
         ctx = _FakeCtx({"PORTHOLE_DEVICE": "google-taimen",
                         "PORTHOLE_WORKDIR": "/nonexistent",
+                        "PORTHOLE_PMB_DIR": tempfile.mkdtemp(prefix="porthole-history-"),
                         "PORTHOLE_KERNEL_PKG": "linux-google-taimen"})
         build._run(ctx, "tkmod", 60, host=True, rung="mod")
     finally:
@@ -2865,6 +2886,30 @@ def test_a_non_android_file_is_refused_rather_than_guessed_at():
         assert False, "a non-Android file should not parse as a boot image"
     except SystemExit:
         pass
+
+
+def test_dtb_mismatch_names_cached_kernel_candidates():
+    import gzip
+    import struct
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        cache = root / "cache_apk_aarch64" / "linux-example-1-r1.apk"
+        cache.parent.mkdir()
+        cache.write_bytes(b"cached")
+        kernel = gzip.compress(b"kernel") + b"\xd0\x0d\xfe\xedold"
+        header = b"ANDROID!" + struct.pack("<IIIIIIII", len(kernel), 0,
+                                            0, 0, 0, 0, 0, 4096)
+        image = root / "boot.img"
+        image.write_bytes(header + b"\0" * (4096 - len(header)) + kernel)
+        dtb = root / "new.dtb"
+        dtb.write_bytes(b"\xd0\x0d\xfe\xednew")
+        env = dict(os.environ, PORTHOLE_PMB_DIR=tmp,
+                   PORTHOLE_KERNEL_PKG="linux-example")
+        run = subprocess.run([sys.executable, str(ROOT / "tools/bootimg-verify.py"),
+                              str(image), "--dtb", str(dtb)], env=env,
+                             capture_output=True, text=True)
+        assert run.returncode != 0
+        assert str(cache) in run.stdout, run.stdout
 
 
 

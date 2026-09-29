@@ -99,8 +99,16 @@ def _common_dir(path: pathlib.Path) -> str:
 
 def survey(path: pathlib.Path) -> dict:
     """Everything worth knowing about one checkout, read once."""
+    status = _git(path, "status", "--porcelain", "--untracked-files=all").splitlines()
+    upstream = _git(path, "rev-parse", "--abbrev-ref", "@{upstream}")
+    counts = _git(path, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").split() if upstream else []
     return {
         "path": str(path),
+        "untracked": sum(line.startswith("??") for line in status),
+        "upstream": upstream,
+        "ahead": int(counts[0]) if len(counts) == 2 else None,
+        "behind": int(counts[1]) if len(counts) == 2 else None,
+        "tracking_note": "local remote refs only; no fetch performed",
         "branch": _git(path, "rev-parse", "--abbrev-ref", "HEAD") or "detached",
         # The load-bearing field. See the module docstring.
         "linked": (path / ".git").is_file(),
@@ -152,7 +160,7 @@ def unshallow_targets(shallow) -> list:
 
 
 def cmd_workspace(args, ctx) -> int:
-    workdir = (ctx.cfg.get("PORTHOLE_WORKDIR") or "").strip()
+    workdir = (getattr(args, "root", None) or ctx.cfg.get("PORTHOLE_WORKDIR") or "").strip()
     if not workdir or not pathlib.Path(workdir).is_dir():
         raise Bail("no working repo to inventory", EX_FAIL,
                    "porthole init    finds or creates one, and writes the key")
@@ -205,6 +213,14 @@ def cmd_workspace(args, ctx) -> int:
                 marks.append(ctx.out.paint("SHALLOW", "yellow"))
             if row["dirty"]:
                 marks.append(f"{row['dirty']} dirty")
+            if row["untracked"]:
+                marks.append(f"{row['untracked']} untracked files")
+            if not row["origin"]:
+                marks.append("no origin")
+            if not row["upstream"]:
+                marks.append("no tracking branch")
+            elif row["ahead"] or row["behind"]:
+                marks.append(f"{row['ahead']} ahead / {row['behind']} behind (local refs)")
             name = str(pathlib.Path(row["path"]).relative_to(root)) or "."
             tag = (ctx.out.paint("·", "green") if row["registered"]
                    else ctx.out.paint("?", "yellow"))
@@ -261,6 +277,7 @@ SPEC = {
         "which is why `git remote get-url` answers the same for both and why\n"
         "two of them read as duplicated history when they are not."),
     "args": [
+        (["--root"], {"help": "directory to inventory instead of the configured workdir (three levels)"}),
         (["--json"], {"action": "store_true", "help": "machine-readable"}),
     ],
     "run": cmd_workspace,

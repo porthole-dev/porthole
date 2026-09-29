@@ -265,7 +265,8 @@ _UUID_LINE = "Filesystem UUID:"
 _LABEL_LINE = "Filesystem volume name:"
 
 
-def verify(runner, out, lay: dict, boot_uuid, root_uuid, user=None) -> list:
+def verify(runner, out, lay: dict, boot_uuid, root_uuid, user=None,
+           require_authorized_keys=True) -> list:
     """Read each partition back out of the assembled disk and check it.
 
     Offline, before anything is written to a phone, because flash_rootfs
@@ -276,8 +277,12 @@ def verify(runner, out, lay: dict, boot_uuid, root_uuid, user=None) -> list:
     verification works in exactly the place assembly does -- no root, no
     loop device, same as the assembler that produced the image.
 
-    `user`, when given, checks the root partition for the two things that
-    made an assembled image install and boot and then be UNREACHABLE: no
+    `user`, when given, checks the root partition for the build marker and,
+    unless require_authorized_keys is false, SSH access. Public images use
+    password login and deliberately ship no build-host key.
+
+    The checks catch the things that made an assembled image install and boot
+    and then be UNREACHABLE: no
     `~<user>/.ssh/authorized_keys` (nothing to log in with) and a surviving
     `/in-pmbootstrap` marker (the device would misdetect itself as a build
     chroot). Found on hardware on 2026-09-08 -- this is the difference
@@ -343,7 +348,7 @@ def verify(runner, out, lay: dict, boot_uuid, root_uuid, user=None) -> list:
             # error message that might not even be visible.
             ssh_ls = runner(["debugfs", "-R",
                              f"ls -l /home/{user}/.ssh", part])
-            if "authorized_keys" not in _names(ssh_ls):
+            if require_authorized_keys and "authorized_keys" not in _names(ssh_ls):
                 problems.append(
                     f"root: no authorized_keys for {user} -- the phone "
                     f"would install and boot with no way to log in")

@@ -63,6 +63,9 @@ def cmd_flash(args, ctx) -> int:
                      stream=sys.stderr)
 
     action = getattr(args, "action", None) or "boot"
+    dtbo = ("/tmp/postmarketOS-export/dtbo.img" if action == "full"
+            and cfg.get("PORTHOLE_NEEDS_DTBO") == "1"
+            else cfg.get("PORTHOLE_DTBO_IMG", ""))
     op = plan.op(f"flash-{action}")
     flag = gate_flag(op)   # "--yes" for boot, "--replace-rootfs" for full
 
@@ -86,8 +89,7 @@ def cmd_flash(args, ctx) -> int:
         o.kv("slots", "A/B" if has_slots else "single", 14)
         o.kv("set active", target or o.paint("left alone", "grey"), 14)
         o.kv("forbidden", " ".join(forbidden) or o.paint("none", "grey"), 14)
-        o.kv("dtbo", cfg.get("PORTHOLE_DTBO_IMG", "")
-             or o.paint("none", "grey"), 14)
+        o.kv("dtbo", dtbo or o.paint("none", "grey"), 14)
         if problems:
             o.blank()
             o.heading("not ready")
@@ -107,6 +109,7 @@ def cmd_flash(args, ctx) -> int:
     if not args.yes:
         return ctx.emit({"action": action, "device": device, "state": state,
                          "slot": target, "forbidden": forbidden,
+                         "dtbo": dtbo,
                          "problems": problems, "would_run": True}, render)
 
     # `--yes` alone confirms a `boot` flash but not a `full` one -- replacing

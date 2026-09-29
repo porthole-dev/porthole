@@ -1469,6 +1469,26 @@ def test_a_neighbours_ending_is_not_this_builds():
     assert progress.log_outcome(built, "webkit2gtk-6.0")[0] == "done"
 
 
+def test_finished_reattached_build_uses_its_apk_timestamp():
+    now = _at("2026-09-21 19:27:00")
+    text = ("[5317/5317] Linking mesa.so\n"
+            ">>> mesa*: Create mesa-26.2.3-r63.apk\n"
+            "(1) [17:19:36] DONE!\n")
+    with tempfile.TemporaryDirectory() as tmp:
+        log = pathlib.Path(tmp) / "log.txt"
+        log.write_text(text)
+        apk = pathlib.Path(tmp) / "packages/edge/aarch64/mesa-26.2.3-r63.apk"
+        apk.parent.mkdir(parents=True)
+        apk.write_bytes(b"apk")
+        os.utime(apk, (now - 540, now - 540))
+        snap = progress.snapshot_from_log(text, "mesa", now - 30, now=now,
+                                          log_path=log)
+    assert snap["state"] == "done"
+    assert snap["phase"] == "done"
+    assert snap["last_at"] == now - 540
+    assert snap["last_age"] == 540
+
+
 def test_an_ending_outranks_the_mtime_of_a_log_every_build_shares():
     """A fresh mtime is not evidence this build lives, and a stale one is not
     evidence it died -- both are facts about a file the whole workspace

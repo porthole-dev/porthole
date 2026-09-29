@@ -134,7 +134,7 @@ ACTIONS = {
              "build the kernel and flash boot only; no repartition, and the "
              "image's pmos_root_uuid is checked against the phone (~6m)"),
     "kernel": ("tkbuild",
-               "build the kernel, package it, install and verify, but NOT flash (~10m)"),
+               "build the kernel and reinstall the rootfs chroot (needs its password); verify, but do not flash (~10m)"),
     # The cheapest correct way onto a BOOTED phone: no host-side boot.img,
     # so no uuid to get wrong, no module/BTF mismatch, and no slot to guess.
     "deploy": ("tkdeploy",
@@ -191,7 +191,7 @@ LADDER = [
      "flashes the APORT release, so the change must be in the series",
      "flashes boot only", True),
     ("kernel", "rootfs contents changed, or boot/rootfs desynced",
-     "then `porthole flash full --yes --replace-rootfs`", True),
+     "reinstalls the rootfs chroot, needs its password; then `porthole flash full --yes --replace-rootfs`", True),
     ("upgrade", "the device moves to a DIFFERENT kernel flavor (a major version "
      "bump): PORTHOLE_KERNEL_PKG now names another aport, so kernel.release "
      "changes and the modules on the phone are absent rather than stale",
@@ -814,7 +814,8 @@ def _tree_inside(tree, workdir) -> str:
 # Behaviour switches that must reach the workspace. Deliberately a list of
 # NAMES, not a prefix: see _container_cmd, where the standing rule is that
 # host PORTHOLE_* values never cross because they name host paths.
-KNOBS_THAT_CROSS = ("PORTHOLE_NO_CCACHE", "PORTHOLE_LAX_BUILD")
+KNOBS_THAT_CROSS = ("PORTHOLE_NO_CCACHE", "PORTHOLE_LAX_BUILD",
+                    "PORTHOLE_IMAGE_NO_SSH_KEYS")
 
 
 def _device_address(cfg: dict) -> dict:
@@ -868,8 +869,8 @@ def _container_cmd(func: str, extra: list[str] | None,
     # such a value, and tkbuild requires it.
     for key in sorted(k for k in secrets if k.startswith("TK_")):
         argv += ["-e", key]
-    # The narrow exception, by NAME and not by prefix. These two are switches
-    # rather than settings: `1` or unset, no path in either, so none of them
+    # The narrow exception, by NAME and not by prefix. These are switches
+    # rather than settings: `1` or unset, no path in any of them, so none of them
     # can name a directory that does not exist in here. Everything the rule
     # above exists to stop is a value; a list of names cannot grow into one by
     # accident.

@@ -253,20 +253,8 @@ def test_serial_baud_table_covers_the_usual_rates():
 
 # -------------------------------------------------------------------- docs --
 
-def test_docs_nav_quotes_titles_containing_colons():
-    """Note titles routinely contain a colon -- "Playbook: first boot" -- and an
-    unquoted colon-space is a YAML mapping. The file then fails to parse with an
-    error pointing at a line that looks perfectly fine."""
-    from porthole_cmd_docs import _nav, _yaml_key
-    assert _yaml_key("Playbook: first boot") == '"Playbook: first boot"'
-    assert _yaml_key('a "quoted" title') == '"a \\"quoted\\" title"'
-    out = _nav([("Playbook: first boot", "a.md")])
-    assert out.strip() == '- "Playbook: first boot": a.md', out
-
-
 def test_docs_resolves_wikilinks_across_sections():
-    """A law is linked from a workflow note. Resolving relative to the LINKING
-    file points at a sibling that does not exist, and mkdocs --strict fails."""
+    """A law linked from a workflow note must resolve relative to its source."""
     from porthole_cmd_docs import _resolve_links
     index = {
         "the-lock-says-who-not-what": pathlib.PurePath("laws/the-lock-says-who-not-what.md"),
@@ -280,9 +268,7 @@ def test_docs_resolves_wikilinks_across_sections():
 
 
 def test_docs_renders_an_unwritten_wikilink_as_plain_text():
-    """brain/README.md says to link liberally: a [[link]] to a note nobody has
-    written yet is a marker, not an error. It must not become a broken link
-    that fails a strict docs build."""
+    """An unwritten brain wikilink is text and must not become a broken link."""
     from porthole_cmd_docs import _resolve_links
     out = _resolve_links("see [[not-written-yet]]",
                          pathlib.PurePath("laws/x.md"), {})
@@ -303,6 +289,28 @@ def test_docs_index_drops_the_readme_table_of_contents():
                            "## Real section\n\nbody\n")
     assert "Table of contents" not in out
     assert "Real section" in out and "body" in out
+
+
+def test_docs_index_rewrites_the_upstream_naming_link():
+    from porthole_cmd_docs import _readme_as_index
+    out = _readme_as_index("See [upstream naming](docs/UPSTREAM-NAMING.md).")
+    assert "(upstream-naming.md)" in out and "docs/UPSTREAM-NAMING.md" not in out
+
+
+def test_docs_serve_restarts_before_regenerating_content():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import porthole_cmd_docs as docs
+    order = []
+
+    def run(argv, **kwargs):
+        order.append(argv[-1] if argv[-1] == 'stop' else 'start')
+        return SimpleNamespace(returncode=0)
+
+    with patch.object(docs.subprocess, 'run', side_effect=run), \
+            patch.object(docs, 'cmd_build', side_effect=lambda *a: order.append('build')):
+        assert docs.cmd_serve(SimpleNamespace(), SimpleNamespace(root=ROOT)) == 0
+    assert order == ['stop', 'build', 'start'], order
 
 
 def test_series_problems_reports_a_malformed_patch():

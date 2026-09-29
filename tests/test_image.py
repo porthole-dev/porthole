@@ -389,6 +389,20 @@ def test_verification_flags_a_root_with_no_authorized_keys():
     assert any("authorized_keys" in p for p in problems), problems
 
 
+def test_public_image_can_require_password_login_without_build_key():
+    def ls(cmd):
+        if cmd == "ls -l /etc/apk/keys":
+            return "    12  100644 (1)  0  0  100 1-Jan-2026 build.rsa.pub\n"
+        if cmd == "ls -l /":
+            return "     2  40755 (2)  0  0  1024  1-Jan-2026 .\n"
+        return ""
+
+    problems = image.verify(_uuids_runner(ls), "/out.img",
+                            image.layout(32, 64, "aarch64"), "uu", "uu",
+                            user="nura", require_authorized_keys=False)
+    assert problems == [], problems
+
+
 def test_verification_flags_a_surviving_in_pmbootstrap_marker():
     def ls(cmd):
         if cmd == "ls -l /":
@@ -677,7 +691,7 @@ def test_a_refused_image_is_not_left_where_flash_would_find_it():
                / "lib/porthole_image.py").read_text()
         (repo_root / "lib/porthole_image.py").write_text(
             real +
-            "\n\ndef verify(runner, out, lay, boot_uuid, root_uuid):\n"
+            "\n\ndef verify(runner, out, lay, boot_uuid, root_uuid, **kwargs):\n"
             '    return ["forced failure for the cleanup test"]\n')
 
         # _ph_assemble_image's only pmbootstrap call is `chroot -r --

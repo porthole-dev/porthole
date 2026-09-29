@@ -263,7 +263,12 @@ def test_the_row_is_coloured_even_though_stdout_is_not_a_terminal():
                       "pid": os.getpid(), "elapsed": 12.0, "progress": 0.5,
                       "eta": 30.0, "last": "  CC drivers/foo.o",
                       "last_at": now, "steps": "10/20"})
-        row = sl.build_line(repo, 100, now)
+        saved = os.environ.pop("NO_COLOR", None)
+        try:
+            row = sl.build_line(repo, 100, now)
+        finally:
+            if saved is not None:
+                os.environ["NO_COLOR"] = saved
         assert "\033[" in row, row
         assert pp.visible_len(row) <= 100
         saved = os.environ.get("NO_COLOR")
@@ -743,6 +748,63 @@ def test_a_finished_pmbootstrap_invocation_is_not_a_running_build():
         with _only_these_logs(pmb):
             row = sl.build_line(repo, 100, now)
         assert row and "device-google-taimen" in row, row
+
+
+# ------------------------------------------------- the row, exactly once --
+
+def test_an_inherited_command_that_calls_this_one_does_not_double_the_row():
+    """The cycle, and the reason it is not hypothetical.
+
+    This verb runs the status line it is standing in front of. A developer
+    whose script still ends with the hand-rolled `porthole statusline |
+    tail -n1` -- which is what people wrote before this verb learned to
+    inherit -- therefore has each one running the other: two build rows on
+    screen, and a fork every two seconds for as long as the timeouts allow.
+    """
+    base = ("printf 'MINE\\n'; " + sys.executable + " "
+            + str(ROOT / "bin" / "porthole") + " statusline")
+    out = _render({"PORTHOLE_STATUSLINE_BASE": base})
+    assert "MINE" in out, out
+    assert out.count("MINE") == 1, out
+    assert out.strip().count("\n") <= 1, ("the inherited line and at most one "
+                                          "row of our own:\n" + out)
+
+
+def test_a_staged_apkbuild_older_than_its_verdict_does_not_name_a_row():
+    """A `sandbox shell --command` build wearing the last package's name.
+
+    The fallback names an untracked build from the staged APKBUILD, and that
+    file outlives the build that wrote it. Here this checkout has already
+    published `done` for mesa, and the staging predates that verdict -- so
+    the ninja lines in the shared log belong to something else, and every
+    number derived from the staging's mtime would be the dead build's.
+    """
+    now = time.time()
+    work = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-"))
+    build = work / "chroot_buildroot_aarch64" / "home" / "pmos" / "build"
+    build.mkdir(parents=True)
+    staged = build / "APKBUILD"
+    staged.write_text("pkgname=mesa\n")
+    os.utime(staged, (now - 23000, now - 23000))
+    (work / "log.txt").write_text("[59/1521] Building CXX object x.o\n")
+    os.utime(work / "log.txt", (now - 3, now - 3))
+
+    repo = pathlib.Path(tempfile.mkdtemp(prefix="porthole-sl-repo-"))
+    (repo / ".run").mkdir()
+    (repo / ".run" / "pkg-status.json").write_text(json.dumps(
+        {"state": "done", "rung": "pkg:mesa", "pid": 1,
+         "last_at": now - 22000, "started": now - 23000}))
+
+    with only_work_dir(work):
+        snap, _ = sl.build_snapshot(repo, now)
+
+    assert snap is None, "a finished build's staging named a live row: %r" % (snap,)
+
+    # ...and a NEW staging of the same package, after that verdict, still does.
+    os.utime(staged, (now - 600, now - 600))
+    with only_work_dir(work):
+        snap, _ = sl.build_snapshot(repo, now)
+    assert snap is not None and "mesa" in (snap.get("rung") or ""), snap
 
 
 if __name__ == "__main__":

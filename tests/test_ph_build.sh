@@ -23,6 +23,35 @@ saw() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 
+# A full install must reject a missing export before flash_rootfs writes, and
+# a matching mainline stub must be distinguishable from a stock overlay.
+printf 'mainline stub' > "$TMP/dtbo.img"
+dtbo_sha=$(sha256sum "$TMP/dtbo.img" | cut -d' ' -f1)
+dtbo_gate=$(env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+    PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" PORTHOLE_NEEDS_DTBO=1 \
+    PORTHOLE_DTBO_SHA256="$dtbo_sha" DTBO_FIXTURE="$TMP/dtbo.img" bash -c '
+    source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+    _ph_check_dtbo "$DTBO_FIXTURE" || exit 1
+    printf changed >> "$DTBO_FIXTURE"
+    _ph_check_dtbo "$DTBO_FIXTURE" >/dev/null 2>&1 && exit 2
+    _ph_verify_export() { :; }
+    _ph_check_dtbo() { return 1; }
+    pmbootstrap() { echo wrote-rootfs; }
+    tkflash-boot() { echo wrote-boot; }
+    tkflash >/dev/null 2>&1
+    printf "%s\n" "$?"')
+is "full flash rejects a wrong DTBO before writing rootfs" "$dtbo_gate" "1"
+dtbo_export=$(env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+    PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/repo" PORTHOLE_NEEDS_DTBO=1 bash -c '
+    source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+    _ph_verify_export() { :; }
+    _ph_check_dtbo() { [ "$1" = /tmp/postmarketOS-export/dtbo.img ]; }
+    pmbootstrap() { echo rootfs; }
+    tkflash-boot() { echo "boot:$1"; }
+    tkflash')
+is "full flash uses the exported DTBO alongside the rootfs" "$dtbo_export" \
+    $'rootfs\nboot:/tmp/postmarketOS-export/dtbo.img'
+
 # Call the REAL function against fixture files rather than re-implementing its
 # version arithmetic here -- a test that repeats the expression under test
 # passes just as happily when the expression is wrong.
@@ -683,6 +712,7 @@ install_loop() { # install_loop <fail-count> <log-text> -> "rc attempts"
         PORTHOLE_PMB_DIR="$TMP/inst/pmb" TK_PMOS_PASSWORD="$PW" \
         PORTHOLE_INSTALL_ATTEMPTS=6 FAILS="$1" LOGTEXT="$2" \
         bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+                 _ph_can_make_image() { return 0; }
                  tries=0
                  pmbootstrap() {
                      tries=$((tries + 1)); echo "$tries" > "$PORTHOLE_PMB_DIR/tries"
@@ -717,6 +747,23 @@ imgbody=$(sed -n "/^tksysimage() {/,/^}/p" "$ROOT/tools/ph-build.sh")
 is "tksysimage does not build the tree"  "$(saw "$imgbody" "_ph_make")"  "no"
 is "tksysimage pins the aport kernel"    "$(saw "$imgbody" "_ph_install_kernel_release")" "yes"
 is "tksysimage verifies against the apk" "$(saw "$imgbody" "_ph_dtb_from_apk")" "yes"
+
+# The device repo is /work in the sandbox; porthole's tools live at /porthole.
+# Check every call, including the RAM-boot repacker, before a build can fail
+# after its expensive install step with /work/tools/...: No such file.
+is "all boot-image tools resolve from the porthole checkout" \
+   "$(grep -c '\$_PH_REPO/tools/bootimg-' "$ROOT/tools/ph-build.sh" || true)" "0"
+
+mkdir -p "$TMP/missing-aport/pmaports/device"
+missing=$(env -i PATH="$PATH" HOME="$HOME" PORTHOLE_ROOT="$ROOT" \
+    PORTHOLE_DEVICE=google-taimen PORTHOLE_WORKDIR="$TMP/missing-aport" \
+    PORTHOLE_PMB_DIR="$TMP/missing-aport/pmb" PORTHOLE_KERNEL_PKG=fakekpkg \
+    bash -c 'source "$PORTHOLE_ROOT/tools/ph-build.sh" >/dev/null 2>&1
+             _ph_build_kernel_release 2>&1; echo "rc=$?"')
+is "a missing kernel aport fails before the image install" \
+   "$(saw "$missing" 'rc=1')" "yes"
+is "a missing kernel aport names the mount recovery" \
+   "$(saw "$missing" 'porthole sandbox up')" "yes"
 
 
 # ---------------------------------------------------------------------------
@@ -789,6 +836,10 @@ is "the configured developer keys are authorized" \
    "$(saw "$asmbody" "authorized_keys")" "yes"
 is "porthole's own device key is authorized too, not just pmbootstrap's ssh_keys config" \
    "$(saw "$asmbody" "device_key")" "yes"
+is "public image mode omits injected SSH keys and removes stale authorization" \
+   "$(saw "$asmbody" "PORTHOLE_IMAGE_NO_SSH_KEYS")" "yes"
+is "public image mode removes an existing authorized_keys file" \
+   "$(saw "$asmbody" "authorized_keys.unlink(missing_ok=True)")" "yes"
 is "verify() is told which user's authorized_keys to check" \
    "$(saw "$asmbody" "user=user")" "yes"
 

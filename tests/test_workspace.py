@@ -120,6 +120,20 @@ def test_shallow_is_reported():
         assert ws.survey(tree)["shallow"] is True
 
 
+def test_untracked_and_unpublished_work_is_visible():
+    with tempfile.TemporaryDirectory() as d:
+        tree = repo(pathlib.Path(d) / "local")
+        (tree / "new").write_text("unpublished")
+        row = ws.survey(tree)
+        assert row["untracked"] == 1 and row["ahead"] is None
+        git(tree, "branch", "upstream")
+        git(tree, "branch", "--set-upstream-to=upstream")
+        git(tree, "add", "new")
+        git(tree, "commit", "-qm", "local change")
+        row = ws.survey(tree)
+        assert row["untracked"] == 0 and row["ahead"] == 1 and row["behind"] == 0
+
+
 def test_a_missing_git_never_raises():
     """The inventory must degrade to blanks, not explode: it is run on a desk
     whose whole problem is that something is in a state nobody expected."""
@@ -134,7 +148,7 @@ def test_the_verb_is_read_only():
     before shipping -- it wrapped `git worktree prune` and did nothing git
     does not already do."""
     flags = [names[0] for names, _kw in ws.SPEC["args"]]
-    assert flags == ["--json"], flags
+    assert flags == ["--root", "--json"], flags
     assert "READ-ONLY" in ws.SPEC["description"], ws.SPEC["description"]
 
 

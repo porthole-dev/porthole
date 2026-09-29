@@ -137,12 +137,26 @@ def _base_command() -> str:
     return ""
 
 
+# Set for the inherited command's environment, and refused on entry. The
+# inherited status line is somebody else's script, and the obvious thing for
+# it to have done -- before this verb learned to inherit -- is append
+# `porthole statusline` itself. That is a cycle: this runs theirs, theirs runs
+# this, and each level appends another build row. Reported as a status line
+# that showed the same build twice, on a developer whose script still carried
+# the hand-rolled `porthole statusline | tail -n1` this verb replaced.
+#
+# The outer process owns the row, so a nested one prints nothing at all rather
+# than a second copy of it.
+NESTED_ENV = "PORTHOLE_STATUSLINE_NESTED"
+
+
 def _run_base(command: str, stdin_text: str) -> str:
     """Its stdout, verbatim, or "" if it failed. Never raises."""
     try:
         proc = subprocess.run(["bash", "-c", command], input=stdin_text,
                               capture_output=True, text=True,
-                              timeout=BASE_TIMEOUT_S)
+                              timeout=BASE_TIMEOUT_S,
+                              env={**os.environ, NESTED_ENV: "1"})
     except (OSError, subprocess.SubprocessError):
         return ""
     return proc.stdout
@@ -287,6 +301,39 @@ def _ended_here(best, name: str, log_mtime: float, now: float) -> bool:
     return log_mtime <= last_at + KILL_GRACE_S
 
 
+def _leftover_staging(best, name: str, started) -> bool:
+    """Is the staged APKBUILD the corpse of a build that already ENDED here? PURE.
+
+    `_ended_here` answers the same question for the seconds after a kill, and
+    lets the veto expire with LINGER_S because a finished row is only worth
+    keeping on screen that long. But the veto on the NAME does not expire: a
+    staged APKBUILD outlives its build by hours, and the fallback is reading
+    it precisely because nothing else in the workspace will say what is
+    running.
+
+    The test is the ordering of two timestamps this process already has. If
+    the staged file is no newer than the verdict this checkout published for
+    the same package, then that verdict is this staging's own ending -- the
+    build that wrote the file is over, whoever is writing the log now is
+    somebody else, and every number the row would derive from `started`
+    belongs to the dead build. A genuinely new untracked build of the same
+    package stages a new APKBUILD, so its mtime lands after the verdict and
+    this says nothing.
+
+    Reported 2026-09-21: a `sandbox shell --command` cmake/ninja build of
+    VK-GL-CTS, twelve minutes old, shown as `mesa ... 6h32m build ·
+    reattached` -- the name and the elapsed both from a mesa package build
+    that had finished at 02:29 that morning.
+    """
+    if not best or not started:
+        return False
+    if (best.get("state") or "running") == "running":
+        return False
+    if str(best.get("rung") or "").split(":", 1)[-1] != name:
+        return False
+    return started <= (best.get("last_at") or 0)
+
+
 def build_snapshot(repo: pathlib.Path, now: float):
     """`(snapshot, reattached)` for the build worth showing, or `(None, ...)`.
 
@@ -369,7 +416,8 @@ def build_snapshot(repo: pathlib.Path, now: float):
     if live:
         import porthole_buildroot as buildroot
         name, started = buildroot.staged_build_name(live[0].parent)
-        if name and not _ended_here(best, name, live[1], now):
+        if (name and not _ended_here(best, name, live[1], now)
+                and not _leftover_staging(best, name, started)):
             text, _ = pp.log_tail(live[0])
             samples = _samples(repo / ".run", live[1],
                                pp.log_steps(text or "")[0], now)
@@ -515,6 +563,8 @@ def session_line(inp, repo: pathlib.Path) -> str:
 
 
 def _render() -> int:
+    if os.environ.get(NESTED_ENV):
+        return EX_OK             # see NESTED_ENV: the outer render owns the row
     raw, inp = "", {}
     if not sys.stdin.isatty():
         try:

@@ -183,21 +183,26 @@ generic notes as well.
 | [an-unblanked-screen-can-still-be-locked](traps/an-unblanked-screen-can-still-be-locked.md) | `generic` | On, unlocked and showing your app are three different things -- an injected gesture drives whatever is actually on top, and every frame statistic then describes that |
 | [androidboot-bootreason-always-says-watchdog-here](traps/androidboot-bootreason-always-says-watchdog-here.md) | `device:google-taimen` | androidboot.bootreason says watchdog on every boot of taimen, including clean ones -- it is not a reset-reason oracle |
 | [anubis-blocks-the-wiki-the-api-does-not](traps/anubis-blocks-the-wiki-the-api-does-not.md) | `generic` | The pmOS wiki is behind Anubis, but its MediaWiki API is not -- fetch wikitext, not HTML |
+| [apk-artifact-directory-appears-after-build](traps/apk-artifact-directory-appears-after-build.md) | `generic` | Package build succeeds but the tool reports its APK missing |
 | [apk-info-W-wants-the-path-the-package-recorded](traps/apk-info-W-wants-the-path-the-package-recorded.md) | `generic` | apk info -W does not resolve /lib -> /usr/lib, and the right path differs for modules and firmware |
 | [apk3-reads-only-etc-apk-keys](traps/apk3-reads-only-etc-apk-keys.md) | `generic` | apk-tools 3 trusts only /etc/apk/keys, and the keys packages install to /usr/share/apk/keys -- so a fresh rootfs can install nothing at all |
 | [apr-service-inherits-a-protection-domain-the-board-deletes](traps/apr-service-inherits-a-protection-domain-the-board-deletes.md) | `soc:qcom` | A new APR service inherits a protection domain the board deletes |
 | [base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork](traps/base-a-kernel-aport-on-a-pinned-tag-not-a-vendor-fork.md) | `generic` | Base a kernel aport on pristine kernel.org or a pinned tag — never an untagged vendor fork |
 | [build-mod-against-an-aport-kernel-fails-at-the-next-boot](traps/build-mod-against-an-aport-kernel-fails-at-the-next-boot.md) | `generic` | build mod from the tree against a kernel that ships from the aport is refused by MODVERSIONS -- and on a no-reload module the refusal lands at the next boot, with the shipped module already gone |
 | [busybox-reboot-eats-the-mode-string](traps/busybox-reboot-eats-the-mode-string.md) | `generic` | busybox `reboot bootloader` silently discards the word "bootloader |
+| [ci-floor-copies-release-cache](traps/ci-floor-copies-release-cache.md) | `generic` | Python floor test fills disk after an image build |
 | [critical-chain-shows-the-longest-path-not-the-floor](traps/critical-chain-shows-the-longest-path-not-the-floor.md) | `generic` | systemd-analyze critical-chain shows the longest path, not the floor |
 | [crossdirect-replaces-the-environment-on-exec](traps/crossdirect-replaces-the-environment-on-exec.md) | `generic` | No CCACHE_ export reaches a cross compile, because crossdirect execs with a literal environment |
 | [dmesg-can-be-empty-about-boot](traps/dmesg-can-be-empty-about-boot.md) | `generic` | dmesg can be empty about boot while the journal still has everything |
 | [dtbo-must-match-the-kernel](traps/dtbo-must-match-the-kernel.md) | `generic` | The dtbo must match the kernel, and the bootloader reads it from the active slot |
+| [dtbo-package-padding-hides-correct-overlay](traps/dtbo-package-padding-hides-correct-overlay.md) | `device:google-taimen` | Packaged DTBO has a correct payload but a different digest |
 | [every-manifest-commit-predating-pkg-fork-says-unknown](traps/every-manifest-commit-predating-pkg-fork-says-unknown.md) | `device:google-taimen` | Every manifest commit predating pkg fork says unknown |
 | [fastboot-boot-ignores-the-ramdisk-on-newer-pixels](traps/fastboot-boot-ignores-the-ramdisk-on-newer-pixels.md) | `soc:gs201` | On Pixel 7 and later, `fastboot boot` ignores the ramdisk — there is no RAM-boot safety net |
 | [fixing-one-read-leaves-the-other-reads-stale](traps/fixing-one-read-leaves-the-other-reads-stale.md) | `generic` | Fixing one stale read leaves the other reads in the same function stale |
 | [frozen-is-not-hung](traps/frozen-is-not-hung.md) | `generic` | FROZEN (kernel alive, userspace gone) is a distinct state and the watchdog will not save you |
+| [git-ancestry-is-not-a-maintenance-inventory](traps/git-ancestry-is-not-a-maintenance-inventory.md) | `generic` | Fork audit selects hundreds of unrelated packages |
 | [git-apply-silently-skips-diff-git-patches](traps/git-apply-silently-skips-diff-git-patches.md) | `generic` | git apply silently skips 'diff --git' patches and exits 0, so a source tree ends up half-patched |
+| [image-build-cannot-find-verifier](traps/image-build-cannot-find-verifier.md) | `generic` | Image build finishes export then cannot find verifier |
 | [initramfs-is-not-frozen](traps/initramfs-is-not-frozen.md) | `generic` | A device stopped in the initramfs looks exactly like a frozen one, and is nothing like it |
 | [installing-firmware-can-flash-the-boot-partition](traps/installing-firmware-can-flash-the-boot-partition.md) | `generic` | apk add <firmware-pkg> (and apk fix) can FLASH the boot partition |
 | [memory-high-arms-systemd-oomd-against-the-browser](traps/memory-high-arms-systemd-oomd-against-the-browser.md) | `generic` | MemoryHigh= on an app scope arms systemd-oomd against that app |
@@ -276,9 +281,9 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 63
+- `device:google-taimen` — 64
 - `device:taimen` — 2
-- `generic` — 136
+- `generic` — 140
 - `soc:gs201` — 1
 - `soc:msm8998` — 36
 - `soc:qcom` — 1

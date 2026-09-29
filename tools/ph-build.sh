@@ -6,6 +6,7 @@
 # needs: - (host; the device only for tkflash, which takes the mutex itself)
 # env:    PORTHOLE_WORKDIR (required), PORTHOLE_KERNEL_PKG, PORTHOLE_DEVICE_PKG
 #         PORTHOLE_FW_PKG, PORTHOLE_DTB, PORTHOLE_DEFCONFIG, PORTHOLE_KPKG
+#         PORTHOLE_IMAGE_NO_SSH_KEYS=1 for public images
 # gives:  tkbuild tkflash tkclean tkpurge-devpkgs
 # exits:  0 built and verified - 1 anything else
 #
@@ -762,8 +763,13 @@ _ph_assert_no_devpkgs() {
 # Sets _PH_KREL (the version) and _PH_INSTALLED_APK (the artifact), which is
 # also what gives the export verification a reference that is not a tree build.
 _ph_build_kernel_release() {
+	local apkbuild="$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD"
+	[ -r "$apkbuild" ] || {
+		echo ">> cannot read the kernel aport at $apkbuild" >&2
+		echo ">> check the pmaports checkout; in the sandbox, run \`porthole sandbox up\` to restore its mount" >&2
+		return 1; }
 	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
-	_PH_KREL=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	_PH_KREL=$(. "$apkbuild" 2>/dev/null
 	           echo "$pkgver-r$pkgrel")
 	[ -n "$_PH_KREL" ] && [ "$_PH_KREL" != "-r" ] || {
 		echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
@@ -1112,8 +1118,9 @@ _ph_assemble_image() {
 	        home.mkdir(parents=True, exist_ok=True)
 	run(["chown", "-R", "10000:10000", str(home)])
 
+	no_ssh_keys = os.environ.get("PORTHOLE_IMAGE_NO_SSH_KEYS") == "1"
 	keys = []
-	if run(["pmbootstrap", "config", "ssh_keys"]).strip() == "True":
+	if not no_ssh_keys and run(["pmbootstrap", "config", "ssh_keys"]).strip() == "True":
 	    glob_pat = run(["pmbootstrap", "config", "ssh_key_glob"]).strip()
 	    for path in glob.glob(os.path.expanduser(glob_pat)):
 	        try:
@@ -1128,13 +1135,16 @@ _ph_assemble_image() {
 	# (no .pub sibling is mounted) with ssh-keygen -y, the standard way to
 	# get a public key back out of a private one.
 	device_key = pathlib.Path("/run/porthole/device_key")
-	if device_key.exists():
+	if not no_ssh_keys and device_key.exists():
 	    keys.append(run(["ssh-keygen", "-y", "-f", str(device_key)]))
+	ssh_dir = home / ".ssh"
+	authorized_keys = ssh_dir / "authorized_keys"
 	if keys:
-	    ssh_dir = home / ".ssh"
 	    ssh_dir.mkdir(mode=0o700, exist_ok=True)
-	    (ssh_dir / "authorized_keys").write_text("".join(keys))
+	    authorized_keys.write_text("".join(keys))
 	    run(["chown", "-R", "10000:10000", str(ssh_dir)])
+	elif no_ssh_keys:
+	    authorized_keys.unlink(missing_ok=True)
 
 	# The device's initramfs attaches the assembled image with
 	# `losetup -b <sector_size>`, so a table written in the wrong sector
@@ -1167,7 +1177,8 @@ _ph_assemble_image() {
 	ok = False
 	try:
 	    image.assemble(run, chroot / "boot", chroot, out, lay, boot_uuid, root_uuid)
-	    problems = image.verify(run, out, lay, boot_uuid, root_uuid, user=user)
+	    problems = image.verify(run, out, lay, boot_uuid, root_uuid, user=user,
+	                            require_authorized_keys=not no_ssh_keys)
 	    if problems:
 	        for p in problems:
 	            print(f">> {p}", file=sys.stderr)
@@ -1224,7 +1235,7 @@ tkbuild() {
 
 	echo
 	echo ">> verifying the exported image is actually what we built"
-	"$_PH_REPO/tools/bootimg-verify.py" \
+	"$_PH_REPO_ROOT/tools/bootimg-verify.py" \
 		"$(readlink -f /tmp/postmarketOS-export/boot.img)" \
 		--dtb "$_PH_DTB_BUILT" \
 		--config "$_PH_PKGCONFIG" \
@@ -1252,7 +1263,16 @@ tkbuild() {
 # rootfs AND boot: `install` runs mkfs and remints the filesystem UUIDs, so
 # flashing boot alone (the `porthole flash` default) leaves an initramfs
 # hunting for a root that no longer exists under that UUID.
+_ph_require_image_tools() {
+	# Check the toolkit mount before installation, not after an expensive export.
+	local helper="$_PH_REPO_ROOT/tools/bootimg-verify.py"
+	[ -x "$helper" ] && "$helper" --help >/dev/null || {
+		echo ">> image verifier unavailable at $helper; restore the porthole mount" >&2
+		return 69; }
+}
+
 tksysimage() {
+	_ph_require_image_tools || return $?
 	# Read before anything runs, not at the end of a twenty-minute install.
 	: "${TK_PMOS_PASSWORD:?set PORTHOLE_PMOS_PASSWORD, or the legacy TK_PMOS_PASSWORD (the rootfs user password), before an image build}"
 	# Same hazard tkbuild documents at ~line 838: apk sorts a leftover
@@ -1279,11 +1299,14 @@ tksysimage() {
 	_ph_install_kernel_release || return 1
 	echo ">> exporting the built image (pmbootstrap export)"
 	pmbootstrap export || return 1
+	if [ "${PORTHOLE_NEEDS_DTBO:-0}" = "1" ]; then
+		_ph_check_dtbo /tmp/postmarketOS-export/dtbo.img || return 1
+	fi
 
 	echo
 	echo ">> verifying the exported image against the kernel apk it installed"
 	local dtb; dtb=$(_ph_dtb_from_apk "$_PH_INSTALLED_APK") || return 1
-	"$_PH_REPO/tools/bootimg-verify.py" \
+	"$_PH_REPO_ROOT/tools/bootimg-verify.py" \
 		"$(readlink -f /tmp/postmarketOS-export/boot.img)" --dtb "$dtb" || {
 		echo ">> refusing to hand over a stale image" >&2; return 1; }
 
@@ -1500,7 +1523,7 @@ _ph_verify_export() {
 	[ -s "$img" ] || { echo ">> no exported boot.img -- run a build first" >&2; return 1; }
 	dtb=$(_ph_ref_dtb) || return 1
 	echo ">> pre-flight: verifying the export before writing anything"
-	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
+	"$_PH_REPO_ROOT/tools/bootimg-verify.py" "$img" --dtb "$dtb" || {
 		echo ">> refusing to flash a stale image -- NOTHING has been written" >&2
 		return 1; }
 }
@@ -1528,17 +1551,45 @@ _ph_device_root_uuid() {
 	return 1
 }
 
+_ph_check_dtbo() {
+	local img=${1:-} actual
+	if [ ! -s "$img" ]; then
+		echo ">> required DTBO is missing or empty: $img" >&2
+		return 1
+	fi
+	if [ -n "${PORTHOLE_DTBO_SHA256:-}" ]; then
+		actual=$(sha256sum "$img" | cut -d' ' -f1) || return 1
+		if [ "$actual" != "$PORTHOLE_DTBO_SHA256" ]; then
+			echo ">> DTBO differs from the profile's mainline stub: $img" >&2
+			return 1
+		fi
+	fi
+}
+
 tkflash() {
 	# Verify FIRST. flash_rootfs writes ~640 MB and is not undoable, so a
 	# refusal after it has run leaves a half-flashed device and an error that
 	# reads like a build problem. tkflash-boot repeats the same dtb check
 	# against the same export below.
 	_ph_verify_export || return 1
+	local dtbo_export=""
+	if [ "${PORTHOLE_NEEDS_DTBO:-0}" = "1" ] || [ -n "${PORTHOLE_DTBO_IMG:-}" ]; then
+		dtbo_export=/tmp/postmarketOS-export/dtbo.img
+		_ph_check_dtbo "$dtbo_export" || return 1
+	fi
 	pmbootstrap flasher flash_rootfs || return 1
-	tkflash-boot
+	tkflash-boot "$dtbo_export"
 }
 
 tkflash-boot() {
+	local dtbo_img=${1:-}
+	if [ -z "$dtbo_img" ] && [ -n "${PORTHOLE_DTBO_IMG:-}" ]; then
+		dtbo_img="$_PH_REPO/${PORTHOLE_DTBO_IMG}"
+	fi
+	if [ "${PORTHOLE_NEEDS_DTBO:-0}" = "1" ] || [ -n "$dtbo_img" ]; then
+		_ph_check_dtbo "$dtbo_img" || return 1
+	fi
+
 	# Baseline the boot id BEFORE the device moves, so the wait at the end can
 	# tell "came back" from "never left". Read it while the phone is still up:
 	# once it is in the bootloader there is no ssh to ask, and an empty baseline
@@ -1595,7 +1646,7 @@ tkflash-boot() {
 	fi
 
 	# shellcheck disable=SC2086
-	"$_PH_REPO/tools/bootimg-verify.py" "$img" --dtb "$dtb" $uuid_arg || {
+	"$_PH_REPO_ROOT/tools/bootimg-verify.py" "$img" --dtb "$dtb" $uuid_arg || {
 		echo ">> refusing to flash a stale image"; return 1; }
 
 	# Which slots exist, which one may be armed, and which dtbo to write are
@@ -1615,12 +1666,7 @@ tkflash-boot() {
 		done
 	fi
 
-	if [ -n "${PORTHOLE_DTBO_IMG:-}" ]; then
-		local dtbo_img="$_PH_REPO/${PORTHOLE_DTBO_IMG}"
-		if [ ! -s "$dtbo_img" ]; then
-			echo ">> PORTHOLE_DTBO_IMG is set but $dtbo_img is missing" >&2
-			return 1
-		fi
+	if [ -n "$dtbo_img" ]; then
 		# The bootloader reads dtbo from the ACTIVE slot, so both get it or the
 		# next slot flip silently reverts you. See brain/traps/dtbo-must-match.
 		if [ "${PORTHOLE_HAS_AB_SLOTS:-0}" != "1" ]; then
@@ -1723,7 +1769,7 @@ tkbuild-kernel() {
 	# Against the apk that was installed, NOT the tree: this rung flashes the
 	# aport release, and the tree is a different kernel.
 	local dtb; dtb=$(_ph_dtb_from_apk "$_PH_INSTALLED_APK") || return 1
-	"$_PH_REPO/tools/bootimg-verify.py" \
+	"$_PH_REPO_ROOT/tools/bootimg-verify.py" \
 		"$(readlink -f /tmp/postmarketOS-export/boot.img)" --dtb "$dtb" || {
 		echo ">> refusing to flash a stale image"; return 1; }
 
@@ -1775,9 +1821,14 @@ tkbuild-kernel() {
 tkupgrade-kernel() {
 	local ver incumbent repo
 	repo="$_PH_PMB/packages/edge/${PORTHOLE_ARCH}"
+	local apkbuild="$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD"
+	[ -r "$apkbuild" ] || {
+		echo ">> cannot read the kernel aport at $apkbuild" >&2
+		echo ">> check the pmaports checkout; in the sandbox, run \`porthole sandbox up\` to restore its mount" >&2
+		return 1; }
 
 	# shellcheck disable=SC2154  # pkgver/pkgrel are set by the sourced APKBUILD
-	ver=$(. "$_PH_APORTS/device/testing/$_PH_KPKG/APKBUILD" 2>/dev/null
+	ver=$(. "$apkbuild" 2>/dev/null
 	      echo "$pkgver-r$pkgrel")
 	[ -n "$ver" ] && [ "$ver" != "-r" ] || {
 		echo ">> could not read $_PH_KPKG pkgver/pkgrel" >&2; return 1; }
@@ -1863,7 +1914,7 @@ tkupgrade-kernel() {
 	# aport release, and on a version bump the tree is a different kernel
 	# entirely rather than merely a diverged one.
 	local dtb; dtb=$(_ph_dtb_from_apk "$_PH_INSTALLED_APK") || return 1
-	"$_PH_REPO/tools/bootimg-verify.py" \
+	"$_PH_REPO_ROOT/tools/bootimg-verify.py" \
 		"$(readlink -f /tmp/postmarketOS-export/boot.img)" --dtb "$dtb" || {
 		echo ">> refusing to flash a stale image"; return 1; }
 
@@ -2661,11 +2712,11 @@ tkboot() {
 
 	local out=/tmp/tk-fast-boot.img
 	if [ -n "$with_kernel" ]; then
-		"$_PH_REPO/tools/bootimg-repack-dtb.py" "$_PH_BASEIMG" \
+		"$_PH_REPO_ROOT/tools/bootimg-repack-dtb.py" "$_PH_BASEIMG" \
 			"$_PH_DTB_BUILT" "$out" \
 			--kernel "$_PH_OUT/arch/arm64/boot/Image.gz" || return 1
 	else
-		"$_PH_REPO/tools/bootimg-repack-dtb.py" "$_PH_BASEIMG" \
+		"$_PH_REPO_ROOT/tools/bootimg-repack-dtb.py" "$_PH_BASEIMG" \
 			"$_PH_DTB_BUILT" "$out" || return 1
 	fi
 

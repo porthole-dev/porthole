@@ -959,6 +959,9 @@ def _build(ctx, args) -> int:
     # decided there was nothing to do -- neither of which the return code
     # distinguishes. This is already the stated rule for the kernel rungs and
     # it applies identically here.
+    # The pre-build fallback may name edge while this aport lands in
+    # systemd-edge; resolve again now that pmbootstrap has created the file.
+    want = expected_apk(packages, arch, fields)
     landed = want.exists() if want else False
     fresh = landed and (before is False or want.stat().st_mtime != before)
     if rc != 0:
@@ -1146,6 +1149,7 @@ def _resume(ctx, args) -> int:
                            follow=pmb_log,
                            on_kill=_kill_inside if usable else None)
 
+    want = expected_apk(packages, arch, fields)
     landed = want.exists() if want else False
     fresh = landed and (before is False or want.stat().st_mtime != before)
     if rc != 0:

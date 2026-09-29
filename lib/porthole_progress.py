@@ -1576,7 +1576,7 @@ def _stamped_at(lines, now=None):
 
 
 def snapshot_from_log(text: str, name: str, mtime, now=None,
-                      samples=None) -> dict:
+                      samples=None, log_path=None) -> dict:
     """A tracker-shaped snapshot re-derived from a log tail. Pure.
 
     Everything unknowable without the run that started the build is `None`
@@ -1621,7 +1621,19 @@ def snapshot_from_log(text: str, name: str, mtime, now=None,
         # that touched the log next -- `DONE!` -- as its own final word.
         eta, last = None, said
         mtime = ended if ended is not None else mtime
-    return {"rung": f"pkg:{name}", "phase": pkg_phase_of(last, "build"),
+        if state == "done" and log_path:
+            # abuild's Create line names an artifact with its own timestamp.
+            # A shared log can acquire a later, unrelated pmbootstrap stamp.
+            apk = said.rsplit("Create ", 1)[-1]
+            if "/" not in apk:
+                for path in pathlib.Path(log_path).parent.glob(
+                        "packages/*/*/" + apk):
+                    try:
+                        mtime = path.stat().st_mtime
+                    except OSError:
+                        pass  # a package can disappear during a status read
+                    break
+    return {"rung": f"pkg:{name}", "phase": "done" if state == "done" else pkg_phase_of(last, "build"),
             "state": state or "running", "pid": None, "elapsed": None,
             "progress": progress, "eta": eta,
             "compile_lines": done or 0, "last": _STAMP.sub("", last.lstrip()),
@@ -1685,7 +1697,8 @@ def reattach_from_log(log_path, snap, now=None, samples=None):
     name = str(snap.get("rung") or "build").split(":", 1)[-1]
     if now - mtime > LOG_FRESH_S and not log_outcome(text, name, now)[0]:
         return None
-    return snapshot_from_log(text, name, mtime, now=now, samples=samples)
+    return snapshot_from_log(text, name, mtime, now=now, samples=samples,
+                             log_path=log_path)
 
 
 # pmbootstrap writes this as the last line of EVERY invocation that finishes,
@@ -2020,7 +2033,7 @@ def reattach(log_path, name: str, probe, interval: float, out,
             if not samples or samples[-1] != sample:
                 samples.append(sample)
         snap = snapshot_from_log(text, name, mtime, now=clock,
-                                 samples=samples)
+                                 samples=samples, log_path=log_path)
         if ndjson:
             out(json.dumps({**snap, "note": banner}) + "\n")
         elif tty:
@@ -2055,7 +2068,7 @@ def reattach(log_path, name: str, probe, interval: float, out,
                 text, mtime = log_tail(log_path)
                 if text is not None:
                     snap = snapshot_from_log(text, name, mtime, now=clock,
-                                             samples=samples)
+                                             samples=samples, log_path=log_path)
                 break
         # `now()` per repaint, not the tick's `clock`: reusing one timestamp
         # for all ten frames of a second is why the spinner stood still.

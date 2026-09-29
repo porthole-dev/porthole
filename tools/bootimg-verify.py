@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # scope: generic
 # needs: - (host only, no device)
-# env: -
-# exits: 0 ok · 32 see source
+# env: PORTHOLE_PMB_DIR, PORTHOLE_KERNEL_PKG (optional cache diagnosis)
+# exits: 0 checks passed · 1 content mismatch or invalid image · 64 usage
 """Verify a boot.img actually carries the kernel/DTB you just built.
 
 This exists because the failure it catches is invisible: `pmbootstrap build
@@ -22,6 +22,8 @@ Exit status is 0 only when every requested check passes, so it can gate a flash.
 """
 import argparse
 import hashlib
+import os
+import pathlib
 import struct
 import sys
 import zlib
@@ -74,14 +76,29 @@ def main():
     ap.add_argument('--dtb', required=True, help="the .dtb make just produced")
     ap.add_argument('--config', help="config shipped inside the rootfs chroot's /boot")
     ap.add_argument('--ref-config', help=".output/.config to compare it against")
+    ap.add_argument('--kernel', help="packaged gzip kernel to compare with the boot payload")
     ap.add_argument('--expect-root-uuid', metavar='UUID',
                     help="the pmos_root_uuid the DEVICE actually has; refuse "
                          "to flash an image naming a different one")
     a = ap.parse_args()
+    if bool(a.config) != bool(a.ref_config):
+        print("--config and --ref-config must be supplied together", file=sys.stderr)
+        return 64
 
     ok = True
 
     packed = appended_dtb(a.bootimg)
+    if a.kernel:
+        image = pathlib.Path(a.bootimg).read_bytes()
+        size = struct.unpack_from('<I', image, 8)[0]
+        page = struct.unpack_from('<I', image, 36)[0]
+        got = zlib.decompress(image[page:page + size], 16 + zlib.MAX_WBITS)
+        ref = pathlib.Path(a.kernel).read_bytes()
+        if ref[:2] == b'\x1f\x8b':
+            ref = zlib.decompress(ref, 16 + zlib.MAX_WBITS)
+        matches = sha(got) == sha(ref)
+        ok = ok and matches
+        print("PASS  kernel matches the package" if matches else "FAIL  kernel content mismatch")
     built = open(a.dtb, 'rb').read()
     if sha(packed) == sha(built):
         print("PASS  DTB matches (%d bytes, %s)" % (len(packed), sha(packed)[:16]))
@@ -104,9 +121,12 @@ def main():
         print("         and install falls back to the cached release apk. Build the")
         print("         kernel FROM the aport instead, which has no dev package to lose:")
         print("             porthole build image --yes")
-        print("         or delete the offending cached apk and re-run. `find")
-        print("         <workdir>/cache_apk_*/ -name '<kernel pkg>-*.apk'` shows which")
-        print("         pkgrel is being preferred.")
+        print("         or delete the offending cached apk and re-run.")
+        work, package = os.environ.get("PORTHOLE_PMB_DIR"), os.environ.get("PORTHOLE_KERNEL_PKG")
+        if work and package:
+            cached = sorted(pathlib.Path(work).glob("cache_apk_*/" + package + "-*.apk"))
+            for path in cached:
+                print("         cached kernel candidate: " + str(path))
 
     # An image whose pmos_root_uuid names a filesystem this phone does not
     # have does not boot, and does not fail in a way that mentions UUIDs: the
@@ -159,7 +179,7 @@ def main():
             ok = False
             print("FAIL  packaged config differs from .output/.config -- same stale-apk cause")
 
-    print("\n%s" % ("ALL CHECKS PASSED - safe to flash" if ok
+    print("\n%s" % ("ALL REQUESTED CONTENT CHECKS PASSED - hardware not tested" if ok
                     else "DO NOT FLASH - the image is not what you built"))
     return 0 if ok else 1
 

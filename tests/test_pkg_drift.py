@@ -56,7 +56,7 @@ def test_drift_json_reports_a_verdict_per_carried_fork():
     assert "aports" in payload, payload
     for name, row in payload["aports"].items():
         assert row["verdict"] in (
-            "safe", "loses", "at-risk", "unknown", "unresolved"), row
+            "safe", "loses", "at-risk", "stale", "unknown", "unresolved"), row
 
 
 def test_entries_we_own_outright_are_not_reported_as_drifting():

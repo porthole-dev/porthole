@@ -39,14 +39,14 @@ def test_rotation_keeps_the_recent_ones_and_drops_the_rest():
     """255 logs, 131 MB, back to 2026-08-29 -- nothing ever collected them."""
     names = [f"build-auto-2026090{d}-1200{i:02d}.log"
              for d in range(1, 9) for i in range(40)]
-    kept, dropped = log.keep(names, max_count=50)
+    kept, dropped = log.keep(names, max_count=50, now=datetime(2026, 9, 8))
     assert len(kept) == 50, len(kept)
     assert len(dropped) == len(names) - 50, len(dropped)
 
 
 def test_the_newest_log_is_never_dropped():
     names = ["build-auto-20260901-120000.log", "build-auto-20260908-120000.log"]
-    kept, _ = log.keep(names, max_count=1)
+    kept, _ = log.keep(names, max_count=1, now=datetime(2026, 9, 8))
     assert kept == ["build-auto-20260908-120000.log"], kept
 
 
@@ -76,7 +76,7 @@ def test_a_name_with_no_parseable_stamp_does_not_crash_and_is_not_exempt():
     YYYYMMDD-HHMMSS to rank -- it must lose ties for a max_count slot, not
     silently escape rotation forever."""
     names = ["build-fast-detached.log", "build-auto-20260908-000000.log"]
-    kept, dropped = log.keep(names, max_count=1)
+    kept, dropped = log.keep(names, max_count=1, now=datetime(2026, 9, 8))
     assert kept == ["build-auto-20260908-000000.log"], kept
     assert dropped == ["build-fast-detached.log"], dropped
 
