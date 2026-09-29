@@ -177,6 +177,7 @@ generic notes as well.
 | [a-tree-built-module-carries-btf-the-running-kernel-rejects](traps/a-tree-built-module-carries-btf-the-running-kernel-rejects.md) | `generic` | A tree-built module carries BTF the running kernel rejects, and modprobe blames a symlink loop |
 | [a-ucm-device-switch-cycles-the-whole-verb](traps/a-ucm-device-switch-cycles-the-whole-verb.md) | `generic` | A UCM device switch cycles the whole verb, so a DisableSequence runs mid-use |
 | [ab-retry-counter-is-a-countdown-not-a-glitch](traps/ab-retry-counter-is-a-countdown-not-a-glitch.md) | `generic` | Every Nth boot lands in the bootloader" is a retry countdown, not a glitch |
+| [abuild-checksums-follow-source-order](traps/abuild-checksums-follow-source-order.md) | `generic` | Correct downloaded bytes fail when checksums are out of source order |
 | [an-arm-behind-the-phosh-lockscreen-measures-a-still-page](traps/an-arm-behind-the-phosh-lockscreen-measures-a-still-page.md) | `device:google-taimen` | An arm behind the phosh lockscreen measures a still page, and it looks exactly like the change under test breaking WebKit |
 | [an-injected-touch-does-not-wake-a-blanked-screen](traps/an-injected-touch-does-not-wake-a-blanked-screen.md) | `generic` | An injected touch does not wake a blanked screen, and every gesture arm then measures a still image |
 | [an-instrument-that-fails-quietly-is-worse-than-none](traps/an-instrument-that-fails-quietly-is-worse-than-none.md) | `generic` | An instrument must report 'I could not run' differently from 'I ran and saw nothing |
@@ -283,7 +284,7 @@ generic notes as well.
 
 - `device:google-taimen` — 64
 - `device:taimen` — 2
-- `generic` — 140
+- `generic` — 141
 - `soc:gs201` — 1
 - `soc:msm8998` — 36
 - `soc:qcom` — 1
