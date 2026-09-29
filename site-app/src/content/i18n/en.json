@@ -1,0 +1,23 @@
+{
+  "skipLink.label": "Skip to content",
+  "search.label": "Search the field guide",
+  "search.ctrlKey": "Ctrl",
+  "search.cancelLabel": "Close",
+  "themeSelect.accessibleLabel": "Select color theme",
+  "themeSelect.dark": "Dark",
+  "themeSelect.light": "Light",
+  "themeSelect.auto": "System",
+  "menuButton.accessibleLabel": "Open navigation menu",
+  "sidebarNav.accessibleLabel": "Field guide navigation",
+  "tableOfContents.onThisPage": "On this page",
+  "tableOfContents.overview": "Overview",
+  "page.editLink": "Edit this page",
+  "page.previousLink": "Previous page",
+  "page.nextLink": "Next page",
+  "404.text": "We couldn’t find that page. Check the address or search the field guide.",
+  "aside.note": "Note",
+  "aside.tip": "Tip",
+  "aside.caution": "Caution",
+  "aside.danger": "Important",
+  "heading.anchorLabel": "Section: {{title}}"
+}

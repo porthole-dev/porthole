@@ -5,9 +5,9 @@ name: Docs
 #   Settings -> Secrets and variables -> Actions -> Variables
 #   PUBLISH_DOCS = true
 #
-# Unset, this workflow still generates the site and runs `mkdocs build
-# --strict` on every push and pull request -- a broken link or a bad nav entry
-# fails here rather than shipping. It simply does not touch GitHub Pages, which
+# Unset, this workflow still generates the site and checks its local links
+# on every push and pull request -- a broken link fails here rather than shipping.
+# It simply does not touch GitHub Pages, which
 # is what you want while the repository is private: Pages needs a plan that
 # includes it, so attempting to deploy would put a permanent red cross on a
 # workflow that is otherwise doing its job.
@@ -39,6 +39,8 @@ jobs:
     name: Build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,27 +49,47 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Generate the site sources
-        # Generation needs no dependencies -- it reads the command registry,
-        # the tool headers, the profile template and brain/. Only rendering
-        # needs mkdocs, which is why this step comes first and separately.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: site-app/package-lock.json
+
+      - name: Install the locked site toolchain
+        run: npm ci --prefix site-app
+
+      - name: Generate Starlight content
         run: ./bin/porthole docs build --org "${GITHUB_REPOSITORY%/*}" --repo "${GITHUB_REPOSITORY#*/}"
 
-      - name: Assert the site is actually generated, not committed
+      - name: Build the static site
+        run: npm run build --prefix site-app
+
+      - name: Check local links
+        run: python3 site-app/check-links.py
+
+      - name: Assert generated content stays out of git
         # site-src/ is gitignored on purpose. If a stale copy ever gets
         # committed it will silently shadow the generated one and the published
         # docs will drift from the code.
         run: |
-          git status --porcelain site-src mkdocs.yml
+          test -z "$(git ls-files -- site-src site-app/src/content/docs site-app/sidebar.generated.mjs site-app/src/assets/porthole.svg site-app/src/styles/editorial.css site-app/public/porthole.svg)"
           test -f site-src/cli.md
           test -f site-src/tools.md
+          test -f site-src/downloads.md
+          test -f site-app/dist/downloads/index.html
+          test -f site-app/dist/devices/index.html
           grep -q "porthole" site-src/index.md
-
-      - name: Install mkdocs
-        run: pip install mkdocs-material
-
-      - name: Build (strict, a broken link fails the build)
-        run: mkdocs build --strict
+          test -f site-app/dist/index.html
+          test -f site-app/dist/pagefind/pagefind.js
+          python3 - <<'PY'
+          from pathlib import Path
+          dist = Path("site-app/dist/devices")
+          profiles = Path("profiles")
+          for env in profiles.glob("*/device.env"):
+              if not env.parent.name.startswith("_"):
+                  page = dist / env.parent.name / "index.html"
+                  assert page.is_file(), f"missing device page: {page}"
+          PY
 
       - name: Say whether this will publish
         env:
@@ -76,7 +98,7 @@ jobs:
           if [ "$PUBLISH_DOCS" = "true" ]; then
             echo "PUBLISH_DOCS=true — deploying to GitHub Pages."
           else
-            echo "Docs built and link-checked, but NOT published."
+            echo "Docs built and checked, but NOT published."
             echo "PUBLISH_DOCS is not set, so GitHub Pages is left alone."
             echo "To publish: Settings -> Secrets and variables -> Actions"
             echo "            -> Variables -> PUBLISH_DOCS = true"
@@ -86,7 +108,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && vars.PUBLISH_DOCS == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: site
+          path: site-app/dist
 
   deploy:
     name: Deploy

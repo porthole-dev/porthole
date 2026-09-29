@@ -91,9 +91,11 @@ floor:           ## the suite on the declared python floor, in a container (need
 	@# this target actually needs. Nothing under tests/ requires the repo's own
 	@# history: the one reader (test_brain.py) already handles "git absent, or
 	@# not a clone" and only uses it to enrich a failure message.
+	@# A release workspace can contain multi-gigabyte images under .run. Copy
+	@# source only: duplicating .run into the container can fill the host disk.
 	@if command -v podman >/dev/null; then \
 	  $(PODMAN) -v "$(CURDIR):/src:ro" -w /tmp $(FLOOR_IMAGE) \
-	    sh -c 'cp -r /src /w && rm -rf /w/.git && cd /w || exit 1; \
+	    sh -c 'mkdir /w && tar -C /src --exclude=./.git --exclude=./.run --exclude=./site-src --exclude=./site-app/node_modules --exclude=./site-app/.astro --exclude=./site-app/dist --exclude=./site-app/src/content/docs --exclude=./site-app/src/assets/porthole.svg --exclude=./site-app/src/styles/editorial.css --exclude=./site-app/sidebar.generated.mjs -cf - . | tar -C /w -xf - && cd /w || exit 1; \
 	      fail=0; \
 	      python -m compileall -q lib bin tools tests || fail=1; \
 	      for t in tests/test_*.py; do \

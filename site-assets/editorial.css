@@ -1,0 +1,77 @@
+:root {
+  --sl-color-accent-low: #e6ece5;
+  --sl-color-accent: #52765c;
+  --sl-color-accent-high: #294b35;
+  --sl-color-white: #252a24;
+  --sl-color-gray-1: #343a33;
+  --sl-color-gray-2: #4d554c;
+  --sl-color-gray-3: #70786f;
+  --sl-color-gray-4: #a4aaa0;
+  --sl-color-gray-5: #d4d6cd;
+  --sl-color-gray-6: #eeece4;
+  --sl-color-black: #fbfaf6;
+  --sl-color-bg: #f4f1e9;
+  --sl-color-bg-nav: #f4f1e9;
+  --sl-color-bg-sidebar: #f4f1e9;
+  --sl-content-width: 52rem;
+  --sl-text-h1: clamp(2.65rem, 7vw, 5rem);
+  --sl-font: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --sl-font-system: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --sl-font-system-mono: "SFMono-Regular", Consolas, monospace;
+}
+
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #23382a;
+  --sl-color-accent: #a8c7ae;
+  --sl-color-accent-high: #d1e5d4;
+  --sl-color-white: #e8e9df;
+  --sl-color-gray-1: #d5d8d0;
+  --sl-color-gray-2: #b4b9b0;
+  --sl-color-gray-3: #92988f;
+  --sl-color-gray-4: #626960;
+  --sl-color-gray-5: #404840;
+  --sl-color-gray-6: #29302b;
+  --sl-color-black: #1d231f;
+  --sl-color-bg: #171c19;
+  --sl-color-bg-nav: #171c19;
+  --sl-color-bg-sidebar: #171c19;
+}
+
+:root[data-theme="light"] .hero h1 {
+  max-width: 13ch;
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-weight: 400;
+  letter-spacing: -.055em;
+  line-height: .98;
+}
+
+:root[data-theme="light"] .hero .tagline {
+  max-width: 38rem;
+  color: var(--sl-color-gray-2);
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  line-height: 1.65;
+}
+
+.sl-markdown-content starlight-aside {
+  border-inline-start-color: #a05e3e;
+}
+
+.sl-markdown-content .card-grid a {
+  text-decoration: none;
+}
+
+.sl-markdown-content .card-grid sl-link-card {
+  transition: transform .18s ease, border-color .18s ease;
+}
+
+.sl-markdown-content .card-grid sl-link-card:hover {
+  transform: translateY(-2px);
+}
+
+.sl-markdown-content table {
+  font-size: .88em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}

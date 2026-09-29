@@ -486,6 +486,7 @@ a wrong one wastes a session finding out.
 | `run` | run a tool with the config applied | no | no |
 | `new-device` | scaffold a profile for a device nobody has ported yet | yes | no |
 | `completion` | emit a shell completion script (bash, zsh, fish) | no | no |
+| `release` | plan images and validate release and hardware evidence locally | yes | no |
 | `docs` | generate the documentation site | yes | no |
 | `version` | version, environment and host tool versions | yes | no |
 <!-- END GENERATED: verbs -->

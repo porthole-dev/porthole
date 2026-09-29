@@ -68,21 +68,22 @@ A note earns its place if it would have saved someone a session.
 The site is generated, never hand-edited:
 
 ```sh
-make docs          # regenerate site-src/ and mkdocs.yml
-make docs-serve    # preview at http://127.0.0.1:8000 (needs mkdocs-material)
+cd site-app && npm ci   # install the locked static-site toolchain once
+cd .. && make docs      # stage generated Markdown for Starlight
+npm run build --prefix site-app
+make docs-serve    # preview at http://127.0.0.1:8000/porthole/
 ```
 
 Its CLI reference comes from the command registry, its tool catalogue from the
 tool headers, its profile keys from `profiles/_template/device.env`, and its
 knowledge base from `brain/`. Edit those, not the site.
 
-`site-src/`, `site/` and `mkdocs.yml` are gitignored. A committed copy would
+`site-src/`, generated content, and `site-app/dist/` are gitignored. A committed copy would
 silently shadow the generated one and let the published docs drift from the
 code.
 
-**Publishing is opt-in.** CI builds the docs with `--strict` on every push and
-pull request, so a broken link fails there rather than shipping — but it only
-deploys to GitHub Pages when a repository variable says to:
+**Publishing is opt-in.** CI builds the documentation on every push and pull
+request, but deploys to GitHub Pages only when a repository variable says to:
 
 > Settings → Secrets and variables → Actions → Variables → `PUBLISH_DOCS` = `true`
 

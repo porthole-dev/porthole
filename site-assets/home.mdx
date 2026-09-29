@@ -1,0 +1,42 @@
+---
+title: Porthole · bring-up and downloads
+description: Bring-up tools, device notes, and community releases for Linux phones.
+template: splash
+hero:
+  title: Bring devices up. Find the right image.
+  tagline: A practical toolkit for bringing Linux to phones, with device notes and releases in one place.
+  actions:
+    - text: Browse downloads
+      link: ./downloads/
+      icon: right-arrow
+      variant: primary
+    - text: Start a bring-up
+      link: ./working-guide/
+---
+import { Aside, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Independent fork · not affiliated with Nura">
+We use AI assistance. Nura's [contribution policy](https://docs.postmarketos.org/policies-and-processes/development/ai-policy.html) does not accept AI-assisted work, so we maintain those changes here instead of sending them upstream. See [our AI policy](https://github.com/porthole-dev/porthole/blob/main/AI.md).
+</Aside>
+
+## Where to go
+
+<CardGrid>
+  <LinkCard title="Porthole bring-up" href="./working-guide/">
+    Install Porthole and work through a device bring-up.
+  </LinkCard>
+  <LinkCard title="Device directory" href="./devices/">
+    See the work and test results for each device.
+  </LinkCard>
+  <LinkCard title="Downloads" href="./downloads/">
+    Find available images, checksums, and release notes.
+  </LinkCard>
+</CardGrid>
+
+## About this project
+
+Porthole is the command-line toolkit for building and testing device ports. Each device page tracks its own progress; downloads appear only after release checks pass. Hardware results name the exact image tested.
+
+See [project status](./project-status/), [release guidance](./releases/), and [contributing](./contributing/). Start a change with `make ci`.
+
+Nura's name changed in 2026. Some package names still use `postmarketOS` for compatibility; see [naming notes](./upstream-naming/).

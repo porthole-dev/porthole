@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "name": "Google Pixel 2 XL",
+  "vendor": "Google",
+  "status": "experimental",
+  "owner": "porthole-dev",
+  "summary": "Experimental Pixel 2 XL images with pinned firmware sources and a required mainline DTBO. Hardware capabilities are reported separately from build checks.",
+  "combinations": [
+    {
+      "channel": "edge",
+      "ui": "phosh",
+      "init": "systemd"
+    }
+  ],
+  "image_enabled": false,
+  "dtbo_sha256": "fd9752b381403312bcdeda8bb8555f0ad964f3464e7bc4ed307e3cef018362da",
+  "blocked_by": [
+    "Test first boot, account login, and recovery on the candidate image."
+  ],
+  "freshness_days": 30,
+  "critical_tests": [
+    "boot",
+    "display",
+    "input",
+    "storage",
+    "charging",
+    "connectivity"
+  ],
+  "capabilities": [
+    "boot",
+    "display",
+    "input",
+    "storage",
+    "charging",
+    "connectivity",
+    "camera",
+    "fingerprint",
+    "audio",
+    "calls",
+    "suspend",
+    "chromium"
+  ]
+}
