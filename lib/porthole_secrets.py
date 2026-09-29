@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import hashlib
 import re
 import subprocess
 import sys
@@ -207,7 +208,7 @@ def scan_tracked(root):
         if rel == SELF:
             continue
         path = root / rel
-        if is_capture(rel):
+        if is_capture(rel) and not is_public_brand_asset(rel, path.read_bytes()):
             hits.append((rel, 0, CAPTURE, path.suffix))
             continue
         try:
@@ -224,6 +225,17 @@ class _Capture:
 
 
 CAPTURE = _Capture()
+
+
+def is_public_brand_asset(rel, data):
+    """Only the reviewed public organization avatar, never an arbitrary raster.
+
+    Source: avatars.githubusercontent.com/u/321378695. Pinning its bytes keeps
+    a screenshot substituted at the same path subject to the capture ban.
+    """
+    return (rel == "site-app/public/organization.png" and
+            hashlib.sha256(data).hexdigest() ==
+            "c1efd530c953b2f70a70557056ed9782f2c56eb60d910ff53295ae8ea11c58c9")
 
 
 def is_capture(rel: str) -> bool:
