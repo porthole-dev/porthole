@@ -322,7 +322,7 @@ def cmd_build(args, ctx) -> int:
     release_data = catalogue(root, getattr(args, "catalog", None) or root / "releases")
     markdown_catalogue(release_data, src / "devices")
     (src / "downloads.md").write_text(markdown_downloads(release_data))
-    for name in ("RELEASES.md", "PROJECT-STATUS.md", "WORKING-GUIDE.md"):
+    for name in ("RELEASES.md", "PROJECT-STATUS.md", "WORKING-GUIDE.md", "PIPELINES.md"):
         (src / name.lower()).write_text(_readme_as_index(_docs_links(
             (root / "docs" / name).read_text(), pages)))
     (src / "upstream-naming.md").write_text(_docs_links(
@@ -334,6 +334,7 @@ def cmd_build(args, ctx) -> int:
     nav = [
         ("Home", "index.md"),
         ("Downloads", "downloads.md"),
+        ("Release pipelines", "pipelines.md"),
         ("Devices", [("Device directory", "devices/index.md")] + [
             (d["policy"]["name"], "devices/{}.md".format(d["device"]))
             for d in release_data["devices"]]),
