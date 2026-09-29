@@ -1,17 +1,12 @@
 # Porthole · device bring-up and downloads
 
-<p class="eyebrow">Linux phone bring-up · maintained by porthole-dev</p>
+[Website](https://porthole-dev.github.io/porthole/) · [Downloads](https://porthole-dev.github.io/porthole/downloads/) · [Device support](https://porthole-dev.github.io/porthole/devices/)
 
 Porthole is a command-line toolbox for bringing up Linux on mobile devices.
 This repository contains the tool, device profiles, build guidance, and a
 separate catalogue for community-built device images.
 
-> **Independent fork — not affiliated with Nura.** We use AI assistance.
-> Nura's [contribution policy](https://docs.postmarketos.org/policies-and-processes/development/ai-policy.html)
-> does not accept AI-assisted work, so those changes stay in this downstream
-> fork. See [our AI policy](AI.md).
-
-## Choose your next step
+## Get started
 
 ### Browse device status and downloads
 
@@ -67,3 +62,6 @@ evidence are reviewed.
 Nura was announced on 2026-09-27; see [the announcement](https://nura.eco/blog/2026/09/27/nura-rename/).
 Some package and repository names retain `postmarketOS` for upstream
 compatibility; see [naming notes](docs/UPSTREAM-NAMING.md).
+
+Independent downstream project. See [AI.md](AI.md) for the assistance and
+contribution policy.
