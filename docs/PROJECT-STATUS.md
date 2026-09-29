@@ -15,7 +15,8 @@ verification, and hardware behavior have separate evidence.
 ## Responsibilities
 
 The organization maintains shared contribution policy and build infrastructure.
-`google-taimen` has a release policy, currently blocked from image builds.
+`google-taimen` has an experimental candidate pipeline. Promotion to a tested
+release requires first-boot, login and recovery evidence for that exact image.
 `google-cheetah` has a bring-up profile but no reviewed release policy. A release reviewer must have access to
 the target hardware before approving working claims. A second maintainer should
 be able to repeat the documented procedure before a regular release commitment.
