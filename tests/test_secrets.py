@@ -117,5 +117,13 @@ def test_both_hooks_are_wired_to_this_scanner():
             f".githooks/{name} does not run the scanner"
 
 
+def test_public_brand_asset_requires_exact_bytes():
+    path = "site-app/public/organization.png"
+    data = (ROOT / path).read_bytes()
+    assert secrets.is_public_brand_asset(path, data)
+    assert not secrets.is_public_brand_asset(path, data + b"changed")
+    assert not secrets.is_public_brand_asset("docs/device.png", data)
+
+
 if __name__ == "__main__":
     sys.exit(_runner.run(globals()))
