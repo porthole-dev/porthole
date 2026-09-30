@@ -234,7 +234,7 @@ def copy_brain(root: pathlib.Path, dest: pathlib.Path) -> dict[str, list]:
         topics.setdefault(topic, []).append((meta.get("title", rel.stem), rel, meta))
     directory = dest / "brain" / "topics"
     directory.mkdir(parents=True, exist_ok=True)
-    browse = ["# Knowledge base", "", "Find device notes, troubleshooting lessons, and development playbooks by topic. Use the site search for a symptom, command, or note title.", "", "## Browse by topic", "", "| Topic | Notes |", "|---|---|"]
+    browse = ["# Knowledge base", "", "Find device notes, troubleshooting lessons, and development playbooks by topic. Use the site search for a symptom, command, or note title.", "", "## Start with the essentials", "", "[Evidence laws](laws/every-test-needs-a-positive-control.md) · [Agent workflow](workflow/agent-protocol.md) · [Playbooks](playbooks/00-device-protocol.md)", "", "## Browse by topic", "", "| Topic | Notes |", "|---|---|"]
     for topic, notes in sorted(topics.items()):
         slug = re.sub(r"[^a-z0-9-]+", "-", topic.lower()).strip("-") or "general"
         browse.append("| [{}](topics/{}.md) | {} |".format(topic.capitalize(), slug, len(notes)))

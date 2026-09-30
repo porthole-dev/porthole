@@ -1,6 +1,6 @@
 {
   "skipLink.label": "Skip to content",
-  "search.label": "Search the field guide",
+  "search.label": "Search Porthole",
   "search.ctrlKey": "Ctrl",
   "search.cancelLabel": "Close",
   "themeSelect.accessibleLabel": "Select color theme",
@@ -8,7 +8,7 @@
   "themeSelect.light": "Light",
   "themeSelect.auto": "System",
   "menuButton.accessibleLabel": "Open navigation menu",
-  "sidebarNav.accessibleLabel": "Field guide navigation",
+  "sidebarNav.accessibleLabel": "Organization navigation",
   "tableOfContents.onThisPage": "On this page",
   "tableOfContents.overview": "Overview",
   "page.editLink": "Edit this page",

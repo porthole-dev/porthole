@@ -1,9 +1,9 @@
 ---
-title: Porthole
+title: Porthole Dev
 description: Nura on community-supported phones. Find your device, download a build, or help develop the port.
 template: splash
 hero:
-  title: A new chapter for your phone.
+  title: Give your phone a new chapter.
   tagline: Nura device ports, signed packages, and practical tools for keeping hardware in use.
   actions:
     - text: Find your device
@@ -16,13 +16,20 @@ hero:
 ---
 import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 
+## Porthole Dev
+
+We maintain community device ports, signed software packages, release pipelines
+and the tools and knowledge needed to keep these phones useful.
+
 ## Start here
 
 <CardGrid>
   <LinkCard title="Device support" href="./devices/" description="Find your model, check tested features, and review known limitations." />
-  <LinkCard title="Downloads" href="./images/" description="Get complete images, required boot files, and installation instructions." />
+  <LinkCard title="Downloads" href="./images/" description="Download one complete installation bundle, or choose separate image files." />
   <LinkCard title="Development" href="./working-guide/" description="Set up a rootless workspace, build packages, and contribute a device port." />
   <LinkCard title="Signed APK packages" href="./packages/" description="Browse package versions and download from verified, signed repositories." />
+  <LinkCard title="Knowledge base" href="./brain/browse/" description="Search troubleshooting lessons, device findings and playbooks by topic." />
+  <LinkCard title="Developer releases" href="./pipelines/" description="Trigger reviewed builds, track releases and understand what reaches the website." />
 </CardGrid>
 
 ## Know what you are installing

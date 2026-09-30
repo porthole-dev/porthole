@@ -15,6 +15,7 @@ export default defineConfig({
     favicon: '/organization.png',
     social: [{ icon: 'github', label: 'GitHub', href: `https://github.com/${owner}/${repository}` }],
     sidebar,
+    components: { Head: './src/components/CatalogHead.astro' },
     customCss: ['./src/styles/editorial.css'],
     pagefind: true,
     expressiveCode: { themes: ['github-light', 'github-dark'] },

@@ -45,3 +45,35 @@ latest workflow result; open a pipeline for its running jobs and logs.
 To receive GitHub notifications, open the relevant repository and choose
 **Watch → Custom → Releases**. Workflow failures and running jobs are visible
 under its **Actions** tab.
+
+## Trigger a release
+
+Maintainers can use **Actions → workflow → Run workflow**, or the GitHub CLI.
+Select the primary branch. Branch pushes and pull requests run checks; they do
+not deploy Pages or publish APKs. Pmaports uses `taimen-bringup` as its primary
+branch; the other maintained repositories use `main`.
+
+```sh
+# Changed core packages publish automatically after merging. Build selected ones:
+gh workflow run build.yml -R porthole-dev/pmaports --ref taimen-bringup -f packages="tap obscura"
+# Full image: explicit build using the signed packages already published:
+gh workflow run image.yml -R porthole-dev/pmaports --ref taimen-bringup -f device=google-taimen
+# Add a complete bundle to an existing candidate without rebuilding its images:
+gh workflow run bundle.yml -R porthole-dev/pmaports --ref taimen-bringup -f tag=google-taimen-candidate-6 -f device=google-taimen
+# Website refresh:
+gh workflow run docs.yml -R porthole-dev/porthole --ref main
+# Application release: the version tag must already point to a commit on main:
+gh workflow run release.yml -R porthole-dev/tap --ref main -f tag=v0.2.0 -f dry-run=true
+```
+
+The application command rehearses an existing version tag; use `dry-run=false`
+when ready to publish that version. Creating a `v*` tag on a commit merged into
+`main` also triggers publication. A tag on an unmerged branch is rejected.
+
+Device image checks evaluate primary-branch pushes and pull requests; expensive
+image assembly remains explicit. The firmware grant must be approved. Existing
+candidates and hardware claims are preserved. Core and staged Chromium APK
+publishers and image/bundle workflows refresh the website after verified upload;
+the scheduled refresh remains a fallback. The publisher token needs Actions
+write access on `porthole-dev/porthole` as well as its existing package access.
+A denied refresh fails visibly; it does not invalidate already verified assets.

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   # `edited` is not a default type, and without it the trailers job below
   # scans the body once at open and never again -- so a clean PR edited
   # afterwards keeps a stale green. The cost is that every job reruns on a
