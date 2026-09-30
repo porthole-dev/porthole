@@ -30,6 +30,7 @@ The core distribution is published. [Device downloads](https://porthole-dev.gith
 |---|---|
 | Missing Rust compiler wrapper with prebuilt dependencies | Install sccache from declared build dependencies, including initialized chroots. Regression and real Obscura build pass. |
 | Corrupt APKs despite a signed index | Competing matrix artifacts extracted into the same filenames. Publish only the requested origin; verify payloads and downloaded bytes. Remove invalid retained candidates, preserving valid history. Both original Settings artifacts passed while the merged public asset failed. |
+| Separate Chromium publisher and interrupted-upload retries | Chromium now uses the core publisher and attestation contract. The old workflow fails the regression gate; matching, orphaned and empty-index controls pass. The shared path passed its core repository audit. The already-running Chromium workflow retains its original definition, so its output will also be checked independently. |
 | Missing image loop partition nodes | Create only the selected image's missing partition nodes from kernel sysfs numbers. Physical disks and existing nodes remain untouched. The corrected installer completed the filesystem image. |
 | Protected rootfs checks ran without permission | Run the existing validator and udev control with privilege inside the CI container. Required content checks pass. |
 | UUID verifier read an Android sparse image as raw GPT | Decode a temporary copy with the existing Android tool; preserve the original fastboot export. UUID comparison passes. |
@@ -45,7 +46,7 @@ Changes were reconciled against published branches. Unpublished GTK4, Stevia and
 |---|---|
 | porthole | [Compare changes](https://github.com/porthole-dev/porthole/compare/84a388f...620c878d990877e1bca50b343f01445ba068135f) |
 | .github | [Compare changes](https://github.com/porthole-dev/.github/compare/b4f7bd46f772860e6f825139e2cff7d3b25d898c...55fae9480ac477dd875ffce4471b5f5fc93cc0a6) |
-| pmaports | [Compare changes](https://github.com/porthole-dev/pmaports/compare/b6dbbc1b14bba240a658c5a97fd9d256769c9aa4...ebcc7f1ae2a6ccde4d1772086e63bcbd4a269a97) |
+| pmaports | [Compare changes](https://github.com/porthole-dev/pmaports/compare/b6dbbc1b14bba240a658c5a97fd9d256769c9aa4...461e2ed) |
 | pmbootstrap | [Compare changes](https://github.com/porthole-dev/pmbootstrap/compare/5b42347...d4183da02b3b3030b0557e4520ade30c3311d53d) |
 | pmos-packages | [Compare changes](https://github.com/porthole-dev/pmos-packages/compare/7dfa7ed...91602540efe1508c8562c507dffac4f6067c4bf3) |
 | obscura | [Compare changes](https://github.com/porthole-dev/obscura/compare/eb89479...0cb479ae234373abef90a0900efbfcccb1c33a7a) |
