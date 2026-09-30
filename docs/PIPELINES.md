@@ -74,6 +74,9 @@ Device image checks evaluate primary-branch pushes and pull requests; expensive
 image assembly remains explicit. The firmware grant must be approved. Existing
 candidates and hardware claims are preserved. Core and staged Chromium APK
 publishers and image/bundle workflows refresh the website after verified upload;
-the scheduled refresh remains a fallback. The publisher token needs Actions
-write access on `porthole-dev/porthole` as well as its existing package access.
-A denied refresh fails visibly; it does not invalidate already verified assets.
+the scheduled refresh remains a fallback. For immediate refresh, configure the
+`WEBSITE_TOKEN` secret in pmaports' `publish` environment: a fine-grained token
+with only Actions write access to `porthole-dev/porthole`. The package publisher
+credential remains scoped to package publication. If no website token is set,
+the release summary explains that the six-hour scheduled Docs refresh will
+update the catalog. A configured but invalid token fails visibly.
