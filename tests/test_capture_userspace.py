@@ -207,6 +207,8 @@ def test_the_unconfigured_fallback_excludes_a_repo_built_linux_package():
         env = _repo_env(tmp, "linux-lts-6.6.10-r3.apk")
         env.pop("PORTHOLE_DEVICE", None)
         env["HOME"] = str(pathlib.Path(tmp) / "no-such-home")
+        # XDG_CONFIG_HOME wins over HOME on desktops that export it.
+        env["XDG_CONFIG_HOME"] = str(pathlib.Path(tmp) / "no-such-config")
         out = subprocess.run(["bash", str(TOOL), "--parse-only"],
                              input="linux-lts-6.6.10-r3\n", capture_output=True,
                              text=True, check=True, env=env)
