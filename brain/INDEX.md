@@ -217,6 +217,7 @@ generic notes as well.
 | [one-arm-cannot-resolve-a-browser-change-here](traps/one-arm-cannot-resolve-a-browser-change-here.md) | `device:google-taimen` | One browser arm cannot resolve anything under ~10% here: the same build gave 29% and 73% frames-over-budget |
 | [parallel-artifact-extraction-corrupts-apks](traps/parallel-artifact-extraction-corrupts-apks.md) | `generic` | Parallel artifact extraction corrupts APK payloads |
 | [pmbootstrap-never-runs-the-shell-in-an-apkbuild](traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md) | `generic` | pmbootstrap parses an APKBUILD line by line and never runs the shell |
+| [private-container-dev-hides-loop-partitions](traps/private-container-dev-hides-loop-partitions.md) | `generic` | A privileged container cannot see new loop partition nodes |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
 | [pstore-has-never-worked-on-7-2](traps/pstore-has-never-worked-on-7-2.md) | `device:google-taimen` | pstore has never produced a record on 7.2.2, even though ramoops registers and enables a console |
 | [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
@@ -287,7 +288,7 @@ generic notes as well.
 
 - `device:google-taimen` — 64
 - `device:taimen` — 2
-- `generic` — 144
+- `generic` — 145
 - `soc:gs201` — 1
 - `soc:msm8998` — 36
 - `soc:qcom` — 1
