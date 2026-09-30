@@ -73,6 +73,7 @@ if not images:
     rows += ["## Image availability", "", "The complete-image pipeline is being validated. No candidate is available yet. [Follow the image build](../pipelines/).", ""]
 counts = {}
 published = {}
+web_releases = []
 for release in images:
     assets = {a["name"]: a for a in release["assets"]}
     device = json.loads(fetch(assets["device.json"]["browser_download_url"]))
@@ -105,7 +106,12 @@ for release in images:
         digest, filename = native_sums.strip().split()
         if filename != native_bundle or not re.fullmatch(r"[a-f0-9]{64}", digest) or assets[native_bundle].get("digest") != "sha256:" + digest:
             raise SystemExit("Native bundle checksum mismatch: " + native_bundle)
-        rows += ["", "**[Download Windows, macOS and Linux installation bundle · {}]({})**".format(size(assets[native_bundle]["size"]), assets[native_bundle]["browser_download_url"]), "", "No Python required. Install current Android platform-tools, back up your phone, and unlock its bootloader using the device guide. Verify the [bundle checksum]({}) and build provenance, then extract the ZIP.".format(assets["NATIVE-V2-BUNDLE-SHA256SUMS"]["browser_download_url"]), "", "```sh", "gh attestation verify " + native_bundle + " -R porthole-dev/pmaports", "```", "", "**Linux or macOS**, from the extracted folder:", "", "```sh", "bash install.sh", "```", "", "**Windows PowerShell**, from the extracted folder:", "", "```powershell", r"powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1", "```", "", "The Windows command permits the verified script for this process only. Both installers check image hashes, the model and unlocked bootloader, then ask you to type the device name before erasing data. They never unlock the bootloader automatically. To verify and preview without contacting a phone, use `bash install.sh --dry-run` or `powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1 -DryRun`.", ""]
+        if not older:
+            web_releases.append(dict(device=codename, name=device['name'], tag=release['tag_name'],
+                                     url=assets[native_bundle]['browser_download_url'],
+                                     size=assets[native_bundle]['size'], sha256=digest,
+                                     dtbo_sha256=device.get('dtbo_sha256')))
+        rows += ["", "**[Download Windows, macOS and Linux installation bundle · {}]({})**".format(size(assets[native_bundle]["size"]), assets[native_bundle]["browser_download_url"]), "", "[Experimental browser installer](../install/) · or use the native scripts below.", "", "No Python required. Install current Android platform-tools, back up your phone, and unlock its bootloader using the device guide. Verify the [bundle checksum]({}) and build provenance, then extract the ZIP.".format(assets["NATIVE-V2-BUNDLE-SHA256SUMS"]["browser_download_url"]), "", "```sh", "gh attestation verify " + native_bundle + " -R porthole-dev/pmaports", "```", "", "**Linux or macOS**, from the extracted folder:", "", "```sh", "bash install.sh", "```", "", "**Windows PowerShell**, from the extracted folder:", "", "```powershell", r"powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1", "```", "", "The Windows command permits the verified script for this process only. Both installers check image hashes, the model and unlocked bootloader, then ask you to type the device name before erasing data. They never unlock the bootloader automatically. To verify and preview without contacting a phone, use `bash install.sh --dry-run` or `powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1 -DryRun`.", ""]
     if has_bundle:
         bundle_sums = fetch(assets["BUNDLE-SHA256SUMS"]["browser_download_url"]).decode()
         digest, filename = bundle_sums.strip().split()
@@ -126,5 +132,6 @@ for release in images:
     if older:
         rows += ["</details>", ""]
 (OUT / "images.md").write_text("\n".join(rows) + "\n")
+(OUT / "web-install.json").write_text(json.dumps(web_releases, indent=2) + "\n")
 (OUT / "devices.json").write_text(json.dumps(published, indent=2) + "\n")
 print("Updated device downloads and verified APK package catalog")

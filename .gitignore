@@ -46,3 +46,5 @@ logs/
 # and ref_lock_small.png locally once (grim the same region documented in
 # session_state.sh against a known-unlocked screen) before using the rig.
 tools/repro/a5xx-gmem/*.png
+
+/site-app/public/install-releases.json

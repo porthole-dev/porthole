@@ -1,0 +1,34 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+---
+<StarlightPage frontmatter={{ title: 'Install in your browser', description: 'Experimental browser installation for Porthole device images.' }}>
+  <p>Install a verified experimental image using a desktop browser. No Python or local fastboot installation is needed.</p>
+  <aside class="install-warning"><strong>Experimental browser installer.</strong> Software checks cover verification and failure handling. This browser path has not yet been qualified on a physical Pixel 2 XL. The operating system remains experimental; check <a href="../devices/google-taimen/">exact-image hardware results</a> before installing.</aside>
+  <p>Use current Chrome or Edge on Windows, macOS or Linux. Windows needs the <a href="https://developer.android.com/studio/run/win-usb">Google USB driver</a>; Linux may need <a href="https://developer.android.com/studio/run/device#setting-up">USB permissions</a>. Safari, Firefox and mobile browsers are not supported by this installer. Back up your phone and unlock its bootloader using the device guide first.</p>
+  <p>If the browser cannot access your phone or has insufficient storage, use the <a href="../images/">native Bash or PowerShell installer</a>. Separate files and the Python installer also remain available.</p>
+  <div id="web-installer">
+    <h2>1. Choose the release</h2>
+    <label>Device and candidate <select id="install-release" disabled><option>Loading verified releases…</option></select></label>
+    <p><a id="install-download" hidden>Download the matching native ZIP</a></p>
+    <label>Select that ZIP from your computer <input id="install-file" type="file" accept=".zip,application/zip" disabled /></label>
+    <p>The file stays on this computer. Preparation checks the full bundle hash and each image, then streams the rootfs into temporary browser storage. Allow 8 GiB of free browser storage.</p>
+    <button id="install-prepare" type="button" disabled>Verify and prepare images</button>
+    <button id="install-discard" type="button" disabled>Discard prepared images</button>
+    <h2>2. Connect the phone</h2>
+    <p>Connect one phone directly by USB and enter bootloader fastboot mode. Close other flashing tools. Select the phone in the browser’s USB chooser. Connecting performs checks only.</p>
+    <button id="install-connect" type="button" disabled>Select and check phone</button>
+    <h2>3. Confirm installation</h2>
+    <p><strong>Installation replaces the operating system and erases all user data.</strong> Keep the cable connected until completion. The installer never unlocks or relocks a bootloader.</p>
+    <label class="install-check"><input id="install-backup" type="checkbox" disabled /> I have backed up my phone and understand that all user data will be erased.</label>
+    <label class="install-check"><input id="install-experimental" type="checkbox" disabled /> I understand that this browser installer and image are experimental.</label>
+    <label>Type the device codename shown after connecting <input id="install-confirm" type="text" autocomplete="off" spellcheck="false" disabled /></label>
+    <button id="install-start" type="button" disabled>Erase data and install</button>
+    <progress id="install-progress" max="1" value="0" aria-label="Installation progress"></progress>
+    <p id="install-status" role="status" aria-live="polite">Loading release information. No phone has been contacted.</p>
+    <details><summary>If installation stops</summary><p>No automatic reboot or further write is attempted after an error. Keep the phone in its bootloader, retain the error message, and follow <a href="../images/">manual recovery instructions</a>. If any partition was written, reinstall the complete matching image set before booting. Reloading requires selecting and checking the phone again. Preparation failures can be retried without touching a phone.</p></details>
+  </div>
+  <script>
+    import { setupWebInstaller } from '../web-install-ui.js';
+    setupWebInstaller();
+  </script>
+</StarlightPage>

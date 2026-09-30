@@ -539,6 +539,10 @@ def _starlight_content(src: pathlib.Path, content: pathlib.Path, nav,
     shutil.copyfile(src.parent / "site-assets" / "mark.svg",
                     public / "porthole.svg")
 
+    web_releases = src.parent / ".run/public-downloads/web-install.json"
+    (public / "install-releases.json").write_text(
+        web_releases.read_text() if web_releases.is_file() else "[]\n")
+
     def items(entries):
         result = []
         for label, target in entries:
@@ -556,8 +560,12 @@ def _starlight_content(src: pathlib.Path, content: pathlib.Path, nav,
                 result.append({"label": label, "slug":
                                pathlib.PurePosixPath(target).with_suffix("").as_posix().lower()})
         return result
+    navigation = items(nav)
+    for group in navigation:
+        if group.get("label") == "Downloads":
+            group["items"].insert(1, {"label": "Browser installer", "link": "/install/"})
     (app / "sidebar.generated.mjs").write_text(
-        "export default " + json.dumps(items(nav), ensure_ascii=False) + ";\n")
+        "export default " + json.dumps(navigation, ensure_ascii=False) + ";\n")
     return sum(1 for _ in content.rglob("*.md*"))
 
 

@@ -69,7 +69,9 @@ jobs:
         run: ./bin/porthole docs build --org "${GITHUB_REPOSITORY%/*}" --repo "${GITHUB_REPOSITORY#*/}"
 
       - name: Check package search matching
-        run: node site-app/test-catalog.mjs
+        run: |
+          node site-app/test-catalog.mjs
+          node site-app/test-web-install.mjs
 
       - name: Build the static site
         run: npm run build --prefix site-app
@@ -82,7 +84,7 @@ jobs:
         # committed it will silently shadow the generated one and the published
         # docs will drift from the code.
         run: |
-          test -z "$(git ls-files -- site-src site-app/src/content/docs site-app/sidebar.generated.mjs site-app/src/assets/porthole.svg site-app/src/styles/editorial.css site-app/public/porthole.svg)"
+          test -z "$(git ls-files -- site-src site-app/src/content/docs site-app/sidebar.generated.mjs site-app/src/assets/porthole.svg site-app/src/styles/editorial.css site-app/public/porthole.svg site-app/public/install-releases.json)"
           test -f site-src/cli.md
           test -f site-src/tools.md
           test -f site-src/downloads.md

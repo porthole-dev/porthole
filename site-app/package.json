@@ -9,6 +9,9 @@
   },
   "dependencies": {
     "@astrojs/starlight": "0.42.4",
-    "astro": "7.3.5"
+    "@zip.js/zip.js": "2.18.2",
+    "android-fastboot": "1.1.3",
+    "astro": "7.3.5",
+    "hash-wasm": "4.12.0"
   }
 }

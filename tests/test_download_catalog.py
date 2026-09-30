@@ -45,6 +45,8 @@ def test_bundle_and_history():
             text = (root / '.run/public-downloads/images.md').read_text()
             assert json.loads((root / '.run/public-downloads/devices.json').read_text())['google-taimen']['tag'] == latest['tag_name']
             assert 'bash install.sh' in text and 'powershell -NoProfile' in text
+            web = json.loads((root / '.run/public-downloads/web-install.json').read_text())
+            assert len(web) == 1 and web[0]['sha256'] == digest and web[0]['tag'] == latest['tag_name']
             assert 'No Python required' in text
             assert 'python3 google-taimen-install.zip' in text
             assert 'Previous candidate: google-taimen-candidate-5' in text
