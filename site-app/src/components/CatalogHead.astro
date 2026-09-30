@@ -3,7 +3,8 @@ import Default from '@astrojs/starlight/components/Head.astro';
 ---
 <Default {...Astro.props} />
 <script>
-  import { setupCatalog } from '../catalog.js';
-  setupCatalog();
-  document.addEventListener('astro:page-load', setupCatalog);
+  import { setupCatalog, setupChecksums } from '../catalog.js';
+  const setup = () => { setupCatalog(); setupChecksums(); };
+  setup();
+  document.addEventListener('astro:page-load', setup);
 </script>

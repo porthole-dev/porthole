@@ -67,6 +67,7 @@ images = [r for r in releases("pmaports") if "-candidate-" in r["tag_name"] and 
 if not images:
     rows += ["## Image availability", "", "The complete-image pipeline is being validated. No candidate is available yet. [Follow the image build](../pipelines/).", ""]
 counts = {}
+published = {}
 for release in images:
     assets = {a["name"]: a for a in release["assets"]}
     device = json.loads(fetch(assets["device.json"]["browser_download_url"]))
@@ -84,30 +85,41 @@ for release in images:
         raise SystemExit("Incomplete image release: " + release["tag_name"])
     sums = fetch(assets["SHA256SUMS"]["browser_download_url"]).decode()
     hashes = dict((line.split()[1][2:] if line.split()[1].startswith("./") else line.split()[1], line.split()[0]) for line in sums.splitlines())
+    if codename not in published:
+        published[codename] = dict(tag=release["tag_name"], date=release["published_at"][:10])
     older = counts[codename] > 1
     if older:
         rows += ["<details>", "<summary>Previous candidate: " + release["tag_name"] + "</summary>", ""]
     rows += ["## " + release.get("name", device["name"]), "", "**Experimental** · Published " + release["published_at"][:10], ""]
     bundle = codename + "-install.zip"
     has_bundle = bundle in assets and "BUNDLE-SHA256SUMS" in assets
+    native_bundle = codename + "-native.zip"
+    has_native = native_bundle in assets and "NATIVE-BUNDLE-SHA256SUMS" in assets
+    if has_native:
+        native_sums = fetch(assets["NATIVE-BUNDLE-SHA256SUMS"]["browser_download_url"]).decode()
+        digest, filename = native_sums.strip().split()
+        if filename != native_bundle or not re.fullmatch(r"[a-f0-9]{64}", digest) or assets[native_bundle].get("digest") != "sha256:" + digest:
+            raise SystemExit("Native bundle checksum mismatch: " + native_bundle)
+        rows += ["", "**[Download Windows, macOS and Linux installation bundle · {}]({})**".format(size(assets[native_bundle]["size"]), assets[native_bundle]["browser_download_url"]), "", "No Python required. Install current Android platform-tools, back up your phone, and unlock its bootloader using the device guide. Verify the [bundle checksum]({}) and build provenance, then extract the ZIP.".format(assets["NATIVE-BUNDLE-SHA256SUMS"]["browser_download_url"]), "", "```sh", "gh attestation verify " + native_bundle + " -R porthole-dev/pmaports", "```", "", "**Linux or macOS**, from the extracted folder:", "", "```sh", "bash install.sh", "```", "", "**Windows PowerShell**, from the extracted folder:", "", "```powershell", r"powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1", "```", "", "The Windows command permits the verified script for this process only. Both installers check image hashes, the model and unlocked bootloader, then ask you to type the device name before erasing data. They never unlock the bootloader automatically. To verify and preview without contacting a phone, use `bash install.sh --dry-run` or `powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1 -DryRun`.", ""]
     if has_bundle:
         bundle_sums = fetch(assets["BUNDLE-SHA256SUMS"]["browser_download_url"]).decode()
         digest, filename = bundle_sums.strip().split()
         if filename != bundle or not re.fullmatch(r"[a-f0-9]{64}", digest) or assets[bundle].get("digest") != "sha256:" + digest:
             raise SystemExit("Bundle checksum mismatch: " + bundle)
-        rows += ["", "**[Download complete installation bundle · {}]({})**".format(size(assets[bundle]["size"]), assets[bundle]["browser_download_url"]), "", "One download includes the matching rootfs, boot, DTBO, checksums, source revisions and installer. Separate files remain below.", "", "Verify [bundle checksums]({}) and provenance before running:".format(assets["BUNDLE-SHA256SUMS"]["browser_download_url"]), "", "```sh", "gh attestation verify " + bundle + " -R porthole-dev/pmaports", "python3 " + bundle, "```", "", "Requires Python 3.8+, current Android platform-tools, an unlocked bootloader and a backup. The installer checks the model and asks before replacing the OS and erasing user data. Add `--dry-run` to verify and preview without contacting a phone.", "", "### Separate files", ""]
+        rows += ["", "**[Download Python installation bundle · {}]({})**".format(size(assets[bundle]["size"]), assets[bundle]["browser_download_url"]), "", "One download includes the matching rootfs, boot, DTBO, checksums, source revisions and installer. Separate files remain below.", "", "Verify [bundle checksums]({}) and provenance before running:".format(assets["BUNDLE-SHA256SUMS"]["browser_download_url"]), "", "```sh", "gh attestation verify " + bundle + " -R porthole-dev/pmaports", "python3 " + bundle, "```", "", "Requires Python 3.8+, current Android platform-tools, an unlocked bootloader and a backup. The installer checks the model and asks before replacing the OS and erasing user data. Add `--dry-run` to verify and preview without contacting a phone.", "", "### Separate files", ""]
     rows += ["| File | Download | SHA-256 |", "|---|---|---|"]
     for name in [image_name, "boot.img"] + (["dtbo.img"] if "dtbo.img" in required else []) + ["SHA256SUMS", "INSTALL.md"]:
         asset = assets[name]
         if name in hashes and asset.get("digest") and asset["digest"] != "sha256:" + hashes[name]:
             raise SystemExit("Release asset checksum mismatch: " + name)
         rows.append("| {} | [{}]({}) | `{}` |".format(name, size(asset["size"]), asset["browser_download_url"], hashes.get(name, "See checksum file")))
-    if has_bundle:
+    if has_bundle or has_native:
         rows += ["", "<details>", "<summary>Manual installation and recovery</summary>", ""]
     rows += ["", "### Installation", "", fetch(assets["INSTALL.md"]["browser_download_url"]).decode().split("\n", 1)[1].replace("## ", "#### "), "", "Verify build provenance with `gh attestation verify <downloaded-file> -R porthole-dev/pmaports`.", ""]
-    if has_bundle:
+    if has_bundle or has_native:
         rows += ["</details>", ""]
     if older:
         rows += ["</details>", ""]
 (OUT / "images.md").write_text("\n".join(rows) + "\n")
+(OUT / "devices.json").write_text(json.dumps(published, indent=2) + "\n")
 print("Updated device downloads and verified APK package catalog")

@@ -266,8 +266,9 @@ def catalogue(root, directory, today=None):
     return {"schema": 1, "generated": (today or dt.date.today()).isoformat(), "devices": devices}
 
 
-def markdown_catalogue(data, out):
+def markdown_catalogue(data, out, published=None):
     """Generate the device directory and a page for each profile."""
+    published = published or {}
     out = pathlib.Path(out)
     out.mkdir(parents=True, exist_ok=True)
     rows = ["# Devices", "",
@@ -278,7 +279,8 @@ def markdown_catalogue(data, out):
         available = sum(1 for build in device["builds"] if build.get("download_ready"))
         rows.append("| [{}]({}.md) | {} | {} | {} |".format(
             policy["name"], device["device"], policy.get("vendor", "Unknown"),
-            policy["status"].capitalize(), str(available) if available else "Not available yet"))
+            policy["status"].capitalize(), "[Experimental candidate](../images/)" if device["device"] in published else
+            ("{} hardware-qualified".format(available) if available else "No published candidate")))
     rows += [""]
     for d in data["devices"]:
         p, builds = d["policy"], d["builds"]
@@ -290,8 +292,12 @@ def markdown_catalogue(data, out):
                 p["summary"], "",
                 "Unofficial community work; not affiliated with Nura.", "",
                 "## Downloads", ""]
-        if not builds:
-            page += ["No tested release image yet. [Browse experimental image downloads](../../images/).", ""]
+        candidate = published.get(d["device"])
+        if candidate:
+            page += ["[Download experimental candidate {}](../../images/) · Published {}".format(candidate["tag"], candidate["date"]), "",
+                     "Published images and hardware qualification are tracked separately. See exact-image test results below before installing.", ""]
+        elif not builds:
+            page += ["No published candidate for this device yet. [Browse device downloads](../../images/).", ""]
         for m in builds:
             page += ["### {} · {} · {} · {}".format(
                 m["channel"], m["ui"], m["init"], m["id"]), "",

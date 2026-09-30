@@ -108,7 +108,7 @@ def test_catalogue_and_hardware():
         assert 'works' in text
         cheetah = (page_dir/'google-cheetah.md').read_text()
         assert 'build and release setup is still needed' in cheetah
-        assert 'No tested release image yet.' in cheetah
+        assert 'No published candidate for this device yet.' in cheetah
         assert 'Nura' not in (page_dir/'index.md').read_text()
         assert 'AI policy' not in cheetah
         downloads = release.markdown_downloads(data)
@@ -125,6 +125,11 @@ def test_catalogue_and_hardware():
         assert good['files'][0]['url'] not in release.markdown_downloads(untested)
         release.markdown_catalogue(untested, page_dir)
         assert good['files'][0]['url'] not in (page_dir/'google-taimen.md').read_text()
+        release.markdown_catalogue(untested, page_dir, {'google-taimen': {'tag': 'google-taimen-candidate-6', 'date': '2026-09-30'}})
+        assert 'Experimental candidate' in (page_dir/'index.md').read_text()
+        assert 'Download experimental candidate google-taimen-candidate-6' in (page_dir/'google-taimen.md').read_text()
+        assert 'No published candidate for this device' not in (page_dir/'google-taimen.md').read_text()
+        assert not untested['devices'][1]['builds'][1]['download_ready']
 
 
 def test_artifact_verification_checks_bytes_and_rejects_symlinks():

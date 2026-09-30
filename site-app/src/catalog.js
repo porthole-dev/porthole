@@ -45,3 +45,39 @@ export function setupCatalog() {
   select.addEventListener('change', update);
   update();
 }
+
+export function isChecksum(value) {
+  return /^[a-f0-9]{64}$/i.test(value.trim());
+}
+
+export function setupChecksums() {
+  for (const table of document.querySelectorAll('.sl-markdown-content table')) {
+    const labels = [...table.querySelectorAll('thead th')].map(cell => cell.textContent.trim());
+    if (!labels.some(label => label.includes('SHA-256'))) continue;
+    table.classList.add('download-table');
+    for (const row of table.querySelectorAll('tbody tr')) {
+      [...row.cells].forEach((cell, index) => { cell.dataset.label = labels[index] || ''; });
+    }
+  }
+  for (const code of document.querySelectorAll('.sl-markdown-content code')) {
+    if (!isChecksum(code.textContent) || code.closest('pre, .checksum')) continue;
+    const digest = code.textContent.trim();
+    const details = document.createElement('details');
+    details.className = 'checksum';
+    const summary = document.createElement('summary');
+    summary.textContent = `SHA-256 · ${digest.slice(0, 8)}…`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Copy SHA-256';
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(digest);
+        button.textContent = 'Copied';
+      } catch {
+        button.textContent = 'Select the checksum to copy';
+      }
+    });
+    code.replaceWith(details);
+    details.append(summary, code, button);
+  }
+}

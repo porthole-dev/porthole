@@ -335,7 +335,9 @@ def cmd_build(args, ctx) -> int:
     (src / "profile-keys.md").write_text(page_profile_keys(root))
     from porthole_cmd_release import catalogue, markdown_catalogue, markdown_downloads
     release_data = catalogue(root, getattr(args, "catalog", None) or root / "releases")
-    markdown_catalogue(release_data, src / "devices")
+    public_devices = root / ".run/public-downloads/devices.json"
+    markdown_catalogue(release_data, src / "devices",
+                       json.loads(public_devices.read_text()) if public_devices.is_file() else None)
     (src / "downloads.md").write_text(markdown_downloads(release_data))
     public_downloads = root / ".run" / "public-downloads"
     for name, title in (("packages", "Signed APK packages"), ("images", "Device downloads")):

@@ -53,3 +53,23 @@ a:focus-visible, button:focus-visible { outline: 3px solid var(--sl-color-accent
 #catalog-tools input, #catalog-tools select { font: inherit; padding: 0.5rem; color: var(--sl-color-white); background: var(--sl-color-bg); border: 1px solid var(--sl-color-gray-4); border-radius: 0.3rem; max-width: 100%; }
 [hidden] { display: none !important; }
 input:focus-visible, select:focus-visible { outline: 3px solid var(--sl-color-accent); outline-offset: 3px; }
+
+.sl-markdown-content .checksum { display: inline-block; vertical-align: top; max-width: min(20rem, 100%); margin: 0; }
+.checksum summary { cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
+.sl-markdown-content .checksum code { display: block; white-space: normal; overflow-wrap: anywhere; user-select: all; margin-block: 0.5rem; }
+.checksum button { font: inherit; font-size: 0.85rem; padding: 0.3rem 0.6rem; background: var(--sl-color-bg); color: var(--sl-color-white); border: 1px solid var(--sl-color-gray-4); border-radius: 0.3rem; }
+@media (max-width: 40rem) {
+  .sl-markdown-content table { max-width: 100%; }
+  .sl-markdown-content .checksum { max-width: 12rem; }
+  #catalog-tools label { width: 100%; margin-right: 0; }
+}
+
+@media (max-width: 40rem) {
+  .sl-markdown-content .download-table { display: block; overflow: visible; width: 100%; }
+  .download-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .download-table tbody { display: block; }
+  .download-table tbody tr { display: block; padding-block: 0.75rem; border-bottom: 1px solid var(--sl-color-gray-5); }
+  .sl-markdown-content .download-table td { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: 0.75rem; border: 0; padding: 0.3rem 0; overflow-wrap: anywhere; }
+  .download-table td::before { content: attr(data-label); color: var(--sl-color-gray-2); font-weight: 600; }
+  .download-table .checksum { max-width: 100%; min-width: 0; }
+}
