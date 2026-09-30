@@ -1,6 +1,6 @@
 # Porthole · device bring-up and downloads
 
-[Website](https://porthole-dev.github.io/porthole/) · [Downloads](https://porthole-dev.github.io/porthole/downloads/) · [Device support](https://porthole-dev.github.io/porthole/devices/)
+[Website](https://porthole-dev.github.io/porthole/) · [Downloads](https://porthole-dev.github.io/porthole/images/) · [Device support](https://porthole-dev.github.io/porthole/devices/)
 
 Porthole is a command-line toolbox for bringing up Linux on mobile devices.
 This repository contains the tool, device profiles, build guidance, and a
