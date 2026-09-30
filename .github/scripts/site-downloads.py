@@ -98,14 +98,14 @@ for release in images:
     rows += ["## " + release.get("name", device["name"]), "", "**Experimental** · Published " + release["published_at"][:10], ""]
     bundle = codename + "-install.zip"
     has_bundle = bundle in assets and "BUNDLE-SHA256SUMS" in assets
-    native_bundle = codename + "-native.zip"
-    has_native = native_bundle in assets and "NATIVE-BUNDLE-SHA256SUMS" in assets
+    native_bundle = codename + "-native-v2.zip"
+    has_native = native_bundle in assets and "NATIVE-V2-BUNDLE-SHA256SUMS" in assets
     if has_native:
-        native_sums = fetch(assets["NATIVE-BUNDLE-SHA256SUMS"]["browser_download_url"]).decode()
+        native_sums = fetch(assets["NATIVE-V2-BUNDLE-SHA256SUMS"]["browser_download_url"]).decode()
         digest, filename = native_sums.strip().split()
         if filename != native_bundle or not re.fullmatch(r"[a-f0-9]{64}", digest) or assets[native_bundle].get("digest") != "sha256:" + digest:
             raise SystemExit("Native bundle checksum mismatch: " + native_bundle)
-        rows += ["", "**[Download Windows, macOS and Linux installation bundle · {}]({})**".format(size(assets[native_bundle]["size"]), assets[native_bundle]["browser_download_url"]), "", "No Python required. Install current Android platform-tools, back up your phone, and unlock its bootloader using the device guide. Verify the [bundle checksum]({}) and build provenance, then extract the ZIP.".format(assets["NATIVE-BUNDLE-SHA256SUMS"]["browser_download_url"]), "", "```sh", "gh attestation verify " + native_bundle + " -R porthole-dev/pmaports", "```", "", "**Linux or macOS**, from the extracted folder:", "", "```sh", "bash install.sh", "```", "", "**Windows PowerShell**, from the extracted folder:", "", "```powershell", r"powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1", "```", "", "The Windows command permits the verified script for this process only. Both installers check image hashes, the model and unlocked bootloader, then ask you to type the device name before erasing data. They never unlock the bootloader automatically. To verify and preview without contacting a phone, use `bash install.sh --dry-run` or `powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1 -DryRun`.", ""]
+        rows += ["", "**[Download Windows, macOS and Linux installation bundle · {}]({})**".format(size(assets[native_bundle]["size"]), assets[native_bundle]["browser_download_url"]), "", "No Python required. Install current Android platform-tools, back up your phone, and unlock its bootloader using the device guide. Verify the [bundle checksum]({}) and build provenance, then extract the ZIP.".format(assets["NATIVE-V2-BUNDLE-SHA256SUMS"]["browser_download_url"]), "", "```sh", "gh attestation verify " + native_bundle + " -R porthole-dev/pmaports", "```", "", "**Linux or macOS**, from the extracted folder:", "", "```sh", "bash install.sh", "```", "", "**Windows PowerShell**, from the extracted folder:", "", "```powershell", r"powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1", "```", "", "The Windows command permits the verified script for this process only. Both installers check image hashes, the model and unlocked bootloader, then ask you to type the device name before erasing data. They never unlock the bootloader automatically. To verify and preview without contacting a phone, use `bash install.sh --dry-run` or `powershell -NoProfile -ExecutionPolicy Bypass -File .\\install.ps1 -DryRun`.", ""]
     if has_bundle:
         bundle_sums = fetch(assets["BUNDLE-SHA256SUMS"]["browser_download_url"]).decode()
         digest, filename = bundle_sums.strip().split()

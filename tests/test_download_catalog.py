@@ -21,7 +21,7 @@ def test_bundle_and_history():
         script.write_bytes((ROOT / '.github/scripts/site-downloads.py').read_bytes())
         digest = 'a' * 64
         names = ['boot.img', 'google-taimen.img.gz', 'SHA256SUMS', 'INSTALL.md', 'device.json',
-                 'google-taimen-install.zip', 'BUNDLE-SHA256SUMS', 'google-taimen-native.zip', 'NATIVE-BUNDLE-SHA256SUMS']
+                 'google-taimen-install.zip', 'BUNDLE-SHA256SUMS', 'google-taimen-native-v2.zip', 'NATIVE-V2-BUNDLE-SHA256SUMS']
         assets = [{'name': name, 'size': 1024, 'digest': 'sha256:' + digest,
                    'browser_download_url': 'https://fixture.invalid/' + name} for name in names]
         latest = dict(tag_name='google-taimen-candidate-6', name='Pixel 2 XL candidate 6',
@@ -33,7 +33,7 @@ def test_bundle_and_history():
             'https://fixture.invalid/device.json': b'{"device":"google-taimen","name":"Pixel 2 XL"}',
             'https://fixture.invalid/SHA256SUMS': (digest + '  boot.img\n' + digest + '  google-taimen.img.gz\n').encode(),
             'https://fixture.invalid/INSTALL.md': b'# Install\n\nExisting manual guide\n',
-            'https://fixture.invalid/NATIVE-BUNDLE-SHA256SUMS': (digest + '  google-taimen-native.zip\n').encode(),
+            'https://fixture.invalid/NATIVE-V2-BUNDLE-SHA256SUMS': (digest + '  google-taimen-native-v2.zip\n').encode(),
             'https://fixture.invalid/BUNDLE-SHA256SUMS': (digest + '  google-taimen-install.zip\n').encode(),
         }
         def fetch(request, timeout):
