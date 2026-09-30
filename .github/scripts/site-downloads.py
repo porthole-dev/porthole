@@ -4,6 +4,7 @@ import datetime
 import hashlib
 import io
 import json
+import os
 import pathlib
 import re
 import sys
@@ -20,7 +21,11 @@ KEY = ROOT / "profiles/google-taimen/keys/porthole-dev-packages-20260915.rsa.pub
 
 
 def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "Porthole-release-catalog", "Accept": "application/vnd.github+json"})
+    headers = {"User-Agent": "Porthole-release-catalog", "Accept": "application/vnd.github+json"}
+    # Authenticate API metadata only; never send the CI token to download hosts.
+    if url.startswith("https://api.github.com/repos/porthole-dev/") and os.environ.get("GH_TOKEN"):
+        headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=60) as response:
         return response.read()
 

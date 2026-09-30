@@ -2,6 +2,7 @@
 """Exercise public image catalog generation without network or real releases."""
 import io
 import json
+import os
 from pathlib import Path
 import runpy
 import sys
@@ -36,8 +37,10 @@ def test_bundle_and_history():
             'https://fixture.invalid/BUNDLE-SHA256SUMS': (digest + '  google-taimen-install.zip\n').encode(),
         }
         def fetch(request, timeout):
+            expected = "Bearer fixture-token" if request.full_url.startswith("https://api.github.com/") else None
+            assert request.get_header("Authorization") == expected
             return io.BytesIO(data[request.full_url])
-        with patch('urllib.request.urlopen', fetch):
+        with patch.dict(os.environ, GH_TOKEN='fixture-token'), patch('urllib.request.urlopen', fetch):
             runpy.run_path(str(script), run_name='__main__')
             text = (root / '.run/public-downloads/images.md').read_text()
             assert json.loads((root / '.run/public-downloads/devices.json').read_text())['google-taimen']['tag'] == latest['tag_name']

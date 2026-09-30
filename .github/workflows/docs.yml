@@ -61,6 +61,8 @@ jobs:
         run: npm ci --prefix site-app
 
       - name: Refresh verified public download catalogs
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/site-downloads.py
 
       - name: Generate Starlight content
