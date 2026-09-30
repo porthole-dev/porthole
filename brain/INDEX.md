@@ -221,6 +221,7 @@ generic notes as well.
 | [pushing-one-module-of-a-pair-corrupts-the-other](traps/pushing-one-module-of-a-pair-corrupts-the-other.md) | `generic` | Pushing one module while its sibling stays old is worse than pushing neither |
 | [reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone](traps/reading-the-qfprom-corrected-region-through-nvmem-hard-resets-the-phone.md) | `soc:msm8998` | Reading the qfprom corrected region through nvmem hard resets the phone |
 | [running-a-device-script-on-the-host](traps/running-a-device-script-on-the-host.md) | `generic` | A device-side script run on the host produces plausible, entirely wrong output |
+| [rust-wrapper-missing-with-prebuilt-dependencies](traps/rust-wrapper-missing-with-prebuilt-dependencies.md) | `generic` | Rust wrapper missing with prebuilt dependencies |
 | [settings-subpage-is-compiled-but-not-navigable](traps/settings-subpage-is-compiled-but-not-navigable.md) | `generic` | Settings subpage is compiled but not navigable |
 | [ssh-host-keys-change-every-boot](traps/ssh-host-keys-change-every-boot.md) | `generic` | Host keys change on essentially every boot, which constrains both correctness and speed |
 | [stacked-bind-mounts-break-pmbootstrap](traps/stacked-bind-mounts-break-pmbootstrap.md) | `generic` | Every `source envkernel.sh` stacks another /mnt/linux bind mount |
@@ -285,7 +286,7 @@ generic notes as well.
 
 - `device:google-taimen` — 64
 - `device:taimen` — 2
-- `generic` — 142
+- `generic` — 143
 - `soc:gs201` — 1
 - `soc:msm8998` — 36
 - `soc:qcom` — 1
