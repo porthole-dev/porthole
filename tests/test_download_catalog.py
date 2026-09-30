@@ -58,6 +58,14 @@ def test_bundle_and_history():
                 assert 'Bundle checksum mismatch' in str(error)
             else:
                 raise AssertionError('Catalog advertised a mismatching bundle')
+            data['https://fixture.invalid/BUNDLE-SHA256SUMS'] = (digest + '  google-taimen-install.zip\n').encode()
+            data['https://fixture.invalid/NATIVE-V2-BUNDLE-SHA256SUMS'] = (('b' * 64) + '  google-taimen-native-v2.zip\n').encode()
+            try:
+                runpy.run_path(str(script), run_name='__main__')
+            except SystemExit as error:
+                assert 'Native bundle checksum mismatch' in str(error)
+            else:
+                raise AssertionError('Catalog advertised a mismatching native bundle')
 
 
 if __name__ == '__main__':
