@@ -215,6 +215,7 @@ generic notes as well.
 | [no-passwordless-sudo-disables-the-whole-toolbox](traps/no-passwordless-sudo-disables-the-whole-toolbox.md) | `generic` | A fresh install has no passwordless sudo, and that silently disables every tool |
 | [olddefconfig-silently-drops-symbols](traps/olddefconfig-silently-drops-symbols.md) | `generic` | olddefconfig silently drops symbols whose dependencies are unmet |
 | [one-arm-cannot-resolve-a-browser-change-here](traps/one-arm-cannot-resolve-a-browser-change-here.md) | `device:google-taimen` | One browser arm cannot resolve anything under ~10% here: the same build gave 29% and 73% frames-over-budget |
+| [parallel-artifact-extraction-corrupts-apks](traps/parallel-artifact-extraction-corrupts-apks.md) | `generic` | Parallel artifact extraction corrupts APK payloads |
 | [pmbootstrap-never-runs-the-shell-in-an-apkbuild](traps/pmbootstrap-never-runs-the-shell-in-an-apkbuild.md) | `generic` | pmbootstrap parses an APKBUILD line by line and never runs the shell |
 | [prove-which-kernel-answered](traps/prove-which-kernel-answered.md) | `generic` | After any boot test, prove which kernel answered |
 | [pstore-has-never-worked-on-7-2](traps/pstore-has-never-worked-on-7-2.md) | `device:google-taimen` | pstore has never produced a record on 7.2.2, even though ramoops registers and enables a console |
@@ -286,7 +287,7 @@ generic notes as well.
 
 - `device:google-taimen` — 64
 - `device:taimen` — 2
-- `generic` — 143
+- `generic` — 144
 - `soc:gs201` — 1
 - `soc:msm8998` — 36
 - `soc:qcom` — 1
