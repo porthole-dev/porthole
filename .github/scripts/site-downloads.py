@@ -83,7 +83,7 @@ for release in images:
         raise SystemExit("Incomplete image release: " + release["tag_name"])
     sums = fetch(assets["SHA256SUMS"]["browser_download_url"]).decode()
     hashes = dict((line.split()[1][2:] if line.split()[1].startswith("./") else line.split()[1], line.split()[0]) for line in sums.splitlines())
-    rows += ["## " + device["name"] + " · " + release["tag_name"], "", "**Experimental** · Published " + release["published_at"][:10], "", "| File | Download | SHA-256 |", "|---|---|---|"]
+    rows += ["## " + release.get("name", device["name"]), "", "**Experimental** · Published " + release["published_at"][:10], "", "| File | Download | SHA-256 |", "|---|---|---|"]
     for name in [image_name, "boot.img"] + (["dtbo.img"] if "dtbo.img" in required else []) + ["SHA256SUMS", "INSTALL.md"]:
         asset = assets[name]
         if name in hashes and asset.get("digest") and asset["digest"] != "sha256:" + hashes[name]:
