@@ -89,7 +89,8 @@ for release in images:
         rows += ["<details>", "<summary>Previous candidate: " + release["tag_name"] + "</summary>", ""]
     rows += ["## " + release.get("name", device["name"]), "", "**Experimental** · Published " + release["published_at"][:10], ""]
     bundle = codename + "-install.zip"
-    if bundle in assets and "BUNDLE-SHA256SUMS" in assets:
+    has_bundle = bundle in assets and "BUNDLE-SHA256SUMS" in assets
+    if has_bundle:
         bundle_sums = fetch(assets["BUNDLE-SHA256SUMS"]["browser_download_url"]).decode()
         digest, filename = bundle_sums.strip().split()
         if filename != bundle or not re.fullmatch(r"[a-f0-9]{64}", digest) or assets[bundle].get("digest") != "sha256:" + digest:
@@ -101,7 +102,11 @@ for release in images:
         if name in hashes and asset.get("digest") and asset["digest"] != "sha256:" + hashes[name]:
             raise SystemExit("Release asset checksum mismatch: " + name)
         rows.append("| {} | [{}]({}) | `{}` |".format(name, size(asset["size"]), asset["browser_download_url"], hashes.get(name, "See checksum file")))
+    if has_bundle:
+        rows += ["", "<details>", "<summary>Manual installation and recovery</summary>", ""]
     rows += ["", "### Installation", "", fetch(assets["INSTALL.md"]["browser_download_url"]).decode().split("\n", 1)[1].replace("## ", "#### "), "", "Verify build provenance with `gh attestation verify <downloaded-file> -R porthole-dev/pmaports`.", ""]
+    if has_bundle:
+        rows += ["</details>", ""]
     if older:
         rows += ["</details>", ""]
 (OUT / "images.md").write_text("\n".join(rows) + "\n")
