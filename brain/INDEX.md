@@ -81,6 +81,7 @@ generic notes as well.
 | [the-browsers-blank-band-is-a-main-thread-record-not-a-prepaint-shortfall](findings/the-browsers-blank-band-is-a-main-thread-record-not-a-prepaint-shortfall.md) | `generic` | The unpainted band during a fast fling is a 200 ms record() on the WebKit main thread, and no prepaint knob bridges it |
 | [the-camera-hold-was-the-whole-244mw](findings/the-camera-hold-was-the-whole-244mw.md) | `device:google-taimen` | The 244 mW of always-on idle was the camera sensors alone; venus and Easel are inside the noise |
 | [the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized](findings/the-compositor-period-is-cpu-paint-plus-gpu-tail-serialized.md) | `device:google-taimen` | Epiphany's frame period is CPU paint PLUS the GPU tail, serialized -- frameDone to next frame start is 0.1 ms |
+| [the-first-boot-lock-screen-pin-is-the-pmos-default-not-the-install-password](findings/the-first-boot-lock-screen-pin-is-the-pmos-default-not-the-install-password.md) | `device:google-taimen` | A freshly flashed taimen asks for a PIN on first boot, and the PIN is the postmarketOS default 147147 |
 | [the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible](findings/the-frame-period-is-quantised-so-sub-refresh-wins-are-invisible.md) | `device:google-taimen` | Epiphany's frame period is pinned at 2 refreshes because the CPU paint alone exceeds one -- every sub-quantum optimisation measures as neutral |
 | [the-memory-bound-is-not-too-tight-the-phone-is-full](findings/the-memory-bound-is-not-too-tight-the-phone-is-full.md) | `device:google-taimen` | The Epiphany memory bound is not too tight -- the phone is genuinely full, and the swap is zram |
 | [the-missing-eapol-is-ath10ks-rx-confused-latch](findings/the-missing-eapol-is-ath10ks-rx-confused-latch.md) | `device:google-taimen` | The missing 4-way handshake is ath10k's rx_confused latch: one split A-MSDU disables data RX for the life of the firmware |
@@ -287,7 +288,7 @@ generic notes as well.
 
 ## By scope
 
-- `device:google-taimen` — 64
+- `device:google-taimen` — 65
 - `device:taimen` — 2
 - `generic` — 146
 - `soc:gs201` — 1
